@@ -253,10 +253,10 @@ public final class SelectiveFooterParser {
         Map<RowGroup, Long> rowGroupOffsets = new HashMap<>();
 
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            int id = ThriftCompactReader.fieldId(header);
-            byte type = ThriftCompactReader.type(header);
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            int id = header.value;
+            byte type = header.type;
             switch (id) {
                 case 1: // version
                     fileMetaData.setVersion(in.readI32());
@@ -293,11 +293,11 @@ public final class SelectiveFooterParser {
     // ------------------------------------------------------------------ schema (manual)
 
     private List<SchemaElement> readSchemaElements() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("schema element list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<SchemaElement> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             result.add(readSchemaElement());
@@ -308,10 +308,10 @@ public final class SelectiveFooterParser {
     private SchemaElement readSchemaElement() throws IOException {
         SchemaElement element = new SchemaElement();
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            int id = ThriftCompactReader.fieldId(header);
-            byte type = ThriftCompactReader.type(header);
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            int id = header.value;
+            byte type = header.type;
             switch (id) {
                 case 1: // type (enum)
                     element.setType(Type.findByValue(in.readI32()));
@@ -360,9 +360,9 @@ public final class SelectiveFooterParser {
     private LogicalType readLogicalType() throws IOException {
         LogicalType logicalType = new LogicalType();
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            int id = ThriftCompactReader.fieldId(header);
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            int id = header.value;
             switch (id) {
                 case 1: // STRING
                     skipEmptyStruct();
@@ -384,9 +384,9 @@ public final class SelectiveFooterParser {
                     {
                         DecimalType decimal = new DecimalType();
                         in.structBegin();
-                        int inner;
-                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                            switch (ThriftCompactReader.fieldId(inner)) {
+                        ThriftCompactReader.Header inner;
+                        while ((inner = in.readFieldHeader()) != null) {
+                            switch (inner.value) {
                                 case 1:
                                     decimal.setScale(in.readI32());
                                     break;
@@ -394,7 +394,7 @@ public final class SelectiveFooterParser {
                                     decimal.setPrecision(in.readI32());
                                     break;
                                 default:
-                                    in.skip(ThriftCompactReader.type(inner));
+                                    in.skip(inner.type);
                             }
                         }
                         in.structEnd();
@@ -423,10 +423,10 @@ public final class SelectiveFooterParser {
                     {
                         IntType intType = new IntType();
                         in.structBegin();
-                        int inner;
-                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                            byte innerType = ThriftCompactReader.type(inner);
-                            switch (ThriftCompactReader.fieldId(inner)) {
+                        ThriftCompactReader.Header inner;
+                        while ((inner = in.readFieldHeader()) != null) {
+                            byte innerType = inner.type;
+                            switch (inner.value) {
                                 case 1:
                                     // i8 values are a single raw byte in the compact protocol
                                     intType.setBitWidth(in.readByteValue());
@@ -467,12 +467,12 @@ public final class SelectiveFooterParser {
                     {
                         VariantType variant = new VariantType();
                         in.structBegin();
-                        int inner;
-                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                            if (ThriftCompactReader.fieldId(inner) == 1) {
+                        ThriftCompactReader.Header inner;
+                        while ((inner = in.readFieldHeader()) != null) {
+                            if (inner.value == 1) {
                                 variant.setSpecification_version(in.readByteValue());
                             } else {
-                                in.skip(ThriftCompactReader.type(inner));
+                                in.skip(inner.type);
                             }
                         }
                         in.structEnd();
@@ -483,12 +483,12 @@ public final class SelectiveFooterParser {
                     {
                         GeometryType geometry = new GeometryType();
                         in.structBegin();
-                        int inner;
-                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                            if (ThriftCompactReader.fieldId(inner) == 1) {
+                        ThriftCompactReader.Header inner;
+                        while ((inner = in.readFieldHeader()) != null) {
+                            if (inner.value == 1) {
                                 geometry.setCrs(in.readString());
                             } else {
-                                in.skip(ThriftCompactReader.type(inner));
+                                in.skip(inner.type);
                             }
                         }
                         in.structEnd();
@@ -499,9 +499,9 @@ public final class SelectiveFooterParser {
                     {
                         GeographyType geography = new GeographyType();
                         in.structBegin();
-                        int inner;
-                        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                            switch (ThriftCompactReader.fieldId(inner)) {
+                        ThriftCompactReader.Header inner;
+                        while ((inner = in.readFieldHeader()) != null) {
+                            switch (inner.value) {
                                 case 1:
                                     geography.setCrs(in.readString());
                                     break;
@@ -510,7 +510,7 @@ public final class SelectiveFooterParser {
                                             EdgeInterpolationAlgorithm.findByValue(in.readI32()));
                                     break;
                                 default:
-                                    in.skip(ThriftCompactReader.type(inner));
+                                    in.skip(inner.type);
                             }
                         }
                         in.structEnd();
@@ -524,7 +524,7 @@ public final class SelectiveFooterParser {
                     // a second time. Fail fast into the fallback instead.
                     throw new FallbackSignalException(
                             "unsupported logical type member "
-                                    + ThriftCompactReader.fieldId(header)
+                                    + header.value
                                     + " at "
                                     + in.position());
             }
@@ -537,10 +537,10 @@ public final class SelectiveFooterParser {
     private void readTimeUnitStruct(@Nullable TimeType time, @Nullable TimestampType timestamp)
             throws IOException {
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            int id = ThriftCompactReader.fieldId(header);
-            byte type = ThriftCompactReader.type(header);
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            int id = header.value;
+            byte type = header.type;
             if (id == 1) { // isAdjustedToUTC
                 boolean value = type == ThriftCompactReader.BOOLEAN_TRUE;
                 if (time != null) {
@@ -551,9 +551,9 @@ public final class SelectiveFooterParser {
             } else if (id == 2) { // unit
                 TimeUnit unit = new TimeUnit();
                 in.structBegin();
-                int inner;
-                while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                    switch (ThriftCompactReader.fieldId(inner)) {
+                ThriftCompactReader.Header inner;
+                while ((inner = in.readFieldHeader()) != null) {
+                    switch (inner.value) {
                         case 1: // MILLIS
                             skipEmptyStruct();
                             unit.setMILLIS(new org.apache.parquet.format.MilliSeconds());
@@ -567,7 +567,7 @@ public final class SelectiveFooterParser {
                             unit.setNANOS(new org.apache.parquet.format.NanoSeconds());
                             break;
                         default:
-                            in.skip(ThriftCompactReader.type(inner));
+                            in.skip(inner.type);
                     }
                 }
                 in.structEnd();
@@ -585,9 +585,9 @@ public final class SelectiveFooterParser {
 
     private void skipEmptyStruct() throws IOException {
         in.structBegin();
-        int inner;
-        while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            in.skip(ThriftCompactReader.type(inner));
+        ThriftCompactReader.Header inner;
+        while ((inner = in.readFieldHeader()) != null) {
+            in.skip(inner.type);
         }
         in.structEnd();
     }
@@ -596,20 +596,20 @@ public final class SelectiveFooterParser {
 
     private void readRowGroups(List<RowGroup> rowGroups, Map<RowGroup, Long> rowGroupOffsets)
             throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("row group list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         long rowIdxSum = 0;
         for (int i = 0; i < size; i++) {
             RowGroup rowGroup = new RowGroup();
             List<ColumnChunk> columns = new ArrayList<>();
             in.structBegin();
-            int header;
-            while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                int id = ThriftCompactReader.fieldId(header);
-                byte type = ThriftCompactReader.type(header);
+            ThriftCompactReader.Header header;
+            while ((header = in.readFieldHeader()) != null) {
+                int id = header.value;
+                byte type = header.type;
                 switch (id) {
                     case 1: // columns
                         readColumnChunks(columns);
@@ -648,19 +648,19 @@ public final class SelectiveFooterParser {
     // ------------------------------------------------------------------ column chunks
 
     private void readColumnChunks(List<ColumnChunk> columns) throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("column chunk list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         for (int i = 0; i < size; i++) {
             ColumnChunk chunk = new ColumnChunk();
             ColumnMetaData meta = null;
             in.structBegin();
-            int header;
-            while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                int id = ThriftCompactReader.fieldId(header);
-                byte type = ThriftCompactReader.type(header);
+            ThriftCompactReader.Header header;
+            while ((header = in.readFieldHeader()) != null) {
+                int id = header.value;
+                byte type = header.type;
                 switch (id) {
                     case 1: // file_path
                         chunk.setFile_path(in.readString());
@@ -716,10 +716,10 @@ public final class SelectiveFooterParser {
         // null = path not seen yet, TRUE = keep, FALSE = drop
         Boolean keep = requestedColumns == null ? Boolean.TRUE : null;
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            int id = ThriftCompactReader.fieldId(header);
-            byte type = ThriftCompactReader.type(header);
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            int id = header.value;
+            byte type = header.type;
             switch (id) {
                 case 1: // type (enum)
                     if (shouldMaterialize(keep)) {
@@ -872,11 +872,11 @@ public final class SelectiveFooterParser {
     // ------------------------------------------------------------------ small structs
 
     private List<org.apache.parquet.format.Encoding> readEncodings() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.I32) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.I32) {
             throw new FallbackSignalException("encoding list of non-i32 type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<Encoding> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             result.add(Encoding.findByValue(in.readI32()));
@@ -885,11 +885,11 @@ public final class SelectiveFooterParser {
     }
 
     private List<String> readStringList() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.BINARY) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.BINARY) {
             throw new FallbackSignalException("string list of non-binary type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<String> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             result.add(in.readString());
@@ -898,18 +898,18 @@ public final class SelectiveFooterParser {
     }
 
     private List<KeyValue> readKeyValues() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("key value list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<KeyValue> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             KeyValue kv = new KeyValue();
             in.structBegin();
-            int header;
-            while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                switch (ThriftCompactReader.fieldId(header)) {
+            ThriftCompactReader.Header header;
+            while ((header = in.readFieldHeader()) != null) {
+                switch (header.value) {
                     case 1:
                         kv.setKey(in.readString());
                         break;
@@ -917,7 +917,7 @@ public final class SelectiveFooterParser {
                         kv.setValue(in.readString());
                         break;
                     default:
-                        in.skip(ThriftCompactReader.type(header));
+                        in.skip(header.type);
                 }
             }
             in.structEnd();
@@ -927,28 +927,28 @@ public final class SelectiveFooterParser {
     }
 
     private List<ColumnOrder> readColumnOrders() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("column order list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<ColumnOrder> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             ColumnOrder order = new ColumnOrder();
             in.structBegin();
-            int header;
-            while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                if (ThriftCompactReader.fieldId(header) == 1) { // TYPE_ORDER
+            ThriftCompactReader.Header header;
+            while ((header = in.readFieldHeader()) != null) {
+                if (header.value == 1) { // TYPE_ORDER
                     // consume the (empty) TypeDefinedOrder struct
                     in.structBegin();
-                    int inner;
-                    while ((inner = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                        in.skip(ThriftCompactReader.type(inner));
+                    ThriftCompactReader.Header inner;
+                    while ((inner = in.readFieldHeader()) != null) {
+                        in.skip(inner.type);
                     }
                     in.structEnd();
                     order.setTYPE_ORDER(new TypeDefinedOrder());
                 } else {
-                    in.skip(ThriftCompactReader.type(header));
+                    in.skip(header.type);
                 }
             }
             in.structEnd();
@@ -960,10 +960,10 @@ public final class SelectiveFooterParser {
     private org.apache.parquet.format.Statistics readStatistics() throws IOException {
         Statistics statistics = new Statistics();
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            byte type = ThriftCompactReader.type(header);
-            switch (ThriftCompactReader.fieldId(header)) {
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            byte type = header.type;
+            switch (header.value) {
                 case 1: // max (deprecated)
                     statistics.setMax(in.readBinary());
                     break;
@@ -997,18 +997,18 @@ public final class SelectiveFooterParser {
     }
 
     private List<PageEncodingStats> readPageEncodingStats() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.STRUCT) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.STRUCT) {
             throw new FallbackSignalException("page encoding stats list of non-struct type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<PageEncodingStats> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             PageEncodingStats stats = new PageEncodingStats();
             in.structBegin();
-            int header;
-            while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-                switch (ThriftCompactReader.fieldId(header)) {
+            ThriftCompactReader.Header header;
+            while ((header = in.readFieldHeader()) != null) {
+                switch (header.value) {
                     case 1: // page_type (enum)
                         stats.setPage_type(
                                 org.apache.parquet.format.PageType.findByValue(in.readI32()));
@@ -1020,7 +1020,7 @@ public final class SelectiveFooterParser {
                         stats.setCount(in.readI32());
                         break;
                     default:
-                        in.skip(ThriftCompactReader.type(header));
+                        in.skip(header.type);
                 }
             }
             in.structEnd();
@@ -1032,10 +1032,10 @@ public final class SelectiveFooterParser {
     private SizeStatistics readSizeStatistics() throws IOException {
         SizeStatistics statistics = new SizeStatistics();
         in.structBegin();
-        int header;
-        while ((header = in.readFieldHeader()) != ThriftCompactReader.STOP) {
-            byte type = ThriftCompactReader.type(header);
-            switch (ThriftCompactReader.fieldId(header)) {
+        ThriftCompactReader.Header header;
+        while ((header = in.readFieldHeader()) != null) {
+            byte type = header.type;
+            switch (header.value) {
                 case 1: // unencoded_byte_array_data_bytes
                     statistics.setUnencoded_byte_array_data_bytes(in.readI64());
                     break;
@@ -1054,11 +1054,11 @@ public final class SelectiveFooterParser {
     }
 
     private List<Long> readI64List() throws IOException {
-        int listHeader = in.readListHeader();
-        if (ThriftCompactReader.listElemType(listHeader) != ThriftCompactReader.I64) {
+        ThriftCompactReader.Header listHeader = in.readListHeader();
+        if (listHeader.type != ThriftCompactReader.I64) {
             throw new FallbackSignalException("histogram list of non-i64 type");
         }
-        int size = ThriftCompactReader.listSize(listHeader);
+        int size = listHeader.value;
         List<Long> result = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             result.add(in.readI64());

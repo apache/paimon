@@ -51,6 +51,21 @@ final class ThriftCompactReader {
     static final byte MAP = 11;
     static final byte STRUCT = 12;
 
+    /**
+     * Reusable result of a protocol header read. A single pooled instance serves both {@link
+     * #readFieldHeader()} — where {@link #value} is the field id and {@link #type} the field type —
+     * and {@link #readListHeader()} — where {@link #value} is the element count and {@link #type}
+     * the element type. {@link #readFieldHeader()} returns {@code null} on {@link #STOP}.
+     *
+     * <p>Reuse: callers must copy {@link #value}/{@link #type} into locals before any further read,
+     * because a nested read overwrites them in place. Keeping one pooled instance avoids allocating
+     * one object per field/list header, which the selective footer parse hits constantly.
+     */
+    static final class Header {
+        int value;
+        byte type;
+    }
+
     private final byte[] buf;
     private final int offset;
     private final int limit;
@@ -60,6 +75,9 @@ final class ThriftCompactReader {
     private int[] lastFieldIds = new int[16];
 
     private int structDepth;
+
+    /** Pooled header result reused by {@link #readFieldHeader()} and {@link #readListHeader()}. */
+    private final Header header = new Header();
 
     ThriftCompactReader(byte[] buf, int offset, int limit) {
         this.buf = buf;
@@ -163,18 +181,19 @@ final class ThriftCompactReader {
     }
 
     /**
-     * Reads the next field header of the current struct. Booleans carry their value in the header
-     * itself, so the caller must inspect {@code type} for {@link #BOOLEAN_TRUE}/{@link
-     * #BOOLEAN_FALSE} instead of reading a value byte.
+     * Reads the next field header of the current struct into the pooled {@link Header}. Booleans
+     * carry their value in the header itself, so the caller must inspect {@code header.type} for
+     * {@link #BOOLEAN_TRUE}/{@link #BOOLEAN_FALSE} instead of reading a value byte.
      *
-     * @return {@code fieldId << 8 | type}; {@code type == STOP} means the struct ended
+     * @return the pooled {@link Header} holding the field id ({@code header.value}) and field type
+     *     ({@code header.type}), or {@code null} when the struct ended ({@link #STOP})
      */
-    int readFieldHeader() throws IOException {
+    Header readFieldHeader() throws IOException {
         byte b = readByte();
         int type = b & 0x0f;
         if (type == STOP) {
             lastFieldIds[structDepth - 1] = 0;
-            return STOP;
+            return null;
         }
         int delta = (b & 0xf0) >>> 4;
         int fieldId;
@@ -185,39 +204,32 @@ final class ThriftCompactReader {
             fieldId = lastFieldIds[structDepth - 1] + delta;
         }
         lastFieldIds[structDepth - 1] = fieldId;
-        return (fieldId << 8) | type;
-    }
-
-    static int fieldId(int fieldHeader) {
-        return fieldHeader >>> 8;
-    }
-
-    static byte type(int fieldHeader) {
-        return (byte) (fieldHeader & 0xff);
+        header.value = fieldId;
+        header.type = (byte) type;
+        return header;
     }
 
     // ------------------------------------------------------------------ list / map
 
-    /** @return {@code size << 8 | elemType} */
-    int readListHeader() throws IOException {
+    /**
+     * Reads a list/set header into the pooled {@link Header}: {@code header.value} is the element
+     * count, {@code header.type} the element type. Sharing the pooled instance with {@link
+     * #readFieldHeader()} keeps the parse allocation-free; the caller must copy both fields before
+     * reading any element, since a nested header read overwrites them.
+     */
+    Header readListHeader() throws IOException {
         byte b = readByte();
         int size = (b & 0xf0) >>> 4;
-        int elemType = b & 0x0f;
+        byte elemType = (byte) (b & 0x0f);
         if (size == 15) {
             size = (int) readVarint();
         }
         if (size < 0) {
             throw new IOException("malformed list size " + size + " at " + pos);
         }
-        return (size << 8) | elemType;
-    }
-
-    static int listSize(int listHeader) {
-        return listHeader >>> 8;
-    }
-
-    static byte listElemType(int listHeader) {
-        return (byte) (listHeader & 0xff);
+        header.value = size;
+        header.type = elemType;
+        return header;
     }
 
     // ------------------------------------------------------------------ skipping
@@ -245,24 +257,18 @@ final class ThriftCompactReader {
             case LIST:
             case SET:
                 {
-                    int header = readListHeader();
-                    skipElements(listSize(header), listElemType(header));
+                    Header header = readListHeader();
+                    skipElements(header.value, header.type);
                     return;
                 }
             case MAP:
-                {
-                    long size = readVarint();
-                    if (size > 0) {
-                        int kvTypes = readByte() & 0xff;
-                        skipMapEntries(size, (byte) (kvTypes >>> 4), (byte) (kvTypes & 0x0f));
-                    }
-                    return;
-                }
+                skipMap();
+                return;
             case STRUCT:
                 structBegin();
-                int header;
-                while ((header = readFieldHeader()) != STOP) {
-                    skip(type(header));
+                Header header;
+                while ((header = readFieldHeader()) != null) {
+                    skip(header.type);
                 }
                 structEnd();
                 return;
@@ -291,6 +297,21 @@ final class ThriftCompactReader {
         }
     }
 
+    /**
+     * Skips a map value: a varint size, then — only when non-empty — a single byte carrying the key
+     * and value types in its two nibbles (high key, low value). The shared wire byte is decoded here
+     * into separate named values so callers never see a fused representation.
+     */
+    private void skipMap() throws IOException {
+        long size = readVarint();
+        if (size > 0) {
+            int kvTypes = readByte() & 0xff;
+            byte keyType = (byte) (kvTypes >>> 4);
+            byte valueType = (byte) (kvTypes & 0x0f);
+            skipMapEntries(size, keyType, valueType);
+        }
+    }
+
     /** Skips a single element of the given type (list-element context). */
     private void skipElement(byte elemType) throws IOException {
         switch (elemType) {
@@ -315,19 +336,13 @@ final class ThriftCompactReader {
             case LIST:
             case SET:
                 {
-                    int header = readListHeader();
-                    skipElements(listSize(header), listElemType(header));
+                    Header header = readListHeader();
+                    skipElements(header.value, header.type);
                     break;
                 }
             case MAP:
-                {
-                    long size = readVarint();
-                    if (size > 0) {
-                        int kvTypes = readByte() & 0xff;
-                        skipMapEntries(size, (byte) (kvTypes >>> 4), (byte) (kvTypes & 0x0f));
-                    }
-                    break;
-                }
+                skipMap();
+                break;
             case STRUCT:
                 skip(STRUCT);
                 break;
