@@ -139,6 +139,8 @@ class ResourcePaths:
     def prediction(self, prediction_id: str) -> str:
         if not isinstance(prediction_id, str) or not prediction_id.strip():
             raise ValueError("prediction_id must be a non-empty string")
+        if prediction_id in (".", ".."):
+            raise ValueError("prediction_id must not be a dot segment")
         return "{}/{}".format(
             self.predictions(), RESTUtil.encode_string(prediction_id))
 

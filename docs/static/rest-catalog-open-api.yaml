@@ -197,7 +197,7 @@ paths:
       operationId: getPrediction
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: predictionId, in: path, required: true, schema: {$ref: '#/components/schemas/PredictionId'}}
       responses:
         "200":
           description: Prediction metadata
@@ -218,7 +218,7 @@ paths:
         unchanged.
       parameters:
         - {name: prefix, in: path, required: true, schema: {type: string}}
-        - {name: predictionId, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: predictionId, in: path, required: true, schema: {$ref: '#/components/schemas/PredictionId'}}
       responses:
         "200":
           description: Latest prediction metadata
@@ -4589,6 +4589,12 @@ components:
       minLength: 1
       pattern: '^(?!\.{1,2}$).+'
       description: A non-empty path segment other than `.` or `..`.
+    PredictionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^(?!\.{1,2}$).+'
+      description: A prediction identifier other than `.` or `..`.
     ModelField:
       type: object
       additionalProperties: false
@@ -4791,7 +4797,7 @@ components:
       additionalProperties: false
       required: [predictionId, source, status, snapshotId, model]
       properties:
-        predictionId: {type: string, minLength: 1, maxLength: 64}
+        predictionId: {$ref: '#/components/schemas/PredictionId'}
         source:
           $ref: '#/components/schemas/PredictionSource'
         name: {type: string, minLength: 1, maxLength: 128}
