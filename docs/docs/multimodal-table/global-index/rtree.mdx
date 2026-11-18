@@ -77,9 +77,10 @@ another spatial relation must retain its original predicate for exact refinement
 
 The index also supports `IS NULL` and `IS NOT NULL`. Empty geometries are
 non-null, have no spatial leaf entry, and do not match `bboxIntersects`.
-For a scalar index lookup, only a predicate the R-tree can evaluate contributes R-tree
-matches in `fast` mode. Geometry equality remains a data filter. In `full` and `detail`
-modes, a supplementary data scan covers only gaps in the applicable index coverage.
+For a bbox lookup, `fast` returns only the rows matched by the R-tree. In `full` and
+`detail`, Paimon also scans the original data in uncovered row-ID ranges. A range
+searched by the R-tree stays covered even when the lookup finds zero matches.
+Geometry equality remains a data filter.
 For a `fast` disjunction that combines a bbox with filters on other columns, the planner
 evaluates the indexes before assigning data splits, so a reader declining an operand can
 trigger fallback for the whole disjunction. Negating a spatial candidate bitmap is unsupported.

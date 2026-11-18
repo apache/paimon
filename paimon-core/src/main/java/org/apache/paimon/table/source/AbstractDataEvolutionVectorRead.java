@@ -259,7 +259,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 return null;
             }
             RoaringNavigableMap64 matched = evaluation.get().result().results();
-            if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
+            if (FilteredRowIdReader.isExact(
+                    table.rowType(), filter, evaluation.get(), scalarIndexFiles)) {
                 return matched;
             }
             if (!FilteredRowIdReader.shouldRefine(table, filter)) {

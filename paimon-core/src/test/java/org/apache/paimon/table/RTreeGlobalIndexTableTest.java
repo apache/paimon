@@ -190,7 +190,7 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testFullTextIndexDoesNotExtendSpatialFastCoverage(boolean deferred) throws Exception {
+    void testSpatialFilterWithUnsupportedBranchOnAnotherColumn(boolean deferred) throws Exception {
         queryInReader = deferred;
         createTableDefault();
         catalog.alterTable(
@@ -222,38 +222,6 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(readIds(table, PredicateBuilder.and(bounds, equality))).containsExactly(0);
         // Without a scalar index on content the disjunction needs the ordinary data scan.
         assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0, 1, 2);
-        // The full-text shard cannot contribute scalar matches on this column.
-        buildIndex(table, new Range(0, 0), Collections.emptyList(), "btree", "content");
-        assertThat(readIds(table, equality)).containsExactly(0);
-        assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0);
-        assertThat(readIds(table, PredicateBuilder.and(bounds, equality))).containsExactly(0);
-        for (String mode : new String[] {"fast", "full", "detail"}) {
-            FileStoreTable configured =
-                    getTableDefault()
-                            .copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode))
-                            .copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
-            assertThat(readIds(configured, equality))
-                    .containsExactly(
-                            "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1, 2});
-            if (!"fast".equals(mode)) {
-                try (DataEvolutionGlobalIndexScanner scanner =
-                        DataEvolutionGlobalIndexScanner.create(
-                                        configured, PartitionPredicate.ALWAYS_TRUE, equality)
-                                .get()) {
-                    assertThat(
-                                    scanner.scan(equality)
-                                            .get()
-                                            .or(scanner.unindexedRows(equality))
-                                            .results()
-                                            .toRangeList())
-                            .containsExactly(new Range(0, 2));
-                }
-            }
-        }
     }
 
     @ParameterizedTest

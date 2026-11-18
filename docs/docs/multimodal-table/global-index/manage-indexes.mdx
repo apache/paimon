@@ -237,17 +237,6 @@ Updates to already indexed rows also require the [update policy](#update-indexed
 | `full` | Check row-ID coverage against snapshot `nextRowId`; scan raw data for detected gaps where supported. | Newly appended ranges need to be included. |
 | `detail` | Compare active data-file row-ID ranges with index coverage, then scan detected gaps where supported. | Coverage should be checked against current files, including partition filtering. |
 
-For a scalar index lookup, coverage is specific to the predicate. In `fast` mode,
-only indexes that can evaluate the predicate contribute matching row IDs. In `full` and
-`detail` modes, Paimon also reads the original data for the uncovered row-ID ranges.
-When the applicable indexes cover the entire search range, both modes skip this extra scan,
-including when the lookup finds zero matches.
-
-For example, a B-tree can evaluate `name = 'alice'`. A full-text index on the same column
-that only supports text search contributes no coverage to that equality lookup.
-If only the full-text index covers a recently appended range, `fast` omits that range.
-Both `full` and `detail` check it against the original data.
-
 ![An index covers the original row range; appended rows need another index build or a search mode that includes uncovered data.](/img/multimodal-index-coverage.svg)
 
 To include appended data for query types that support raw-data search, set:

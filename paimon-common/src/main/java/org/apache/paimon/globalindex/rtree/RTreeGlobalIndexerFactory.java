@@ -21,6 +21,12 @@ package org.apache.paimon.globalindex.rtree;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.BBoxIntersects;
+import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.IsNull;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -31,6 +37,19 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RTreeGlobalIndexerFactory implements GlobalIndexerFactory {
 
     public static final String IDENTIFIER = "rtree";
+
+    /** The predicates whose matches the R-tree can determine from its envelopes and null rows. */
+    public static boolean canEvaluate(Predicate predicate) {
+        if (!(predicate instanceof LeafPredicate)) {
+            return false;
+        }
+        LeafPredicate leaf = (LeafPredicate) predicate;
+        LeafFunction function = leaf.function();
+        return leaf.fieldRefOptional().isPresent()
+                && (function instanceof BBoxIntersects
+                        || function instanceof IsNull
+                        || function instanceof IsNotNull);
+    }
 
     @Override
     public String identifier() {

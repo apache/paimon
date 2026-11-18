@@ -36,8 +36,6 @@ import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.IsNotNull;
-import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.Or;
@@ -66,7 +64,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -84,8 +81,6 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
  */
 class GlobalIndexQuery {
 
-    private static final int ALTERNATIVE_INDEX_LEAF = 3;
-
     /** A leaf, paired range or composite lookup; null for an AND/OR node. */
     @Nullable private final Predicate predicate;
 
@@ -98,24 +93,11 @@ class GlobalIndexQuery {
     /** A query's index groups; empty when none overlap this data split. */
     private final List<IndexGroup> groups;
 
-    // Keep this fact when a data split overlaps just one of the alternative indexes.
-    private final boolean alternativeIndexes;
-
     private GlobalIndexQuery(
             @Nullable Predicate predicate,
             boolean union,
             List<GlobalIndexQuery> children,
             List<IndexGroup> groups) {
-        this(predicate, union, children, groups, false);
-    }
-
-    private GlobalIndexQuery(
-            @Nullable Predicate predicate,
-            boolean union,
-            List<GlobalIndexQuery> children,
-            List<IndexGroup> groups,
-            boolean alternativeIndexes) {
-        this.alternativeIndexes = alternativeIndexes;
         this.predicate = predicate;
         this.union = union;
         this.children = children;
@@ -129,17 +111,6 @@ class GlobalIndexQuery {
             List<IndexFileMeta> files,
             IndexPathFactory pathFactory,
             Options options) {
-        return create(rowType, predicate, files, pathFactory, options, ignored -> {});
-    }
-
-    @Nullable
-    static GlobalIndexQuery create(
-            RowType rowType,
-            Predicate predicate,
-            List<IndexFileMeta> files,
-            IndexPathFactory pathFactory,
-            Options options,
-            Consumer<Predicate> residual) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(
                         files.stream()
@@ -157,7 +128,7 @@ class GlobalIndexQuery {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createForPredicate(predicate, rowType, groups, options, residual);
+        return createForPredicate(predicate, rowType, groups, options);
     }
 
     @Nullable
@@ -165,8 +136,7 @@ class GlobalIndexQuery {
             Predicate predicate,
             RowType rowType,
             Map<Integer, List<IndexGroup>> groups,
-            Options options,
-            Consumer<Predicate> residual) {
+            Options options) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate);
             Optional<FieldRef> field = leaf.fieldRefOptional();
@@ -205,12 +175,8 @@ class GlobalIndexQuery {
                 predicates.removeIf(
                         child -> {
                             Set<Integer> residualFields = collectFieldIds(rowType, child);
-                            if (!residualFields.isEmpty()
-                                    && keyFields.containsAll(residualFields)) {
-                                residual.accept(child);
-                                return true;
-                            }
-                            return false;
+                            return !residualFields.isEmpty()
+                                    && keyFields.containsAll(residualFields);
                         });
             }
         }
@@ -245,10 +211,9 @@ class GlobalIndexQuery {
                 }
             }
             if (query == null) {
-                query = createForPredicate(child, rowType, groups, options, residual);
+                query = createForPredicate(child, rowType, groups, options);
             }
             if (query == null) {
-                residual.accept(child);
                 if (union) {
                     return null;
                 }
@@ -375,28 +340,14 @@ class GlobalIndexQuery {
             // Scalar lookups use independent single-field index definitions.
             if (group.extraFields.isEmpty()
                     && (!RTreeGlobalIndexerFactory.IDENTIFIER.equals(group.type)
-                            || isSpatialIndexLookup(predicate))) {
+                            || RTreeGlobalIndexerFactory.canEvaluate(predicate))) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }
         if (selectedGroups.isEmpty()) {
             return null;
         }
-        String firstType = selectedGroups.get(0).type;
-        boolean alternatives =
-                selectedGroups.stream().anyMatch(group -> !group.type.equals(firstType));
-        return new GlobalIndexQuery(
-                predicate, false, Collections.emptyList(), selectedGroups, alternatives);
-    }
-
-    private static boolean isSpatialIndexLookup(Predicate predicate) {
-        if (!(predicate instanceof LeafPredicate)) {
-            return false;
-        }
-        LeafPredicate leaf = (LeafPredicate) predicate;
-        return leaf.function() instanceof BBoxIntersects
-                || leaf.function() instanceof IsNull
-                || leaf.function() instanceof IsNotNull;
+        return new GlobalIndexQuery(predicate, false, Collections.emptyList(), selectedGroups);
     }
 
     /** Only prune when metadata proves no match throughout the requested row ranges. */
@@ -409,11 +360,6 @@ class GlobalIndexQuery {
         return union
                 ? children.stream().allMatch(child -> child.isEmpty(ranges))
                 : children.stream().anyMatch(child -> child.isEmpty(ranges));
-    }
-
-    boolean hasAlternativeIndexes() {
-        return alternativeIndexes
-                || children.stream().anyMatch(GlobalIndexQuery::hasAlternativeIndexes);
     }
 
     boolean hasCompositeQuery() {
@@ -486,8 +432,7 @@ class GlobalIndexQuery {
             selectedChildren.add(child.forRanges(ranges));
         }
         // Keep children without local groups so readers can retain their uncertain candidates.
-        return new GlobalIndexQuery(
-                predicate, union, selectedChildren, selected, alternativeIndexes);
+        return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
     }
 
     GlobalIndexResult evaluate(FileIO fileIO, Options options, List<Range> ranges)
@@ -523,13 +468,10 @@ class GlobalIndexQuery {
             }
             return Optional.ofNullable(result);
         }
-        if ((alternativeIndexes
-                        || (predicate instanceof LeafPredicate
-                                && ((LeafPredicate) predicate).function()
-                                        instanceof BBoxIntersects))
+        if (predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).function() instanceof BBoxIntersects
                 && new CoreOptions(options).scalarIndexSearchMode()
                         == CoreOptions.GlobalIndexSearchMode.FAST) {
-            // A provider that declined this predicate contributes neither matches nor raw rows.
             return Optional.of(
                     evaluateWithCoverage(fileIO, options, ranges)
                             .map(Evaluation::result)
@@ -569,7 +511,6 @@ class GlobalIndexQuery {
             GlobalIndexResult result = null;
             Set<Integer> fields = new HashSet<>();
             List<Range> coverage = null;
-            boolean allPredicatesEvaluated = true;
             for (GlobalIndexQuery child : children) {
                 Optional<Evaluation> evaluation =
                         child.evaluateWithExecutor(
@@ -578,10 +519,8 @@ class GlobalIndexQuery {
                     if (union) {
                         return Optional.empty();
                     }
-                    allPredicatesEvaluated = false;
                     continue;
                 }
-                allPredicatesEvaluated &= evaluation.get().allPredicatesEvaluated();
                 GlobalIndexResult matches = evaluation.get().result();
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
@@ -591,7 +530,7 @@ class GlobalIndexQuery {
             }
             return result == null
                     ? Optional.empty()
-                    : Optional.of(new Evaluation(result, fields, coverage, allPredicatesEvaluated));
+                    : Optional.of(new Evaluation(result, fields, coverage));
         }
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
         Set<Integer> fields = new HashSet<>();
@@ -680,8 +619,8 @@ class GlobalIndexQuery {
     }
 
     void serialize(DataOutputView out) throws IOException {
+        out.writeByte(predicate != null ? 0 : union ? 2 : 1);
         if (predicate != null) {
-            out.writeByte(alternativeIndexes ? ALTERNATIVE_INDEX_LEAF : 0);
             serializeBytes(out, InstantiationUtil.serializeObject(predicate));
             out.writeInt(groups.size());
             for (IndexGroup group : groups) {
@@ -705,7 +644,6 @@ class GlobalIndexQuery {
                 }
             }
         } else {
-            out.writeByte(union ? 2 : 1);
             out.writeInt(children.size());
             for (GlobalIndexQuery child : children) {
                 child.serialize(out);
@@ -715,7 +653,7 @@ class GlobalIndexQuery {
 
     static GlobalIndexQuery deserialize(DataInputView in) throws IOException {
         int type = in.readByte();
-        if (type == 0 || type == ALTERNATIVE_INDEX_LEAF) {
+        if (type == 0) {
             Predicate predicate;
             try {
                 predicate =
@@ -750,12 +688,7 @@ class GlobalIndexQuery {
                 }
                 groups.add(new IndexGroup(indexType, field, extraFields, range, files));
             }
-            return new GlobalIndexQuery(
-                    predicate,
-                    false,
-                    Collections.emptyList(),
-                    groups,
-                    type == ALTERNATIVE_INDEX_LEAF);
+            return new GlobalIndexQuery(predicate, false, Collections.emptyList(), groups);
         }
         if (type != 1 && type != 2) {
             throw new IOException("Unknown index query node: " + type);
@@ -783,7 +716,6 @@ class GlobalIndexQuery {
         }
         GlobalIndexQuery that = (GlobalIndexQuery) obj;
         return union == that.union
-                && alternativeIndexes == that.alternativeIndexes
                 && Objects.equals(predicate, that.predicate)
                 && children.equals(that.children)
                 && groups.equals(that.groups);
@@ -791,7 +723,7 @@ class GlobalIndexQuery {
 
     @Override
     public int hashCode() {
-        return Objects.hash(predicate, union, children, groups, alternativeIndexes);
+        return Objects.hash(predicate, union, children, groups);
     }
 
     /**

@@ -29,14 +29,6 @@ Start with [Basic Concepts](docs/docs/concepts/basic-concepts.md),
 Verify implementation details in `AppendOnlyFileStoreTable`, `DataEvolutionSplitRead`,
 `DataEvolutionReadPlanner`, and `SchemaValidation` under `paimon-core/src/main/java/org/apache/paimon/`.
 
-## Data Evolution scalar index reads
-
-Determine coverage for the current predicate. FAST returns matches from indexes that can
-evaluate it. FULL and DETAIL additionally scan original data only in uncovered ranges.
-A supported lookup with zero matches still covers its range. Preserve this behavior in
-both planner-side and reader-side lookups, including when a column has multiple index types.
-See [Coverage and Freshness](docs/docs/multimodal-table/global-index/manage-indexes.mdx#coverage-and-freshness).
-
 ## Syntax Requirements
 
 - Based on JDK 8 and Scala 2.12, higher version syntax features must not be used.

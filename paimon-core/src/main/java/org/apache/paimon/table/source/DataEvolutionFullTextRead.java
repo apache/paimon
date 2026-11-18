@@ -233,7 +233,8 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 RoaringNavigableMap64 fromIndex =
                         RoaringNavigableMap64.and(
                                 evaluation.get().result().results(), decidedByIndex);
-                if (!FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())
+                if (!FilteredRowIdReader.isExact(
+                                table.rowType(), filter, evaluation.get(), scalarIndexFiles)
                         && !fromIndex.isEmpty()) {
                     if (FilteredRowIdReader.shouldRefine(table, filter)) {
                         fromIndex =

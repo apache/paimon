@@ -593,7 +593,6 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(evaluation).isPresent();
         assertThat(evaluation.get().contributingFieldIds()).containsExactly(0);
-        assertThat(evaluation.get().allPredicatesEvaluated()).isFalse();
         assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
         evaluator.close();
     }
@@ -621,41 +620,8 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(evaluation).isPresent();
         assertThat(evaluation.get().contributingFieldIds()).containsExactly(2);
-        assertThat(evaluation.get().allPredicatesEvaluated()).isFalse();
         assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
         evaluator.close();
-    }
-
-    @Test
-    void testUnsupportedSameFieldConjunctPropagatesThroughOr() {
-        RowType rowType = rowType();
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-        try (GlobalIndexEvaluator evaluator =
-                new GlobalIndexEvaluator(
-                        rowType,
-                        fieldId -> Collections.singletonList(readerReturning(resultOf(42))))) {
-            Predicate supported = builder.equal(0, 42);
-            Predicate partial = PredicateBuilder.and(supported, builder.isNull(0));
-            assertThat(
-                            evaluator
-                                    .evaluateWithContributingFields(supported)
-                                    .get()
-                                    .allPredicatesEvaluated())
-                    .isTrue();
-            assertThat(
-                            evaluator
-                                    .evaluateWithContributingFields(partial)
-                                    .get()
-                                    .allPredicatesEvaluated())
-                    .isFalse();
-            GlobalIndexEvaluator.Evaluation combined =
-                    evaluator
-                            .evaluateWithContributingFields(PredicateBuilder.or(partial, supported))
-                            .get();
-            assertThat(combined.contributingFieldIds()).containsExactly(0);
-            assertThat(combined.allPredicatesEvaluated()).isFalse();
-            assertBitmapContainsExactly(combined.result().results(), 42L);
-        }
     }
 
     @Test

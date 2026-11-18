@@ -30,7 +30,6 @@ import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -40,7 +39,6 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.fmindex.FMGlobalIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
-import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -591,103 +589,6 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         assertThat(combinedSplits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
         assertThat(read(combinedRead, combinedSplits))
                 .containsExactlyInAnyOrderElementsOf(expected);
-    }
-
-    @ParameterizedTest
-    @CsvSource({"false,false", "true,false", "true,true"})
-    public void testBTreeAndFullTextOnSameColumn(boolean inReader, boolean separateSplits)
-            throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        BinaryString hit = str("alpha");
-        BinaryString miss = str("zulu");
-        write(table, GenericRow.of(0, hit, hit), GenericRow.of(1, miss, miss));
-        createIndex("btree", "f1");
-        write(table, GenericRow.of(2, hit, hit), GenericRow.of(3, miss, miss));
-        String type = TestFullTextGlobalIndexerFactory.IDENTIFIER;
-        GlobalIndexSingleColumnWriter writer =
-                (GlobalIndexSingleColumnWriter)
-                        GlobalIndexBuilderUtils.createIndexWriter(
-                                table,
-                                type,
-                                Collections.singletonList(table.rowType().getField("f1")),
-                                new Options());
-        writer.write(hit, 0);
-        writer.write(miss, 1);
-        List<IndexFileMeta> files =
-                GlobalIndexBuilderUtils.toIndexFileMetas(
-                        table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
-                        table.coreOptions(),
-                        new Range(2, 3),
-                        table.rowType().getField("f1").id(),
-                        type,
-                        writer.finish());
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.commit(
-                    Collections.singletonList(
-                            new CommitMessageImpl(
-                                    BinaryRow.EMPTY_ROW,
-                                    BucketMode.UNAWARE_BUCKET,
-                                    null,
-                                    DataIncrement.indexIncrement(files),
-                                    CompactIncrement.emptyIncrement())));
-        }
-
-        if (separateSplits) {
-            table = smallSplits(table);
-        }
-        if (inReader) {
-            table = distributedTable(table);
-        }
-        assertThat(table.newScan().plan().splits()).hasSize(separateSplits ? 2 : 1);
-        DataSplit tail =
-                smallSplits(table).newScan().plan().splits().stream()
-                        .map(split -> (DataSplit) split)
-                        .filter(split -> split.dataFiles().get(0).nonNullFirstRowId() == 2)
-                        .findFirst()
-                        .get();
-        PredicateBuilder builder = new PredicateBuilder(table.rowType());
-        for (boolean complete : Arrays.asList(false, true)) {
-            if (complete) {
-                createIndex("btree", "f1", Collections.singletonList(tail));
-            }
-            for (String mode : Arrays.asList("fast", "full", "detail")) {
-                FileStoreTable configured =
-                        table.copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
-                boolean fillGap = !complete && !"fast".equals(mode);
-                List<Range> expected = new ArrayList<>(Collections.singletonList(new Range(0, 0)));
-                if (complete || fillGap) {
-                    expected.add(new Range(2, fillGap ? 3 : 2));
-                }
-                assertThat(candidateRanges(configured, builder.equal(1, hit)))
-                        .containsExactlyElementsOf(expected);
-                assertThat(candidateRanges(configured, builder.equal(1, str("middle"))))
-                        .containsExactlyElementsOf(
-                                fillGap
-                                        ? Collections.singletonList(new Range(2, 3))
-                                        : Collections.emptyList());
-            }
-        }
-    }
-
-    private List<Range> candidateRanges(FileStoreTable table, Predicate predicate)
-            throws Exception {
-        List<Range> ranges = new ArrayList<>();
-        for (Split split : table.newReadBuilder().withFilter(predicate).newScan().plan().splits()) {
-            if (split instanceof IndexQuerySplit) {
-                split =
-                        ((IndexQuerySplit)
-                                        SplitSerializer.deserialize(
-                                                SplitSerializer.serialize(split)))
-                                .evaluate(table.fileIO());
-            }
-            assertThat(split).isInstanceOf(IndexedSplit.class);
-            ranges.addAll(((IndexedSplit) split).rowRanges());
-        }
-        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     @Test

@@ -110,13 +110,9 @@ class GlobalIndexQueryTest {
                                 null));
         IndexPathFactory paths = mock(IndexPathFactory.class);
         when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
-        Predicate trailing = b.in(0, Arrays.asList(7, 8));
-        Predicate predicate = PredicateBuilder.and(b.isNotNull(1), trailing);
-        List<Predicate> residuals = new ArrayList<>();
+        Predicate predicate = PredicateBuilder.and(b.isNotNull(1), b.in(0, Arrays.asList(7, 8)));
         GlobalIndexQuery query =
-                GlobalIndexQuery.create(
-                        rowType, predicate, files, paths, new Options(), residuals::add);
-        assertThat(residuals).containsExactly(trailing);
+                GlobalIndexQuery.create(rowType, predicate, files, paths, new Options());
         assertThat(query.hasCompositeQuery()).isTrue();
         assertThat(query.hasScalarQuery()).isFalse();
         assertThat(query.contributingFieldIds(rowType)).containsExactly(1);
