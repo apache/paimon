@@ -94,13 +94,16 @@ class PaimonSemanticViewResolver(spark: SparkSession)
                   require(
                     table.isInstanceOf[FileStoreTable],
                     "Ossie source must be a physical Paimon table")
-                  val yaml = OssieToSparkMetricView.convert(
+                  val conversion = OssieToSparkMetricView.convert(
                     spark,
                     model,
                     source,
                     table.rowType().getFieldNames.asScala.toSeq)
+                  val yaml = conversion.yaml
                   val (analyzed, _) = MetricViewHelper.analyzeMetricViewText(spark, parts, yaml)
-                  OssieToSparkMetricView.validateDateTruncInputs(analyzed)
+                  OssieToSparkMetricView.validateDateTruncInputs(
+                    analyzed,
+                    conversion.dateTruncOrigins)
                   val metadata = CatalogTable(
                     identifier = TableIdentifier(
                       ident.name(),

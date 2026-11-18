@@ -27,6 +27,7 @@ import org.apache.spark.sql.catalyst.analysis.{UnresolvedAttribute, UnresolvedFu
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.trees.Origin
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
@@ -43,12 +44,15 @@ private[paimon] object OssieToSparkMetricView {
     aggregates ++ Set("abs", "round", "floor", "ceil", "ceiling", "coalesce", "date_trunc")
   private val dateTruncUnits =
     Set("YEAR", "QUARTER", "MONTH", "WEEK", "DAY", "HOUR", "MINUTE", "SECOND")
+  private val dateTruncFunction = Seq("system", "builtin", "date_trunc")
+
+  case class Conversion(yaml: String, dateTruncOrigins: Set[Origin])
 
   def convert(
       spark: SparkSession,
       model: OssieModel,
       source: Seq[String],
-      sourceColumns: Seq[String]): String = {
+      sourceColumns: Seq[String]): Conversion = {
     val sourceNames = sourceColumns.map(n => OssieModel.normalize(n) -> n).toMap
     require(sourceNames.size == sourceColumns.size, "Ambiguous case-insensitive source columns")
     val publicNames =
@@ -122,16 +126,26 @@ private[paimon] object OssieToSparkMetricView {
     measures.foreach {
       case (name, expr) => metricNodes.addObject().put("name", name).put("expr", expr)
     }
+    val parser = spark.sessionState.sqlParser
+    val expressions = parser.parsePlan(sql).expressions ++
+      measures.map { case (_, expression) => parser.parseExpression(expression) }
+    val dateTruncOrigins = expressions
+      .flatMap(_.collect {
+        case f: UnresolvedFunction if f.nameParts == dateTruncFunction => f.origin
+      })
+      .toSet
     // JSON is a YAML subset, and avoids another serialization path for SQL strings.
-    mapper.writeValueAsString(root)
+    Conversion(mapper.writeValueAsString(root), dateTruncOrigins)
   }
 
-  def validateDateTruncInputs(plan: LogicalPlan): Unit = {
+  def validateDateTruncInputs(plan: LogicalPlan, dateTruncOrigins: Set[Origin]): Unit = {
     // Spark inserts the session-zone cast during analysis, including for computed arguments.
+    // Match model call origins so SQL UDF bodies retain their own timestamp semantics.
     val truncatesLocalTimestamp = plan.exists {
       node =>
         node.expressions.exists(_.exists {
-          case TruncTimestamp(_, cast: Cast, _) => cast.child.dataType == TimestampNTZType
+          case t @ TruncTimestamp(_, cast: Cast, _) =>
+            dateTruncOrigins.contains(t.origin) && cast.child.dataType == TimestampNTZType
           case _ => false
         })
     }
@@ -273,7 +287,7 @@ private[paimon] object OssieToSparkMetricView {
       RenderedSQL(s"TIMESTAMP_LTZ '${DateTimeUtils.microsToInstant(micros)}'")
     case f: UnresolvedFunction =>
       val nameParts = if (OssieModel.normalize(f.nameParts.head) == "date_trunc") {
-        Seq("system", "builtin", "date_trunc")
+        dateTruncFunction
       } else {
         f.nameParts
       }

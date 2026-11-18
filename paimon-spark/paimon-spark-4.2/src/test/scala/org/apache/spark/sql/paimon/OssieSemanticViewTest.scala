@@ -258,6 +258,36 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("DATE_TRUNC input validation preserves SQL UDF body semantics") {
+    val session = spark.newSession()
+    session.conf.set("spark.sql.path.enabled", "true")
+    session.conf.set("spark.sql.session.timeZone", "UTC")
+    session.sql(
+      "CREATE FUNCTION spark_catalog.default.floor(ts TIMESTAMP_NTZ) " +
+        "RETURNS TIMESTAMP_LTZ RETURN date_trunc('day', ts)")
+    try {
+      session.sql("SET PATH = spark_catalog.default, system.builtin")
+      val floor = "FLOOR(TIMESTAMP_NTZ '2026-06-12 10:11:12')"
+      val truncate = "DATE_TRUNC('day', TIMESTAMP_LTZ '2026-06-12 10:11:12Z')"
+      Seq(floor, s"COALESCE($floor, $truncate)", s"DATE_TRUNC('day', $floor)").foreach {
+        expression =>
+          register(model.replace("sql: region_code", s"sql: $expression"))
+          val result = session.sql(
+            "SELECT region, MEASURE(gross) AS gross FROM paimon.sales.order_metrics GROUP BY region")
+          assert(result.schema("region").dataType == TimestampType)
+          checkAnswer(
+            result.selectExpr("CAST(region AS STRING)", "gross"),
+            Row("2026-06-12 00:00:00", BigDecimal(280)))
+      }
+      register(model.replace("sql: SUM(amount)", s"sql: MAX($floor)"))
+      checkAnswer(
+        session.sql("SELECT CAST(MEASURE(revenue) AS STRING) FROM paimon.sales.order_metrics"),
+        Row("2026-06-12 00:00:00"))
+    } finally {
+      session.sql("DROP FUNCTION spark_catalog.default.floor")
+    }
+  }
+
   test("resolve Ossie DATE_TRUNC to the Spark builtin regardless of the SQL path") {
     val session = spark.newSession()
     session.conf.set("spark.sql.path.enabled", "true")
