@@ -51,13 +51,22 @@ public class FieldListaggAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
+        boolean normalizeAccumulator = distinct && delimiterBinaryString.getSizeInBytes() > 0;
         if (inputField == null || StringUtils.isBlank(inputField.toString())) {
-            return accumulator;
+            if (!normalizeAccumulator
+                    || accumulator == null
+                    || StringUtils.isBlank(accumulator.toString())) {
+                return accumulator;
+            }
+            inputField = BinaryString.EMPTY_UTF8;
         }
         // ordered by type root definition
 
         if (accumulator == null || StringUtils.isBlank(accumulator.toString())) {
-            return inputField;
+            if (!normalizeAccumulator) {
+                return inputField;
+            }
+            accumulator = BinaryString.EMPTY_UTF8;
         }
 
         BinaryString mergeFieldSD = (BinaryString) accumulator;
@@ -67,21 +76,44 @@ public class FieldListaggAgg extends FieldAggregator {
             BinaryString[] accumulatorTokens =
                     splitByWholeSeparatorPreserveAllTokens(mergeFieldSD, delimiterBinaryString);
             Set<BinaryString> existingTokens = new HashSet<>(accumulatorTokens.length);
+            List<BinaryString> result = new ArrayList<>();
+            int accumulatorSize = 0;
             for (BinaryString token : accumulatorTokens) {
-                existingTokens.add(token);
+                if (!normalizeAccumulator) {
+                    existingTokens.add(token);
+                    continue;
+                }
+                if (StringUtils.isBlank(token.toString()) || !existingTokens.add(token)) {
+                    continue;
+                }
+                if (!result.isEmpty()) {
+                    result.add(delimiterBinaryString);
+                    accumulatorSize += delimiterBinaryString.getSizeInBytes();
+                }
+                result.add(token);
+                accumulatorSize += token.getSizeInBytes();
             }
 
-            List<BinaryString> result = new ArrayList<>();
-            result.add(mergeFieldSD);
+            if (!normalizeAccumulator) {
+                result.add(mergeFieldSD);
+            }
+            boolean changed =
+                    normalizeAccumulator && accumulatorSize != mergeFieldSD.getSizeInBytes();
             for (BinaryString str :
                     splitByWholeSeparatorPreserveAllTokens(inFieldSD, delimiterBinaryString)) {
-                if (StringUtils.isBlank(str.toString()) || existingTokens.contains(str)) {
+                if (StringUtils.isBlank(str.toString()) || !existingTokens.add(str)) {
                     continue;
                 }
 
-                existingTokens.add(str);
-                result.add(delimiterBinaryString);
+                if (!result.isEmpty()) {
+                    result.add(delimiterBinaryString);
+                }
                 result.add(str);
+                changed = true;
+            }
+
+            if (!changed) {
+                return mergeFieldSD;
             }
 
             if (result.size() == 1) {
