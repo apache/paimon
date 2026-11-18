@@ -100,6 +100,7 @@ class PaimonSemanticViewResolver(spark: SparkSession)
                     source,
                     table.rowType().getFieldNames.asScala.toSeq)
                   val (analyzed, _) = MetricViewHelper.analyzeMetricViewText(spark, parts, yaml)
+                  OssieToSparkMetricView.validateDateTruncInputs(analyzed)
                   val metadata = CatalogTable(
                     identifier = TableIdentifier(
                       ident.name(),
