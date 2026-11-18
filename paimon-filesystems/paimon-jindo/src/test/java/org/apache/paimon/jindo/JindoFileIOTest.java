@@ -20,13 +20,16 @@ package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import com.aliyun.jindodata.types.JindoHadoopFileStatus;
 import com.aliyun.oss.ClientConfiguration;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSSClient;
@@ -34,6 +37,7 @@ import com.aliyun.oss.model.ObjectMetadata;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -41,11 +45,13 @@ import java.time.Duration;
 import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,6 +164,77 @@ public class JindoFileIOTest {
         assertThat(stream).isInstanceOf(RenamingTwoPhaseOutputStream.class);
         stream.close();
         verify(fs).getMpuStore(hadoopPath);
+    }
+
+    @Test
+    public void testDirectoryListingsWithStorageClass() throws IOException {
+        org.apache.hadoop.fs.Path dir = new org.apache.hadoop.fs.Path("oss://bucket/dir");
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.makeQualified(dir)).thenReturn(dir);
+        @SuppressWarnings("unchecked")
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> page =
+                mock(org.apache.hadoop.fs.RemoteIterator.class);
+        when(fs.listStatusIterator(dir)).thenReturn(page);
+        JindoHadoopFileStatus archive =
+                listedStatus(new org.apache.hadoop.fs.Path(dir, "file"), false, "Archive");
+        JindoHadoopFileStatus unknown =
+                listedStatus(new org.apache.hadoop.fs.Path(dir, "unknown"), false, "Unknown");
+        JindoHadoopFileStatus subdir =
+                listedStatus(new org.apache.hadoop.fs.Path(dir, "subdir"), true, "Standard");
+        when(page.next()).thenReturn(archive, unknown, subdir);
+        when(fs.listStatus(dir)).thenReturn(new JindoHadoopFileStatus[] {archive, unknown, subdir});
+        IOException failure = new IOException("Failed to list next page");
+        when(page.hasNext()).thenThrow(failure);
+
+        JindoFileIO fileIO = new TestingJindoFileIO(fs, dir);
+        Path path = new Path(dir.toUri());
+        assertThat(fileIO.listStatus(path))
+                .extracting(FileStatus::getStorageClass)
+                .containsExactly("Archive", null, null);
+        RemoteIterator<FileStatus> entries = fileIO.listStatusIterative(path);
+        verify(page, never()).next();
+        assertThat(entries.next().getStorageClass()).isEqualTo("Archive");
+        assertThat(entries.next().getStorageClass()).isNull();
+        FileStatus directory = entries.next();
+        assertThat(directory.isDir()).isTrue();
+        assertThat(directory.getStorageClass()).isNull();
+        assertThatThrownBy(entries::hasNext).isSameAs(failure);
+        verify(fs, never()).getFileStatus(any());
+    }
+
+    @Test
+    public void testListingFileDoesNotExposeDefaultStorageClass() throws IOException {
+        org.apache.hadoop.fs.Path file = new org.apache.hadoop.fs.Path("oss://bucket/file");
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.makeQualified(file)).thenReturn(file);
+        @SuppressWarnings("unchecked")
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> entries =
+                mock(org.apache.hadoop.fs.RemoteIterator.class);
+        JindoHadoopFileStatus basic = listedStatus(file, false, "Standard");
+        when(entries.next()).thenReturn(basic);
+        when(fs.listStatusIterator(file)).thenReturn(entries);
+        when(fs.getFileStatus(file)).thenReturn(basic);
+        when(fs.listStatus(file)).thenReturn(new JindoHadoopFileStatus[] {basic});
+
+        JindoFileIO fileIO = new TestingJindoFileIO(fs, file);
+        Path path = new Path(file.toUri());
+        FileStatus listed = fileIO.listStatusIterative(path).next();
+        assertThat(listed.getPath()).isEqualTo(path);
+        assertThat(listed.getStorageClass()).isNull();
+        assertThat(fileIO.listStatus(path))
+                .extracting(FileStatus::getStorageClass)
+                .containsExactly((String) null);
+        assertThat(fileIO.getFileStatus(path).getStorageClass()).isNull();
+    }
+
+    private static JindoHadoopFileStatus listedStatus(
+            org.apache.hadoop.fs.Path path, boolean directory, String storageClass) {
+        JindoHadoopFileStatus status = mock(JindoHadoopFileStatus.class);
+        when(status.getPath()).thenReturn(path);
+        when(status.isFile()).thenReturn(!directory);
+        when(status.isDirectory()).thenReturn(directory);
+        when(status.getStorageClassName()).thenReturn(storageClass);
+        return status;
     }
 
     private static class TestingJindoFileIO extends JindoFileIO {

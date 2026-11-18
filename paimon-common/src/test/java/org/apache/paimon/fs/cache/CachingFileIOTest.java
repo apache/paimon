@@ -192,7 +192,7 @@ class CachingFileIOTest {
     }
 
     @Test
-    void testListFilesIterativeReachesDelegateOverride() throws IOException {
+    void testIterativeListingsReachDelegateOverride() throws IOException {
         FileIO delegate = mock(FileIO.class);
         CachingFileIO cachingIO =
                 newCachingFileIO(
@@ -207,6 +207,8 @@ class CachingFileIOTest {
 
         assertThat(cachingIO.listFilesIterative(tableRoot, true)).isSameAs(marker);
         verify(delegate).listFilesIterative(tableRoot, true);
+        when(delegate.listStatusIterative(tableRoot)).thenReturn(marker);
+        assertThat(cachingIO.listStatusIterative(tableRoot)).isSameAs(marker);
         // the interface default would construct its own iterator backed by listStatus
         verify(delegate, never()).listStatus(any());
     }
