@@ -30,11 +30,6 @@ public interface GlobalIndexerFactory {
 
     String identifier();
 
-    /** Whether this index participates in scalar filters and their row-range coverage. */
-    default boolean supportsScalarSearch() {
-        return true;
-    }
-
     default boolean supportsFullTextSearch() {
         return false;
     }

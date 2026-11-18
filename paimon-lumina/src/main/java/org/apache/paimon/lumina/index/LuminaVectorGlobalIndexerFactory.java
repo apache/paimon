@@ -36,11 +36,6 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public boolean supportsScalarSearch() {
-        return false;
-    }
-
-    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         if (indexFields.size() != 1) {
             throw new UnsupportedOperationException(

@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -56,6 +57,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -393,15 +395,33 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexFiles.isEmpty()) {
             return dataPlan;
         }
+        Options indexOptions = table.coreOptions().toConfiguration();
         GlobalIndexQuery indexQuery =
                 GlobalIndexQuery.create(
                         table.rowType(),
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory(),
-                        table.coreOptions().toConfiguration());
+                        indexOptions);
         if (indexQuery == null) {
             return dataPlan;
+        }
+        if (table.coreOptions().scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST
+                && indexQuery.needsReaderCoverage(indexOptions)) {
+            try {
+                indexQuery = indexQuery.resolveFastCoverage(table.fileIO(), indexOptions);
+                if (indexQuery == null) {
+                    return dataPlan;
+                }
+                if (indexQuery.hasResolvedMatches()) {
+                    // Reuse scalar matches already returned by the extension. Work against the
+                    // data splits from the same snapshot and never query that index a second time.
+                    return planResolvedSplits(
+                            splits, indexQuery.fastCandidates(table.fileIO(), indexOptions));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
         List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
@@ -423,6 +443,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;
+    }
+
+    private static Plan planResolvedSplits(List<Split> splits, GlobalIndexResult result) {
+        RowRangeIndex matches = RowRangeIndex.fromBitmap(result.results());
+        List<Split> selected = new ArrayList<>();
+        for (Split split : splits) {
+            DataSplit data = dataSplit(split);
+            List<Range> hits = new ArrayList<>();
+            for (Range range :
+                    GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(data))) {
+                hits.addAll(matches.intersectedRanges(range.from, range.to));
+            }
+            if (!hits.isEmpty()) {
+                selected.add(withAuth(split, new IndexedSplit(data, hits, null)));
+            }
+        }
+        return () -> selected;
     }
 
     @Override
@@ -507,14 +544,18 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             long lookupStart = System.nanoTime();
-            Optional<GlobalIndexEvaluator.Evaluation> result =
-                    scanner.scanWithCoverage(globalIndexFilter);
-            long lookupDuration = System.nanoTime() - lookupStart;
-            long coverageStart = System.nanoTime();
-            Optional<GlobalIndexResult> finalResult =
-                    options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST
-                            ? scanner.fastCandidates(globalIndexFilter, result)
-                            : result.map(e -> e.result().or(scanner.unindexedRowsForEvaluation(e)));
+            Optional<GlobalIndexResult> finalResult;
+            long coverageStart;
+            if (options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST) {
+                finalResult = scanner.scanFast(globalIndexFilter);
+                coverageStart = System.nanoTime();
+            } else {
+                Optional<GlobalIndexEvaluator.Evaluation> result =
+                        scanner.scanWithCoverage(globalIndexFilter);
+                coverageStart = System.nanoTime();
+                finalResult = result.map(e -> e.result().or(scanner.unindexedRowsForEvaluation(e)));
+            }
+            long lookupDuration = coverageStart - lookupStart;
             if (finalResult.isPresent()) {
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;

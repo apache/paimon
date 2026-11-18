@@ -52,7 +52,7 @@ public class GlobalIndexerFactoryUtils {
         }
     }
 
-    private static GlobalIndexerFactory find(String type) {
+    static GlobalIndexerFactory find(String type) {
         GlobalIndexerFactory factory = factories.get(type);
         if (factory != null) {
             return factory;
@@ -79,11 +79,6 @@ public class GlobalIndexerFactoryUtils {
             throw new RuntimeException("Can't find global index for type: " + type);
         }
         return globalIndexerFactory;
-    }
-
-    public static boolean supportsScalarSearch(String type) {
-        GlobalIndexerFactory factory = find(type);
-        return factory == null || factory.supportsScalarSearch();
     }
 
     /** Keep unrecognized index types for the reader to resolve at execution time. */

@@ -382,6 +382,69 @@ class GlobalIndexQuery {
                 || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
     }
 
+    // Core scalar index definitions provide coverage even when a leaf requires a residual filter.
+    // Full-text and extension indexes may also support scalar filters; ask their reader.
+    static boolean mayNeedReaderCoverage(String type) {
+        return "full-text".equals(type) || CoreOptions.isVectorIndexType(type);
+    }
+
+    boolean needsReaderCoverage(Options options) {
+        return groups.stream().anyMatch(g -> g.needsReaderCoverage(options))
+                || children.stream().anyMatch(child -> child.needsReaderCoverage(options));
+    }
+
+    boolean hasResolvedMatches() {
+        return groups.stream().anyMatch(g -> g.matches != null)
+                || children.stream().anyMatch(GlobalIndexQuery::hasResolvedMatches);
+    }
+
+    /** Resolve ambiguous groups once for the snapshot, before FAST drops uncovered data splits. */
+    @Nullable
+    GlobalIndexQuery resolveFastCoverage(FileIO fileIO, Options options) throws IOException {
+        if (predicate == null) {
+            List<GlobalIndexQuery> selected = new ArrayList<>();
+            for (GlobalIndexQuery child : children) {
+                GlobalIndexQuery resolved = child.resolveFastCoverage(fileIO, options);
+                if (resolved != null) {
+                    selected.add(resolved);
+                } else if (union) {
+                    return null;
+                }
+            }
+            return selected.isEmpty() ? null : new GlobalIndexQuery(null, union, selected, groups);
+        }
+        List<IndexGroup> selected = new ArrayList<>();
+        for (IndexGroup group : groups) {
+            if (!group.needsReaderCoverage(options)) {
+                selected.add(group);
+                continue;
+            }
+            Optional<GlobalIndexResult> matches =
+                    readGroup(
+                            fileIO,
+                            options,
+                            group,
+                            null,
+                            GlobalIndexReadThreadPool.getExecutorService(
+                                    options.get(GLOBAL_INDEX_THREAD_NUM)));
+            if (matches.isPresent()) {
+                // The same group can occur under different leaves. Cache only this leaf's answer.
+                IndexGroup resolved =
+                        new IndexGroup(
+                                group.type,
+                                group.field,
+                                group.extraFields,
+                                group.range,
+                                group.files);
+                resolved.matches = matches.get();
+                selected.add(resolved);
+            }
+        }
+        return selected.isEmpty()
+                ? null
+                : new GlobalIndexQuery(predicate, false, children, selected);
+    }
+
     boolean hasRTreeQuery() {
         return groups.stream()
                         .anyMatch(group -> RTreeGlobalIndexerFactory.IDENTIFIER.equals(group.type))
@@ -461,6 +524,12 @@ class GlobalIndexQuery {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
+    }
+
+    GlobalIndexResult fastCandidates(FileIO fileIO, Options options) throws IOException {
+        List<Range> ranges = indexedRanges();
+        return evaluateCandidates(fileIO, options, ranges)
+                .orElseGet(() -> GlobalIndexResult.fromRanges(ranges));
     }
 
     /** Retain candidates wherever a child predicate cannot be evaluated by an index. */
@@ -558,44 +627,62 @@ class GlobalIndexQuery {
                 coverage.add(group.range);
                 continue;
             }
-            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
-                    predicateQuery(group);
             GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
             if (splitRows.results().isEmpty()) {
                 supported = true;
                 continue;
             }
-            GlobalIndexer indexer = GlobalIndexer.create(group.type, group.indexFields(), options);
-            try (GlobalIndexReader reader =
-                    indexer.createReader(
-                            meta -> fileIO.newInputStream(meta.filePath()),
-                            group.files,
-                            group.range.count(),
-                            splitRows.results().toRangeList(),
-                            executor)) {
-                Optional<GlobalIndexResult> matches = query.apply(reader).get();
-                if (!matches.isPresent()) {
-                    if (allowUnsupported) {
-                        continue;
-                    }
-                    throw new IOException("Index reader does not support predicate: " + predicate);
+            Optional<GlobalIndexResult> matches =
+                    group.matches == null
+                            ? readGroup(
+                                    fileIO,
+                                    options,
+                                    group,
+                                    splitRows.results().toRangeList(),
+                                    executor)
+                            : Optional.of(group.matches);
+            if (!matches.isPresent()) {
+                if (allowUnsupported) {
+                    continue;
                 }
-                supported = true;
-                fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
-                coverage.add(group.range);
-                // Clip in index-local coordinates before offset() iterates the retained rows.
-                result = result.or(splitRows.and(matches.get()).offset(group.range.from));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while evaluating index query split", e);
-            } catch (ExecutionException e) {
-                throw new IOException("Failed to evaluate index query split", e.getCause());
+                throw new IOException("Index reader does not support predicate: " + predicate);
             }
+            supported = true;
+            fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
+            coverage.add(group.range);
+            result = result.or(splitRows.and(matches.get()).offset(group.range.from));
         }
         return supported
                 ? Optional.of(
                         new Evaluation(result, fields, Range.sortAndMergeOverlap(coverage, true)))
                 : Optional.empty();
+    }
+
+    private Optional<GlobalIndexResult> readGroup(
+            FileIO fileIO,
+            Options options,
+            IndexGroup group,
+            @Nullable List<Range> localRanges,
+            ExecutorService executor)
+            throws IOException {
+        GlobalIndexer indexer = GlobalIndexer.create(group.type, group.indexFields(), options);
+        try (GlobalIndexReader reader =
+                indexer.createReader(
+                        meta -> fileIO.newInputStream(meta.filePath()),
+                        group.files,
+                        group.range.count(),
+                        localRanges,
+                        executor)) {
+            return predicateQuery(group)
+                    .apply(reader)
+                    .get()
+                    .map(hit -> GlobalIndexResult.create(hit.results()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while evaluating index query split", e);
+        } catch (ExecutionException e) {
+            throw new IOException("Failed to evaluate index query split", e.getCause());
+        }
     }
 
     private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
@@ -762,6 +849,9 @@ class GlobalIndexQuery {
         /** File paths and metadata; contains no query results or open readers. */
         private final List<GlobalIndexIOMeta> files;
 
+        // Planning-time answers are consumed before creating reader splits.
+        @Nullable private GlobalIndexResult matches;
+
         private IndexGroup(
                 String type,
                 DataField field,
@@ -808,6 +898,18 @@ class GlobalIndexQuery {
                                                                 files));
                                             }));
             return result;
+        }
+
+        private boolean needsReaderCoverage(Options options) {
+            if (files.isEmpty() || !mayNeedReaderCoverage(type)) {
+                return false;
+            }
+            GlobalIndexerFactory factory = GlobalIndexerFactoryUtils.find(type);
+            // Preserve deferred lookup for job-scoped providers available only in the reader.
+            return factory != null
+                    && (factory.supportsFullTextSearch()
+                            || GlobalIndexer.create(type, indexFields(), options)
+                                    instanceof VectorGlobalIndexer);
         }
 
         private boolean isCompositeBTree() {

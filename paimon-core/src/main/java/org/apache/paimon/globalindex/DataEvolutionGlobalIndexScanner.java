@@ -80,6 +80,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
+    private final boolean scalarTableScan;
     private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
     private final List<IndexFileMeta> indexFiles;
@@ -103,7 +104,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 fileIO,
                 indexPathFactory,
                 indexFiles,
-                indexFiles);
+                indexFiles,
+                false);
     }
 
     private DataEvolutionGlobalIndexScanner(
@@ -115,7 +117,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> coverageIndexFiles,
-            Collection<IndexFileMeta> indexFiles) {
+            Collection<IndexFileMeta> indexFiles,
+            boolean scalarTableScan) {
+        this.scalarTableScan = scalarTableScan;
         this.table = table;
         this.indexFiles = new ArrayList<>(indexFiles);
         this.fileIO = fileIO;
@@ -283,7 +287,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        indexFiles,
+                        indexFiles,
+                        true));
     }
 
     /**
@@ -321,7 +327,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         indexFiles,
-                        selectedIndexFiles));
+                        selectedIndexFiles,
+                        false));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -379,11 +386,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                     }
                     return false;
                 };
-        // Ranked-only indexes do not contribute row coverage to a scalar filter.
-        return indexFileFilter.and(
-                entry ->
-                        GlobalIndexerFactoryUtils.supportsScalarSearch(
-                                entry.indexFile().indexType()));
+        return indexFileFilter;
     }
 
     private static boolean isMultiFieldIndex(IndexFileMeta file) {
@@ -409,20 +412,29 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
         List<Predicate> residuals = new ArrayList<>();
+        boolean checkGroupCoverage =
+                scalarTableScan
+                        && indexFiles.stream()
+                                .anyMatch(
+                                        f -> GlobalIndexQuery.mayNeedReaderCoverage(f.indexType()));
         GlobalIndexQuery query =
-                predicate == null
-                                || indexFiles.stream()
-                                        .noneMatch(
-                                                DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
-                        ? null
-                        : GlobalIndexQuery.create(
+                predicate != null
+                                && (checkGroupCoverage
+                                        || indexFiles.stream()
+                                                .anyMatch(
+                                                        DataEvolutionGlobalIndexScanner
+                                                                ::isMultiFieldIndex))
+                        ? GlobalIndexQuery.create(
                                 rowType,
                                 predicate,
                                 indexFiles,
                                 indexPathFactory,
                                 options,
-                                residuals::add);
-        if (query != null && query.hasCompositeQuery()) {
+                                residuals::add)
+                        : null;
+        if (query != null
+                && (query.hasCompositeQuery()
+                        || (checkGroupCoverage && query.needsReaderCoverage(options)))) {
             try {
                 Optional<GlobalIndexEvaluator.Evaluation> evaluation =
                         query.evaluateWithCoverage(
@@ -441,7 +453,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                 e.coveredRanges(),
                                                 false));
             } catch (IOException e) {
-                throw new RuntimeException("Failed to evaluate composite global index query", e);
+                throw new RuntimeException("Failed to evaluate global index query", e);
             }
         }
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
@@ -461,43 +473,34 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluateTopN(topN);
     }
 
-    /** Keep candidates inside the selected spatial/scalar index ranges in fast mode. */
-    Optional<GlobalIndexResult> fastCandidates(
-            Predicate predicate, Optional<GlobalIndexEvaluator.Evaluation> evaluation) {
-        Optional<GlobalIndexResult> matches =
-                evaluation.map(GlobalIndexEvaluator.Evaluation::result);
-        if (evaluation.isPresent()
-                && evaluation.get().allPredicatesEvaluated()
-                && !(predicate instanceof CompoundPredicate)) {
-            return matches;
-        }
+    Optional<GlobalIndexResult> scanFast(Predicate predicate) throws IOException {
         if (indexFiles.stream()
-                .noneMatch(f -> RTreeGlobalIndexerFactory.IDENTIFIER.equals(f.indexType()))) {
-            return matches;
+                .anyMatch(
+                        f ->
+                                GlobalIndexQuery.mayNeedReaderCoverage(f.indexType())
+                                        || RTreeGlobalIndexerFactory.IDENTIFIER.equals(
+                                                f.indexType()))) {
+            GlobalIndexQuery query =
+                    GlobalIndexQuery.create(
+                            rowType, predicate, indexFiles, indexPathFactory, options);
+            if (query != null && query.needsReaderCoverage(options)) {
+                query = query.resolveFastCoverage(fileIO, options);
+                return query == null
+                        ? Optional.empty()
+                        : Optional.of(query.fastCandidates(fileIO, options));
+            }
+            if (query != null && query.hasRTreeQuery()) {
+                List<Range> ranges = query.indexedRanges();
+                // Keep the parallel shard lookup for a single spatial leaf.
+                Optional<GlobalIndexResult> candidates =
+                        predicate instanceof CompoundPredicate
+                                ? query.evaluateCandidates(fileIO, options, ranges)
+                                : scan(predicate);
+                return Optional.of(
+                        candidates.orElseGet(() -> GlobalIndexResult.fromRanges(ranges)));
+            }
         }
-        GlobalIndexQuery query =
-                GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query == null || !query.hasRTreeQuery()) {
-            return matches;
-        }
-        List<Range> indexed = query.indexedRanges();
-        if (!evaluation.isPresent()) {
-            return Optional.of(GlobalIndexResult.fromRanges(indexed));
-        }
-        // Other selected indexes may cover rows outside the ranges tested by a supported child.
-        // The data filter must check these rows, as it does in IndexQuerySplit.
-        GlobalIndexEvaluator.Evaluation supported = evaluation.get();
-        List<Range> covered =
-                supported.coveredRanges() == null
-                        ? coverage.indexedRanges(supported.contributingFieldIds())
-                        : supported.coveredRanges();
-        // An R-tree query has at least one index group. Subtract coverage once for the whole
-        // span, then intersect with the selected ranges to keep gaps between shards out.
-        Range span = new Range(indexed.get(0).from, indexed.get(indexed.size() - 1).to);
-        List<Range> untested = Range.and(indexed, span.exclude(covered));
-        return untested.isEmpty()
-                ? matches
-                : Optional.of(supported.result().or(GlobalIndexResult.fromRanges(untested)));
+        return scan(predicate);
     }
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {
@@ -507,7 +510,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         ? null
                         : GlobalIndexQuery.create(
                                 rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
+        if (query != null
+                && ((scalarTableScan && query.needsReaderCoverage(options))
+                        || (query.hasCompositeQuery() && query.hasScalarQuery()))) {
             // Scalar shards can decline a predicate at runtime, so the legacy API must use
             // evaluated coverage as well. Internal callers retain the evaluation directly.
             Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);

@@ -39,11 +39,6 @@ public class TestVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public boolean supportsScalarSearch() {
-        return false;
-    }
-
-    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         String metric = options.getString(IDENTIFIER + ".metric", null);
         // Existing test fixtures may explicitly select their metric with the test-only option.

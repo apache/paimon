@@ -45,11 +45,6 @@ public class TestFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public boolean supportsScalarSearch() {
-        return false;
-    }
-
-    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         // This brute-force backend indexes the first VARCHAR/STRING column.
         DataField textField = indexFields.get(0);

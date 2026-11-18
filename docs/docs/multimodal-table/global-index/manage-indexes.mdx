@@ -488,5 +488,11 @@ These table options affect global index build and read behavior:
 | `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |
 
+In `fast` mode, the planner needs to know which row ranges a scalar filter can search
+before it assigns data splits. For providers that also support full-text or vector search,
+the planner checks the scalar predicate against the reader at the selected snapshot. When such
+a reader supplies scalar matches, the planner reuses those rows to select splits. When it
+declines, the remaining built-in scalar indexes can still run in the data readers.
+
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
 evaluated by the core scan, including scans used by Flink and Spark.

@@ -196,7 +196,9 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         FileStoreTable table = getTableDefault();
         BinaryString text = BinaryString.fromString("same");
         byte[] geom = point(1, 1);
-        write(table, GenericRow.of(0, geom, text), GenericRow.of(1, geom, text));
+        write(table, GenericRow.of(0, geom, text));
+        write(getTableDefault(), GenericRow.of(1, geom, text));
+        write(getTableDefault(), GenericRow.of(2, geom, text));
         buildIndex(getTableDefault(), new Range(0, 0));
         buildIndex(
                 getTableDefault(),
@@ -207,15 +209,55 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         table =
                 getTableDefault()
                         .copy(Collections.singletonMap("scalar-index.search-mode", "fast"));
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
+        assertThat(table.newReadBuilder().newScan().plan().splits()).hasSize(3);
         PredicateBuilder predicates = new PredicateBuilder(table.rowType());
         Predicate equality = predicates.equal(2, text);
-        assertThat(readIds(table, equality)).containsExactly(0, 1);
+        assertThat(readIds(table, equality)).containsExactly(0, 1, 2);
+        assertThat(
+                        readIds(
+                                table,
+                                PredicateBuilder.or(
+                                        predicates.bboxIntersects(1, 0, 0, 2, 2), equality)))
+                .containsExactly(0, 1, 2);
         assertThat(
                         readIds(
                                 table,
                                 PredicateBuilder.and(
                                         predicates.bboxIntersects(1, 0, 0, 2, 2), equality)))
                 .containsExactly(0);
+        // The B-tree and the full-text index cover disjoint ranges on the same column.
+        buildIndex(getTableDefault(), new Range(0, 0), Collections.emptyList(), "btree", "content");
+        for (String mode : new String[] {"fast", "full", "detail"}) {
+            FileStoreTable configured =
+                    getTableDefault()
+                            .copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode))
+                            .copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
+            assertThat(readIds(configured, equality))
+                    .containsExactly(
+                            "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1, 2});
+            if (!"fast".equals(mode)) {
+                try (DataEvolutionGlobalIndexScanner scanner =
+                        DataEvolutionGlobalIndexScanner.create(
+                                        configured, PartitionPredicate.ALWAYS_TRUE, equality)
+                                .get()) {
+                    assertThat(
+                                    scanner.scan(equality)
+                                            .get()
+                                            .or(scanner.unindexedRows(equality))
+                                            .results()
+                                            .toRangeList())
+                            .containsExactly(new Range(0, 2));
+                }
+            }
+        }
     }
 
     @ParameterizedTest
