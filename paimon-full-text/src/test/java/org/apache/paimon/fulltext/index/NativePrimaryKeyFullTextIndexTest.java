@@ -180,10 +180,10 @@ class NativePrimaryKeyFullTextIndexTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
         ResultEntry result = results.get(0);
-        Path path = new Path(indexPath, result.fileName());
+        Path path = new Path(result.filePath());
         return new IndexFileMeta(
                 "full-text",
-                result.fileName(),
+                new Path(result.filePath()).getName(),
                 fileIO.getFileSize(path),
                 result.rowCount(),
                 new GlobalIndexMeta(
@@ -201,13 +201,13 @@ class NativePrimaryKeyFullTextIndexTest {
     private GlobalIndexFileWriter fileWriter() {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID();
+            public String newFilePath(String prefix) {
+                return new Path(indexPath, prefix + "-" + UUID.randomUUID()).toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                return fileIO.newOutputStream(new Path(indexPath, fileName), false);
+            public PositionOutputStream newOutputStream(String filePath) throws IOException {
+                return fileIO.newOutputStream(new Path(filePath), false);
             }
         };
     }

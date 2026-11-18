@@ -721,7 +721,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         new Range(0, rowCount - 1),
                         tagsField.id(),
@@ -2034,7 +2033,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         vectorField.id(),
@@ -2076,7 +2074,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles1 =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange1,
                         vectorField.id(),
@@ -2099,7 +2096,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles2 =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange2,
                         vectorField.id(),
@@ -2271,7 +2267,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexFields,
@@ -2313,7 +2308,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         idField.id(),
@@ -2354,7 +2348,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         vectorField.id(),

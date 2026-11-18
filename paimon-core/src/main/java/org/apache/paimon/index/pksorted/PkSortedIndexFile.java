@@ -98,11 +98,11 @@ public class PkSortedIndexFile extends IndexFile {
                     result.rowCount(),
                     sourceRowCount);
             byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles).serialize();
-            Path payloadPath = fileWriter.path(result.fileName());
+            Path payloadPath = fileWriter.path(result.filePath());
             IndexFileMeta payload =
                     new IndexFileMeta(
                             indexType,
-                            result.fileName(),
+                            payloadPath.getName(),
                             fileIO.getFileSize(payloadPath),
                             result.rowCount(),
                             new GlobalIndexMeta(
@@ -168,20 +168,20 @@ public class PkSortedIndexFile extends IndexFile {
         private final Map<String, Path> createdFiles = new LinkedHashMap<>();
 
         @Override
-        public String newFileName(String prefix) {
+        public String newFilePath(String prefix) {
             Path path = pathFactory.newPath();
-            createdFiles.put(path.getName(), path);
-            return path.getName();
+            createdFiles.put(path.toString(), path);
+            return path.toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) throws IOException {
-            return fileIO.newOutputStream(path(fileName), false);
+        public PositionOutputStream newOutputStream(String filePath) throws IOException {
+            return fileIO.newOutputStream(path(filePath), false);
         }
 
-        private Path path(String fileName) {
-            Path path = createdFiles.get(fileName);
-            checkArgument(path != null, "Sorted payload file %s was not allocated.", fileName);
+        private Path path(String filePath) {
+            Path path = createdFiles.get(filePath);
+            checkArgument(path != null, "Sorted payload file %s was not allocated.", filePath);
             return path;
         }
 

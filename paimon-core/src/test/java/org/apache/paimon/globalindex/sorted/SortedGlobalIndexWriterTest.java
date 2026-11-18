@@ -20,18 +20,26 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.Closeable;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -45,6 +53,54 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link SortedGlobalIndexWriter}. */
 public class SortedGlobalIndexWriterTest extends TableTestBase {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testBuildPreservesAllocatedPathsInCommit(boolean external) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        Path firstRoot = new Path(table.location(), "external-a");
+        Path secondRoot = new Path(table.location(), "external-b");
+        if (external) {
+            table =
+                    table.copy(
+                            Collections.singletonMap(
+                                    "global-index.external-path", firstRoot + "," + secondRoot));
+        }
+        Options options = new Options();
+        options.setString("btree-index.records-per-range", "1");
+        SortedGlobalIndexWriter writer =
+                new SortedGlobalIndexWriter(table, "btree", options)
+                        .withIndexFields(Collections.singletonList("f0"));
+        List<CommitMessage> commits =
+                writer.buildForSinglePartition(
+                        new Range(0, 1),
+                        null,
+                        Arrays.<InternalRow>asList(GenericRow.of(10, 0L), GenericRow.of(20, 1L))
+                                .iterator(),
+                        1L);
+        assertThat(commits).hasSize(2);
+        List<Path> parents = new ArrayList<>();
+        for (CommitMessage commit : commits) {
+            List<IndexFileMeta> files =
+                    ((CommitMessageImpl) commit).newFilesIncrement().newIndexFiles();
+            assertThat(files).hasSize(1);
+            IndexFileMeta file = files.get(0);
+            Path path = table.store().pathFactory().globalIndexFileFactory().toPath(file);
+            assertThat(table.fileIO().exists(path)).isTrue();
+            assertThat(file.fileName())
+                    .isEqualTo(path.getName())
+                    .startsWith("btree-global-index-")
+                    .endsWith(".index");
+            assertThat(file.externalPath()).isEqualTo(external ? path.toString() : null);
+            parents.add(path.getParent());
+        }
+        if (external) {
+            assertThat(parents).containsExactlyInAnyOrder(firstRoot, secondRoot);
+        } else {
+            assertThat(parents).containsOnly(new Path(table.location(), "index"));
+        }
+    }
 
     @Test
     public void testFieldOptionsControlFileRotationAndBuildSettings() throws Exception {
@@ -72,9 +128,13 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
         GlobalIndexSingleColumnWriter first = mock(GlobalIndexSingleColumnWriter.class);
         GlobalIndexSingleColumnWriter second = mock(GlobalIndexSingleColumnWriter.class);
         when(first.finish(2))
-                .thenReturn(Collections.singletonList(new ResultEntry("index-1", 2, null)));
+                .thenReturn(
+                        Collections.singletonList(
+                                new ResultEntry("memory://test/index-1", 2, null)));
         when(second.finish(1))
-                .thenReturn(Collections.singletonList(new ResultEntry("index-2", 1, null)));
+                .thenReturn(
+                        Collections.singletonList(
+                                new ResultEntry("memory://test/index-2", 1, null)));
         Queue<GlobalIndexSingleColumnWriter> writers =
                 new ArrayDeque<>(Arrays.asList(first, second));
         SortedSingleColumnIndexWriter rotatingWriter =
@@ -89,15 +149,20 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
         verify(first).write(20, 1);
         verify(second).write(30, 2);
         assertThat(results).hasSize(2);
-        assertThat(results.get(0)).extracting(ResultEntry::fileName).containsExactly("index-1");
-        assertThat(results.get(1)).extracting(ResultEntry::fileName).containsExactly("index-2");
+        assertThat(results.get(0))
+                .extracting(ResultEntry::filePath)
+                .containsExactly("memory://test/index-1");
+        assertThat(results.get(1))
+                .extracting(ResultEntry::filePath)
+                .containsExactly("memory://test/index-2");
     }
 
     @Test
     public void testSingleColumnWriterPreservesSourceRowCount() throws Exception {
         GlobalIndexSingleColumnWriter writer = mock(GlobalIndexSingleColumnWriter.class);
         when(writer.finish(5))
-                .thenReturn(Collections.singletonList(new ResultEntry("index", 5, null)));
+                .thenReturn(
+                        Collections.singletonList(new ResultEntry("memory://test/index", 5, null)));
         SortedSingleColumnIndexWriter taskWriter =
                 SortedSingleColumnIndexWriter.forSourceRowCount(5, writer);
 
@@ -114,7 +179,8 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
     public void testSingleColumnWriterPreservesSourceRangeWithoutEntries() {
         GlobalIndexSingleColumnWriter writer = mock(GlobalIndexSingleColumnWriter.class);
         when(writer.finish(3))
-                .thenReturn(Collections.singletonList(new ResultEntry("index", 3, null)));
+                .thenReturn(
+                        Collections.singletonList(new ResultEntry("memory://test/index", 3, null)));
         SortedSingleColumnIndexWriter taskWriter =
                 SortedSingleColumnIndexWriter.forSourceRowCount(3, writer);
 

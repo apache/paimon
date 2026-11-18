@@ -475,7 +475,7 @@ These table options affect global index build and read behavior:
 | `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, and FM queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
-| `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `global-index.external-path` | Not set | Comma-separated root directories for global index files, for example `s3://bucket-a/index,s3://bucket-b/index`. New files use round-robin selection independently of data-file external path settings. Each file's actual path is saved in metadata, so changing this option does not relocate existing files. If not set, files are stored under the table index directory. |
 | `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
 | `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. Falls back to `sorted-index.records-per-range`, then `btree-index.records-per-range`. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |

@@ -291,13 +291,14 @@ class CompositeBTreeRangeTest {
         GlobalIndexFileWriter files =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + UUID.randomUUID();
+                    public String newFilePath(String prefix) {
+                        return new Path(directory, prefix + UUID.randomUUID()).toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String name) throws IOException {
-                        return io.newOutputStream(new Path(directory, name), false);
+                    public PositionOutputStream newOutputStream(String filePath)
+                            throws IOException {
+                        return io.newOutputStream(new Path(filePath), false);
                     }
                 };
         GlobalIndexSingleColumnWriter writer =
@@ -309,7 +310,7 @@ class CompositeBTreeRangeTest {
         }
         List<GlobalIndexIOMeta> result = new ArrayList<>();
         for (ResultEntry entry : writer.finish()) {
-            Path path = new Path(directory, entry.fileName());
+            Path path = new Path(entry.filePath());
             result.add(
                     new GlobalIndexIOMeta(
                             path, io.getFileSize(path), entry.rowCount(), entry.meta()));

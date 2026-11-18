@@ -277,8 +277,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
             LOG.info("{} write phase started", identifier);
-            String fileName = fileWriter.newFileName(fileNamePrefix());
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            String filePath = fileWriter.newFilePath(fileNamePrefix());
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;
@@ -310,7 +310,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     System.currentTimeMillis() - buildStart);
 
             VectorIndexMeta meta = new VectorIndexMeta();
-            return new ResultEntry(fileName, rowCount, meta.serialize());
+            return new ResultEntry(filePath, rowCount, meta.serialize());
         }
     }
 

@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -167,7 +168,7 @@ class ESIndexVectorMetricTest {
         writer.write(new float[] {0f, 1f}, 1);
         writer.write(new float[] {-1f, 0f}, 2);
         ResultEntry entry = writer.finish().get(0);
-        Path archive = archiveDir.resolve(entry.fileName());
+        Path archive = Paths.get(entry.filePath());
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
                         new org.apache.paimon.fs.Path(archive.toString()),
@@ -278,14 +279,15 @@ class ESIndexVectorMetricTest {
         }
 
         @Override
-        public String newFileName(String prefix) {
-            return prefix + "-" + UUID.randomUUID() + ".index";
+        public String newFilePath(String prefix) {
+            return new org.apache.paimon.fs.Path(
+                            dir.resolve(prefix + "-" + UUID.randomUUID() + ".index").toString())
+                    .toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) throws IOException {
-            return fio.newOutputStream(
-                    new org.apache.paimon.fs.Path(dir.resolve(fileName).toString()), true);
+        public PositionOutputStream newOutputStream(String filePath) throws IOException {
+            return fio.newOutputStream(new org.apache.paimon.fs.Path(filePath), true);
         }
     }
 }

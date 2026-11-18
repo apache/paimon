@@ -106,12 +106,12 @@ public final class BTreeFixtureGenerator {
                     GlobalIndexFileWriter fileWriter =
                             new GlobalIndexFileWriter() {
                                 @Override
-                                public String newFileName(String prefix) {
-                                    return name;
+                                public String newFilePath(String prefix) {
+                                    return directory.resolve(name).toAbsolutePath().toString();
                                 }
 
                                 @Override
-                                public PositionOutputStream newOutputStream(String fileName) {
+                                public PositionOutputStream newOutputStream(String filePath) {
                                     return new PositionOutputStream() {
                                         @Override
                                         public long getPos() {
@@ -176,12 +176,12 @@ public final class BTreeFixtureGenerator {
         GlobalIndexFileWriter files =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return name;
+                    public String newFilePath(String prefix) {
+                        return directory.resolve(name).toAbsolutePath().toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName) {
+                    public PositionOutputStream newOutputStream(String filePath) {
                         return new PositionOutputStream() {
                             @Override
                             public long getPos() {
