@@ -4716,14 +4716,14 @@ components:
         table: {type: string, minLength: 1, maxLength: 128}
     PredictionOutput:
       type: object
-      minProperties: 1
+      additionalProperties: false
+      required: [table]
       properties:
         table:
           $ref: '#/components/schemas/PredictionSource'
           description: >-
             Managed result table containing source identity columns, a response string,
             and an error string.
-      additionalProperties: true
     SubmitPredictionRequest:
       type: object
       additionalProperties: false

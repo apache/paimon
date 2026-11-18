@@ -160,12 +160,12 @@ class PredictionSpec:
 
 @dataclass
 class PredictionOutput:
-    """Known output locations of an asynchronous prediction."""
+    """Managed result table of an asynchronous prediction."""
 
-    table: Optional[Identifier] = None
+    table: Identifier
 
     def __post_init__(self):
-        if self.table is not None and not isinstance(self.table, Identifier):
+        if not isinstance(self.table, Identifier):
             raise ValueError("table must be an Identifier")
 
 

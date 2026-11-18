@@ -23,25 +23,23 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Output of an asynchronous prediction. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PredictionOutput {
 
-    private final @Nullable PredictionSource table;
+    private final PredictionSource table;
 
     @JsonCreator
-    public PredictionOutput(@Nullable @JsonProperty("table") PredictionSource table) {
+    public PredictionOutput(@JsonProperty("table") PredictionSource table) {
+        checkArgument(table != null, "table must not be null");
         this.table = table;
     }
 
-    @Nullable
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonGetter("table")
     public PredictionSource table() {
         return table;

@@ -191,6 +191,9 @@ class PredictionTest(unittest.TestCase):
                 Identifier.create("system", "prediction_results")),
             completed.to_prediction().output,
         )
+        with self.assertRaises(ValueError):
+            ApiPredictionOutput.from_dict(
+                {"artifactUri": "oss://bucket/result"})
         page = JSON.from_json(
             JSON.to_json(ListPredictionsResponse([_response()], "next")),
             ListPredictionsResponse,

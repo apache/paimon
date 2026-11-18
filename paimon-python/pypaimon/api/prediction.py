@@ -54,12 +54,10 @@ class PredictionSource:
 
 @dataclass
 class PredictionOutput:
-    table: Optional[PredictionSource] = optional_json_field(
-        "table", "non_null")
+    table: PredictionSource
 
     def __post_init__(self):
-        if self.table is not None and not isinstance(
-                self.table, PredictionSource):
+        if not isinstance(self.table, PredictionSource):
             raise ValueError("table must be a PredictionSource")
 
     @classmethod
@@ -71,10 +69,7 @@ class PredictionOutput:
         )
 
     def to_catalog_output(self) -> CatalogPredictionOutput:
-        return CatalogPredictionOutput(
-            table=(self.table.to_identifier()
-                   if self.table is not None else None),
-        )
+        return CatalogPredictionOutput(table=self.table.to_identifier())
 
 
 @dataclass

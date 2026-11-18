@@ -115,6 +115,9 @@ class RESTApiPredictionTest {
         assertThat((Map<String, Object>) output.get("table"))
                 .containsEntry("database", "system")
                 .containsEntry("table", "prediction_results");
+        assertThatThrownBy(() -> new PredictionOutput(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("table");
 
         ListPredictionsResponse empty = RESTApi.fromJson("{}", ListPredictionsResponse.class);
         assertThat(empty.getPredictions()).isEmpty();
