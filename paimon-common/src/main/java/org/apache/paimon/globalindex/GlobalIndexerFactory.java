@@ -34,6 +34,11 @@ public interface GlobalIndexerFactory {
         return false;
     }
 
+    /** Whether a scalar lookup can use this index when planning without opening its files. */
+    default boolean supportsPredicate(Predicate predicate) {
+        return true;
+    }
+
     /**
      * Select index files using metadata only. Implementations must retain every file that may
      * match; the default keeps all files when no safe pruning is available.

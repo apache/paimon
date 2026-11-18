@@ -65,8 +65,11 @@ class Spark4Shim extends SparkShim {
   override def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit =
     SpatialIntersects.register(extensions)
 
-  override def spatialCandidate(predicate: V2Expression, rowType: RowType): Option[Predicate] =
-    SpatialIntersects.candidate(predicate, rowType)
+  override def spatialCandidate(
+      predicate: V2Expression,
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] =
+    SpatialIntersects.candidate(predicate, rowType, ranked)
 
   override def classicApi: ClassicApi = new Classic4Api
 

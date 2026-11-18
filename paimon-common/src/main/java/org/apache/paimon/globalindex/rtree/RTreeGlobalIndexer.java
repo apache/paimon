@@ -73,7 +73,7 @@ public class RTreeGlobalIndexer implements GlobalIndexer {
         readBatchBytes = (int) batchBytes;
         readFileConcurrency = options.get(RTreeIndexOptions.READ_FILE_CONCURRENCY);
         checkArgument(readFileConcurrency > 0, "R-tree read file concurrency must be positive.");
-        readContext = new RTreeIndexReadContext(cacheBytes);
+        readContext = new RTreeIndexReadContext(cacheBytes, readFileConcurrency);
     }
 
     @Override

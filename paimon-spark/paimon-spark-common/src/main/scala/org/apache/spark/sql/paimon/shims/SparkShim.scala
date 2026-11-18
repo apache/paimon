@@ -59,7 +59,10 @@ trait SparkShim {
 
   def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit = {}
 
-  def spatialCandidate(predicate: V2Expression, rowType: RowType): Option[Predicate] = None
+  def spatialCandidate(
+      predicate: V2Expression,
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] = None
 
   def createSparkParser(delegate: ParserInterface): ParserInterface
 

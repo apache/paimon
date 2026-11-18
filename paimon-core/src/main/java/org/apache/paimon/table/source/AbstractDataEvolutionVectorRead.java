@@ -262,7 +262,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
                 return matched;
             }
-            if (!table.coreOptions().globalIndexFilterRefineFromData()) {
+            if (!FilteredRowIdReader.shouldRefine(table, filter)) {
                 FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
                 return new RoaringNavigableMap64();
             }

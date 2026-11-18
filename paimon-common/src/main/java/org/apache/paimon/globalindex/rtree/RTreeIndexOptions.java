@@ -58,7 +58,8 @@ public class RTreeIndexOptions {
             ConfigOptions.key("rtree-index.read-file-concurrency")
                     .intType()
                     .defaultValue(4)
-                    .withDescription("Maximum index files read concurrently per reader query.");
+                    .withDescription(
+                            "Maximum index files read concurrently across readers sharing an indexer.");
 
     public static final ConfigOption<MemorySize> READ_BATCH_SIZE =
             ConfigOptions.key("rtree-index.read-batch-size")

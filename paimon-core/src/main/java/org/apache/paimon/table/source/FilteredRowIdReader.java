@@ -26,6 +26,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Contains;
 import org.apache.paimon.predicate.EndsWith;
+import org.apache.paimon.predicate.GeometryIntersectsTransform;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Like;
@@ -92,6 +93,20 @@ class FilteredRowIdReader {
         return !hasCandidateOnlyLeaf(filter);
     }
 
+    /** An envelope can prune spatial matches, but exact geometry must decide ranked slots. */
+    static boolean shouldRefine(FileStoreTable table, Predicate predicate) {
+        return table.coreOptions().globalIndexFilterRefineFromData() || hasSpatialFilter(predicate);
+    }
+
+    private static boolean hasSpatialFilter(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            return ((CompoundPredicate) predicate)
+                    .children().stream().anyMatch(FilteredRowIdReader::hasSpatialFilter);
+        }
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).transform() instanceof GeometryIntersectsTransform;
+    }
+
     private static boolean hasCandidateOnlyLeaf(Predicate predicate) {
         if (predicate instanceof CompoundPredicate) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {
@@ -103,7 +118,8 @@ class FilteredRowIdReader {
         }
         if (predicate instanceof LeafPredicate) {
             LeafFunction function = ((LeafPredicate) predicate).function();
-            return function instanceof Contains
+            return ((LeafPredicate) predicate).transform() instanceof GeometryIntersectsTransform
+                    || function instanceof Contains
                     || function instanceof EndsWith
                     || function instanceof Like;
         }

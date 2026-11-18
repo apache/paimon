@@ -128,6 +128,31 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void testUnsupportedEqualityDoesNotClaimIndexCoverage(boolean deferred) throws Exception {
+        queryInReader = deferred;
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        byte[] value = point(1, 1);
+        write(table, GenericRow.of(0, value));
+        buildIndex(table, new Range(0, 0));
+        write(getTableDefault(), GenericRow.of(1, value));
+        for (String mode : new String[] {"fast", "full"}) {
+            table =
+                    getTableDefault()
+                            .copy(Collections.singletonMap("scalar-index.search-mode", mode));
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate equality = builder.equal(1, value);
+            Predicate bounds = builder.bboxIntersects(1, 0, 0, 2, 2);
+            assertThat(readIds(table, equality)).containsExactly(0, 1);
+            assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0, 1);
+            assertThat(readIds(table, bounds))
+                    .containsExactly(
+                            "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1});
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void testIndexReadsLatestUnrelatedColumnVersion(boolean queryInReader) throws Exception {
         this.queryInReader = queryInReader;
         createTableDefault();

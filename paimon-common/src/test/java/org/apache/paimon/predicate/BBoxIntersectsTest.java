@@ -56,6 +56,43 @@ class BBoxIntersectsTest {
     }
 
     @Test
+    void testExactGeometryFilterRoundTrip() throws Exception {
+        RowType rowType = RowType.of(DataTypes.GEOMETRY());
+        Predicate filter =
+                new PredicateBuilder(rowType)
+                        .equal(
+                                new GeometryIntersectsTransform(
+                                        new FieldRef(
+                                                0,
+                                                rowType.getFieldNames().get(0),
+                                                rowType.getTypeAt(0)),
+                                        point(0, 1)),
+                                true);
+        for (Predicate p :
+                new Predicate[] {
+                    filter,
+                    JsonSerdeUtil.fromJson(JsonSerdeUtil.toJson(filter), Predicate.class),
+                    InstantiationUtil.deserializeObject(
+                            InstantiationUtil.serializeObject(filter), getClass().getClassLoader())
+                }) {
+            assertThat(p).isEqualTo(filter);
+            byte[] pointZ =
+                    java.nio.ByteBuffer.allocate(29)
+                            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                            .put((byte) 1)
+                            .putInt(1001)
+                            .putDouble(0)
+                            .putDouble(1)
+                            .putDouble(2)
+                            .array();
+            assertThat(p.test(GenericRow.of((Object) pointZ))).isTrue();
+            assertThat(p.test(GenericRow.of((Object) line(0, 0, 2, 2)))).isFalse();
+            assertThat(p.test(GenericRow.of((Object) line(0, 1, 2, 1)))).isTrue();
+            assertThat(p.test(GenericRow.of((Object) null))).isFalse();
+        }
+    }
+
+    @Test
     void testRejectsWrongTypesAndInvalidWindows() {
         for (org.apache.paimon.types.DataType type :
                 new org.apache.paimon.types.DataType[] {

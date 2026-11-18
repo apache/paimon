@@ -24,7 +24,7 @@ import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAn
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
 import org.apache.paimon.predicate.FullTextSearch
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.BUCKET_COLUMN
-import org.apache.paimon.table.{SpecialFields, Table}
+import org.apache.paimon.table.{FullTextSearchTable, HybridSearchTable, SpecialFields, Table, VectorSearchTable}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
@@ -120,7 +120,9 @@ abstract class PaimonBaseScanBuilder
               case None =>
                 // An envelope match can only prune candidates for the exact spatial predicate.
                 if (coreOptions.dataEvolutionEnabled() && !coreOptions.queryAuthEnabled()) {
-                  SparkShimLoader.shim.spatialCandidate(predicate, newRowType).foreach {
+                  val ranked = table.isInstanceOf[FullTextSearchTable] ||
+                    table.isInstanceOf[VectorSearchTable] || table.isInstanceOf[HybridSearchTable]
+                  SparkShimLoader.shim.spatialCandidate(predicate, newRowType, ranked).foreach {
                     candidate =>
                       pushableDataFilters.append(candidate)
                       pushable.append(predicate)

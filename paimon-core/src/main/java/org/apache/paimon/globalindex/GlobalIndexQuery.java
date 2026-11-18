@@ -62,6 +62,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -109,6 +110,17 @@ class GlobalIndexQuery {
             List<IndexFileMeta> files,
             IndexPathFactory pathFactory,
             Options options) {
+        return create(rowType, predicate, files, pathFactory, options, ignored -> {});
+    }
+
+    @Nullable
+    static GlobalIndexQuery create(
+            RowType rowType,
+            Predicate predicate,
+            List<IndexFileMeta> files,
+            IndexPathFactory pathFactory,
+            Options options,
+            Consumer<Predicate> residual) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(
                         files.stream()
@@ -126,7 +138,7 @@ class GlobalIndexQuery {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createForPredicate(predicate, rowType, groups, options);
+        return createForPredicate(predicate, rowType, groups, options, residual);
     }
 
     @Nullable
@@ -134,9 +146,10 @@ class GlobalIndexQuery {
             Predicate predicate,
             RowType rowType,
             Map<Integer, List<IndexGroup>> groups,
-            Options options) {
+            Options options,
+            Consumer<Predicate> residual) {
         if (predicate instanceof LeafPredicate) {
-            LeafPredicate leaf = (LeafPredicate) predicate;
+            LeafPredicate leaf = GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate);
             Optional<FieldRef> field = leaf.fieldRefOptional();
             if (!field.isPresent()) {
                 return null;
@@ -173,8 +186,12 @@ class GlobalIndexQuery {
                 predicates.removeIf(
                         child -> {
                             Set<Integer> residualFields = collectFieldIds(rowType, child);
-                            return !residualFields.isEmpty()
-                                    && keyFields.containsAll(residualFields);
+                            if (!residualFields.isEmpty()
+                                    && keyFields.containsAll(residualFields)) {
+                                residual.accept(child);
+                                return true;
+                            }
+                            return false;
                         });
             }
         }
@@ -209,9 +226,10 @@ class GlobalIndexQuery {
                 }
             }
             if (query == null) {
-                query = createForPredicate(child, rowType, groups, options);
+                query = createForPredicate(child, rowType, groups, options, residual);
             }
             if (query == null) {
+                residual.accept(child);
                 if (union) {
                     return null;
                 }
@@ -336,7 +354,8 @@ class GlobalIndexQuery {
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
             // Scalar lookups use independent single-field index definitions.
-            if (group.extraFields.isEmpty()) {
+            if (group.extraFields.isEmpty()
+                    && GlobalIndexerFactoryUtils.supportsPredicate(group.type, predicate)) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }

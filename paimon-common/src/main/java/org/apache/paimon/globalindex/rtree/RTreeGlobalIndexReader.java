@@ -64,6 +64,7 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
     private final List<RTreeIndexFile.Metadata> metadata = new ArrayList<>();
     private final long totalRowCount;
     private final ExecutorService executor;
+    private final RTreeIndexReadContext.FileWorkers fileWorkers;
     private final RTreeIndexReadContext readContext;
     private final List<RTreeIndexReadContext.FileKey> fileKeys = new ArrayList<>();
     private final int readBatchBytes;
@@ -85,6 +86,7 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         this.files = new ArrayList<>();
         this.totalRowCount = totalRowCount;
         this.executor = executor;
+        this.fileWorkers = readContext.workers(executor);
         this.readContext = readContext;
         this.readBatchBytes = readBatchBytes;
         this.readFileConcurrency = readFileConcurrency;
@@ -139,19 +141,21 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         int workers = Math.min(readFileConcurrency, files.size());
         for (int i = 0; i < workers && search.hasWork(); i++) {
             try {
-                executor.execute(search);
+                fileWorkers.execute(executor, search);
             } catch (RuntimeException e) {
                 search.fail(e);
                 break;
             }
         }
-        return search.completion;
+        // Synchronous user continuations may submit and await another query on the same indexer.
+        // Publish success and failure outside the file worker that still owns the scheduling slot.
+        return search.completion.whenCompleteAsync((ignored, error) -> {});
     }
 
     /**
      * Only workers that actually start own work. An executor may discard queued tasks on shutdown.
      */
-    private final class FileSearch implements Runnable {
+    private final class FileSearch implements RTreeIndexReadContext.FileWork {
         @Nullable private final BoundingBox query;
         private final boolean nulls;
         private final AtomicInteger next = new AtomicInteger();
@@ -193,7 +197,8 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
             }
         }
 
-        private synchronized void fail(Throwable cause) {
+        @Override
+        public synchronized void fail(Throwable cause) {
             if (failure == null) {
                 failure = cause;
             }
@@ -233,6 +238,15 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
                 : (nulls ? meta.nulls : meta.nonNulls) == 0) {
             return;
         }
+        try {
+            // A running worker can drain its files after queued workers are discarded on shutdown.
+            if (!readContext.filePermits.tryAcquire()) {
+                readContext.filePermits.acquire();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CompletionException(e);
+        }
         try (FileAccess access = new FileAccess(file)) {
             if (query == null) {
                 readRows(access, nulls, result);
@@ -242,6 +256,8 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         } catch (IOException e) {
             throw new UncheckedIOException(
                     "Failed to read R-tree index " + files.get(file).filePath(), e);
+        } finally {
+            readContext.filePermits.release();
         }
     }
 
@@ -541,5 +557,8 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() {
         closed = true;
+        if (executor.isTerminated()) {
+            fileWorkers.failAbandoned();
+        }
     }
 }

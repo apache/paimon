@@ -235,7 +235,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                                 evaluation.get().result().results(), decidedByIndex);
                 if (!FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())
                         && !fromIndex.isEmpty()) {
-                    if (table.coreOptions().globalIndexFilterRefineFromData()) {
+                    if (FilteredRowIdReader.shouldRefine(table, filter)) {
                         fromIndex =
                                 new FilteredRowIdReader(
                                                 table, planSnapshot, partitionFilter, filter)

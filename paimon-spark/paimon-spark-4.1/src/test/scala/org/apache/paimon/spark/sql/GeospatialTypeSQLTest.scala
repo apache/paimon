@@ -87,6 +87,48 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
     }
   }
 
+  test("ST_Intersects refines the geometry before full-text top-k") {
+    val diagonal =
+      "0102000000020000000000000000000000000000000000000000000000000000400000000000000040"
+    val point = "01010000000000000000000000000000000000F03F"
+    def geom(hex: String): String = s"ST_SetSrid(ST_GeomFromWKB(unhex('$hex')), 4326)"
+    val pointZ = "01E90300000000000000000000000000000000F03F0000000000000040"
+    Seq(true, false).foreach {
+      indexed =>
+        withTable("t") {
+          sql(
+            """CREATE TABLE t (id INT, geom GEOMETRY(4326), content STRING) TBLPROPERTIES (
+              | 'bucket' = '-1', 'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true',
+              | 'scalar-index.search-mode' = 'full')""".stripMargin)
+          val stored = if (indexed) point else pointZ
+          sql(
+            s"INSERT INTO t VALUES (1, ${geom(diagonal)}, 'paimon lake'), (2, ${geom(stored)}, 'paimon')")
+          val indexes = Seq(("content", "test-fulltext")) ++ (if (indexed) Seq(("geom", "rtree"))
+                                                              else Seq.empty)
+          indexes.foreach {
+            case (col, index) =>
+              sql(
+                s"CALL sys.create_global_index(table => 'test.t', index_column => '$col', index_type => '$index')")
+                .collect()
+          }
+          val search =
+            """full_text_search('t', 'content', '{"match":{"query":"paimon lake"}}', 1)"""
+          checkAnswer(sql(s"SELECT id FROM $search"), Seq(Row(1)))
+          checkAnswer(
+            sql(s"SELECT id FROM $search WHERE ST_Intersects(geom, ${geom(pointZ)})"),
+            Seq(Row(2)))
+          Seq(false, true).foreach {
+            refine =>
+              sql(
+                s"ALTER TABLE t SET TBLPROPERTIES ('global-index.filter.refine-from-data' = '$refine')")
+              checkAnswer(
+                sql(s"SELECT id FROM $search WHERE ST_Intersects(geom, ${geom(point)})"),
+                Seq(Row(2)))
+          }
+        }
+    }
+  }
+
   test("ST_Intersects prunes indexed geometries and refines envelope matches") {
     def geometry(wkb: String): String = s"ST_SetSrid(ST_GeomFromWKB(unhex('$wkb')), 4326)"
     val diagonal =
@@ -124,6 +166,10 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
         sql("SELECT id FROM t WHERE ST_Intersects(geom, geom)"),
         Seq(Row(1), Row(2), Row(3)))
       checkAnswer(sql(s"SELECT ST_Intersects(NULL, $point)"), Seq(Row(null)))
+      val intersects = s"ST_Intersects(geom, $point)"
+      checkAnswer(
+        sql(s"SELECT $intersects, COUNT(*) FROM t GROUP BY $intersects"),
+        Seq(Row(false, 2L), Row(true, 1L), Row(null, 1L)))
       val empty = geometry("010700000000000000")
       checkAnswer(sql(s"SELECT ST_Intersects($point, $empty)"), Seq(Row(false)))
       val error = intercept[Exception] {

@@ -104,6 +104,11 @@ evaluates the exact geometry intersection. `EXPLAIN` shows `BBoxIntersects`
 in the Paimon scan's `DataFilters` when that filter is pushed. Column-to-column
 and negated intersections use exact SQL evaluation.
 
+For Data Evolution full-text, vector, and hybrid searches with this positive
+column-to-constant filter, Paimon checks candidate geometries before ranking.
+An envelope hit alone cannot consume a top-k slot. The spatial check also runs
+when `global-index.filter.refine-from-data` is false.
+
 ## Coverage and Updates
 
 The normal [coverage and freshness rules](./manage-indexes#coverage-and-freshness)
@@ -142,21 +147,18 @@ Global settings use the `rtree-index.` prefix. Field overrides in
 | `rtree-index.partition-row-count` | `65536` | Maximum source rows buffered per file, including null and empty geometries; from 1 to 1048576. |
 | `rtree-index.read-cache-size` | `8 MiB` | Maximum cached page bytes across all readers from one indexer. Zero disables caching. Cache keys and other Java object overhead are additional. |
 | `rtree-index.read-batch-size` | `1 MiB` | Maximum page bytes per read batch, from 4 KiB to 16 MiB; at least one page is read. Temporary merge buffers can add another batch of bytes. |
-| `rtree-index.read-file-concurrency` | `4` | Maximum physical index files traversed concurrently per reader query, including null predicates. Set to 1 for sequential file reads. |
+| `rtree-index.read-file-concurrency` | `4` | Maximum physical index files traversed concurrently across all shards sharing an indexer, including null predicates. A value of 1 serializes file reads within that indexer. |
 | `rtree-index.read-cache-pages` | unset | Legacy shared cache budget in pages of the configured page size. Used only if explicitly set and `read-cache-size` is absent. |
 
-Each Java reader schedules file workers on the supplied global-index executor.
-The executor can further limit effective concurrency. Each active spatial traversal
-can issue up to four disjoint positioned reads within its own batch. The page
-cache budget is shared, while temporary batches, row lists and result bitmaps
-can grow with the number of active files. A null or non-null lookup reads one
-row-ID block (eight bytes per selected row plus its checksum) per active file.
-Separate readers and concurrent queries can each use their own file limit.
+Readers sharing one indexer queue excess file traversals before submitting work to the
+global-index executor. The executor can further limit effective concurrency. Each active
+spatial traversal can issue up to four disjoint positioned reads within its own batch.
+Temporary batches, row lists and result bitmaps can grow with the number of active files.
+Independent indexers have separate cache and concurrency budgets.
 
 Closing a reader stops new queries. Each admitted query closes its own streams
 as its file traversals finish. Cached pages remain available to other readers
-until eviction or release of the owning indexer. Independent
-indexers have independent budgets. Empty `IS NULL` / `IS NOT NULL` results are
+until eviction or release of the owning indexer. Empty `IS NULL` / `IS NOT NULL` results are
 answered from metadata counts without reading the row-ID block.
 
 ## File Format, Version 1

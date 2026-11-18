@@ -407,7 +407,7 @@ class RTreeGlobalIndexTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"bbox", "null", "non-null", "corrupt"})
+    @ValueSource(strings = {"bbox", "null", "non-null", "corrupt", "shards"})
     void testBoundedFileQueries(String predicate) throws Exception {
         Options options = new Options();
         options.set(RTreeIndexOptions.READ_FILE_CONCURRENCY, 2);
@@ -455,14 +455,27 @@ class RTreeGlobalIndexTest {
                         }
                     };
                 };
-        ExecutorService executor = Executors.newFixedThreadPool(6);
-        try (GlobalIndexReader reader = indexer.createReader(tracked, files, 8, null, executor)) {
+        ExecutorService executor = Executors.newFixedThreadPool("shards".equals(predicate) ? 3 : 6);
+        try (GlobalIndexReader reader =
+                "shards".equals(predicate)
+                        ? new UnionGlobalIndexReader(
+                                files.stream()
+                                        .map(
+                                                file ->
+                                                        indexer.createReader(
+                                                                tracked,
+                                                                Collections.singletonList(file),
+                                                                8,
+                                                                null,
+                                                                executor))
+                                        .collect(java.util.stream.Collectors.toList()))
+                        : indexer.createReader(tracked, files, 8, null, executor)) {
             CompletableFuture<Optional<GlobalIndexResult>> result;
             List<Long> expected;
             if ("null".equals(predicate)) {
                 result = reader.visitIsNull(ref);
                 expected = Arrays.asList(0L, 2L, 4L, 6L);
-            } else if ("non-null".equals(predicate)) {
+            } else if ("non-null".equals(predicate) || "shards".equals(predicate)) {
                 result = reader.visitIsNotNull(ref);
                 expected = Arrays.asList(1L, 3L, 5L, 7L);
             } else {
@@ -471,6 +484,11 @@ class RTreeGlobalIndexTest {
             }
             assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(result).isNotDone();
+            if ("shards".equals(predicate)) {
+                // The two active file reads leave the third executor thread available to other
+                // queries.
+                assertThat(executor.submit(() -> true).get(5, TimeUnit.SECONDS)).isTrue();
+            }
             release.countDown();
             if ("corrupt".equals(predicate)) {
                 assertThatThrownBy(() -> result.get(5, TimeUnit.SECONDS))
@@ -582,6 +600,86 @@ class RTreeGlobalIndexTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testCompletionCanWaitForAnotherQueryOnTheSameReader(boolean failFirst) throws Exception {
+        Options options = new Options();
+        options.set(RTreeIndexOptions.READ_FILE_CONCURRENCY, 1);
+        RTreeGlobalIndexer indexer = new RTreeGlobalIndexer(field, options);
+        List<GlobalIndexIOMeta> files = write(indexer, Arrays.asList(null, point(0, 0)));
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(files.get(0).filePath().toUri()));
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicInteger opens = new AtomicInteger();
+        GlobalIndexFileReader input =
+                file -> {
+                    if (!awaitUninterruptibly(release, 5, TimeUnit.SECONDS)) {
+                        throw new IOException("Timed out waiting for callback registration");
+                    }
+                    if (failFirst && opens.getAndIncrement() == 0) {
+                        throw new IOException("Injected read failure");
+                    }
+                    return new MemoryInput(bytes);
+                };
+        try (GlobalIndexReader reader = indexer.createReader(input, files, 2, null, pool)) {
+            CompletableFuture<Optional<GlobalIndexResult>> next =
+                    reader.visitIsNull(ref)
+                            .handle(
+                                    (ignored, error) -> {
+                                        assertThat(error != null).isEqualTo(failFirst);
+                                        try {
+                                            return reader.visitIsNotNull(ref)
+                                                    .get(5, TimeUnit.SECONDS);
+                                        } catch (Exception e) {
+                                            throw new AssertionError(e);
+                                        }
+                                    });
+            release.countDown();
+            next.get(10, TimeUnit.SECONDS);
+            assertRows(next, Collections.singletonList(1L));
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void testCloseFailsQueuedReadsAfterExecutorTerminates() throws Exception {
+        RTreeGlobalIndexer indexer = indexer(2, 1, 0);
+        List<GlobalIndexIOMeta> files = write(indexer, Collections.singletonList(point(1, 1)));
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        pool.submit(
+                () -> {
+                    started.countDown();
+                    awaitUninterruptibly(release);
+                });
+        GlobalIndexReader reader =
+                indexer.createReader(
+                        f -> {
+                            throw new AssertionError();
+                        },
+                        files,
+                        1,
+                        null,
+                        pool);
+        try {
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<Optional<GlobalIndexResult>> pending = reader.visitIsNotNull(ref);
+            assertThat(pool.shutdownNow()).isNotEmpty();
+            release.countDown();
+            assertThat(pool.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            reader.close();
+            assertThatThrownBy(() -> pending.get(5, TimeUnit.SECONDS))
+                    .hasRootCauseInstanceOf(RejectedExecutionException.class);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+            reader.close();
+        }
+    }
+
     @Test
     void testFileConcurrencyMustBePositive() {
         Options options = new Options();
@@ -596,7 +694,7 @@ class RTreeGlobalIndexTest {
         RTreeGlobalIndexer indexer = indexer(2, 2, 0);
         GlobalIndexIOMeta first = write(indexer, Collections.singletonList(point(1, 1))).get(0);
         GlobalIndexIOMeta second = write(indexer, Collections.singletonList(point(2, 2))).get(0);
-        RTreeIndexReadContext context = new RTreeIndexReadContext(200);
+        RTreeIndexReadContext context = new RTreeIndexReadContext(200, 1);
         RTreeIndexReadContext.FileKey a =
                 new RTreeIndexReadContext.FileKey(first, first.metadata());
         RTreeIndexReadContext.FileKey b =
@@ -625,7 +723,7 @@ class RTreeGlobalIndexTest {
                 write(indexer(2, 2, 0), Collections.singletonList(point(1, 1))).get(0);
         RTreeIndexReadContext.FileKey key =
                 new RTreeIndexReadContext.FileKey(file, file.metadata());
-        RTreeIndexReadContext context = new RTreeIndexReadContext(4);
+        RTreeIndexReadContext context = new RTreeIndexReadContext(4, 1);
         PageBlock first = new PageBlock(0, 1, new byte[] {10, 11});
         PageBlock overlap = new PageBlock(1, 1, new byte[] {11, 12});
         context.put(key, first);
@@ -650,7 +748,7 @@ class RTreeGlobalIndexTest {
                 write(indexer(2, 2, 0), Collections.singletonList(point(1, 1))).get(0);
         RTreeIndexReadContext.FileKey key =
                 new RTreeIndexReadContext.FileKey(file, file.metadata());
-        RTreeIndexReadContext context = new RTreeIndexReadContext(5);
+        RTreeIndexReadContext context = new RTreeIndexReadContext(5, 1);
         PageBlock source = new PageBlock(7, 2, new byte[] {10, 11, 12, 13, 14, 15});
         context.put(key, source);
         assertThat(context.cachedBytes()).isEqualTo(4);

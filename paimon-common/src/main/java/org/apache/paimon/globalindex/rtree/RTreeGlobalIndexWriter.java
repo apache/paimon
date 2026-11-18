@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 
 import org.davidmoten.hilbert.HilbertCurve;
+import org.davidmoten.hilbert.SmallHilbertCurve;
 
 import javax.annotation.Nullable;
 
@@ -104,7 +105,7 @@ public class RTreeGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Cl
             bounds = bounds.union(entry.box);
         }
         final BoundingBox totalBounds = bounds;
-        final HilbertCurve curve = HilbertCurve.bits(16).dimensions(2);
+        final SmallHilbertCurve curve = HilbertCurve.small().bits(16).dimensions(2);
         // Compute keys once; comparisons should not recompute a Hilbert value.
         List<SortedEntry> sorted = new ArrayList<>(entries.size());
         for (RTreeIndexFile.Entry entry : entries) {
@@ -119,7 +120,7 @@ public class RTreeGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Cl
                             box.minY() / 2 + box.maxY() / 2,
                             totalBounds.minY(),
                             totalBounds.maxY());
-            sorted.add(new SortedEntry(entry, curve.index(x, y).longValue()));
+            sorted.add(new SortedEntry(entry, curve.index(x, y)));
         }
         sorted.sort(
                 Comparator.comparingLong((SortedEntry e) -> e.hilbert)

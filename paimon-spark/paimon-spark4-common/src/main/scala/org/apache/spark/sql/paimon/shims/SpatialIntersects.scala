@@ -19,8 +19,9 @@
 package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.geo.BoundingBox
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.{FieldRef, GeometryIntersectsTransform, Predicate, PredicateBuilder}
 import org.apache.paimon.shade.org.locationtech.jts.geom.Geometry
+import org.apache.paimon.shade.org.locationtech.jts.geom.prep.{PreparedGeometry, PreparedGeometryFactory}
 import org.apache.paimon.shade.org.locationtech.jts.io.WKBReader
 import org.apache.paimon.types.{GeometryType => PaimonGeometryType, RowType}
 
@@ -57,26 +58,33 @@ private[shims] object SpatialIntersects {
     if (types.contains(NullType)) {
       Literal.create(null, BooleanType)
     } else {
-      ApplyFunctionExpression(new Intersects(types.toArray, args.indexWhere(_.foldable)), args)
+      ApplyFunctionExpression(Intersects(types, args.indexWhere(_.foldable)), args)
     }
   }
 
   // Only recognize the entire positive predicate. A negated envelope match would lose rows.
-  def candidate(expression: V2Expression, rowType: RowType): Option[Predicate] = expression match {
-    case p: SparkPredicate if p.name() == "BOOLEAN_EXPRESSION" =>
-      p.children() match {
-        case Array(f: UserDefinedScalarFunc) if f.canonicalName() == CanonicalName =>
-          f.children() match {
-            case Array(col: NamedReference, lit: V2Literal[_]) => bounds(col, lit, rowType)
-            case Array(lit: V2Literal[_], col: NamedReference) => bounds(col, lit, rowType)
-            case _ => None
-          }
-        case _ => None
-      }
-    case _ => None
-  }
+  def candidate(expression: V2Expression, rowType: RowType, ranked: Boolean): Option[Predicate] =
+    expression match {
+      case p: SparkPredicate if p.name() == "BOOLEAN_EXPRESSION" =>
+        p.children() match {
+          case Array(f: UserDefinedScalarFunc) if f.canonicalName() == CanonicalName =>
+            f.children() match {
+              case Array(col: NamedReference, lit: V2Literal[_]) =>
+                bounds(col, lit, rowType, ranked)
+              case Array(lit: V2Literal[_], col: NamedReference) =>
+                bounds(col, lit, rowType, ranked)
+              case _ => None
+            }
+          case _ => None
+        }
+      case _ => None
+    }
 
-  private def bounds(col: NamedReference, lit: V2Literal[_], rowType: RowType): Option[Predicate] =
+  private def bounds(
+      col: NamedReference,
+      lit: V2Literal[_],
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] =
     (col.fieldNames(), lit.dataType()) match {
       case (Array(name), t: GeometryType) if lit.value() != null && !t.isMixedSrid =>
         val index = rowType.getFieldNames.indexOf(name)
@@ -84,24 +92,28 @@ private[shims] object SpatialIntersects {
         rowType.getTypeAt(index) match {
           case geom: PaimonGeometryType if GeometryType(geom.getCrs).srid == t.srid =>
             // The V1 index accepts 2D WKB. Other valid geometries keep exact SQL evaluation.
-            val wkb = new ST_AsBinary(Literal(lit.value(), t)).replacement.eval()
-            Try(BoundingBox.fromWkb(wkb.asInstanceOf[Array[Byte]])).toOption
-              .filterNot(_.isEmpty)
-              .map(
-                b =>
-                  new PredicateBuilder(rowType)
-                    .bboxIntersects(index, b.minX(), b.minY(), b.maxX(), b.maxY()))
+            val wkb =
+              new ST_AsBinary(Literal(lit.value(), t)).replacement.eval().asInstanceOf[Array[Byte]]
+            val builder = new PredicateBuilder(rowType)
+            if (ranked) {
+              val exact = new GeometryIntersectsTransform(new FieldRef(index, name, geom), wkb)
+              Some(builder.equal(exact, true))
+            } else {
+              Try(BoundingBox.fromWkb(wkb)).toOption.filterNot(_.isEmpty).map {
+                b => builder.bboxIntersects(index, b.minX(), b.minY(), b.maxX(), b.maxY())
+              }
+            }
           case _ => None
         }
       case _ => None
     }
 
-  private class Intersects(types: Array[DataType], constant: Int)
+  private case class Intersects(types: Seq[DataType], constant: Int)
     extends ScalarFunction[java.lang.Boolean]
     with Serializable {
     override def name(): String = Name
     override def canonicalName(): String = CanonicalName
-    override def inputTypes(): Array[DataType] = types
+    override def inputTypes(): Array[DataType] = types.toArray
     override def resultType(): DataType = BooleanType
 
     private val sameFixedSrid = types(0) == types(1) &&
@@ -111,21 +123,22 @@ private[shims] object SpatialIntersects {
     @transient private lazy val binary = refs.map(ref => new ST_AsBinary(ref).replacement)
     @transient private lazy val srids = refs.map(ref => ST_Srid(ref).replacement)
     @transient private lazy val reader = new WKBReader()
-    @transient private var cached: Geometry = _
+    @transient private var prepared: PreparedGeometry = _
 
-    private def geometry(i: Int, input: InternalRow): Geometry = {
-      if (i == constant && cached != null) return cached
-      val geom = reader.read(binary(i).eval(input).asInstanceOf[Array[Byte]])
-      if (i == constant) cached = geom
-      geom
-    }
+    private def geometry(i: Int, input: InternalRow): Geometry =
+      reader.read(binary(i).eval(input).asInstanceOf[Array[Byte]])
 
     override def produceResult(input: InternalRow): java.lang.Boolean = {
       if (input.isNullAt(0) || input.isNullAt(1)) return null
       require(
         sameFixedSrid || srids(0).eval(input) == srids(1).eval(input),
         "ST_Intersects requires geometries with the same SRID")
-      geometry(0, input).intersects(geometry(1, input))
+      if (constant >= 0) {
+        if (prepared == null) prepared = PreparedGeometryFactory.prepare(geometry(constant, input))
+        prepared.intersects(geometry(1 - constant, input))
+      } else {
+        geometry(0, input).intersects(geometry(1, input))
+      }
     }
   }
 }

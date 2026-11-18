@@ -81,6 +81,11 @@ public class GlobalIndexerFactoryUtils {
         return globalIndexerFactory;
     }
 
+    public static boolean supportsPredicate(String type, Predicate predicate) {
+        GlobalIndexerFactory factory = find(type);
+        return factory == null || factory.supportsPredicate(predicate);
+    }
+
     /** Keep unrecognized index types for the reader to resolve at execution time. */
     public static List<GlobalIndexIOMeta> selectFiles(
             String type,

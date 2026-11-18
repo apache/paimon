@@ -31,6 +31,8 @@ import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.GeometryIntersectsTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -94,6 +96,22 @@ class RTreeRankedFilterTest extends TableTestBase {
         Predicate filter = PredicateBuilder.and(bbox, builder.equal(1, point(1, 1)));
         assertThat(fullText(table, filter).results())
                 .containsExactly(refine ? new Long[] {1L} : new Long[0]);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testExactGeometryPrecedesRanking(boolean refine) throws Exception {
+        FileStoreTable table = prepare(refine);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        // Both points lie in the query envelope; only the second lies on the query line.
+        byte[] line = org.apache.paimon.geo.WkbTestUtils.line(0, 2, 2, 0);
+        Predicate filter =
+                builder.equal(
+                        new GeometryIntersectsTransform(
+                                new FieldRef(1, "geom", table.rowType().getTypeAt(1)), line),
+                        true);
+        assertThat(fullText(table, filter).results()).containsExactly(1L);
+        assertThat(vector(table, filter).results()).containsExactly(1L);
     }
 
     private FileStoreTable prepare(boolean refine) throws Exception {

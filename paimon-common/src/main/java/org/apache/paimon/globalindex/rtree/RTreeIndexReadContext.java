@@ -21,12 +21,20 @@ package org.apache.paimon.globalindex.rtree;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.MapMaker;
+
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 
 /** Byte-bounded page cache shared by readers created by one indexer. */
 final class RTreeIndexReadContext {
@@ -35,8 +43,91 @@ final class RTreeIndexReadContext {
     private final Map<PageKey, PageBlock> pages = new LinkedHashMap<>(16, 0.75f, true);
     private long cachedBytes;
 
-    RTreeIndexReadContext(long capacity) {
+    // Separate supplied executors can share this context. The permit caps their combined I/O.
+    final Semaphore filePermits;
+    private final int fileConcurrency;
+    private final Map<ExecutorService, FileWorkers> workersByExecutor =
+            new MapMaker().weakKeys().weakValues().makeMap();
+
+    RTreeIndexReadContext(long capacity, int fileConcurrency) {
+        this.fileConcurrency = fileConcurrency;
+        this.filePermits = new Semaphore(fileConcurrency);
         this.capacity = capacity;
+    }
+
+    synchronized FileWorkers workers(ExecutorService executor) {
+        return workersByExecutor.computeIfAbsent(executor, e -> new FileWorkers(fileConcurrency));
+    }
+
+    interface FileWork extends Runnable {
+        void fail(Throwable cause);
+    }
+
+    /** Queue excess shards here so waiting for a file slot never occupies their shared executor. */
+    static final class FileWorkers {
+        private final int limit;
+        private final ArrayDeque<FileWork> queue = new ArrayDeque<>();
+        private int workers;
+
+        private FileWorkers(int limit) {
+            this.limit = limit;
+        }
+
+        void execute(ExecutorService executor, FileWork work) {
+            synchronized (this) {
+                if (executor.isShutdown()) {
+                    throw new RejectedExecutionException("R-tree file executor is shut down.");
+                }
+                queue.addLast(work);
+                if (workers == limit) {
+                    return;
+                }
+                workers++;
+            }
+            try {
+                executor.execute(this::drain);
+            } catch (RuntimeException e) {
+                List<FileWork> rejected = new ArrayList<>();
+                synchronized (this) {
+                    queue.removeLastOccurrence(work);
+                    if (--workers == 0) {
+                        rejected.addAll(queue);
+                        queue.clear();
+                    }
+                }
+                rejected.forEach(task -> task.fail(e));
+                throw e;
+            }
+        }
+
+        void failAbandoned() {
+            List<FileWork> abandoned;
+            synchronized (this) {
+                if (queue.isEmpty()) {
+                    return;
+                }
+                abandoned = new ArrayList<>(queue);
+                queue.clear();
+            }
+            RejectedExecutionException error =
+                    new RejectedExecutionException(
+                            "R-tree file executor terminated before reading queued files.");
+            abandoned.forEach(work -> work.fail(error));
+        }
+
+        private void drain() {
+            while (true) {
+                FileWork work;
+                synchronized (this) {
+                    work = queue.pollFirst();
+                    if (work == null) {
+                        workers--;
+                        return;
+                    }
+                }
+                work.run();
+            }
+        }
     }
 
     synchronized PageBlock get(FileKey file, int page) {
