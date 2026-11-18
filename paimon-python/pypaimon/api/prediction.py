@@ -149,6 +149,8 @@ class CancelPredictionRequest(RESTRequest):
 
 @dataclass
 class GetPredictionResponse(RESTResponse):
+    """Prediction metadata with UTC Unix epoch millisecond timestamps."""
+
     prediction_id: str = json_field("predictionId")
     source: PredictionSource = None
     status: PredictionStatus = None

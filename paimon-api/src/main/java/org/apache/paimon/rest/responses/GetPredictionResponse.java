@@ -121,6 +121,7 @@ public class GetPredictionResponse implements RESTResponse {
         return output;
     }
 
+    /** Start time as Unix epoch milliseconds in UTC, or null if not started. */
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonGetter("startTime")
@@ -128,6 +129,7 @@ public class GetPredictionResponse implements RESTResponse {
         return startTime;
     }
 
+    /** End time as Unix epoch milliseconds in UTC, or null if not terminated. */
     @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonGetter("endTime")

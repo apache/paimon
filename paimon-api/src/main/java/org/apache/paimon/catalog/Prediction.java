@@ -96,11 +96,13 @@ public class Prediction {
         return output;
     }
 
+    /** Start time as Unix epoch milliseconds in UTC, or null if not started. */
     @Nullable
     public Long startTime() {
         return startTime;
     }
 
+    /** End time as Unix epoch milliseconds in UTC, or null if not terminated. */
     @Nullable
     public Long endTime() {
         return endTime;

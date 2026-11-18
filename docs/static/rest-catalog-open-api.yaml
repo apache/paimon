@@ -4694,7 +4694,19 @@ components:
           $ref: '#/components/schemas/PredictionState'
         terminationDetails:
           $ref: '#/components/schemas/PredictionTerminationDetails'
-      description: terminationDetails is present when state is TERMINATING or TERMINATED.
+      oneOf:
+        - properties:
+            state: {enum: [PENDING, RUNNING]}
+          not:
+            required: [terminationDetails]
+        - properties:
+            state: {const: TERMINATING}
+        - properties:
+            state: {const: TERMINATED}
+          required: [terminationDetails]
+      description: >-
+        terminationDetails is forbidden for PENDING and RUNNING, optional for
+        TERMINATING, and required for TERMINATED.
     PredictionSource:
       type: object
       additionalProperties: false
@@ -4790,8 +4802,16 @@ components:
           $ref: '#/components/schemas/Identifier'
         output:
           $ref: '#/components/schemas/PredictionOutput'
-        startTime: {type: integer, format: int64, minimum: 0}
-        endTime: {type: integer, format: int64, minimum: 0}
+        startTime:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Start time as Unix epoch milliseconds in UTC.
+        endTime:
+          type: integer
+          format: int64
+          minimum: 0
+          description: End time as Unix epoch milliseconds in UTC.
     ListPredictionsResponse:
       type: object
       required: [predictions]

@@ -240,22 +240,27 @@ class RESTApiPredictionTest {
                 .isFalse();
         assertThat(new PredictionStatus(PredictionStatus.State.RUNNING, null).isTerminal())
                 .isFalse();
-        assertThat(
-                        new PredictionStatus(
-                                        PredictionStatus.State.TERMINATING,
-                                        new PredictionStatus.TerminationDetails(
-                                                PredictionStatus.TerminationCode.CANCELED, null))
-                                .isTerminal())
+        assertThat(new PredictionStatus(PredictionStatus.State.TERMINATING, null).isTerminal())
                 .isFalse();
-        PredictionStatus terminated =
-                new PredictionStatus(
-                        PredictionStatus.State.TERMINATED,
-                        new PredictionStatus.TerminationDetails(
-                                PredictionStatus.TerminationCode.SUCCESS, null));
-        assertThat(terminated.isTerminal()).isTrue();
-        assertThat(terminated.terminationDetails().code())
-                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        for (PredictionStatus.TerminationCode code :
+                Arrays.asList(
+                        PredictionStatus.TerminationCode.CANCELED,
+                        PredictionStatus.TerminationCode.SUCCESS)) {
+            PredictionStatus terminated =
+                    new PredictionStatus(
+                            PredictionStatus.State.TERMINATED,
+                            new PredictionStatus.TerminationDetails(code, null));
+            assertThat(terminated.isTerminal()).isTrue();
+            assertThat(terminated.terminationDetails().code()).isEqualTo(code);
+        }
         assertThatThrownBy(() -> new PredictionStatus(PredictionStatus.State.TERMINATED, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(
+                        () ->
+                                new PredictionStatus(
+                                        PredictionStatus.State.RUNNING,
+                                        new PredictionStatus.TerminationDetails(
+                                                PredictionStatus.TerminationCode.SUCCESS, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

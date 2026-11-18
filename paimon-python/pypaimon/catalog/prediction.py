@@ -65,14 +65,18 @@ class PredictionStatus:
             self.state = PredictionState(self.state)
         if not isinstance(self.state, PredictionState):
             raise ValueError("state must be a PredictionState")
-        terminating = self.state in {
-            PredictionState.TERMINATING,
-            PredictionState.TERMINATED,
-        }
-        if terminating != (self.termination_details is not None):
+        if (self.state is PredictionState.TERMINATED
+                and self.termination_details is None):
             raise ValueError(
-                "termination_details must be present only for "
-                "terminating states")
+                "termination_details must be present for TERMINATED state")
+        accepts_details = self.state in {
+                PredictionState.TERMINATING,
+                PredictionState.TERMINATED,
+        }
+        if not accepts_details and self.termination_details is not None:
+            raise ValueError(
+                "termination_details must not be present before "
+                "termination starts")
         if self.termination_details is not None and not isinstance(
                 self.termination_details, PredictionTerminationDetails):
             raise ValueError(
@@ -167,7 +171,10 @@ class PredictionOutput:
 
 @dataclass
 class Prediction:
-    """Durable metadata for one asynchronous prediction job."""
+    """Durable metadata for one asynchronous prediction job.
+
+    ``start_time`` and ``end_time`` are Unix epoch milliseconds in UTC.
+    """
 
     prediction_id: str
     source: Identifier

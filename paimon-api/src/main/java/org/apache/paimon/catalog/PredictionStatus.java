@@ -88,10 +88,14 @@ public class PredictionStatus {
             @JsonProperty("state") State state,
             @Nullable @JsonProperty("terminationDetails") TerminationDetails terminationDetails) {
         checkArgument(state != null, "state must not be null");
-        boolean terminating = state == State.TERMINATING || state == State.TERMINATED;
         checkArgument(
-                terminating == (terminationDetails != null),
-                "terminationDetails must be present only for terminating states");
+                state != State.TERMINATED || terminationDetails != null,
+                "terminationDetails must be present for TERMINATED state");
+        checkArgument(
+                state == State.TERMINATING
+                        || state == State.TERMINATED
+                        || terminationDetails == null,
+                "terminationDetails must not be present before termination starts");
         this.state = state;
         this.terminationDetails = terminationDetails;
     }

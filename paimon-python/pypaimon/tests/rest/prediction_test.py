@@ -228,6 +228,21 @@ class PredictionTest(unittest.TestCase):
                     PredictionTerminationCode.FAILED),
             )
 
+    def test_terminating_does_not_require_final_result(self):
+        terminating = PredictionStatus(PredictionState.TERMINATING)
+        self.assertFalse(terminating.terminal)
+        for code in (
+                PredictionTerminationCode.CANCELED,
+                PredictionTerminationCode.SUCCESS,
+        ):
+            with self.subTest(code=code):
+                terminated = PredictionStatus(
+                    PredictionState.TERMINATED,
+                    PredictionTerminationDetails(code),
+                )
+                self.assertTrue(terminated.terminal)
+                self.assertEqual(code, terminated.termination_details.code)
+
     def test_structured_model_preserves_dots(self):
         request = SubmitPredictionRequest.from_spec(
             Identifier.create("quality", "clips"),
