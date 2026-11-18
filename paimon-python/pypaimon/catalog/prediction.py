@@ -70,8 +70,8 @@ class PredictionStatus:
             raise ValueError(
                 "termination_details must be present for TERMINATED state")
         accepts_details = self.state in {
-                PredictionState.TERMINATING,
-                PredictionState.TERMINATED,
+            PredictionState.TERMINATING,
+            PredictionState.TERMINATED,
         }
         if not accepts_details and self.termination_details is not None:
             raise ValueError(
