@@ -371,12 +371,18 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         if (writeBuffer != null) {
             writeBuffer.clear();
         }
-        writerFactory.abortManagedBlobWrites();
-        // cancel compaction so that it does not block job cancelling
-        compactManager.cancelCompaction();
-        sync();
-        compactManager.close();
+        IOUtils.closeAll(
+                writerFactory::abortManagedBlobWrites,
+                () -> {
+                    // cancel compaction so that it does not block job cancelling
+                    compactManager.cancelCompaction();
+                    sync();
+                },
+                compactManager::close,
+                this::cleanTemporaryFiles);
+    }
 
+    private void cleanTemporaryFiles() throws Exception {
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
         newFiles.clear();
