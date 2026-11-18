@@ -36,8 +36,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -129,12 +128,7 @@ public class HistoryPartitionCluster {
 
     @VisibleForTesting
     public Map<BinaryRow, List<LevelSortedRun>> constructLevelsForHistoryPartitions() {
-        long historyMilli =
-                LocalDateTime.now()
-                        .minus(historyPartitionIdleTime)
-                        .atZone(ZoneId.systemDefault())
-                        .toInstant()
-                        .toEpochMilli();
+        long historyMilli = Instant.now().minus(historyPartitionIdleTime).toEpochMilli();
 
         List<BinaryRow> historyPartitions =
                 table.newSnapshotReader().withSnapshot(snapshot)
