@@ -27,13 +27,14 @@ import struct
 import sys
 import types
 import unittest
-from typing import List
+from typing import Iterator, List, Optional, Tuple
 from unittest import mock
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.split import Split
 from pypaimon.execution.python.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
 from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluation
@@ -219,7 +220,7 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
         def _new_arrow_batch_reader(self, splits):
             table = self.to_arrow(splits)
             batches = (batch for batch in table.to_batches(max_chunksize=2))
-            return pa.RecordBatchReader.from_batches(table.schema, batches), batches
+            return pa.ipc.RecordBatchReader.from_batches(table.schema, batches), batches
 
     class _Builder:
         def with_partition_filter(self, predicate):
@@ -3070,6 +3071,16 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                     "embedding": pa.array([[1.0], [0.0]]),
                     "_ROW_ID": pa.array([5, 6], type=pa.int64()),
                 })
+
+            def _resolve_parallelism(self, parallelism: Optional[int], num_splits: int) -> int:
+                return 1
+
+            def _new_arrow_batch_reader(
+                    self, splits: List[Split]
+            ) -> Tuple[pa.ipc.RecordBatchReader, Iterator[pa.RecordBatch]]:
+                table = self.to_arrow(splits)
+                batches = iter(table.to_batches())
+                return pa.ipc.RecordBatchReader.from_batches(table.schema, batches), batches
 
         class _Builder:
             def with_partition_filter(self_inner, predicate):

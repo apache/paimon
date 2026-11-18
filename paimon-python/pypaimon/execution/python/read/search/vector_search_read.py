@@ -16,14 +16,14 @@
 # under the License.
 
 
-from pypaimon.table.source.search_types import (VectorSearchRead, BatchVectorSearchRead)
 """Vector search read to read index files."""
 
 import logging
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import ExitStack, closing
 from threading import Lock
+from typing import TYPE_CHECKING, Callable, Dict, Generator, Iterable, Iterator, List, Optional
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -34,6 +34,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+from pypaimon.table.source.search_types import BatchVectorSearchRead, VectorSearchRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
@@ -42,6 +43,18 @@ from pypaimon.table.source.vector_search_split import (
 from pypaimon.execution.python.read.search import global_index_live_row_filter
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
+
+    import pyarrow as pa
+
+    from pypaimon.read.read_support import _ClosableArrowBatchReader
+    from pypaimon.read.split import Split
+    from pypaimon.read.table_read import TableRead
+
+    _BatchStream = Generator[pa.RecordBatch, None, None]
 
 
 class AbstractVectorSearchReadImpl:
@@ -356,20 +369,27 @@ class AbstractVectorSearchReadImpl:
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
 
-        table = self._read_raw_arrow(raw_row_ranges, include_filter, snapshot)
-        if table is None or table.num_rows == 0:
-            return DictBasedScoredIndexResult({})
+        table_read: "TableRead"
+        splits: "List[Split]"
+        table_read, splits = self._plan_raw_read(raw_row_ranges, include_filter, snapshot)
+        metric = self._search_metric(index_type)
+        workers = min(len(splits), table_read._resolve_parallelism(None, len(splits)))
+        if workers <= 1:
+            source = _open_raw_batch_reader(table_read, splits)
+        else:
+            source = closing(_parallel_raw_batches(table_read, splits, workers))
 
-        return self._score_raw_batches(
-            table.to_batches(max_chunksize=_score_block_size(query_vector)),
-            query_vector, self._search_metric(index_type), score_candidates)
+        with source as batches:
+            return self._score_raw_batches(batches, query_vector, metric, score_candidates)
 
     def _score_raw_batches(self, batches, query_vector, metric, score_candidates=None, reject_nan=False):
         """Score bounded Arrow batches, shared by local and distributed reads."""
         import math
 
         top_k_heap = []
-        for block in batches:
+        # Bound the Arrow take as well as the scoring matrix for wide vectors.
+        blocks = batches if score_candidates is None else _slice_batches(batches, _score_block_size(query_vector))
+        for block in blocks:
             row_ids = block.column(SpecialFields.ROW_ID.name).to_pylist()
             vectors = block.column(self._vector_column.name)
             if score_candidates is not None:
@@ -848,6 +868,67 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         return [_scored_result(heap) for heap in heaps]
 
 
+def _open_raw_batch_reader(table_read: "TableRead", splits: "List[Split]") -> "_ClosableArrowBatchReader":
+    from pypaimon.read.read_support import _ClosableArrowBatchReader
+
+    reader, source = table_read._new_arrow_batch_reader(splits)
+    return _ClosableArrowBatchReader(reader, source)
+
+
+def _parallel_raw_batches(
+    table_read: "TableRead", splits: "List[Split]", workers: int,
+) -> "_BatchStream":
+    """Yield ready batches, with at most one outstanding read per split group."""
+    # Readers may be suspended after yielding. Join all in-flight reads
+    # before closing their iterators, including when scoring fails.
+    with ExitStack() as streams, ThreadPoolExecutor(max_workers=workers) as executor:
+        pending: "Dict[Future[Optional[pa.RecordBatch]], Iterator[pa.RecordBatch]]" = {}
+        try:
+            for i in range(workers):
+                group = splits[i::workers]
+                batches = _open_prefetched_batches(table_read, group, streams)
+                pending[executor.submit(next, batches, None)] = batches
+            while pending:
+                completed = wait(pending, return_when=FIRST_COMPLETED).done
+                while completed:
+                    future = completed.pop()
+                    batches = pending.pop(future)
+                    batch = future.result()
+                    if batch is None:
+                        continue
+                    yield batch
+                    # Keep completed batches bounded, and let ready
+                    # readers progress while another reader is slow.
+                    del batch, future
+                    pending[executor.submit(next, batches, None)] = batches
+        finally:
+            for future in pending:
+                future.cancel()
+
+
+def _open_prefetched_batches(
+    table_read: "TableRead", splits: "List[Split]", streams: ExitStack,
+) -> "_BatchStream":
+    """Open on the caller thread and register cleanup before submitting the first read."""
+    reader_scope = streams.enter_context(ExitStack())
+    reader = reader_scope.enter_context(_open_raw_batch_reader(table_read, splits))
+    batches = _read_one_batch_ahead(reader, reader_scope.close)
+    return streams.enter_context(closing(batches))
+
+
+def _read_one_batch_ahead(reader: "Iterator[pa.RecordBatch]", close_reader: Callable[[], None]) -> "_BatchStream":
+    """Read one batch ahead so the last batch can be scored with its reader already closed."""
+    current = next(reader, None)
+    if current is None:
+        close_reader()
+        return
+    for following in reader:
+        yield current
+        current = following
+    close_reader()
+    yield current
+
+
 def _merge_index_scores(merged_scores, result):
     if result is None:
         return
@@ -1050,6 +1131,12 @@ def _raw_search_metric(table, vector_column, options, index_type=None):
 
 def _normalize_metric(metric):
     return str(metric).lower().replace("-", "_")
+
+
+def _slice_batches(batches: "Iterable[pa.RecordBatch]", size: int) -> "Iterator[pa.RecordBatch]":
+    for batch in batches:
+        for start in range(0, batch.num_rows, size):
+            yield batch.slice(start, size)
 
 
 def _score_block_size(query):
