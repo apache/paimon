@@ -81,6 +81,8 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
+import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
@@ -108,6 +110,10 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -731,9 +737,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void abort(List<CommitMessage> commitMessages) {
+    public void abort(List<CommitMessage> commitMessages, int threadNum) {
         DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
         IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
+        List<Path> filesToDelete = new ArrayList<>();
         for (CommitMessage message : commitMessages) {
             DataFilePathFactory dataPathFactory =
                     dataFactories.get(message.partition(), message.bucket());
@@ -747,7 +754,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // New files may also be compaction inputs, but abort still owns their cleanup.
             for (DataFileMeta file : dataFilesToDelete) {
-                file.collectFiles(dataPathFactory).forEach(fileIO::deleteQuietly);
+                filesToDelete.addAll(file.collectFiles(dataPathFactory));
             }
 
             // A level upgrade may reuse a main file while adding new auxiliary files.
@@ -759,15 +766,80 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             for (DataFileMeta file : commitMessage.compactIncrement().compactAfter()) {
                 file.collectFiles(dataPathFactory).stream()
                         .filter(path -> !compactInputPaths.contains(path))
-                        .forEach(fileIO::deleteQuietly);
+                        .forEach(filesToDelete::add);
             }
 
             List<IndexFileMeta> indexFilesToDelete = new ArrayList<>();
             indexFilesToDelete.addAll(commitMessage.newFilesIncrement().newIndexFiles());
             indexFilesToDelete.addAll(commitMessage.compactIncrement().newIndexFiles());
             for (IndexFileMeta file : indexFilesToDelete) {
-                fileIO.deleteQuietly(indexPathFactory.toPath(file));
+                filesToDelete.add(indexPathFactory.toPath(file));
             }
+        }
+        deleteConcurrently(filesToDelete, threadNum);
+    }
+
+    /**
+     * Attempts every delete and waits for all of them even when the caller is interrupted. The
+     * first unchecked failure in input order is rethrown as is, later ones are suppressed into it.
+     * Do not call this from a {@link FileOperationThreadPool} thread, it may wait for itself.
+     */
+    private void deleteConcurrently(List<Path> files, int threadNum) {
+        if (files.isEmpty()) {
+            return;
+        }
+
+        ExecutorService executor = FileOperationThreadPool.getExecutorService(threadNum);
+        // The bounded executor runs a task without a permit if the caller is interrupted while
+        // waiting for one, so abort bounds the deletes with its own permits and keeps waiting for
+        // them under interrupts. A thread-num of 0 or below is bounded by the pool size only.
+        Semaphore permits = new Semaphore(threadNum > 0 ? threadNum : files.size());
+        boolean interrupted = false;
+        // Run each delete with the caller's context class loader, as the sequential abort did.
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        List<FutureTask<?>> deletes = new ArrayList<>(files.size());
+        for (Path file : files) {
+            FutureTask<?> delete =
+                    new FutureTask<>(
+                            () -> {
+                                Thread thread = Thread.currentThread();
+                                ClassLoader previous = thread.getContextClassLoader();
+                                thread.setContextClassLoader(classLoader);
+                                try {
+                                    fileIO.deleteQuietly(file);
+                                } finally {
+                                    thread.setContextClassLoader(previous);
+                                    permits.release();
+                                }
+                            },
+                            null);
+            permits.acquireUninterruptibly();
+            // Remember and clear the flag, so the bounded executor takes its permit as usual.
+            interrupted |= Thread.interrupted();
+            executor.execute(delete);
+            deletes.add(delete);
+        }
+
+        Throwable failure = null;
+        for (FutureTask<?> delete : deletes) {
+            while (true) {
+                try {
+                    delete.get();
+                    break;
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    failure = ExceptionUtils.firstOrSuppressed(e.getCause(), failure);
+                    break;
+                }
+            }
+        }
+
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        if (failure != null) {
+            ExceptionUtils.rethrow(failure);
         }
     }
 

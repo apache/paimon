@@ -103,14 +103,20 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       }
       assert(indexes.size == 5)
 
+      def filteredIds(): Seq[Int] =
+        spark
+          .sql("""SELECT id FROM vector_search('T', 'v', array(300.0f, 11.0f), 1,
+                 |map('ivf.nprobe', '4')) WHERE id = 300""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      // Post-filtering before the scalar index exists must preserve absolute IDs.
+      assert(filteredIds() == Seq(300))
       spark
         .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
         .collect()
-      val filtered = spark
-        .sql("""SELECT id FROM vector_search('T', 'v', array(300.0f, 11.0f), 1,
-               |map('ivf.nprobe', '4')) WHERE id = 300""".stripMargin)
-        .collect()
-      assert(filtered.map(_.getInt(0)).toSeq == Seq(300))
+      assert(filteredIds() == Seq(300))
       spark.sql("DELETE FROM T WHERE p = 0 AND id = 300")
       assert(nearest(300) != 300)
     }

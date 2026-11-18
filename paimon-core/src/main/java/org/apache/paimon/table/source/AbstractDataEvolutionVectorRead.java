@@ -91,6 +91,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final int limit;
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
+    private final int candidatesFactor;
+    // Serialized with Spark/Flink worker closures; reset for each new read.
+    private boolean postFiltering;
 
     /** Snapshot the plan was built against; pins filters and raw reads to it. */
     @Nullable protected Snapshot planSnapshot;
@@ -122,6 +125,18 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 options == null
                         ? Collections.emptyMap()
                         : Collections.unmodifiableMap(new HashMap<>(options));
+        Map<String, String> mergedOptions =
+                new HashMap<>(table == null ? Collections.emptyMap() : table.options());
+        mergedOptions.putAll(this.options);
+        Options effectiveOptions = Options.fromMap(mergedOptions);
+        this.candidatesFactor =
+                effectiveOptions.get(CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR);
+        if (candidatesFactor <= 0) {
+            throw new IllegalArgumentException(
+                    CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key()
+                            + " must be positive, got "
+                            + candidatesFactor);
+        }
     }
 
     protected GlobalIndexer createGlobalIndexer(List<IndexVectorSearchSplit> splits) {
@@ -148,15 +163,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     /**
-     * Splits the search splits into index and raw splits, then moves the index splits aside when
-     * the scalar index cannot evaluate {@link #filter}: the index path answers with all-or-nothing
-     * bitmaps, so with an unevaluable filter it can neither honor the filter (an empty bitmap
-     * silently drops every covered row) nor ignore it (the top-K would be polluted by non-matching
-     * rows). Instead, suppress the index splits and route their ranges through the raw search,
-     * where the exact final-read filter decides; the raw read merges ranges, so overlap with an
-     * existing raw split is deduplicated. Splits routed this way reuse the vector index type so raw
-     * scoring keeps its metric. The computed scalar pre-filter is cached for {@link #preFilters} to
-     * reuse.
+     * Prefer an exact scalar pre-filter. If it cannot be evaluated, retain index work for one ANN
+     * query followed by exact candidate filtering. Raw sources retain their requested exact
+     * scoring.
      */
     protected void prepareSplits(
             List<? extends VectorSearchSplit> splits,
@@ -164,6 +173,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<RawVectorSearchSplit> rawSplits) {
         splitSearchSplits(splits, indexSplits, rawSplits);
         scalarPreFilter = null;
+        postFiltering = false;
         if (filter == null || indexSplits.isEmpty()) {
             return;
         }
@@ -172,15 +182,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarPreFilter = matchedRows;
             return;
         }
-        List<Range> ranges = new ArrayList<>();
-        List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
-        for (IndexVectorSearchSplit split : indexSplits) {
-            ranges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
-            scalarIndexFiles.addAll(split.scalarIndexFiles());
-        }
-        rawSplits.add(
-                new RawVectorSearchSplit(ranges, scalarIndexFiles, vectorIndexType(indexSplits)));
-        indexSplits.clear();
+        postFiltering = true;
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
@@ -193,7 +195,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 GlobalIndexLiveRowFilter.liveRows(
                         table, planSnapshot, partitionFilter, indexedRowRanges);
         RoaringNavigableMap64 matchedRows =
-                scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
+                postFiltering
+                        ? null
+                        : scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
@@ -326,27 +330,37 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        List<GlobalIndexIOMeta> indexIOMetaList =
-                buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        indexFileReader,
-                        indexIOMetaList,
-                        rowRangeEnd - rowRangeStart + 1,
-                        null,
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
                         executor);
+        if (postFiltering) {
+            CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> batch =
+                    evalPostFilter(
+                            reader,
+                            rowRangeStart,
+                            rowRangeEnd,
+                            new float[][] {vector},
+                            searchLimit,
+                            includeRowIds);
+            CompletableFuture<Optional<ScoredGlobalIndexResult>> single =
+                    batch.thenApply(results -> results.get(0));
+            single.whenComplete(
+                    (result, failure) -> {
+                        if (single.isCancelled()) {
+                            batch.cancel(false);
+                        }
+                    });
+            return single;
+        }
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        GlobalIndexReader effectiveReader =
-                CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
-                        ? reader
-                        : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
-        return effectiveReader
-                .visitVectorSearch(vectorSearch)
+        return reader.visitVectorSearch(vectorSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
@@ -364,6 +378,32 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(emptyOptionalResults(vectors.length));
         }
 
+        GlobalIndexReader reader =
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
+                        executor);
+        if (postFiltering) {
+            return evalPostFilter(
+                    reader, rowRangeStart, rowRangeEnd, vectors, searchLimit, includeRowIds);
+        }
+        BatchVectorSearch batchVectorSearch =
+                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
+                        .withIncludeRowIds(includeRowIds);
+        return reader.visitBatchVectorSearch(batchVectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+    }
+
+    private GlobalIndexReader createVectorReader(
+            GlobalIndexer globalIndexer,
+            IndexPathFactory indexPathFactory,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> vectorIndexFiles,
+            ExecutorService executor) {
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
         @SuppressWarnings("resource")
@@ -376,16 +416,51 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeEnd - rowRangeStart + 1,
                         null,
                         executor);
-        BatchVectorSearch batchVectorSearch =
-                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
-                        .withIncludeRowIds(includeRowIds);
-        GlobalIndexReader effectiveReader =
-                CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
-                        ? reader
-                        : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
-        return effectiveReader
-                .visitBatchVectorSearch(batchVectorSearch)
-                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+        return CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
+                ? reader
+                : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
+    }
+
+    private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalPostFilter(
+            GlobalIndexReader reader,
+            long from,
+            long to,
+            float[][] vectors,
+            int searchLimit,
+            @Nullable RoaringNavigableMap64 include) {
+        try {
+            int candidates =
+                    VectorSearchPostFilter.candidateLimit(
+                            limit, candidatesFactor, searchLimit, to - from + 1);
+            return VectorSearchPostFilter.search(
+                    vectors,
+                    candidates,
+                    searchLimit,
+                    new Range(from, to),
+                    include,
+                    queries ->
+                            reader.visitBatchVectorSearch(
+                                    new BatchVectorSearch(
+                                                    queries,
+                                                    candidates,
+                                                    vectorColumn.name(),
+                                                    options)
+                                            .withIncludeRowIds(include)),
+                    rows ->
+                            new FilteredRowIdReader(
+                                            table,
+                                            planSnapshot,
+                                            partitionFilter,
+                                            checkNotNull(filter))
+                                    .matchingRowIds(rows),
+                    () -> IOUtils.closeQuietly(reader));
+        } catch (Throwable error) {
+            IOUtils.closeQuietly(reader);
+            CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> failed =
+                    new CompletableFuture<>();
+            failed.completeExceptionally(error);
+            return failed;
+        }
     }
 
     protected ScoredGlobalIndexResult withRawSearch(

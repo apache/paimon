@@ -206,6 +206,10 @@ merge, sequence, changelog, deletion-vector, record-expiration, and metadata con
 default rewriter and must close it when closed, even if it handles every operation itself. Paimon
 closes the default rewriter if factory creation fails or returns null.
 
+When the default rewriter is a `MergeTreeCompactRewriter`, its `writerFactory()` gives the bucket's
+`KeyValueFileWriterFactory`: the file IO, the key and value types, and the path factory per level, from
+which a custom rewriter can locate its input files and place its output as Paimon's does.
+
 This hook supports primary-key merge-tree writers. Append, postpone, and primary-key clustering
 writers reject it. With `write-only = true`, the factory is never invoked. Installing a factory
 after a bucket writer has been created is rejected.

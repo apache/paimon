@@ -24,6 +24,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -40,12 +42,14 @@ import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -204,13 +208,11 @@ public class DataEvolutionVectorScan implements VectorScan {
                         .unindexedRanges(vectorColumn.id());
         if (filter != null) {
             List<Range> scalarUnindexedRanges =
-                    new DataEvolutionGlobalIndexCoverage(
-                                    table,
-                                    snapshot,
-                                    partitionFilter,
-                                    scalarIndexFiles(allIndexFiles),
-                                    effectiveOptions.scalarIndexSearchMode())
-                            .unindexedRanges(table.rowType(), filter);
+                    scalarUnindexedRanges(
+                            snapshot,
+                            scalarIndexFiles(allIndexFiles),
+                            effectiveOptions.scalarIndexSearchMode(),
+                            filterFieldIds);
             if (vectorSearchMode == GlobalIndexSearchMode.FAST) {
                 scalarUnindexedRanges =
                         Range.and(
@@ -241,6 +243,54 @@ public class DataEvolutionVectorScan implements VectorScan {
                 return planSnapshot;
             }
         };
+    }
+
+    private List<Range> scalarUnindexedRanges(
+            @Nullable Snapshot snapshot,
+            List<IndexFileMeta> scalarFiles,
+            GlobalIndexSearchMode searchMode,
+            Set<Integer> filterFieldIds) {
+        if (searchMode == GlobalIndexSearchMode.FAST) {
+            return Collections.emptyList();
+        }
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
+                        table, snapshot, partitionFilter, scalarFiles, searchMode);
+        List<Range> dataRanges = coverage.unindexedRanges(Collections.emptySet(), null);
+        boolean possiblyPartial = false;
+        for (int fieldId : filterFieldIds) {
+            List<Range> missing =
+                    coverage.unindexedRanges(Collections.singleton(fieldId), dataRanges);
+            if (!missing.isEmpty() && !missing.equals(dataRanges)) {
+                possiblyPartial = true;
+                break;
+            }
+        }
+        if (!possiblyPartial) {
+            return Collections.emptyList();
+        }
+
+        // Metadata alone cannot prove operator support. Probe only partial coverage, and
+        // use the actual contributing fields so a declined OR arm does not generate raw work.
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                        table, snapshot, partitionFilter, scalarFiles);
+        if (!optionalScanner.isPresent()) {
+            return Collections.emptyList();
+        }
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanner.scanWithCoverage(filter);
+            if (!evaluation.isPresent()) {
+                return Collections.emptyList();
+            }
+            GlobalIndexEvaluator.Evaluation evaluated = evaluation.get();
+            return evaluated.coveredRanges() == null
+                    ? coverage.unindexedRanges(evaluated.contributingFieldIds(), dataRanges)
+                    : coverage.unindexedRangesFromCoverage(evaluated.coveredRanges(), dataRanges);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to evaluate scalar index coverage for vector search.", e);
+        }
     }
 
     private CoreOptions effectiveCoreOptions() {
