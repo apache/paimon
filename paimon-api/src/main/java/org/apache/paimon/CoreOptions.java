@@ -2912,7 +2912,8 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+                            "Comma-separated global index root directories, new global index files are distributed "
+                                    + "in round-robin order. If not set, global index files are stored under <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -4211,17 +4212,19 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    public Path globalIndexExternalPath() {
+    public List<Path> globalIndexExternalPaths() {
         String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
         if (pathString == null || pathString.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
-        Path path = new Path(pathString);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
+        List<Path> paths = new ArrayList<>();
+        for (String value : pathString.split(",")) {
+            Path path = new Path(value.trim());
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
         }
-        return path;
+        checkArgument(!paths.isEmpty(), "global index external paths is empty");
+        return paths;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {

@@ -153,7 +153,6 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexedFields(),

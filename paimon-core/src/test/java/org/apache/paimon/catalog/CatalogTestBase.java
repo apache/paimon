@@ -1092,15 +1092,17 @@ public abstract class CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "table_with_external_paths");
         java.nio.file.Path dataExternalPath = tempFile.resolve("data-external-path");
         java.nio.file.Path globalIndexExternalPath = tempFile.resolve("global-index-external-path");
+        java.nio.file.Path secondIndexPath = tempFile.resolve("global-index-external-path-2");
         Files.createDirectories(dataExternalPath.resolve("data"));
         Files.createDirectories(globalIndexExternalPath.resolve("index"));
+        Files.createDirectories(secondIndexPath.resolve("index"));
 
         Map<String, String> options = new HashMap<>();
         options.put(
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), dataExternalPath.toUri().toString());
         options.put(
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
-                globalIndexExternalPath.toUri().toString());
+                globalIndexExternalPath.toUri() + "," + secondIndexPath.toUri());
         Schema schema =
                 new Schema(
                         Lists.newArrayList(
@@ -1116,6 +1118,7 @@ public abstract class CatalogTestBase {
 
         assertThat(Files.exists(dataExternalPath)).isFalse();
         assertThat(Files.exists(globalIndexExternalPath)).isFalse();
+        assertThat(Files.exists(secondIndexPath)).isFalse();
     }
 
     @Test

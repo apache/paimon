@@ -47,7 +47,7 @@ public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWrite
     @Nullable private final BlockCompressionFactory compressionFactory;
     private final RoaringNavigableMap64 currentBitmap = new RoaringNavigableMap64();
 
-    private String fileName;
+    private String filePath;
     private PositionOutputStream outputStream;
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter;
     private BitmapGlobalIndexFormat.SerializedKey currentKey;
@@ -122,7 +122,7 @@ public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWrite
         }
 
         byte[] meta = new SortedIndexFileMeta(firstKey, lastKey, false).serialize();
-        return Collections.singletonList(new ResultEntry(fileName, sourceRowCount, meta));
+        return Collections.singletonList(new ResultEntry(filePath, sourceRowCount, meta));
     }
 
     @Override
@@ -150,8 +150,8 @@ public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWrite
 
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter() throws IOException {
         if (streamingWriter == null) {
-            fileName = fileWriter.newFileName(MultiValueGlobalIndexerFactory.IDENTIFIER);
-            outputStream = fileWriter.newOutputStream(fileName);
+            filePath = fileWriter.newFilePath(MultiValueGlobalIndexerFactory.IDENTIFIER);
+            outputStream = fileWriter.newOutputStream(filePath);
             streamingWriter =
                     new BitmapGlobalIndexFormat.StreamingWriter(
                             outputStream, dictionaryBlockSize, compressionFactory);

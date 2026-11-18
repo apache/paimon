@@ -91,7 +91,6 @@ public class GlobalIndexBuilderUtils {
 
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             int indexFieldId,
@@ -99,15 +98,7 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries)
             throws IOException {
         return toIndexFileMetas(
-                fileIO,
-                indexPathFactory,
-                options,
-                range,
-                indexFieldId,
-                null,
-                indexType,
-                entries,
-                null);
+                fileIO, options, range, indexFieldId, null, indexType, entries, null);
     }
 
     /**
@@ -115,10 +106,11 @@ public class GlobalIndexBuilderUtils {
      * index column (e.g. the first column in {@code CREATE ... INDEX ON (a, b, c)}) and is stored
      * as {@code indexFieldId}; the remaining columns go into {@code extraFieldIds}. Callers must
      * pass {@code fields} in the intended column order.
+     *
+     * <p>The entries already contain their allocated full paths.
      */
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             List<DataField> fields,
@@ -128,7 +120,6 @@ public class GlobalIndexBuilderUtils {
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
-                indexPathFactory,
                 options,
                 range,
                 fields.get(0).id(),
@@ -615,7 +606,6 @@ public class GlobalIndexBuilderUtils {
 
     private static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             int indexFieldId,
@@ -624,10 +614,12 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries,
             @Nullable byte[] sourceMeta)
             throws IOException {
+        boolean isExternalPath = !options.globalIndexExternalPaths().isEmpty();
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
-            String fileName = entry.fileName();
-            long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
+            Path filePath = new Path(entry.filePath());
+            String fileName = filePath.getName();
+            long fileSize = fileIO.getFileSize(filePath);
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(
                             range.from,
@@ -637,12 +629,7 @@ public class GlobalIndexBuilderUtils {
                             entry.meta(),
                             sourceMeta);
 
-            Path externalPathDir = options.globalIndexExternalPath();
-            String externalPathString = null;
-            if (externalPathDir != null) {
-                Path externalPath = new Path(externalPathDir, fileName);
-                externalPathString = externalPath.toString();
-            }
+            String externalPathString = isExternalPath ? filePath.toString() : null;
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
                             indexType,
@@ -659,11 +646,21 @@ public class GlobalIndexBuilderUtils {
     public static GlobalIndexWriter createIndexWriter(
             FileStoreTable table, String indexType, List<DataField> indexFields, Options options)
             throws IOException {
-        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
-        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+        return createIndexWriter(
+                createGlobalIndexFileReadWrite(table), indexType, indexFields, options);
     }
 
-    private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
+    public static GlobalIndexWriter createIndexWriter(
+            GlobalIndexFileReadWrite fileReadWrite,
+            String indexType,
+            List<DataField> indexFields,
+            Options options)
+            throws IOException {
+        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
+        return globalIndexer.createWriter(fileReadWrite);
+    }
+
+    public static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         return new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory);
     }

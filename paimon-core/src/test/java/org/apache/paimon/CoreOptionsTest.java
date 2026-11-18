@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
@@ -42,6 +43,49 @@ public class CoreOptionsTest {
                                 .toConfiguration()
                                 .get(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED))
                 .isTrue();
+    }
+
+    @Test
+    void testGlobalIndexExternalPaths() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, "");
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", " file:///a/ ", "file:///a,", "file:///a,,"}) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            assertThat(core.globalIndexExternalPaths())
+                    .as("global-index.external-path=%s", value)
+                    .containsExactly(new Path("file:///a"));
+        }
+        for (String value :
+                new String[] {
+                    "file:///a, file:///b", "file:///a,file:///b,", "file:///a,file:///b,,"
+                }) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            assertThat(core.globalIndexExternalPaths())
+                    .as("global-index.external-path=%s", value)
+                    .containsExactly(new Path("file:///a"), new Path("file:///b"));
+        }
+        for (String value :
+                new String[] {
+                    ",",
+                    ",,",
+                    " ",
+                    "a",
+                    ",file:///a",
+                    "file:///a,,file:///b",
+                    ",file:///a,,file:///b,",
+                    "file:///a, ",
+                    "file:///a,/b",
+                    "file:///a, ,file:///b"
+                }) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            assertThatThrownBy(core::globalIndexExternalPaths)
+                    .as("global-index.external-path=%s", value)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

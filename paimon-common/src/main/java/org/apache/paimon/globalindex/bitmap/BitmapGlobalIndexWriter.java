@@ -51,7 +51,7 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
     private final RoaringNavigableMap64 nullRows;
     private final RoaringNavigableMap64 nonNullRows;
 
-    private String fileName;
+    private String filePath;
     private PositionOutputStream outputStream;
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter;
     private long rowCount;
@@ -112,7 +112,7 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
                                 lastKey == null ? null : keySerializer.serialize(lastKey),
                                 !nullRows.isEmpty())
                         .serialize();
-        return Collections.singletonList(new ResultEntry(fileName, rowCount, meta));
+        return Collections.singletonList(new ResultEntry(filePath, rowCount, meta));
     }
 
     /** Finalizes a bitmap section for a reader that loads its directory from the footer. */
@@ -158,8 +158,8 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
 
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter() throws IOException {
         if (streamingWriter == null) {
-            fileName = fileWriter.newFileName(BitmapGlobalIndexerFactory.IDENTIFIER);
-            outputStream = fileWriter.newOutputStream(fileName);
+            filePath = fileWriter.newFilePath(BitmapGlobalIndexerFactory.IDENTIFIER);
+            outputStream = fileWriter.newOutputStream(filePath);
             streamingWriter =
                     new BitmapGlobalIndexFormat.StreamingWriter(
                             outputStream, dictionaryBlockSize, compressionFactory);

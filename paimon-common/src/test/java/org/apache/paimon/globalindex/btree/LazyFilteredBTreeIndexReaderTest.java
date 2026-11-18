@@ -598,12 +598,9 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         List<ResultEntry> results = indexWriter.finish();
         Assertions.assertEquals(1, results.size());
         ResultEntry resultEntry = results.get(0);
-        String fileName = resultEntry.fileName();
+        Path filePath = new Path(resultEntry.filePath());
         return new GlobalIndexIOMeta(
-                new Path(new Path(tempPath.toUri()), fileName),
-                fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.rowCount(),
-                resultEntry.meta());
+                filePath, fileIO.getFileSize(filePath), resultEntry.rowCount(), resultEntry.meta());
     }
 
     private List<Pair<Object, Long>> singletonData(Object key, long rowId) {

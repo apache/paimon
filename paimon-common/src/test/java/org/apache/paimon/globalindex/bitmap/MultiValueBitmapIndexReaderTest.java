@@ -80,14 +80,15 @@ class MultiValueBitmapIndexReaderTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(basePath, prefix + "-" + UUID.randomUUID() + ".index")
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(basePath, fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
         fileReader = meta -> fileIO.newInputStream(meta.filePath());
@@ -106,7 +107,7 @@ class MultiValueBitmapIndexReaderTest {
 
         ResultEntry result = writer.finish(5).get(0);
         assertThat(result.rowCount()).isEqualTo(5);
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.meta());
         assertThat(result.meta())
@@ -164,7 +165,7 @@ class MultiValueBitmapIndexReaderTest {
 
         ResultEntry result = writer.finish(3).get(0);
         assertThat(result.rowCount()).isEqualTo(3);
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.meta());
         try (GlobalIndexReader reader =
@@ -191,7 +192,7 @@ class MultiValueBitmapIndexReaderTest {
         writer.write(1, 1);
 
         ResultEntry result = writer.finish(2).get(0);
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.meta());
         try (GlobalIndexReader reader =

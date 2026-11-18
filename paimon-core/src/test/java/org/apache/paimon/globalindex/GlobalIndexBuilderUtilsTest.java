@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -45,8 +47,13 @@ import org.apache.paimon.utils.RowRangeIndex;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -54,6 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link GlobalIndexBuilderUtils}. */
@@ -65,6 +73,69 @@ class GlobalIndexBuilderUtilsTest {
     private IndexPathFactory indexPathFactory;
     private CoreOptions coreOptions;
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFileLocationsWithDifferentReaderOptions(boolean external) throws Exception {
+        Path root = new Path(tempDir.toUri());
+        List<Path> roots = Arrays.asList(new Path(root, "a"), new Path(root, "b"));
+        if (external) {
+            coreOptions
+                    .toConfiguration()
+                    .set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, roots.get(0) + "," + roots.get(1));
+        }
+        IndexPathFactory writerPaths =
+                createNonPartFactory(root, external ? roots : Collections.emptyList())
+                        .globalIndexFileFactory();
+        GlobalIndexFileReadWrite writer = new GlobalIndexFileReadWrite(fileIO, writerPaths);
+        List<ResultEntry> entries = new ArrayList<>();
+        List<Path> parents = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            String file = writer.newFilePath("test");
+            assertThat(new Path(file).toUri().getScheme()).isEqualTo("file");
+            assertThat(new Path(file).getName())
+                    .startsWith("test-global-index-")
+                    .endsWith(".index");
+            try (PositionOutputStream output = writer.newOutputStream(file)) {
+                output.write(i);
+            }
+            assertThat(writer.fileSize(file)).isEqualTo(1);
+            parents.add(new Path(file).getParent());
+            entries.add(new ResultEntry(file, 1, null));
+        }
+        if (external) {
+            for (Path externalRoot : roots) {
+                assertThat(Collections.frequency(parents, externalRoot)).isEqualTo(3);
+            }
+        } else {
+            assertThat(parents).containsOnly(new Path(root, "index"));
+        }
+
+        List<IndexFileMeta> metas =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        fileIO, coreOptions, new Range(0, 5), 0, "test", entries);
+
+        // Reading committed files must not depend on the current external path configuration.
+        IndexPathFactory readerPaths =
+                createNonPartFactory(root, external ? Collections.emptyList() : roots)
+                        .globalIndexFileFactory();
+        GlobalIndexFileReadWrite reader = new GlobalIndexFileReadWrite(fileIO, readerPaths);
+        for (int i = 0; i < metas.size(); i++) {
+            IndexFileMeta meta = metas.get(i);
+            Path path = new Path(entries.get(i).filePath());
+            assertThat(meta.fileName()).isEqualTo(path.getName());
+            assertThat(meta.externalPath()).isEqualTo(external ? path.toString() : null);
+            assertThat(readerPaths.toPath(meta)).isEqualTo(path);
+            try (SeekableInputStream input =
+                    reader.getInputStream(
+                            new GlobalIndexIOMeta(
+                                    readerPaths.toPath(meta), meta.fileSize(), null))) {
+                assertThat(input.read()).isEqualTo(i);
+            }
+            fileIO.delete(readerPaths.toPath(meta), false);
+            assertThat(fileIO.exists(path)).isFalse();
+        }
+    }
+
     @BeforeEach
     void setUp() {
         fileIO = new LocalFileIO();
@@ -72,7 +143,7 @@ class GlobalIndexBuilderUtilsTest {
         indexPathFactory =
                 new IndexPathFactory() {
                     @Override
-                    public Path toPath(String fileName) {
+                    public Path newPathFromName(String fileName) {
                         return new Path(dir, fileName);
                     }
 
@@ -84,6 +155,13 @@ class GlobalIndexBuilderUtilsTest {
                     @Override
                     public boolean isExternalPath() {
                         return false;
+                    }
+
+                    @Override
+                    public Path toPath(String fileName, @Nullable String externalPath) {
+                        return externalPath == null
+                                ? newPathFromName(fileName)
+                                : new Path(externalPath);
                     }
                 };
         coreOptions = new CoreOptions(new Options().toMap());
@@ -101,14 +179,7 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO,
-                        indexPathFactory,
-                        coreOptions,
-                        range,
-                        fields,
-                        "test-type",
-                        entries,
-                        null);
+                        fileIO, coreOptions, range, fields, "test-type", entries, null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -129,14 +200,7 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO,
-                        indexPathFactory,
-                        coreOptions,
-                        range,
-                        fields,
-                        "test-type",
-                        entries,
-                        null);
+                        fileIO, coreOptions, range, fields, "test-type", entries, null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -174,7 +238,6 @@ class GlobalIndexBuilderUtilsTest {
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         fileIO,
-                        indexPathFactory,
                         coreOptions,
                         new Range(0, 9),
                         Collections.singletonList(field),
@@ -199,14 +262,7 @@ class GlobalIndexBuilderUtilsTest {
 
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO,
-                        indexPathFactory,
-                        coreOptions,
-                        range,
-                        fields,
-                        "test-type",
-                        entries,
-                        null);
+                        fileIO, coreOptions, range, fields, "test-type", entries, null);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -327,9 +383,9 @@ class GlobalIndexBuilderUtilsTest {
 
     private List<ResultEntry> createDummyResultEntries() throws IOException {
         String fileName = "test-index-" + UUID.randomUUID();
-        Path filePath = indexPathFactory.toPath(fileName);
+        Path filePath = indexPathFactory.newPathFromName(fileName);
         fileIO.newOutputStream(filePath, false).close();
-        return Collections.singletonList(new ResultEntry(fileName, 100, null));
+        return Collections.singletonList(new ResultEntry(filePath.toString(), 100, null));
     }
 
     private ManifestEntry createEntry(Long firstRowId, long rowCount) {

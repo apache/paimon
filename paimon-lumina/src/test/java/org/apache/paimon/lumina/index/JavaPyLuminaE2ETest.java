@@ -189,7 +189,6 @@ public class JavaPyLuminaE2ETest {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         embeddingField.id(),
@@ -293,7 +292,6 @@ public class JavaPyLuminaE2ETest {
         List<IndexFileMeta> vectorIndexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         embeddingField.id(),
@@ -316,7 +314,6 @@ public class JavaPyLuminaE2ETest {
         List<IndexFileMeta> idIndexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         idField.id(),

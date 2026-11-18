@@ -160,12 +160,12 @@ public class PkFullTextIndexFile extends IndexFile {
                     "Full-text archive row count %s does not match source row count %s.",
                     result.rowCount(),
                     totalRowCount);
-            Path archivePath = fileWriter.path(result.fileName());
+            Path archivePath = fileWriter.path(result.filePath());
             byte[] archiveMetadata = result.meta() == null ? new byte[0] : result.meta();
             IndexFileMeta archive =
                     new IndexFileMeta(
                             INDEX_TYPE,
-                            result.fileName(),
+                            archivePath.getName(),
                             fileIO.getFileSize(archivePath),
                             result.rowCount(),
                             new GlobalIndexMeta(
@@ -219,20 +219,20 @@ public class PkFullTextIndexFile extends IndexFile {
         private final Map<String, Path> createdFiles = new HashMap<>();
 
         @Override
-        public String newFileName(String prefix) {
+        public String newFilePath(String prefix) {
             Path path = pathFactory.newPath();
-            createdFiles.put(path.getName(), path);
-            return path.getName();
+            createdFiles.put(path.toString(), path);
+            return path.toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) throws IOException {
-            return fileIO.newOutputStream(path(fileName), false);
+        public PositionOutputStream newOutputStream(String filePath) throws IOException {
+            return fileIO.newOutputStream(path(filePath), false);
         }
 
-        private Path path(String fileName) {
-            Path path = createdFiles.get(fileName);
-            checkArgument(path != null, "Full-text archive %s was not allocated.", fileName);
+        private Path path(String filePath) {
+            Path path = createdFiles.get(filePath);
+            checkArgument(path != null, "Full-text archive %s was not allocated.", filePath);
             return path;
         }
 

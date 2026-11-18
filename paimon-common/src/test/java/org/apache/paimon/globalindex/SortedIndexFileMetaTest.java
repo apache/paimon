@@ -149,15 +149,15 @@ class SortedIndexFileMetaTest {
         GlobalIndexFileWriter fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return "test-btree-" + prefix;
+                    public String newFilePath(String prefix) {
+                        return new Path(new Path(tempPath.toUri()), "test-btree-" + prefix)
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(
-                                new Path(new Path(tempPath.toUri()), fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
         GlobalIndexSingleColumnWriter indexWriter =

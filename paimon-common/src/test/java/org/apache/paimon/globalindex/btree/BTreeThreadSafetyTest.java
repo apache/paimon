@@ -89,21 +89,20 @@ public class BTreeThreadSafetyTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return "test-btree-" + UUID.randomUUID() + prefix;
+                    public String newFilePath(String prefix) {
+                        return new Path(
+                                        new Path(tempPath.toUri()),
+                                        "test-btree-" + UUID.randomUUID() + prefix)
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(
-                                new Path(new Path(tempPath.toUri()), fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
-        fileReader =
-                meta ->
-                        fileIO.newInputStream(
-                                new Path(new Path(tempPath.toUri()), meta.filePath()));
+        fileReader = meta -> fileIO.newInputStream(meta.filePath());
 
         Options options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
@@ -274,8 +273,7 @@ public class BTreeThreadSafetyTest {
         GlobalIndexFileReader countingFileReader =
                 meta -> {
                     creationCount.incrementAndGet();
-                    return fileIO.newInputStream(
-                            new Path(new Path(tempPath.toUri()), meta.filePath()));
+                    return fileIO.newInputStream(meta.filePath());
                 };
 
         try (GlobalIndexReader reader =
@@ -326,8 +324,7 @@ public class BTreeThreadSafetyTest {
                     synchronized (openedFiles) {
                         openedFiles.add(meta.filePath().getName());
                     }
-                    return fileIO.newInputStream(
-                            new Path(new Path(tempPath.toUri()), meta.filePath()));
+                    return fileIO.newInputStream(meta.filePath());
                 };
 
         try (GlobalIndexReader reader =
@@ -366,11 +363,8 @@ public class BTreeThreadSafetyTest {
         List<ResultEntry> results = indexWriter.finish();
         Assertions.assertEquals(1, results.size());
         ResultEntry resultEntry = results.get(0);
-        String fileName = resultEntry.fileName();
-        return new GlobalIndexIOMeta(
-                new Path(new Path(tempPath.toUri()), fileName),
-                fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.meta());
+        Path filePath = new Path(resultEntry.filePath());
+        return new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), resultEntry.meta());
     }
 
     private List<Long> filter(java.util.function.Predicate<Object> predicate) {

@@ -85,8 +85,8 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
 
         try {
-            String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            String filePath = fileWriter.newFilePath(FILE_NAME_PREFIX);
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 // Header: count
                 ByteBuffer header = ByteBuffer.allocate(4);
                 header.order(ByteOrder.LITTLE_ENDIAN);
@@ -106,7 +106,7 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 out.flush();
             }
 
-            return Collections.singletonList(new ResultEntry(fileName, rowCount, null));
+            return Collections.singletonList(new ResultEntry(filePath, rowCount, null));
         } catch (IOException e) {
             throw new RuntimeException("Failed to write test full-text index", e);
         }

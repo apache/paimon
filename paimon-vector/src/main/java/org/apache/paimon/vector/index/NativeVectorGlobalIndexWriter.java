@@ -353,7 +353,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
             LOG.info("{} write phase started", identifier);
-            String fileName = fileWriter.newFileName(fileNamePrefix());
+            String filePath = fileWriter.newFilePath(fileNamePrefix());
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
             String metric =
@@ -364,7 +364,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                                             identifier, metric)
                             ? new byte[64]
                             : null;
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;
@@ -414,7 +414,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     descriptor = ByteBuffer.allocate(Integer.BYTES).putInt(local.nlist()).array();
                 }
             }
-            return new ResultEntry(fileName, centroidShard ? count : rowCount, descriptor);
+            return new ResultEntry(filePath, centroidShard ? count : rowCount, descriptor);
         }
     }
 

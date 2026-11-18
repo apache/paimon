@@ -160,12 +160,12 @@ public class PkVectorAnnSegmentFile extends IndexFile {
                     "ANN segment build must produce exactly one payload file, but produced %s.",
                     results.size());
             ResultEntry result = results.get(0);
-            Path payloadPath = fileWriter.path(result.fileName());
+            Path payloadPath = fileWriter.path(result.filePath());
             byte[] payloadMetadata = result.meta() == null ? new byte[0] : result.meta();
             IndexFileMeta segment =
                     new IndexFileMeta(
                             indexType,
-                            result.fileName(),
+                            payloadPath.getName(),
                             fileIO.getFileSize(payloadPath),
                             liveRowCount,
                             new GlobalIndexMeta(
@@ -202,31 +202,31 @@ public class PkVectorAnnSegmentFile extends IndexFile {
         private final Map<String, Path> createdFiles = new HashMap<>();
 
         @Override
-        public String newFileName(String prefix) {
+        public String newFilePath(String prefix) {
             Path path = pathFactory.newPath();
-            createdFiles.put(path.getName(), path);
-            return path.getName();
+            createdFiles.put(path.toString(), path);
+            return path.toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) throws IOException {
-            return fileIO.newOutputStream(path(fileName), false);
+        public PositionOutputStream newOutputStream(String filePath) throws IOException {
+            return fileIO.newOutputStream(path(filePath), false);
         }
 
-        private Path path(String fileName) {
-            Path path = createdFiles.get(fileName);
-            checkArgument(path != null, "ANN payload file %s was not allocated.", fileName);
+        private Path path(String filePath) {
+            Path path = createdFiles.get(filePath);
+            checkArgument(path != null, "ANN payload file %s was not allocated.", filePath);
             return path;
         }
 
         private ResultEntry emptyResult() throws IOException {
             deleteCreatedFiles();
             createdFiles.clear();
-            String fileName = newFileName("empty-vector");
-            try (PositionOutputStream ignored = newOutputStream(fileName)) {
+            String filePath = newFilePath("empty-vector");
+            try (PositionOutputStream ignored = newOutputStream(filePath)) {
                 // The searcher does not open payloads for segments without live rows.
             }
-            return new ResultEntry(fileName, 0, null);
+            return new ResultEntry(filePath, 0, null);
         }
 
         private void deleteCreatedFiles() {

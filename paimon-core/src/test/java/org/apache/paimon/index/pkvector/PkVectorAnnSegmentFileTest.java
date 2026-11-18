@@ -36,6 +36,8 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -330,7 +332,7 @@ class PkVectorAnnSegmentFileTest {
         Path directory = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(directory, fileName);
             }
 
@@ -342,6 +344,11 @@ class PkVectorAnnSegmentFileTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

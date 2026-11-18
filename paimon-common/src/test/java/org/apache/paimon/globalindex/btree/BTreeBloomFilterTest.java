@@ -99,7 +99,7 @@ class BTreeBloomFilterTest {
         byte[] bytes = fileWriter.bytes();
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(
-                        new Path(entry.fileName()), bytes.length, entry.rowCount(), entry.meta());
+                        new Path(entry.filePath()), bytes.length, entry.rowCount(), entry.meta());
         try (CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0.5);
                 BTreeIndexReader reader =
                         new BTreeIndexReader(
@@ -177,7 +177,7 @@ class BTreeBloomFilterTest {
                                 .toInput());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(
-                        new Path(entry.fileName()), bytes.length, entry.rowCount(), entry.meta());
+                        new Path(entry.filePath()), bytes.length, entry.rowCount(), entry.meta());
         return new Fixture(bytes, footer, meta);
     }
 
@@ -214,12 +214,12 @@ class BTreeBloomFilterTest {
         private final ByteArrayPositionOutputStream output = new ByteArrayPositionOutputStream();
 
         @Override
-        public String newFileName(String prefix) {
-            return prefix + "-test";
+        public String newFilePath(String prefix) {
+            return "memory://test/" + prefix + "-test";
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) {
+        public PositionOutputStream newOutputStream(String filePath) {
             return output;
         }
 
