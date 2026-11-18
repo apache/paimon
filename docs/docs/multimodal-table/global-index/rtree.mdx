@@ -1,0 +1,187 @@
+---
+title: "R-tree Index"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# R-tree Index
+
+The Java R-tree implementation indexes one `GEOMETRY` column in a
+[Data Evolution append table](../data-evolution). The table must have
+`data-evolution.enabled=true`, `row-tracking.enabled=true`, no primary key,
+and `bucket=-1`. Geometry values use 2D OGC WKB; data files use Parquet.
+
+Each source row contributes its XY bounding box and relative row ID. The writer
+sorts envelopes by a 16-bit-per-axis Hilbert key and packs them into an immutable
+tree. Source rows are divided into independent files to bound build memory.
+Readers prune non-intersecting subtrees and load checksummed pages on demand.
+A byte-bounded page cache is shared by all readers created by the same indexer.
+Reads merge adjacent pages; streams supporting positioned reads also fetch
+disjoint ranges with bounded parallelism. Temporary page batches are bounded
+independently of the cache.
+
+## Build and Query
+
+Use implementation identifier `rtree` with the existing global-index build
+machinery. At the Java SPI level:
+
+```java
+GlobalIndexer indexer = GlobalIndexer.create(
+        "rtree", Collections.singletonList(geometryField), options);
+GlobalIndexSingleColumnWriter writer =
+        (GlobalIndexSingleColumnWriter) indexer.createWriter(fileWriter);
+writer.write(wkbGeometry, relativeRowId);
+List<ResultEntry> files = writer.finish();
+```
+
+The build owner supplies file I/O, unique source row IDs, and publishes the returned
+files with the normal global-index metadata and snapshot commit. Record the source
+snapshot metadata to support refreshing changed column ranges. Java callers
+should close writers implementing `Closeable`, including on failures.
+
+Create an envelope filter using coordinates in the geometry column's CRS:
+
+```java
+Predicate filter = new PredicateBuilder(table.rowType())
+        .bboxIntersects(geometryColumnIndex, minX, minY, maxX, maxY);
+ReadBuilder read = table.newReadBuilder().withFilter(filter);
+try (RecordReader<InternalRow> reader =
+        read.newRead().executeFilter().createReader(read.newScan().plan())) {
+    reader.forEachRemaining(row -> {
+        // Consume each matching row.
+    });
+}
+```
+
+The predicate includes rectangles that touch the query boundary. It is an exact
+test of **bounding-box intersection**, and can return geometries whose actual
+shapes do not intersect. A connector using it to accelerate `ST_Intersects` or
+another spatial relation must retain its original predicate for exact refinement.
+This first version exposes the Java predicate; automatic Spark SQL `ST_*`
+translation is not implemented.
+
+The index also supports `IS NULL` and `IS NOT NULL`. Empty geometries are
+non-null, have no spatial leaf entry, and do not match `bboxIntersects`.
+Unknown scalar predicates are left to the normal data path. Negating a spatial
+candidate bitmap is not supported.
+
+## Coverage and Updates
+
+The normal [coverage and freshness rules](./manage-indexes#coverage-and-freshness)
+apply. The default scalar search mode is `fast`, which can omit unindexed rows.
+Choose `scalar-index.search-mode=full` or `detail` when uncovered ranges must be
+scanned, and refresh indexes as new data arrives.
+
+Changing the geometry column makes existing envelopes stale even when row IDs
+stay the same. Follow the indexed-column update policy and refresh changed
+ranges. Low-level Java partial-column writes do not automatically enforce the
+SQL engines' update policies: the caller must drop or refresh affected indexes
+before using them. Updating unrelated columns preserves the geometry index;
+Data Evolution readers assemble the current column versions by row ID.
+Deletion vectors are applied when reading the indexed rows.
+
+## Supported Input
+
+This version supports 2D Point, LineString, Polygon, MultiPoint, MultiLineString,
+MultiPolygon, and GeometryCollection WKB, in either byte order. Collections may
+contain mixed byte orders. Empty points use two NaNs. Z/M variants, EWKB, malformed
+WKB, excessive collection nesting, and other non-finite coordinates are rejected.
+The reader extracts envelopes; it does not validate polygon topology.
+
+`GEOGRAPHY` is unsupported: curved edges and longitude wrapping need different
+conservative bounds. Query coordinates use the column's CRS without implicit
+coordinate transformation. Primary-key index maintenance is outside this version.
+
+## Options
+
+Global settings use the `rtree-index.` prefix. Field overrides in
+`fields.<column>.index-options` may omit this prefix.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `rtree-index.page-size` | `256` | Entries per page, from 2 to 4096. |
+| `rtree-index.partition-row-count` | `65536` | Maximum source rows buffered per file, including null and empty geometries; from 1 to 1048576. |
+| `rtree-index.read-cache-size` | `8 MiB` | Maximum cached page bytes across all readers from one indexer. Zero disables caching. Cache keys and other Java object overhead are additional. |
+| `rtree-index.read-batch-size` | `1 MiB` | Maximum page bytes per read batch, from 4 KiB to 16 MiB; at least one page is read. Temporary merge buffers can add another batch of bytes. |
+| `rtree-index.read-file-concurrency` | `4` | Maximum physical index files traversed concurrently per reader query, including null predicates. Set to 1 for sequential file reads. |
+| `rtree-index.read-cache-pages` | unset | Legacy shared cache budget in pages of the configured page size. Used only if explicitly set and `read-cache-size` is absent. |
+
+Each Java reader schedules file workers on the supplied global-index executor.
+The executor can further limit effective concurrency. Each active spatial traversal
+can issue up to four disjoint positioned reads within its own batch. The page
+cache budget is shared, while temporary batches, row lists and result bitmaps
+can grow with the number of active files. A null or non-null lookup reads one
+row-ID block (eight bytes per selected row plus its checksum) per active file.
+Separate readers and concurrent queries can each use their own file limit.
+
+Closing a reader stops new queries. Each admitted query closes its own streams
+as its file traversals finish. Cached pages remain available to other readers
+until eviction or release of the owning indexer. Independent
+indexers have independent budgets. Empty `IS NULL` / `IS NOT NULL` results are
+answered from metadata counts without reading the row-ID block.
+
+## File Format, Version 1
+
+All integers and IEEE 754 doubles use big-endian byte order. The 80-byte header
+is also stored verbatim in `GlobalIndexIOMeta.metadata`.
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | int32 | Magic `0x50525431` (`PRT1`). |
+| 4 | int32 | Layout version, `1`. The magic identifies the file family. |
+| 8 | int32 | Page capacity `B`. |
+| 12 | int32 | Number of non-empty geometry entries. |
+| 16 | int32 | Total page count. |
+| 20 | int32 | Null source row count. |
+| 24 | int32 | Non-null source row count, including empty geometries. |
+| 28 | int64 | Minimum relative source row ID. |
+| 36 | int64 | Maximum relative source row ID. |
+| 44 | 4 x float64 | Global bbox: minX, minY, maxX, maxY. |
+| 76 | uint32 | CRC32 of header bytes 0 through 75. |
+
+An empty tree has zero pages and bbox
+`(+Infinity, +Infinity, -Infinity, -Infinity)`.
+
+Pages are stored bottom-up, with zero-based IDs. Each occupies `12 + 40 * B`
+bytes: int32 entry count, int32 level, `B` slots of four bbox doubles plus one
+int64 ID, and a trailing CRC32 over all preceding page bytes. Unused slots are
+zero-filled. Level zero contains relative row IDs; higher levels contain page
+IDs whose level is one lower. The root is the final page.
+
+After the pages, V1 stores the following two blocks in order.
+
+```text
+[null IDs as int64][CRC32 of null IDs][non-null IDs as int64][CRC32 of non-null IDs]
+```
+
+Each empty block stores a four-byte zero CRC. All checksums use CRC-32/IEEE.
+For `P` pages and `R` source rows the exact length is
+`88 + P * (12 + 40 * B) + 8 * R` bytes. Each file contains 1 through 1,048,576
+source rows. With zero source rows the writer produces no file. Page capacity
+ranges from 2 through 4096. Each level contains the minimum number of pages
+needed at that capacity. Explicit child IDs identify the pages to visit.
+
+Relative row IDs may be sparse. They use the logical shard's base and satisfy
+`0 <= id < logicalRowDomainSize <= Long.MAX_VALUE`. The two ID lists are
+disjoint, unique and include every source row. A non-null empty geometry occurs
+only in the non-null list. Entries in each list may appear in any order.
+
+Readers reject unknown versions. A null or non-null lookup verifies
+only its requested block. A zero target count can be answered from metadata.

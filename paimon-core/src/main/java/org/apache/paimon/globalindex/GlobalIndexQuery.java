@@ -498,6 +498,7 @@ class GlobalIndexQuery {
             GlobalIndexResult result = null;
             Set<Integer> fields = new HashSet<>();
             List<Range> coverage = null;
+            boolean allPredicatesEvaluated = true;
             for (GlobalIndexQuery child : children) {
                 Optional<Evaluation> evaluation =
                         child.evaluateWithExecutor(
@@ -506,8 +507,10 @@ class GlobalIndexQuery {
                     if (union) {
                         return Optional.empty();
                     }
+                    allPredicatesEvaluated = false;
                     continue;
                 }
+                allPredicatesEvaluated &= evaluation.get().allPredicatesEvaluated();
                 GlobalIndexResult matches = evaluation.get().result();
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
@@ -517,7 +520,7 @@ class GlobalIndexQuery {
             }
             return result == null
                     ? Optional.empty()
-                    : Optional.of(new Evaluation(result, fields, coverage));
+                    : Optional.of(new Evaluation(result, fields, coverage, allPredicatesEvaluated));
         }
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
         Set<Integer> fields = new HashSet<>();

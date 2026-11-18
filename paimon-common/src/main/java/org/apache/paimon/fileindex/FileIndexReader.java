@@ -74,6 +74,12 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
+    public FileIndexResult visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitNotContains(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }

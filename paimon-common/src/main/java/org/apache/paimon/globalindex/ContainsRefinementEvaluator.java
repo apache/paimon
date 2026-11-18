@@ -201,8 +201,7 @@ final class ContainsRefinementEvaluator {
                                                                                             exactFutures
                                                                                                             .size()
                                                                                                     + 1);
-                                                                    if (remainingEvaluation
-                                                                            .isPresent()) {
+                                                                    if (!remaining.isEmpty()) {
                                                                         results.add(
                                                                                 remainingEvaluation);
                                                                     }

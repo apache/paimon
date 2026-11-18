@@ -161,6 +161,13 @@ under the License.
         <!-- Test -->
 
         <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+            <version>1.20.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
