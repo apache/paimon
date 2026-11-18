@@ -84,10 +84,6 @@ final class ThriftCompactReader {
         this.pos = offset;
     }
 
-    ThriftCompactReader(byte[] buf) {
-        this(buf, 0, buf.length);
-    }
-
     int position() {
         return pos;
     }
@@ -104,14 +100,6 @@ final class ThriftCompactReader {
     /** Reads a single raw byte (compact i8 value). */
     byte readByteValue() throws EOFException {
         return readByte();
-    }
-
-    void readBytes(byte[] target, int off, int len) throws IOException {
-        if (pos + len > limit) {
-            throw new EOFException("thrift compact reader overrun at " + pos);
-        }
-        System.arraycopy(buf, pos, target, off, len);
-        pos += len;
     }
 
     /** Unsigned varint (up to 10 bytes for a long). */
