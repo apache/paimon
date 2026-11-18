@@ -30,6 +30,7 @@ import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -39,6 +40,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.fmindex.FMGlobalIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -589,6 +591,79 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         assertThat(combinedSplits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
         assertThat(read(combinedRead, combinedSplits))
                 .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testScalarCoverageWithFullTextIndex(boolean queryInReader) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        BinaryString text = str("same");
+        write(table, GenericRow.of(0, text, text));
+        DataSplit first = (DataSplit) table.newScan().plan().splits().get(0);
+        createIndex("btree", "f0");
+        write(table, GenericRow.of(1, text, text));
+        write(table, GenericRow.of(2, text, text));
+
+        String type = TestFullTextGlobalIndexerFactory.IDENTIFIER;
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                type,
+                                Collections.singletonList(table.rowType().getField("f1")),
+                                new Options());
+        writer.write(text, 0);
+        List<IndexFileMeta> files =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(1, 1),
+                        table.rowType().getField("f1").id(),
+                        type,
+                        writer.finish());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    BucketMode.UNAWARE_BUCKET,
+                                    null,
+                                    DataIncrement.indexIncrement(files),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        table =
+                smallSplits(getTableDefault())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
+                                        Boolean.toString(queryInReader)));
+        assertThat(table.newScan().plan().splits()).hasSize(3);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate id = builder.greaterOrEqual(0, 0);
+        Predicate name = builder.equal(1, text);
+        assertThat(readFiltered(table, name)).containsExactlyInAnyOrder(0, 1, 2);
+        assertThat(readFiltered(table, PredicateBuilder.or(id, name)))
+                .containsExactlyInAnyOrder(0, 1, 2);
+        assertThat(readFiltered(table, PredicateBuilder.and(id, name))).containsExactly(0);
+
+        createIndex("btree", "f1", Collections.singletonList(first));
+        for (String mode : Arrays.asList("fast", "full", "detail")) {
+            FileStoreTable configured =
+                    table.copy(
+                            Collections.singletonMap(
+                                    CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+            assertThat(readFiltered(configured, name))
+                    .containsExactlyInAnyOrder(
+                            "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1, 2});
+        }
+    }
+
+    private List<Integer> readFiltered(FileStoreTable table, Predicate filter) throws Exception {
+        ReadBuilder read = table.newReadBuilder().withFilter(filter);
+        return read(read, read.newScan().plan().splits());
     }
 
     @Test
