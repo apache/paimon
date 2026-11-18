@@ -3050,6 +3050,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<Integer> BLOB_DESCRIPTOR_SCAN_MAX_FILES =
+            key("blob-descriptor.scan.max-files-per-split")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Opt-in maximum BLOB files per row-range split for batch descriptor reads. "
+                                    + "Zero disables splitting. Only a single normal file with disjoint "
+                                    + "BLOB ranges and no deletion vectors is supported. Other layouts "
+                                    + "retain their original splits. Smaller values can increase normal-file IO.");
+
     public static final ConfigOption<String> BLOB_DESCRIPTOR_SOURCE_TABLE =
             key(BLOB_DESCRIPTOR_PREFIX + "source-table")
                     .stringType()
