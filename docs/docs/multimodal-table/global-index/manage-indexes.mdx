@@ -472,7 +472,7 @@ These table options affect global index build and read behavior:
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
-| `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, FM, and Java R-tree bbox queries. |
+| `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, FM, and R-tree bbox queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
