@@ -29,6 +29,7 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import java.util.{List => JList}
@@ -117,6 +118,14 @@ abstract class PaimonBaseScanBuilder
                   postScan.append(predicate)
                 }
               case None =>
+                // An envelope match can only prune candidates for the exact spatial predicate.
+                if (coreOptions.dataEvolutionEnabled() && !coreOptions.queryAuthEnabled()) {
+                  SparkShimLoader.shim.spatialCandidate(predicate, newRowType).foreach {
+                    candidate =>
+                      pushableDataFilters.append(candidate)
+                      pushable.append(predicate)
+                  }
+                }
                 postScan.append(predicate)
             }
         }

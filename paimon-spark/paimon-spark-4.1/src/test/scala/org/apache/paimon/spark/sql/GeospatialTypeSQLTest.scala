@@ -86,4 +86,62 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
           DataTypes.GEOGRAPHY("OGC:CRS84", EdgeAlgorithm.SPHERICAL))
     }
   }
+
+  test("ST_Intersects prunes indexed geometries and refines envelope matches") {
+    def geometry(wkb: String): String = s"ST_SetSrid(ST_GeomFromWKB(unhex('$wkb')), 4326)"
+    val diagonal =
+      geometry("0102000000020000000000000000000000000000000000000000000000000000400000000000000040")
+    val boundary =
+      geometry("0102000000020000000000000000000000000000000000F03F0000000000000040000000000000F03F")
+    val point = geometry("01010000000000000000000000000000000000F03F")
+    val far = geometry("010100000000000000000022400000000000002240")
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, geom GEOMETRY(4326)) TBLPROPERTIES (
+            | 'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            | 'data-evolution.enabled' = 'true')""".stripMargin)
+      sql(s"INSERT INTO t VALUES (1, $diagonal), (2, $boundary), (3, $far), (4, NULL)")
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'geom', " +
+          "index_type => 'rtree')").collect()
+
+      Seq(s"geom, $point", s"$point, geom").foreach {
+        args =>
+          val query = sql(s"SELECT id FROM t WHERE ST_Intersects($args)")
+          val plan = query.queryExecution.executedPlan.toString()
+          assert(plan.contains("BBoxIntersects"), plan)
+          checkAnswer(query, Seq(Row(2)))
+      }
+      checkAnswer(
+        sql(s"SELECT id FROM t WHERE NOT ST_Intersects(geom, $point)"),
+        Seq(Row(1), Row(3)))
+      checkAnswer(
+        sql(s"SELECT id FROM t WHERE ST_Intersects(geom, $point) OR id = 3"),
+        Seq(Row(2), Row(3)))
+      checkAnswer(
+        sql(s"SELECT id, ST_Intersects(geom, $point) FROM t"),
+        Seq(Row(1, false), Row(2, true), Row(3, false), Row(4, null)))
+      checkAnswer(
+        sql("SELECT id FROM t WHERE ST_Intersects(geom, geom)"),
+        Seq(Row(1), Row(2), Row(3)))
+      checkAnswer(sql(s"SELECT ST_Intersects(NULL, $point)"), Seq(Row(null)))
+      val empty = geometry("010700000000000000")
+      checkAnswer(sql(s"SELECT ST_Intersects($point, $empty)"), Seq(Row(false)))
+      val error = intercept[Exception] {
+        sql(s"SELECT id FROM t WHERE ST_Intersects(geom, ST_SetSrid($far, 3857))").collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](error)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains("same SRID"))))
+
+      // A matching append outside the published index distinguishes an indexed fast scan
+      // from a full scan. Full mode must also find the newly appended geometry.
+      sql(s"INSERT INTO t VALUES (5, $point)")
+      val select = s"SELECT id FROM t WHERE ST_Intersects(geom, $point)"
+      checkAnswer(sql(select), Seq(Row(2)))
+      sql("ALTER TABLE t SET TBLPROPERTIES ('scalar-index.search-mode' = 'full')")
+      checkAnswer(sql(select), Seq(Row(2), Row(5)))
+    }
+  }
 }

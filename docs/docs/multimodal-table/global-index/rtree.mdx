@@ -74,13 +74,35 @@ The predicate includes rectangles that touch the query boundary. It is an exact
 test of **bounding-box intersection**, and can return geometries whose actual
 shapes do not intersect. A connector using it to accelerate `ST_Intersects` or
 another spatial relation must retain its original predicate for exact refinement.
-This first version exposes the Java predicate; automatic Spark SQL `ST_*`
-translation is not implemented.
 
 The index also supports `IS NULL` and `IS NOT NULL`. Empty geometries are
 non-null, have no spatial leaf entry, and do not match `bboxIntersects`.
 Unknown scalar predicates are left to the normal data path. Negating a spatial
 candidate bitmap is not supported.
+
+### Spark SQL
+
+The Paimon Spark SQL extension provides `ST_Intersects(left, right)` for
+`GEOMETRY` columns on Spark 4.1 and 4.2. On Spark 4.1, set
+`spark.sql.geospatial.enabled=true`. Both arguments must use the same SRID.
+A null argument yields null, and geometries that touch at a boundary intersect.
+
+For example, the following query finds shapes intersecting the point (1, 2)
+in a column with SRID 4326.
+
+```sql
+SELECT id FROM places
+WHERE ST_Intersects(
+  geom,
+  ST_SetSrid(ST_GeomFromWKB(unhex('0101000000000000000000F03F0000000000000040')), 4326)
+);
+```
+
+For a positive filter on an indexed geometry column and a constant geometry
+in either argument order, the scan can use the query envelope to prune rows. Spark then
+evaluates the exact geometry intersection. `EXPLAIN` shows `BBoxIntersects`
+in the Paimon scan's `DataFilters` when that filter is pushed. Column-to-column
+and negated intersections use exact SQL evaluation.
 
 ## Coverage and Updates
 

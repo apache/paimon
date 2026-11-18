@@ -21,12 +21,13 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.function.{Function => PaimonFunction}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
@@ -37,7 +38,7 @@ import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
-import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Transform}
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
@@ -55,6 +56,10 @@ import java.util.{Map => JMap}
 trait SparkShim {
 
   def classicApi: ClassicApi
+
+  def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit = {}
+
+  def spatialCandidate(predicate: V2Expression, rowType: RowType): Option[Predicate] = None
 
   def createSparkParser(delegate: ParserInterface): ParserInterface
 
