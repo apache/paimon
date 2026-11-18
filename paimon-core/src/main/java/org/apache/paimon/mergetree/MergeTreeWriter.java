@@ -368,6 +368,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void close() throws Exception {
+        if (writeBuffer != null) {
+            writeBuffer.clear();
+        }
         writerFactory.abortManagedBlobWrites();
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
