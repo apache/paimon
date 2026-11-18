@@ -49,14 +49,14 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNotNull, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, CreateNamedStruct, EqualNullSafe, EqualTo, Expression, ExprId, GetStructField, If, IsNotNull, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.plans.{FullOuter, LeftAnti, LeftOuter}
+import org.apache.spark.sql.catalyst.plans.{FullOuter, LeftAnti, LeftOuter, LeftSemi}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.{BooleanType, StructType}
+import org.apache.spark.sql.types.{BooleanType, IntegerType, LongType, StructType}
 
 import java.util.{HashMap => JHashMap}
 
@@ -307,13 +307,27 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = targetSparkTable.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    val pinnedSource =
+      if (
+        table.coreOptions().dataEvolutionMergeIntoNarrowSource() &&
+        !table.coreOptions().dataEvolutionMergeIntoSourcePersist() &&
+        canReuseMergeJoin(sparkSession) && narrowSharedSourceKey.isDefined &&
+        sourceTable.output.exists(
+          attr => allSharedDependencies.contains(attr.exprId) &&
+            !updateSharedDependencies.contains(attr.exprId))
+      ) {
+        pinNarrowSource(sourceTable, originalTargetRelation)
+      } else {
+        None
+      }
+    val command = pinnedSource.map(source => copy(sourceTable = source)).getOrElse(this)
     // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
     SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, targetRelation, sparkSession)
-    invokeMergeInto(sparkSession)
+    command.invokeMergeInto(sparkSession, pinnedSource.isDefined)
     Seq.empty[Row]
   }
 
-  private def invokeMergeInto(sparkSession: SparkSession): Unit = {
+  private def invokeMergeInto(sparkSession: SparkSession, narrowSource: Boolean): Unit = {
     val readSnapshot = TimeTravelUtil.tryTravelOrLatest(table)
     val snapshotReader = table.newSnapshotReader()
     if (readSnapshot != null) {
@@ -395,7 +409,11 @@ case class MergeIntoPaimonDataEvolutionTable(
 
       if (canReuseMergeJoin(sparkSession) && matchedOrInsertDataSplits.nonEmpty) {
         sharedMatches = Some(
-          createSharedMergeJoin(sparkSession, touchedFileTargetRelation, persistSourceDss))
+          createSharedMergeJoin(
+            sparkSession,
+            touchedFileTargetRelation,
+            persistSourceDss,
+            narrowSource))
       }
 
       // step 2: invoke target-side action
@@ -484,11 +502,42 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
+  private lazy val updateSharedDependencies: Set[ExprId] = {
+    val expressions = Seq(matchedCondition) ++ matchedActions.flatMap {
+      case update: UpdateAction =>
+        update.condition.toSeq ++ update.assignments
+          .filter(a => updateColumns.contains(assignmentKeyAttribute(a)))
+          .map(_.value)
+      case action => action.condition.toSeq
+    }
+    (expressions.flatMap(extractFields) ++ updateColumns).map(_.exprId).toSet
+  }
+
+  private lazy val allSharedDependencies: Set[ExprId] =
+    (mergeReadExpressions.flatMap(extractFields) ++ updateColumns).map(_.exprId).toSet
+
+  private def narrowSharedSourceKey: Option[AttributeReference] = {
+    val sourceIds = sourceTable.output.map(_.exprId).toSet
+    val targetIds = targetRelation.output.map(_.exprId).toSet
+    def eligible(source: AttributeReference, target: AttributeReference): Boolean =
+      sourceIds.contains(source.exprId) && targetIds.contains(target.exprId) &&
+        (source.dataType == IntegerType || source.dataType == LongType) &&
+        source.dataType == target.dataType
+    matchedCondition match {
+      case EqualTo(left: AttributeReference, right: AttributeReference) =>
+        if (eligible(left, right)) Some(left)
+        else if (eligible(right, left)) Some(right)
+        else None
+      case _ => None
+    }
+  }
+
   private case class SharedMergeJoin(
       dataset: Dataset[Row],
       targetMarkerId: ExprId,
       sourceMarkerId: ExprId,
-      cleanup: () => Unit) {
+      cleanup: () => Unit,
+      rereadSourceKey: Option[AttributeReference]) {
     def targetMarker(plan: LogicalPlan): Attribute =
       plan.output.find(_.exprId == targetMarkerId).get
 
@@ -499,10 +548,10 @@ case class MergeIntoPaimonDataEvolutionTable(
   private def createSharedMergeJoin(
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
-      persistSourceDss: Option[Dataset[Row]]): SharedMergeJoin = {
-    val needed = (mergeReadExpressions.flatMap(extractFields) ++ updateColumns)
-      .map(_.exprId)
-      .toSet
+      persistSourceDss: Option[Dataset[Row]],
+      narrowSource: Boolean): SharedMergeJoin = {
+    val rereadKey = if (narrowSource) narrowSharedSourceKey else None
+    val needed = if (rereadKey.isDefined) updateSharedDependencies else allSharedDependencies
     val targetAttributes = (targetRelation.output ++ targetRelation.metadataOutput)
       .foldLeft(Seq.empty[AttributeReference]) {
         (attrs, attr) => if (attrs.exists(_.exprId == attr.exprId)) attrs else attrs :+ attr
@@ -519,7 +568,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val (dataset, cleanup) = createDiskCachedDataset(
       sparkSession,
       Join(targetProject, sourceProject, FullOuter, Some(matchedCondition), JoinHint.NONE))
-    SharedMergeJoin(dataset, targetMarker.exprId, sourceMarker.exprId, cleanup)
+    SharedMergeJoin(dataset, targetMarker.exprId, sourceMarker.exprId, cleanup, rereadKey)
   }
 
   private def pushDownMergeFilters(snapshotReader: SnapshotReader): Unit = {
@@ -1223,9 +1272,24 @@ case class MergeIntoPaimonDataEvolutionTable(
       case Some(shared) =>
         val plan = shared.dataset.queryExecution.analyzed
         val sourceIds = sourceTable.output.map(_.exprId).toSet
-        Project(
-          plan.output.filter(attr => sourceIds.contains(attr.exprId)),
-          Filter(IsNull(shared.targetMarker(plan)), plan))
+        shared.rereadSourceKey match {
+          case Some(key) =>
+            val cachedKey = plan.output.find(_.exprId == key.exprId).get
+            val membershipKey = Alias(cachedKey, "__paimon_unmatched_source_key")()
+            val unmatched = Project(
+              Seq(membershipKey), Filter(IsNull(shared.targetMarker(plan)), plan))
+            // Membership must retain NULL keys and every duplicate row in the fixed source.
+            Join(
+              sourceReadPlan,
+              unmatched,
+              LeftSemi,
+              Some(EqualNullSafe(key, membershipKey.toAttribute)),
+              JoinHint.NONE)
+          case None =>
+            Project(
+              plan.output.filter(attr => sourceIds.contains(attr.exprId)),
+              Filter(IsNull(shared.targetMarker(plan)), plan))
+        }
       case None =>
         Join(sourceReadPlan, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
     }
@@ -1431,6 +1495,69 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
   final private val MERGE_DELETED_NAME = "_PAIMON_MERGE_INTO_DELETED"
   final private val RAW_BLOB_PLACEHOLDER_MARKER_PREFIX = "__paimon_raw_blob_placeholder_"
+
+  private[commands] def pinNarrowSource(
+      plan: LogicalPlan,
+      targetRelation: DataSourceV2Relation): Option[LogicalPlan] = {
+    def identity(table: FileStoreTable): (String, String) =
+      (table.location().toString, BranchManager.normalizeBranch(CoreOptions.branch(table.options())))
+
+    val target = targetRelation.table match {
+      case sparkTable: SparkTable => sparkTable.getTable.asInstanceOf[FileStoreTable]
+      case _ => return None
+    }
+
+    def pin(current: LogicalPlan): Option[LogicalPlan] = current match {
+      case alias: SubqueryAlias => pin(alias.child).map(child => alias.copy(child = child))
+      case project: Project if project.projectList.forall {
+            case _: AttributeReference => true
+            case Alias(_: AttributeReference, _) => true
+            case _ => false
+          } =>
+        pin(project.child).map(child => project.copy(child = child))
+      case relation: DataSourceV2Relation =>
+        relation.table match {
+          case sparkTable: SparkTable =>
+            sparkTable.getTable match {
+              case source: FileStoreTable
+                  if source.primaryKeys().isEmpty && identity(source) != identity(target) &&
+                    Set(
+                      CoreOptions.StartupMode.LATEST_FULL,
+                      CoreOptions.StartupMode.LATEST,
+                      CoreOptions.StartupMode.FROM_TIMESTAMP,
+                      CoreOptions.StartupMode.FROM_SNAPSHOT,
+                      CoreOptions.StartupMode.FROM_SNAPSHOT_FULL)
+                      .contains(source.coreOptions().startupMode()) =>
+                // Resolving scan.version can mutate options; never resolve it on the input table.
+                val copied = source.copy(new JHashMap[String, String]())
+                Option(TimeTravelUtil.tryTravelOrLatest(copied))
+                  .filter(snapshot => copied.snapshotManager().snapshotExists(snapshot.id()))
+                  .flatMap {
+                  snapshot =>
+                    val options = new JHashMap[String, String]()
+                    timeTravelOptionKeys.foreach(options.put(_, null))
+                    options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshot.id().toString)
+                    options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
+                    val pinned = copied.copy(options)
+                    // A schema-only change is newer than the data snapshot's read schema.
+                    if (pinned.schema().id() != source.schema().id()) {
+                      None
+                    } else {
+                      Some(SparkShimLoader.shim.copyDataSourceV2Relation(
+                        relation,
+                        SparkTable.of(pinned),
+                        relation.output))
+                    }
+                }
+              case _ => None
+            }
+          case _ => None
+        }
+      case _ => None
+    }
+
+    pin(plan)
+  }
 
   private[commands] def withMatchedUpdateScanOptions(
       v2Table: SparkTable,
