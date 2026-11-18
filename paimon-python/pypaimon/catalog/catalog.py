@@ -123,8 +123,9 @@ class Catalog(ABC):
     def get_prediction(
             self,
             prediction_id: str,
+            timeout_seconds: Optional[float] = None,
     ) -> 'Prediction':
-        """Get one prediction by its unique id."""
+        """Get one prediction, optionally bounding the REST request in seconds."""
         raise NotImplementedError(
             "get_prediction is not supported by this catalog.")
 

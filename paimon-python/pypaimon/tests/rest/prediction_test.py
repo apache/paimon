@@ -381,7 +381,10 @@ class PredictionTest(unittest.TestCase):
                 TimeoutError, "Prediction prediction-1 did not finish"):
             waiter.result(timeout=timedelta(milliseconds=10))
 
-        catalog.get_prediction.assert_called_once_with("prediction-1")
+        catalog.get_prediction.assert_called_once()
+        call = catalog.get_prediction.call_args
+        self.assertEqual("prediction-1", call[0][0])
+        self.assertAlmostEqual(0.01, call[1]["timeout_seconds"])
 
     def test_wait_missing_attribute_uses_attribute_error(self):
         waiter = PredictionWait(Mock(), _prediction())
@@ -480,7 +483,12 @@ class PredictionTest(unittest.TestCase):
             self.assertIn("maxResults=10", calls[-1][1])
             self.assertIn("pageToken=p1", calls[-1][1])
 
-            catalog.get_prediction("prediction/1")
+            with patch.object(
+                    api.client, "get", wraps=api.client.get) as get:
+                catalog.get_prediction(
+                    "prediction/1", timeout_seconds=0.25)
+                self.assertEqual(
+                    0.25, get.call_args[1]["timeout_seconds"])
             self.assertTrue(
                 calls[-1][1].endswith("/predictions/prediction%2F1"))
             catalog.cancel_prediction("prediction/1")

@@ -18,6 +18,9 @@
 import unittest
 from unittest import mock
 
+import requests
+from urllib3.exceptions import MaxRetryError, ReadTimeoutError
+
 from pypaimon.api.client import HttpClient, _parse_error_response
 from pypaimon.api.rest_exception import (AlreadyExistsException, NoSuchResourceException,
                                          ServiceUnavailableException)
@@ -133,10 +136,38 @@ class HttpClientTimeoutTest(unittest.TestCase):
             client._execute_request('GET', 'http://localhost:8080/x')
 
         self.assertTrue(req.called, "session.request must be invoked")
-        kwargs = req.call_args.kwargs
+        kwargs = req.call_args[1]
         self.assertEqual(
             kwargs.get('timeout'), client._timeout,
             "request must carry the timeout; Session.timeout is dead code")
+
+    def test_explicit_request_timeout_overrides_default(self):
+        client = HttpClient("http://localhost:8080")
+        with mock.patch.object(client.session, 'request') as req:
+            req.return_value = mock.Mock(
+                status_code=200, text='{}', headers={},
+                request=mock.Mock(method='GET'),
+                url='http://localhost:8080/x',
+                ok=True,
+            )
+            client._execute_request(
+                'GET', 'http://localhost:8080/x', timeout_seconds=0.01)
+
+        self.assertEqual(0.01, req.call_args[1].get('timeout'))
+
+    def test_explicit_timeout_unwraps_retry_error(self):
+        client = HttpClient("http://localhost:8080")
+        read_timeout = ReadTimeoutError(
+            None, "/x", "read timed out")
+        wrapped = requests.exceptions.ConnectionError(
+            MaxRetryError(None, "/x", read_timeout))
+
+        with mock.patch.object(
+                client.session, 'request', side_effect=wrapped):
+            with self.assertRaises(TimeoutError):
+                client._execute_request(
+                    'GET', 'http://localhost:8080/x',
+                    timeout_seconds=0.01)
 
 
 if __name__ == '__main__':

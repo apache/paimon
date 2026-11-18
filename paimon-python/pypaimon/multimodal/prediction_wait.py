@@ -49,8 +49,17 @@ def _wait_for_prediction(
 
     deadline = time.monotonic() + timeout.total_seconds()
     attempt = 1
-    while time.monotonic() < deadline:
-        prediction = catalog.get_prediction(prediction_id)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            prediction = catalog.get_prediction(
+                prediction_id, timeout_seconds=remaining)
+        except TimeoutError as e:
+            raise TimeoutError(
+                "Prediction {} did not finish within {}".format(
+                    prediction_id, timeout)) from e
         if time.monotonic() >= deadline:
             break
         if prediction.status.terminal:

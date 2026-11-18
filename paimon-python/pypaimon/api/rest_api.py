@@ -801,11 +801,16 @@ class RESTApi:
             self.rest_auth_function,
         )
 
-    def get_prediction(self, prediction_id: str) -> GetPredictionResponse:
+    def get_prediction(
+            self,
+            prediction_id: str,
+            timeout_seconds: Optional[float] = None,
+    ) -> GetPredictionResponse:
         return self.client.get(
             self.resource_paths.prediction(prediction_id),
             GetPredictionResponse,
             self.rest_auth_function,
+            timeout_seconds=timeout_seconds,
         )
 
     def list_predictions(
