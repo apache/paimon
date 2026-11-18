@@ -17,6 +17,7 @@
 
 import json
 import threading
+import time
 import unittest
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -363,18 +364,21 @@ class PredictionTest(unittest.TestCase):
         catalog.get_prediction.assert_not_called()
         catalog.cancel_prediction.assert_not_called()
 
-    @patch(
-        "pypaimon.multimodal.prediction_wait.time.monotonic",
-        side_effect=[0, 0, 0.2],
-    )
-    def test_result_rejects_terminal_response_after_deadline(self, monotonic):
+    def test_result_rejects_terminal_response_after_deadline(self):
+        completed = threading.Event()
         catalog = Mock()
-        catalog.get_prediction.return_value = _prediction(
-            PredictionStatus(
-                PredictionState.TERMINATED,
-                PredictionTerminationDetails(
-                    PredictionTerminationCode.SUCCESS),
-            ))
+
+        def slow_terminal(*args, **kwargs):
+            time.sleep(0.05)
+            completed.set()
+            return _prediction(
+                PredictionStatus(
+                    PredictionState.TERMINATED,
+                    PredictionTerminationDetails(
+                        PredictionTerminationCode.SUCCESS),
+                ))
+
+        catalog.get_prediction.side_effect = slow_terminal
         waiter = PredictionWait(catalog, _prediction())
 
         with self.assertRaisesRegex(
@@ -384,7 +388,85 @@ class PredictionTest(unittest.TestCase):
         catalog.get_prediction.assert_called_once()
         call = catalog.get_prediction.call_args
         self.assertEqual("prediction-1", call[0][0])
-        self.assertAlmostEqual(0.01, call[1]["timeout_seconds"])
+        self.assertGreater(call[1]["timeout_seconds"], 0)
+        self.assertLessEqual(call[1]["timeout_seconds"], 0.01)
+        self.assertTrue(completed.wait(timeout=1))
+
+    def test_result_timeout_covers_retry_after(self):
+        completed = threading.Event()
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                requests.append(self.path)
+                if len(requests) == 1:
+                    body = b'{"message":"busy","code":503}'
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Retry-After", "1")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self._send_prediction()
+                completed.set()
+
+            def _send_prediction(self):
+                body = JSON.to_json(_response()).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server, thread, catalog = self._prediction_server(Handler)
+        try:
+            waiter = PredictionWait(catalog, _prediction())
+            started = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                waiter.result(timeout=timedelta(milliseconds=20))
+            self.assertLess(time.monotonic() - started, 0.5)
+            self.assertTrue(completed.wait(timeout=2))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_result_timeout_covers_slow_response_body(self):
+        completed = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                body = JSON.to_json(_response()).encode()
+                chunk_size = max(1, (len(body) + 19) // 20)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                for offset in range(0, len(body), chunk_size):
+                    time.sleep(0.04)
+                    self.wfile.write(body[offset:offset + chunk_size])
+                    self.wfile.flush()
+                completed.set()
+
+        server, thread, catalog = self._prediction_server(Handler)
+        try:
+            waiter = PredictionWait(catalog, _prediction())
+            started = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                waiter.result(timeout=timedelta(milliseconds=100))
+            self.assertLess(time.monotonic() - started, 0.5)
+            self.assertTrue(completed.wait(timeout=2))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
     def test_wait_missing_attribute_uses_attribute_error(self):
         waiter = PredictionWait(Mock(), _prediction())
@@ -408,6 +490,24 @@ class PredictionTest(unittest.TestCase):
         catalog.rest_api.cancel_prediction.side_effect = untyped
         with self.assertRaises(NoSuchResourceException):
             catalog.cancel_prediction("prediction-1")
+
+    @staticmethod
+    def _prediction_server(handler):
+        server = HTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        api = RESTApi(
+            {
+                "uri": "http://127.0.0.1:%s" % server.server_port,
+                "token.provider": "bear",
+                "token": "test",
+                "prefix": "catalog",
+            },
+            False,
+        )
+        catalog = object.__new__(RESTCatalog)
+        catalog.rest_api = api
+        return server, thread, catalog
 
     def test_rest_round_trip_paths_and_filters(self):
         calls = []
