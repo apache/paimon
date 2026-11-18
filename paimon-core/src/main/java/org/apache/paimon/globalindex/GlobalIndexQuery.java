@@ -62,6 +62,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -109,6 +110,17 @@ class GlobalIndexQuery {
             List<IndexFileMeta> files,
             IndexPathFactory pathFactory,
             Options options) {
+        return create(rowType, predicate, files, pathFactory, options, ignored -> {});
+    }
+
+    @Nullable
+    static GlobalIndexQuery create(
+            RowType rowType,
+            Predicate predicate,
+            List<IndexFileMeta> files,
+            IndexPathFactory pathFactory,
+            Options options,
+            Consumer<Predicate> residual) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(
                         files.stream()
@@ -126,7 +138,7 @@ class GlobalIndexQuery {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createForPredicate(predicate, rowType, groups, options);
+        return createForPredicate(predicate, rowType, groups, options, residual);
     }
 
     @Nullable
@@ -134,7 +146,8 @@ class GlobalIndexQuery {
             Predicate predicate,
             RowType rowType,
             Map<Integer, List<IndexGroup>> groups,
-            Options options) {
+            Options options,
+            Consumer<Predicate> residual) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
             Optional<FieldRef> field = leaf.fieldRefOptional();
@@ -173,8 +186,12 @@ class GlobalIndexQuery {
                 predicates.removeIf(
                         child -> {
                             Set<Integer> residualFields = collectFieldIds(rowType, child);
-                            return !residualFields.isEmpty()
-                                    && keyFields.containsAll(residualFields);
+                            if (!residualFields.isEmpty()
+                                    && keyFields.containsAll(residualFields)) {
+                                residual.accept(child);
+                                return true;
+                            }
+                            return false;
                         });
             }
         }
@@ -209,9 +226,10 @@ class GlobalIndexQuery {
                 }
             }
             if (query == null) {
-                query = createForPredicate(child, rowType, groups, options);
+                query = createForPredicate(child, rowType, groups, options, residual);
             }
             if (query == null) {
+                residual.accept(child);
                 if (union) {
                     return null;
                 }
@@ -498,6 +516,7 @@ class GlobalIndexQuery {
             GlobalIndexResult result = null;
             Set<Integer> fields = new HashSet<>();
             List<Range> coverage = null;
+            boolean allPredicatesEvaluated = true;
             for (GlobalIndexQuery child : children) {
                 Optional<Evaluation> evaluation =
                         child.evaluateWithExecutor(
@@ -506,8 +525,10 @@ class GlobalIndexQuery {
                     if (union) {
                         return Optional.empty();
                     }
+                    allPredicatesEvaluated = false;
                     continue;
                 }
+                allPredicatesEvaluated &= evaluation.get().allPredicatesEvaluated();
                 GlobalIndexResult matches = evaluation.get().result();
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
@@ -517,7 +538,7 @@ class GlobalIndexQuery {
             }
             return result == null
                     ? Optional.empty()
-                    : Optional.of(new Evaluation(result, fields, coverage));
+                    : Optional.of(new Evaluation(result, fields, coverage, allPredicatesEvaluated));
         }
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
         Set<Integer> fields = new HashSet<>();

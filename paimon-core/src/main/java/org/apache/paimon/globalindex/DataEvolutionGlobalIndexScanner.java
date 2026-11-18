@@ -402,6 +402,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
+        List<Predicate> residuals = new ArrayList<>();
         GlobalIndexQuery query =
                 predicate == null
                                 || indexFiles.stream()
@@ -409,15 +410,30 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                 DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
                         ? null
                         : GlobalIndexQuery.create(
-                                rowType, predicate, indexFiles, indexPathFactory, options);
+                                rowType,
+                                predicate,
+                                indexFiles,
+                                indexPathFactory,
+                                options,
+                                residuals::add);
         if (query != null && query.hasCompositeQuery()) {
             try {
-                return query.evaluateWithCoverage(
-                        fileIO,
-                        options,
-                        indexFiles.stream()
-                                .map(file -> file.globalIndexMeta().rowRange())
-                                .collect(Collectors.toList()));
+                Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                        query.evaluateWithCoverage(
+                                fileIO,
+                                options,
+                                indexFiles.stream()
+                                        .map(file -> file.globalIndexMeta().rowRange())
+                                        .collect(Collectors.toList()));
+                return residuals.isEmpty()
+                        ? evaluation
+                        : evaluation.map(
+                                e ->
+                                        new GlobalIndexEvaluator.Evaluation(
+                                                e.result(),
+                                                e.contributingFieldIds(),
+                                                e.coveredRanges(),
+                                                false));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to evaluate composite global index query", e);
             }

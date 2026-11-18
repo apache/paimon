@@ -271,6 +271,10 @@ public class GlobalIndexEvaluator implements Closeable {
     private Optional<Evaluation> combineResults(
             List<Optional<Evaluation>> results, CompoundPredicate predicate) {
         Set<Integer> contributingFieldIds = new HashSet<>();
+        boolean allPredicatesEvaluated =
+                results.stream()
+                        .allMatch(
+                                child -> child.isPresent() && child.get().allPredicatesEvaluated());
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
             for (Optional<Evaluation> child : results) {
@@ -280,7 +284,9 @@ public class GlobalIndexEvaluator implements Closeable {
                 compoundResult = compoundResult.or(child.get().result());
                 contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
+            return Optional.of(
+                    new Evaluation(
+                            compoundResult, contributingFieldIds, null, allPredicatesEvaluated));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -297,7 +303,10 @@ public class GlobalIndexEvaluator implements Closeable {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
+            return compoundResult.map(
+                    result ->
+                            new Evaluation(
+                                    result, contributingFieldIds, null, allPredicatesEvaluated));
         }
     }
 
@@ -309,12 +318,22 @@ public class GlobalIndexEvaluator implements Closeable {
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
         @Nullable private final List<Range> coveredRanges;
+        private final boolean allPredicatesEvaluated;
 
         Evaluation(
                 GlobalIndexResult result,
                 Collection<Integer> contributingFieldIds,
                 @Nullable List<Range> coveredRanges) {
+            this(result, contributingFieldIds, coveredRanges, true);
+        }
+
+        Evaluation(
+                GlobalIndexResult result,
+                Collection<Integer> contributingFieldIds,
+                @Nullable List<Range> coveredRanges,
+                boolean allPredicatesEvaluated) {
             this.result = result;
+            this.allPredicatesEvaluated = allPredicatesEvaluated;
             this.coveredRanges =
                     coveredRanges == null
                             ? null
@@ -334,6 +353,16 @@ public class GlobalIndexEvaluator implements Closeable {
 
         public Set<Integer> contributingFieldIds() {
             return contributingFieldIds;
+        }
+
+        /**
+         * Whether every branch presented to this evaluation had a supported index result, including
+         * predicates on the same field. Query planning may already have left residual predicates
+         * for data filtering. A true value does not guarantee exact matches: an index may return
+         * candidates that still require refinement against the original filter.
+         */
+        public boolean allPredicatesEvaluated() {
+            return allPredicatesEvaluated;
         }
     }
 
