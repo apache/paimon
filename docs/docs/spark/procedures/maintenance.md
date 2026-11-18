@@ -69,13 +69,11 @@ CALL sys.compact(table => 'T', compact_strategy => 'minor');
 CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-3,7');
 
 -- Pass comma-containing values without splitting them into separate options.
--- Callback classes must be available on the Spark classpath.
 CALL sys.compact(
   table => 'T',
-  options => 'target-file-size=128mb',
+  options => 'file.format.per.level=0:orc',
   options_map => map(
-    'target-file-size', '256mb',
-    'commit.callbacks', 'com.example.FirstCommitCallback,com.example.SecondCommitCallback'
+    'file.format.per.level', '0:avro,1:parquet'
   )
 );
 ```
