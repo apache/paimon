@@ -50,6 +50,8 @@ class RESTApiPredictionTest {
         assertThat((String) requestMap.get("idempotencyToken")).isNotBlank();
         assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class).get("idempotencyToken"))
                 .isEqualTo(requestMap.get("idempotencyToken"));
+        assertThat(request.toPredictionSpec().idempotencyToken())
+                .isEqualTo(request.getIdempotencyToken());
         assertThat(requestMap)
                 .containsEntry("instructions", "Classify")
                 .doesNotContainKeys(

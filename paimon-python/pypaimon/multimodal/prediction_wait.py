@@ -51,6 +51,8 @@ def _wait_for_prediction(
     attempt = 1
     while time.monotonic() < deadline:
         prediction = catalog.get_prediction(prediction_id)
+        if time.monotonic() >= deadline:
+            break
         if prediction.status.terminal:
             return prediction
         if callback is not None:

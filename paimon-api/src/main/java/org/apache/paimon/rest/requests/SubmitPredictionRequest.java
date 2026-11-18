@@ -86,7 +86,7 @@ public class SubmitPredictionRequest implements RESTRequest {
                         instructions,
                         where,
                         options,
-                        idempotencyToken);
+                        this.idempotencyToken);
     }
 
     public SubmitPredictionRequest(Identifier source, PredictionSpec spec) {

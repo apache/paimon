@@ -30,7 +30,10 @@ class Wait(Generic[T]):
         self._bind = kwargs
 
     def __getattr__(self, name):
-        return self._bind[name]
+        try:
+            return self._bind[name]
+        except KeyError:
+            raise AttributeError(name) from None
 
     def bind(self):
         return dict(self._bind)

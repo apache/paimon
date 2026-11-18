@@ -1226,7 +1226,10 @@ public class RESTCatalog implements Catalog {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
                 throw new ModelNotExistException(spec.model(), e);
             }
-            throw new TableNotExistException(identifier, e);
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+                throw new TableNotExistException(identifier, e);
+            }
+            throw e;
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
@@ -1237,7 +1240,10 @@ public class RESTCatalog implements Catalog {
         try {
             return api.getPrediction(predictionId).toPrediction();
         } catch (NoSuchResourceException e) {
-            throw new PredictionNotExistException(predictionId, e);
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(predictionId, e);
+            }
+            throw e;
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }
@@ -1270,7 +1276,10 @@ public class RESTCatalog implements Catalog {
         try {
             return api.cancelPrediction(predictionId).toPrediction();
         } catch (NoSuchResourceException e) {
-            throw new PredictionNotExistException(predictionId, e);
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_PREDICTION)) {
+                throw new PredictionNotExistException(predictionId, e);
+            }
+            throw e;
         } catch (NotImplementedException e) {
             throw new UnsupportedOperationException("REST Catalog does not support predictions", e);
         }

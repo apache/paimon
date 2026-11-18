@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Prediction;
 import org.apache.paimon.catalog.PredictionSpec;
 import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -106,9 +107,25 @@ class RESTCatalogPredictionTest {
             assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
                     .isInstanceOf(Catalog.ModelNotExistException.class);
 
+            server.enqueue(notFound("TABLE", "clips"));
+            assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
+                    .isInstanceOf(Catalog.TableNotExistException.class);
+
+            server.enqueue(untypedNotFound());
+            assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
+                    .isInstanceOf(NoSuchResourceException.class);
+
             server.enqueue(notFound("PREDICTION", "prediction-1"));
             assertThatThrownBy(() -> catalog.getPrediction("prediction-1"))
                     .isInstanceOf(Catalog.PredictionNotExistException.class);
+
+            server.enqueue(untypedNotFound());
+            assertThatThrownBy(() -> catalog.getPrediction("prediction-1"))
+                    .isInstanceOf(NoSuchResourceException.class);
+
+            server.enqueue(untypedNotFound());
+            assertThatThrownBy(() -> catalog.cancelPrediction("prediction-1"))
+                    .isInstanceOf(NoSuchResourceException.class);
         }
     }
 
@@ -190,5 +207,9 @@ class RESTCatalogPredictionTest {
                         + resourceName
                         + "\",\"message\":\"not found\",\"code\":404}",
                 404);
+    }
+
+    private static MockResponse untypedNotFound() {
+        return json("{\"message\":\"route not found\",\"code\":404}", 404);
     }
 }

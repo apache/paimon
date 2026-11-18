@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import Mock, patch
 
 from pypaimon.api.api_response import PagedList
+from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.prediction import (
     GetPredictionResponse,
     ListPredictionsResponse,
@@ -361,6 +362,49 @@ class PredictionTest(unittest.TestCase):
 
         catalog.get_prediction.assert_not_called()
         catalog.cancel_prediction.assert_not_called()
+
+    @patch(
+        "pypaimon.multimodal.prediction_wait.time.monotonic",
+        side_effect=[0, 0, 0.2],
+    )
+    def test_result_rejects_terminal_response_after_deadline(self, monotonic):
+        catalog = Mock()
+        catalog.get_prediction.return_value = _prediction(
+            PredictionStatus(
+                PredictionState.TERMINATED,
+                PredictionTerminationDetails(
+                    PredictionTerminationCode.SUCCESS),
+            ))
+        waiter = PredictionWait(catalog, _prediction())
+
+        with self.assertRaisesRegex(
+                TimeoutError, "Prediction prediction-1 did not finish"):
+            waiter.result(timeout=timedelta(milliseconds=10))
+
+        catalog.get_prediction.assert_called_once_with("prediction-1")
+
+    def test_wait_missing_attribute_uses_attribute_error(self):
+        waiter = PredictionWait(Mock(), _prediction())
+        with self.assertRaises(AttributeError):
+            waiter.unknown_attribute
+
+    def test_untyped_prediction_404_is_not_mapped_to_missing_resource(self):
+        catalog = object.__new__(RESTCatalog)
+        catalog.rest_api = Mock()
+        untyped = NoSuchResourceException(None, None, "route not found")
+
+        catalog.rest_api.submit_prediction.side_effect = untyped
+        with self.assertRaises(NoSuchResourceException):
+            catalog.submit_prediction(
+                Identifier.create("quality", "clips"), _spec())
+
+        catalog.rest_api.get_prediction.side_effect = untyped
+        with self.assertRaises(NoSuchResourceException):
+            catalog.get_prediction("prediction-1")
+
+        catalog.rest_api.cancel_prediction.side_effect = untyped
+        with self.assertRaises(NoSuchResourceException):
+            catalog.cancel_prediction("prediction-1")
 
     def test_rest_round_trip_paths_and_filters(self):
         calls = []

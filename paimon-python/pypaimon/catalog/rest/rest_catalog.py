@@ -696,7 +696,9 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
                 raise ModelNotExistException(spec.model) from e
-            raise TableNotExistException(identifier) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TABLE:
+                raise TableNotExistException(identifier) from e
+            raise
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
@@ -708,7 +710,9 @@ class RESTCatalog(Catalog):
         try:
             return self.rest_api.get_prediction(prediction_id).to_prediction()
         except NoSuchResourceException as e:
-            raise PredictionNotExistException(prediction_id) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
+                raise PredictionNotExistException(prediction_id) from e
+            raise
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
@@ -741,7 +745,9 @@ class RESTCatalog(Catalog):
         try:
             return self.rest_api.cancel_prediction(prediction_id).to_prediction()
         except NoSuchResourceException as e:
-            raise PredictionNotExistException(prediction_id) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
+                raise PredictionNotExistException(prediction_id) from e
+            raise
         except NotImplementedException as e:
             raise NotImplementedError(
                 "REST Catalog does not support predictions") from e
