@@ -139,7 +139,7 @@ class PkSortedIndexBuilderTest {
         List<GlobalIndexIOMeta> ioMetas =
                 Collections.singletonList(
                         new GlobalIndexIOMeta(
-                                pathFactory.toPath(payload.fileName()),
+                                pathFactory.toPath(payload),
                                 payload.fileSize(),
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
@@ -388,7 +388,7 @@ class PkSortedIndexBuilderTest {
         List<GlobalIndexIOMeta> ioMetas =
                 Collections.singletonList(
                         new GlobalIndexIOMeta(
-                                pathFactory.toPath(payload.fileName()),
+                                pathFactory.toPath(payload),
                                 payload.fileSize(),
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
