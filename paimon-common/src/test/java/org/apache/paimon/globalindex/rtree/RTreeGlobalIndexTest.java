@@ -1036,7 +1036,7 @@ class RTreeGlobalIndexTest {
     }
 
     @Test
-    void testMultiFileWriterReportsLogicalRowCount() throws Exception {
+    void testMultiFileWriterReportsRowsPerFile() throws Exception {
         RTreeGlobalIndexer indexer = indexer(2, 2, 0);
         List<GlobalIndexIOMeta> files;
         try (RTreeGlobalIndexWriter writer = indexer.createWriter(output)) {
@@ -1044,7 +1044,7 @@ class RTreeGlobalIndexTest {
             writer.write(point(1, 1), 1);
             writer.write(line(), 2);
             List<ResultEntry> entries = writer.finish();
-            assertThat(entries).extracting(ResultEntry::rowCount).containsExactly(3L, 3L);
+            assertThat(entries).extracting(ResultEntry::rowCount).containsExactly(2L, 1L);
             files = metas(entries);
         }
         assertThat(files).extracting(GlobalIndexIOMeta::rowCount).containsExactly(2L, 1L);
@@ -1227,7 +1227,7 @@ class RTreeGlobalIndexTest {
             Path path = new Path(base, entry.fileName());
             files.add(
                     new GlobalIndexIOMeta(
-                            path, io.getFileSize(path), entry.fileRowCount(), entry.meta()));
+                            path, io.getFileSize(path), entry.rowCount(), entry.meta()));
         }
         return files;
     }

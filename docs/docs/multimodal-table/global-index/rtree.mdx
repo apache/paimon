@@ -168,8 +168,7 @@ answered from metadata counts without reading the row-ID block.
 
 All integers and IEEE 754 doubles use big-endian byte order. The 80-byte header
 is also stored verbatim in `GlobalIndexIOMeta.metadata`. A manifest entry records the number of
-source rows in that physical file, including null and empty geometries. The Java writer reports
-this as `ResultEntry.fileRowCount()` and the total across its files as `ResultEntry.rowCount()`.
+source rows in that physical file, including null and empty geometries.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |

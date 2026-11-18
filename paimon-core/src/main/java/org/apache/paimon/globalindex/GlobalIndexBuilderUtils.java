@@ -598,7 +598,7 @@ public class GlobalIndexBuilderUtils {
                             indexType,
                             fileName,
                             fileSize,
-                            entry.fileRowCount(),
+                            entry.rowCount(),
                             globalIndexMeta,
                             externalPathString);
             results.add(indexFileMeta);

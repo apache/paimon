@@ -112,6 +112,9 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         table = getTableDefault();
         buildIndex(table, new Range(3, 5));
         table = getTableDefault();
+        assertThat(table.store().newIndexFileHandler().scan("rtree"))
+                .extracting(entry -> entry.indexFile().rowCount())
+                .containsExactlyInAnyOrder(2L, 1L, 2L, 1L);
         try (DataEvolutionGlobalIndexScanner scanner =
                 DataEvolutionGlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, box)
                         .get()) {

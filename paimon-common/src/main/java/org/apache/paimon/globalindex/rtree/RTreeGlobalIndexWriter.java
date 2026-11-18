@@ -90,13 +90,7 @@ public class RTreeGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Cl
         checkState(!finished, "R-tree writer is already finished or closed.");
         finished = true;
         flush();
-        long rowCount = results.stream().mapToLong(ResultEntry::fileRowCount).sum();
-        List<ResultEntry> finishedFiles = new ArrayList<>(results.size());
-        for (ResultEntry file : results) {
-            finishedFiles.add(
-                    new ResultEntry(file.fileName(), rowCount, file.fileRowCount(), file.meta()));
-        }
-        return finishedFiles;
+        return results;
     }
 
     private void flush() {
