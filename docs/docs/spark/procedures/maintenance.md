@@ -44,6 +44,7 @@ Compact files.
 - `partition_idle_time` (`STRING`, optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.
 - `compact_strategy` (`STRING`, optional): `full` selects all candidate files in the chosen scope; `minor` selects files according to the compaction policy. Defaults to `minor` when incremental clustering is enabled, otherwise `full`.
 - `buckets` (`STRING`, optional): fixed-bucket IDs, comma-separated IDs, or inclusive ranges, for example `'0-3,7'`. Omit to include all buckets. Valid only for fixed-bucket tables without sort compaction.
+- `options_map` (`MAP<STRING, STRING>`, optional): additional dynamic table options, including values containing commas. Options are applied in the order `options`, then `options_map`, so map entries override matching keys in `options`. Both apply only to this invocation and do not modify stored table properties. This argument is appended after `buckets` for positional calls.
 
 ```sql
 SET spark.sql.shuffle.partitions=10; --set the compact parallelism
@@ -66,6 +67,17 @@ CALL sys.compact(table => 'T', compact_strategy => 'minor');
 
 -- Limit full compaction to these buckets of a fixed-bucket table with at least 8 buckets.
 CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-3,7');
+
+-- Pass comma-containing values without splitting them into separate options.
+-- Callback classes must be available on the Spark classpath.
+CALL sys.compact(
+  table => 'T',
+  options => 'target-file-size=128mb',
+  options_map => map(
+    'target-file-size', '256mb',
+    'commit.callbacks', 'com.example.FirstCommitCallback,com.example.SecondCommitCallback'
+  )
+);
 ```
 
 ## compact_database
