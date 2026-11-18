@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/apache/ossie/core-spec/ossie-schema.json",
+  "title": "Apache Ossie Core Metadata Specification",
+  "description": "JSON Schema for validating a single Apache Ossie semantic model document",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "0.3.0.dev0",
+      "description": "Apache Ossie specification version"
+    },
+    "name": {
+      "$ref": "#/$defs/SemanticModel/properties/name"
+    },
+    "description": {
+      "$ref": "#/$defs/SemanticModel/properties/description"
+    },
+    "ai_context": {
+      "$ref": "#/$defs/SemanticModel/properties/ai_context"
+    },
+    "datasets": {
+      "$ref": "#/$defs/SemanticModel/properties/datasets"
+    },
+    "relationships": {
+      "$ref": "#/$defs/SemanticModel/properties/relationships"
+    },
+    "metrics": {
+      "$ref": "#/$defs/SemanticModel/properties/metrics"
+    },
+    "nonportable_extensions": {
+      "$ref": "#/$defs/SemanticModel/properties/nonportable_extensions"
+    }
+  },
+  "required": ["version", "name", "datasets"],
+  "additionalProperties": false,
+  "$defs": {
+    "Dialect": {
+      "type": "string",
+      "minLength": 1,
+      "examples": ["OSSIE_SQL_2026", "ANSI_SQL", "DB_DIALECT", "BI_EXPRESSION", "SEMANTIC_MODEL_EXPRESSION", "PROGRAMMING_LANGUAGE"],
+      "description": "Expression language a metric or field expression is declared in. Any non-empty string is accepted. OSSIE_SQL_2026 is the only dialect this specification defines; others are opaque to Ossie. See extensions/dialects.md."
+    },
+    "Vendor": {
+      "type": "string",
+      "minLength": 1,
+      "examples": ["BI_TOOL", "DB_VENDOR", "SEMANTIC_LAYER"],
+      "description": "Vendor name for non-portable extensions. Any non-empty string is accepted. See extensions/vendors.md."
+    },
+    "AIContext": {
+      "description": "Additional context for AI tools",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "instructions": {
+              "type": "string",
+              "description": "Instructions for AI on how to use this entity"
+            },
+            "synonyms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Alternative names and terms"
+            },
+            "examples": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Sample questions or use cases"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "NonportableExtension": {
+      "type": "object",
+      "description": "Vendor-specific state that Ossie carries and does not interpret. Portable behavior does not depend on it.",
+      "properties": {
+        "vendor_name": {
+          "$ref": "#/$defs/Vendor"
+        },
+        "data": {
+          "type": "object",
+          "description": "Vendor-specific data as a structured object. The core schema does not reference the structure under data: no reserved key and no common sub-key. Keys are entirely vendor-defined. Values must be JSON-representable. Ossie carries the object but does not interpret it. See core-spec/spec.md#non-portable-extensions."
+        }
+      },
+      "required": ["vendor_name", "data"],
+      "additionalProperties": false
+    },
+    "DialectExpression": {
+      "type": "object",
+      "description": "Expression in a specific dialect",
+      "properties": {
+        "dialect": {
+          "$ref": "#/$defs/Dialect"
+        },
+        "expression": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SQL or dialect-specific expression"
+        }
+      },
+      "required": ["dialect", "expression"],
+      "additionalProperties": false
+    },
+    "Expression": {
+      "type": "object",
+      "description": "Expression definition with multi-dialect support",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Primary, portable expression written in OSSIE_SQL_2026. When both this field and an OSSIE_SQL_2026 entry in `dialects` are present, this field is authoritative."
+        },
+        "dialects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DialectExpression"
+          },
+          "minItems": 1
+        }
+      },
+      "anyOf": [
+        { "required": ["sql"] },
+        { "required": ["dialects"] }
+      ],
+      "additionalProperties": false
+    },
+    "DataType": {
+      "type": "string",
+      "enum": [
+        "String",
+        "Integer",
+        "Decimal",
+        "Float",
+        "Boolean",
+        "Date",
+        "Time",
+        "DateTime",
+        "DateTimeTz",
+        "Opaque"
+      ],
+      "description": "Logical data type for fields and metrics, independent of role (e.g. dimension vs fact) and physical representation. `Decimal` is exact base-10 with unspecified precision and scale; `Float` is approximate. `DateTime` has no timezone or offset, while `DateTimeTz` identifies an instant using offset or timezone context but does not guarantee preservation of a named timezone. Omit `datatype` when unknown. `Opaque` means the type is outside the portable vocabulary. A vendor may record its own type name under `nonportable_extensions`; that record is not part of the portable type."
+    },
+    "Dimension": {
+      "type": "object",
+      "description": "Dimension metadata",
+      "properties": {
+        "is_time": {
+          "type": "boolean",
+          "description": "Temporal-role marker. When true, consumers that distinguish time dimensions (e.g. for time-series analysis or temporal filtering) should treat this field as a time dimension. This is a *role* flag, independent of the field's data type: a field with `is_time: true` may carry any `datatype` (e.g. `Integer` for a year grain, `String` for a month name, as well as temporal data types). When `is_time` is unset, it defaults to `true` if `datatype` is one of `Date`, `Time`, `DateTime`, or `DateTimeTz`, and `false` otherwise. Set `is_time: false` explicitly to opt a temporal-typed column (such as an audit timestamp) out of time-dimension treatment."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Field": {
+      "type": "object",
+      "description": "Row-level attribute for grouping, filtering, and metric expressions",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the field within the dataset"
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        },
+        "dimension": {
+          "$ref": "#/$defs/Dimension"
+        },
+        "label": {
+          "type": "string",
+          "description": "Label for categorization"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description"
+        },
+        "datatype": {
+          "$ref": "#/$defs/DataType"
+        },
+        "ai_context": {
+          "$ref": "#/$defs/AIContext"
+        },
+        "nonportable_extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonportableExtension"
+          }
+        }
+      },
+      "required": ["name", "expression"],
+      "additionalProperties": false
+    },
+    "Dataset": {
+      "type": "object",
+      "description": "Logical dataset representing a business entity (fact or dimension table)",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the dataset"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reference to underlying physical table/view (database.schema.table) or query"
+        },
+        "primary_key": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Dataset fields that uniquely identify rows"
+        },
+        "unique_keys": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "minItems": 1,
+          "description": "Array of unique key definitions, each a list of dataset fields"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description"
+        },
+        "ai_context": {
+          "$ref": "#/$defs/AIContext"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Field"
+          },
+          "description": "The dataset's declared fields. Within the dataset, field names and metric names share one namespace and must all be unique across the two."
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Metric"
+          },
+          "description": "Dataset-scoped metrics: aggregations evaluated at this dataset's row level, for measures that semantically belong to the dataset. The expression references this dataset's declared fields by single-part (unqualified) name, and columns of the dataset's source as source.column. It must resolve entirely within this dataset; an expression that must reference another dataset belongs in the model-scoped metrics instead. Within the dataset, field names and metric names share one namespace and must all be unique across the two."
+        },
+        "nonportable_extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonportableExtension"
+          }
+        }
+      },
+      "required": ["name", "source"],
+      "additionalProperties": false
+    },
+    "Relationship": {
+      "type": "object",
+      "description": "Foreign key relationship between datasets",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the relationship"
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dataset on the many side of the relationship"
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dataset on the one side of the relationship"
+        },
+        "from_columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Array of field names in the 'from' dataset (foreign key fields)"
+        },
+        "to_columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Array of field names in the 'to' dataset (primary or unique key fields)"
+        },
+        "ai_context": {
+          "$ref": "#/$defs/AIContext"
+        },
+        "nonportable_extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonportableExtension"
+          }
+        }
+      },
+      "required": ["name", "from", "to", "from_columns", "to_columns"],
+      "additionalProperties": false
+    },
+    "Metric": {
+      "type": "object",
+      "description": "Quantitative measure defined on business data",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the metric"
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what the metric measures"
+        },
+        "datatype": {
+          "$ref": "#/$defs/DataType"
+        },
+        "ai_context": {
+          "$ref": "#/$defs/AIContext"
+        },
+        "nonportable_extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonportableExtension"
+          }
+        }
+      },
+      "required": ["name", "expression"],
+      "additionalProperties": false
+    },
+    "SemanticModel": {
+      "type": "object",
+      "description": "Top-level container representing a complete semantic model",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the semantic model"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description"
+        },
+        "ai_context": {
+          "$ref": "#/$defs/AIContext"
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Dataset"
+          },
+          "minItems": 1,
+          "description": "Collection of logical datasets"
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Relationship"
+          },
+          "description": "Defines how datasets are connected"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Metric"
+          },
+          "description": "Model-scoped metrics: aggregations that span datasets or need to be aware of cross-dataset concepts. Expressions reference fields by multi-part name (dataset.field) and may combine fields from more than one dataset. Names must be unique across the model. See core-spec/spec.md#metric-scoping."
+        },
+        "nonportable_extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonportableExtension"
+          }
+        }
+      },
+      "required": ["name", "datasets"],
+      "additionalProperties": false
+    }
+  }
+}

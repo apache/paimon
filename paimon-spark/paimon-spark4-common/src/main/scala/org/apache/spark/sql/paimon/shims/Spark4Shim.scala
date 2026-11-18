@@ -186,7 +186,7 @@ class Spark4Shim extends SparkShim {
     val statementType = "REPLACE TABLE"
     val columns = schemaOrColumns.asInstanceOf[Seq[ColumnDefinition]]
     ResolveDefaultColumns.validateCatalogForDefaultValue(columns, catalog, ident)
-    GeneratedColumn.validateGeneratedColumns(tableSchema, catalog, ident, statementType)
+    validateGeneratedColumns(tableSchema, columns, catalog, ident, statementType)
     IdentityColumn.validateIdentityColumn(tableSchema, catalog, ident)
     columns.map(_.toV2Column(statementType)).toArray
   }
@@ -196,6 +196,27 @@ class Spark4Shim extends SparkShim {
       additionalProperties: Map[String, String],
       location: Option[String]): TableSpec = {
     tableSpec.copy(properties = tableSpec.properties ++ additionalProperties, location = location)
+  }
+
+  // Spark 4.3 keeps only the catalog check here and verifies generation expressions in
+  // CheckAnalysis.
+  private def validateGeneratedColumns(
+      tableSchema: StructType,
+      columns: Seq[ColumnDefinition],
+      catalog: TableCatalog,
+      ident: Identifier,
+      statementType: String): Unit = {
+    val methods = GeneratedColumn.getClass.getMethods
+    val (method, args) = methods.find(_.getName == "validateGeneratedColumns") match {
+      case Some(m) => (m, Seq(tableSchema, catalog, ident, statementType))
+      case None =>
+        val m = methods
+          .find(_.getName == "validateCatalogForGeneratedColumn")
+          .getOrElse(throw new IllegalStateException("No generated column validation in Spark"))
+        (m, Seq(columns, catalog, ident))
+    }
+    try { method.invoke(GeneratedColumn, args: _*) }
+    catch { case e: java.lang.reflect.InvocationTargetException => throw e.getCause }
   }
 
   private def invalidateCache(tableCatalog: TableCatalog, ident: Identifier): Unit = {
@@ -405,7 +426,7 @@ class Spark4Shim extends SparkShim {
     readSpatial(array, pos, geography = true)
 
   private def readSpatial(value: AnyRef, pos: Int, geography: Boolean): Array[Byte] = {
-    val modern = org.apache.spark.SPARK_VERSION.startsWith("4.2.")
+    val modern = org.apache.spark.SPARK_VERSION >= "4.2"
     val getter = if (modern) "getBinaryView" else if (geography) "getGeography" else "getGeometry"
     val raw = value.getClass
       .getMethod(getter, java.lang.Integer.TYPE)
@@ -430,7 +451,7 @@ class Spark4Shim extends SparkShim {
   override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object = {
     val geographyType = sparkGeographyType(crs, algorithm)
     val name =
-      if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) "stGeogSetSrid" else "stSetSrid"
+      if (org.apache.spark.SPARK_VERSION >= "4.2") "stGeogSetSrid" else "stSetSrid"
     val raw = STUtils.stGeogFromWKB(wkb)
     val method = Class
       .forName("org.apache.spark.sql.catalyst.util.STUtils")
