@@ -76,7 +76,6 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
@@ -446,45 +445,6 @@ class GlobalIndexQueryTest {
                 .withBucketPath("bucket-0")
                 .withDataFiles(Collections.singletonList(file))
                 .build();
-    }
-
-    @Test
-    void testExtensionScalarLookupIsUsedOnceForFastCoverage() throws Exception {
-        RowType rowType = RowType.of(DataTypes.INT());
-        GlobalIndexQuery plan =
-                create(
-                        "extension",
-                        rowType,
-                        new PredicateBuilder(rowType).equal(0, 7),
-                        7,
-                        100,
-                        109);
-        GlobalIndexReader reader = mock(GlobalIndexReader.class);
-        when(reader.visitEqual(any(), eq(7)))
-                .thenReturn(
-                        CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.fromRange(new Range(2, 2)))));
-        GlobalIndexer indexer = mock(GlobalIndexer.class);
-        when(indexer.createReader(any(), anyList(), anyLong(), isNull(), any())).thenReturn(reader);
-        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
-        FileIO fileIO = mock(FileIO.class);
-        Options options = new Options();
-        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
-                mockStatic(GlobalIndexerFactoryUtils.class)) {
-            assertThat(plan.needsReaderCoverage(options)).isFalse(); // Only installed in workers.
-            factories.when(() -> GlobalIndexerFactoryUtils.find("extension")).thenReturn(factory);
-            factories.when(() -> GlobalIndexerFactoryUtils.load("extension")).thenReturn(factory);
-            assertThat(plan.needsReaderCoverage(options)).isFalse(); // Scalar-only extension.
-            when(factory.supportsFullTextSearch()).thenReturn(true);
-            assertThat(plan.needsReaderCoverage(options)).isTrue();
-            GlobalIndexQuery resolved = plan.resolveFastCoverage(fileIO, options);
-            assertThat(resolved.indexedRanges()).containsExactly(new Range(100, 109));
-            assertThat(resolved.fastCandidates(fileIO, options).results().toRangeList())
-                    .containsExactly(new Range(102, 102));
-            verify(reader).visitEqual(any(), eq(7));
-            verify(reader).close();
-        }
     }
 
     @ParameterizedTest

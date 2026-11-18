@@ -134,7 +134,7 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testUnsupportedEqualityScansCoveredRowsInFastMode(boolean deferred) throws Exception {
+    void testGeometryEqualityRemainsADataFilter(boolean deferred) throws Exception {
         queryInReader = deferred;
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -150,9 +150,8 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
             Predicate equality = builder.equal(1, value);
             Predicate bounds = builder.bboxIntersects(1, 0, 0, 2, 2);
             Integer[] expected = "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1};
-            assertThat(readIds(table, equality)).containsExactly(expected);
-            assertThat(readIds(table, PredicateBuilder.or(bounds, equality)))
-                    .containsExactly(expected);
+            assertThat(readIds(table, equality)).containsExactly(0, 1);
+            assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0, 1);
             assertThat(readIds(table, bounds)).containsExactly(expected);
         }
     }
@@ -184,14 +183,14 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
         Predicate equality = builder.equal(1, geom);
         assertThat(readIds(table, PredicateBuilder.and(equality, builder.greaterOrEqual(0, 0))))
-                .containsExactly(0, 1);
+                .containsExactly(0);
         assertThat(readIds(table, PredicateBuilder.and(equality, builder.greaterOrEqual(0, 1))))
-                .containsExactly(1);
+                .isEmpty();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testFullTextOnlyIndexDoesNotExtendSpatialFastCoverage(boolean deferred) throws Exception {
+    void testFullTextIndexDoesNotExtendSpatialFastCoverage(boolean deferred) throws Exception {
         queryInReader = deferred;
         createTableDefault();
         catalog.alterTable(
@@ -219,21 +218,15 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(table.newReadBuilder().newScan().plan().splits()).hasSize(3);
         PredicateBuilder predicates = new PredicateBuilder(table.rowType());
         Predicate equality = predicates.equal(2, text);
-        assertThat(readIds(table, equality)).containsExactly(0, 1, 2);
-        assertThat(
-                        readIds(
-                                table,
-                                PredicateBuilder.or(
-                                        predicates.bboxIntersects(1, 0, 0, 2, 2), equality)))
-                .containsExactly(0, 1, 2);
-        assertThat(
-                        readIds(
-                                table,
-                                PredicateBuilder.and(
-                                        predicates.bboxIntersects(1, 0, 0, 2, 2), equality)))
-                .containsExactly(0);
-        // The B-tree and the full-text index cover disjoint ranges on the same column.
-        buildIndex(getTableDefault(), new Range(0, 0), Collections.emptyList(), "btree", "content");
+        Predicate bounds = predicates.bboxIntersects(1, 0, 0, 2, 2);
+        assertThat(readIds(table, PredicateBuilder.and(bounds, equality))).containsExactly(0);
+        // Without a scalar index on content the disjunction needs the ordinary data scan.
+        assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0, 1, 2);
+        // The full-text shard cannot contribute scalar matches on this column.
+        buildIndex(table, new Range(0, 0), Collections.emptyList(), "btree", "content");
+        assertThat(readIds(table, equality)).containsExactly(0);
+        assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0);
+        assertThat(readIds(table, PredicateBuilder.and(bounds, equality))).containsExactly(0);
         for (String mode : new String[] {"fast", "full", "detail"}) {
             FileStoreTable configured =
                     getTableDefault()

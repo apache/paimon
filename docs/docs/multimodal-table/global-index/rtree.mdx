@@ -77,10 +77,13 @@ another spatial relation must retain its original predicate for exact refinement
 
 The index also supports `IS NULL` and `IS NOT NULL`. Empty geometries are
 non-null, have no spatial leaf entry, and do not match `bboxIntersects`.
-For an unsupported predicate on the indexed column, `fast` tests the original values
-within indexed coverage. Only indexes that support scalar search contribute coverage to a
-compound scalar filter. `full` and `detail` also include uncovered ranges. Negating a spatial
-candidate bitmap is not supported.
+For a scalar index lookup, only a predicate the R-tree can evaluate contributes R-tree
+matches in `fast` mode. Geometry equality remains a data filter. In `full` and `detail`
+modes, a supplementary data scan covers only gaps in the applicable index coverage.
+For a `fast` disjunction that combines a bbox with filters on other columns, the planner
+evaluates the indexes before assigning data splits, so a reader declining an operand can
+trigger fallback for the whole disjunction. Negating a spatial candidate bitmap is unsupported.
+See [Coverage and Freshness](manage-indexes.mdx#coverage-and-freshness).
 
 ### Spark SQL
 

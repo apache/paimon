@@ -28,13 +28,14 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,7 +58,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -344,6 +344,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    // An OR across a spatial and another column can require fallback for the entire predicate.
+    // Decide this before assigning splits: an individual split only sees its local index files.
+    private static boolean hasMixedSpatialDisjunction(Predicate predicate, boolean underMixedOr) {
+        if (predicate instanceof LeafPredicate) {
+            return underMixedOr
+                    && GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate).function()
+                            instanceof BBoxIntersects;
+        }
+        CompoundPredicate compound = (CompoundPredicate) predicate;
+        boolean mixed =
+                underMixedOr
+                        || (compound.function() instanceof Or
+                                && PredicateVisitor.collectFieldNames(compound).size() > 1);
+        return compound.children().stream()
+                .anyMatch(child -> hasMixedSpatialDisjunction(child, mixed));
+    }
+
     /** Plan complete data splits while deferring index evaluation to readers. */
     private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
@@ -357,7 +374,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return planEager();
         }
         Predicate indexFilter = rowIdSafeResidualFilter(filter);
-        if (indexFilter == null) {
+        if (indexFilter == null
+                || (table.coreOptions().scalarIndexSearchMode()
+                                == CoreOptions.GlobalIndexSearchMode.FAST
+                        && hasMixedSpatialDisjunction(indexFilter, false))) {
             return planEager();
         }
 
@@ -395,33 +415,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexFiles.isEmpty()) {
             return dataPlan;
         }
-        Options indexOptions = table.coreOptions().toConfiguration();
         GlobalIndexQuery indexQuery =
                 GlobalIndexQuery.create(
                         table.rowType(),
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexOptions);
+                        table.coreOptions().toConfiguration());
         if (indexQuery == null) {
             return dataPlan;
-        }
-        if (table.coreOptions().scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST
-                && indexQuery.needsReaderCoverage(indexOptions)) {
-            try {
-                indexQuery = indexQuery.resolveFastCoverage(table.fileIO(), indexOptions);
-                if (indexQuery == null) {
-                    return dataPlan;
-                }
-                if (indexQuery.hasResolvedMatches()) {
-                    // Reuse scalar matches already returned by the extension. Work against the
-                    // data splits from the same snapshot and never query that index a second time.
-                    return planResolvedSplits(
-                            splits, indexQuery.fastCandidates(table.fileIO(), indexOptions));
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
         }
         List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
@@ -443,23 +445,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;
-    }
-
-    private static Plan planResolvedSplits(List<Split> splits, GlobalIndexResult result) {
-        RowRangeIndex matches = RowRangeIndex.fromBitmap(result.results());
-        List<Split> selected = new ArrayList<>();
-        for (Split split : splits) {
-            DataSplit data = dataSplit(split);
-            List<Range> hits = new ArrayList<>();
-            for (Range range :
-                    GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(data))) {
-                hits.addAll(matches.intersectedRanges(range.from, range.to));
-            }
-            if (!hits.isEmpty()) {
-                selected.add(withAuth(split, new IndexedSplit(data, hits, null)));
-            }
-        }
-        return () -> selected;
     }
 
     @Override
@@ -544,19 +529,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             long lookupStart = System.nanoTime();
-            Optional<GlobalIndexResult> finalResult;
-            long coverageStart;
-            if (options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST) {
-                finalResult = scanner.scanFast(globalIndexFilter);
-                coverageStart = System.nanoTime();
-            } else {
-                Optional<GlobalIndexEvaluator.Evaluation> result =
-                        scanner.scanWithCoverage(globalIndexFilter);
-                coverageStart = System.nanoTime();
-                finalResult = result.map(e -> e.result().or(scanner.unindexedRowsForEvaluation(e)));
-            }
-            long lookupDuration = coverageStart - lookupStart;
-            if (finalResult.isPresent()) {
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(globalIndexFilter);
+            long lookupDuration = System.nanoTime() - lookupStart;
+            if (result.isPresent()) {
+                long coverageStart = System.nanoTime();
+                GlobalIndexResult finalResult =
+                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(
@@ -567,8 +546,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         metadataDuration / 1_000_000,
                         lookupDuration / 1_000_000,
                         coverageDuration / 1_000_000);
+                return Optional.of(finalResult);
             }
-            return finalResult;
+            return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
