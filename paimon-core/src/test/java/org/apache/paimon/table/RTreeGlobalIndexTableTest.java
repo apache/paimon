@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
@@ -30,6 +32,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.generic.GenericGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -128,7 +131,7 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testUnsupportedEqualityDoesNotClaimIndexCoverage(boolean deferred) throws Exception {
+    void testUnsupportedEqualityScansCoveredRowsInFastMode(boolean deferred) throws Exception {
         queryInReader = deferred;
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -136,19 +139,83 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         write(table, GenericRow.of(0, value));
         buildIndex(table, new Range(0, 0));
         write(getTableDefault(), GenericRow.of(1, value));
-        for (String mode : new String[] {"fast", "full"}) {
+        for (String mode : new String[] {"fast", "full", "detail"}) {
             table =
                     getTableDefault()
                             .copy(Collections.singletonMap("scalar-index.search-mode", mode));
             PredicateBuilder builder = new PredicateBuilder(table.rowType());
             Predicate equality = builder.equal(1, value);
             Predicate bounds = builder.bboxIntersects(1, 0, 0, 2, 2);
-            assertThat(readIds(table, equality)).containsExactly(0, 1);
-            assertThat(readIds(table, PredicateBuilder.or(bounds, equality))).containsExactly(0, 1);
-            assertThat(readIds(table, bounds))
-                    .containsExactly(
-                            "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1});
+            Integer[] expected = "fast".equals(mode) ? new Integer[] {0} : new Integer[] {0, 1};
+            assertThat(readIds(table, equality)).containsExactly(expected);
+            assertThat(readIds(table, PredicateBuilder.or(bounds, equality)))
+                    .containsExactly(expected);
+            assertThat(readIds(table, bounds)).containsExactly(expected);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastMixedPredicatesWithDisjointIndexCoverage(boolean deferred) throws Exception {
+        queryInReader = deferred;
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        byte[] geom = point(1, 1);
+        write(table, GenericRow.of(0, geom), GenericRow.of(1, geom), GenericRow.of(2, geom));
+        table = getTableDefault();
+        SortedGlobalIndexWriter writer =
+                new SortedGlobalIndexWriter(table, "btree")
+                        .withIndexFields(Collections.singletonList("id"));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    writer.buildForSinglePartition(
+                            new Range(0, 0),
+                            BinaryRow.EMPTY_ROW,
+                            Collections.<InternalRow>singletonList(GenericRow.of(0, 0L)).iterator(),
+                            table.latestSnapshot().get().id()));
+        }
+        buildIndex(getTableDefault(), new Range(1, 1));
+        table =
+                getTableDefault()
+                        .copy(Collections.singletonMap("scalar-index.search-mode", "fast"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate equality = builder.equal(1, geom);
+        assertThat(readIds(table, PredicateBuilder.and(equality, builder.greaterOrEqual(0, 0))))
+                .containsExactly(0, 1);
+        assertThat(readIds(table, PredicateBuilder.and(equality, builder.greaterOrEqual(0, 1))))
+                .containsExactly(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFullTextOnlyIndexDoesNotExtendSpatialFastCoverage(boolean deferred) throws Exception {
+        queryInReader = deferred;
+        createTableDefault();
+        catalog.alterTable(
+                identifier(), SchemaChange.addColumn("content", DataTypes.STRING()), false);
+        FileStoreTable table = getTableDefault();
+        BinaryString text = BinaryString.fromString("same");
+        byte[] geom = point(1, 1);
+        write(table, GenericRow.of(0, geom, text), GenericRow.of(1, geom, text));
+        buildIndex(getTableDefault(), new Range(0, 0));
+        buildIndex(
+                getTableDefault(),
+                new Range(1, 1),
+                Collections.emptyList(),
+                "test-fulltext",
+                "content");
+        table =
+                getTableDefault()
+                        .copy(Collections.singletonMap("scalar-index.search-mode", "fast"));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate equality = predicates.equal(2, text);
+        assertThat(readIds(table, equality)).containsExactly(0, 1);
+        assertThat(
+                        readIds(
+                                table,
+                                PredicateBuilder.and(
+                                        predicates.bboxIntersects(1, 0, 0, 2, 2), equality)))
+                .containsExactly(0);
     }
 
     @ParameterizedTest
@@ -294,10 +361,20 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private void buildIndex(FileStoreTable table, Range range, List<IndexManifestEntry> retired)
             throws Exception {
-        DataField field = table.rowType().getField("geom");
+        buildIndex(table, range, retired, "rtree", "geom");
+    }
+
+    private void buildIndex(
+            FileStoreTable table,
+            Range range,
+            List<IndexManifestEntry> retired,
+            String type,
+            String column)
+            throws Exception {
+        DataField field = table.rowType().getField(column);
         RowType readType =
                 SpecialFields.rowTypeWithRowId(
-                        table.rowType().project(Collections.singletonList("geom")));
+                        table.rowType().project(Collections.singletonList(column)));
         ReadBuilder read =
                 table.newReadBuilder()
                         .withReadType(readType)
@@ -305,23 +382,22 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
         GlobalIndexWriter indexWriter =
                 GlobalIndexBuilderUtils.createIndexWriter(
                         table,
-                        "rtree",
+                        type,
                         Collections.singletonList(field),
                         table.coreOptions().toConfiguration());
         List<Split> splits = read.newScan().plan().splits();
         try {
             try (RecordReader<InternalRow> reader = read.newRead().createReader(splits);
                     CloseableIterator<InternalRow> rows = reader.toCloseableIterator()) {
-                int valueIndex = readType.getFieldIndex("geom");
+                InternalRow.FieldGetter getter =
+                        InternalRow.createFieldGetter(field.type(), readType.getFieldIndex(column));
                 int idIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
                 while (rows.hasNext()) {
                     InternalRow row = rows.next();
                     long id = row.getLong(idIndex);
                     if (id >= range.from && id <= range.to) {
                         ((GlobalIndexSingleColumnWriter) indexWriter)
-                                .write(
-                                        row.isNullAt(valueIndex) ? null : row.getBinary(valueIndex),
-                                        id - range.from);
+                                .write(getter.getFieldOrNull(row), id - range.from);
                     }
                 }
             }
@@ -333,7 +409,7 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             table.coreOptions(),
                             range,
                             Collections.singletonList(field),
-                            "rtree",
+                            type,
                             results,
                             new DataEvolutionIndexSourceMeta(table.latestSnapshot().get().id())
                                     .serialize());

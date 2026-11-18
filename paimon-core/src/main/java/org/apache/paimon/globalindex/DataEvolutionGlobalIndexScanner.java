@@ -23,12 +23,14 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
@@ -377,7 +379,11 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                     }
                     return false;
                 };
-        return indexFileFilter;
+        // Ranked-only indexes do not contribute row coverage to a scalar filter.
+        return indexFileFilter.and(
+                entry ->
+                        GlobalIndexerFactoryUtils.supportsScalarSearch(
+                                entry.indexFile().indexType()));
     }
 
     private static boolean isMultiFieldIndex(IndexFileMeta file) {
@@ -453,6 +459,45 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             return Optional.empty();
         }
         return globalIndexEvaluator.evaluateTopN(topN);
+    }
+
+    /** Keep candidates inside the selected spatial/scalar index ranges in fast mode. */
+    Optional<GlobalIndexResult> fastCandidates(
+            Predicate predicate, Optional<GlobalIndexEvaluator.Evaluation> evaluation) {
+        Optional<GlobalIndexResult> matches =
+                evaluation.map(GlobalIndexEvaluator.Evaluation::result);
+        if (evaluation.isPresent()
+                && evaluation.get().allPredicatesEvaluated()
+                && !(predicate instanceof CompoundPredicate)) {
+            return matches;
+        }
+        if (indexFiles.stream()
+                .noneMatch(f -> RTreeGlobalIndexerFactory.IDENTIFIER.equals(f.indexType()))) {
+            return matches;
+        }
+        GlobalIndexQuery query =
+                GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory, options);
+        if (query == null || !query.hasRTreeQuery()) {
+            return matches;
+        }
+        List<Range> indexed = query.indexedRanges();
+        if (!evaluation.isPresent()) {
+            return Optional.of(GlobalIndexResult.fromRanges(indexed));
+        }
+        // Other selected indexes may cover rows outside the ranges tested by a supported child.
+        // The data filter must check these rows, as it does in IndexQuerySplit.
+        GlobalIndexEvaluator.Evaluation supported = evaluation.get();
+        List<Range> covered =
+                supported.coveredRanges() == null
+                        ? coverage.indexedRanges(supported.contributingFieldIds())
+                        : supported.coveredRanges();
+        // An R-tree query has at least one index group. Subtract coverage once for the whole
+        // span, then intersect with the selected ranges to keep gaps between shards out.
+        Range span = new Range(indexed.get(0).from, indexed.get(indexed.size() - 1).to);
+        List<Range> untested = Range.and(indexed, span.exclude(covered));
+        return untested.isEmpty()
+                ? matches
+                : Optional.of(supported.result().or(GlobalIndexResult.fromRanges(untested)));
     }
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {

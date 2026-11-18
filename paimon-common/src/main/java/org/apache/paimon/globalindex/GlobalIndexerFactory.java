@@ -30,13 +30,13 @@ public interface GlobalIndexerFactory {
 
     String identifier();
 
-    default boolean supportsFullTextSearch() {
-        return false;
+    /** Whether this index participates in scalar filters and their row-range coverage. */
+    default boolean supportsScalarSearch() {
+        return true;
     }
 
-    /** Whether a scalar lookup can use this index when planning without opening its files. */
-    default boolean supportsPredicate(Predicate predicate) {
-        return true;
+    default boolean supportsFullTextSearch() {
+        return false;
     }
 
     /**

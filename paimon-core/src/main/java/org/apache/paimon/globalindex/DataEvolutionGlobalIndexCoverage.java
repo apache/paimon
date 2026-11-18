@@ -121,7 +121,7 @@ public class DataEvolutionGlobalIndexCoverage {
         coverageByField.computeIfAbsent(fieldId, k -> new ArrayList<>()).add(range);
     }
 
-    private List<Range> indexedRanges(Collection<Integer> fieldIds) {
+    List<Range> indexedRanges(Collection<Integer> fieldIds) {
         List<Range> ranges = null;
         for (Integer fieldId : fieldIds) {
             List<Range> fieldRanges = coverageByField.get(fieldId);

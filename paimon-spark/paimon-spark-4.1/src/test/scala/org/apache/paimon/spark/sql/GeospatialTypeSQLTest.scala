@@ -23,6 +23,8 @@ import org.apache.paimon.types.{DataTypes, EdgeAlgorithm}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.FunctionIdentifier
+import org.apache.spark.sql.catalyst.expressions.ApplyFunctionExpression
 
 /** Tests Spark 4.1 SQL interoperability with Paimon geospatial columns. */
 class GeospatialTypeSQLTest extends PaimonSparkTestBase {
@@ -117,6 +119,14 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
           checkAnswer(
             sql(s"SELECT id FROM $search WHERE ST_Intersects(geom, ${geom(pointZ)})"),
             Seq(Row(2)))
+          val mixedPoint = s"ST_SetSrid(ST_GeomFromWKB(unhex('$point')), 4300 + 26)"
+          Seq(
+            s"ST_Intersects(geom, $mixedPoint)",
+            s"ST_Intersects(geom, ${geom(point)}) IS TRUE",
+            s"TRUE <=> ST_Intersects(geom, ${geom(point)})"
+          ).foreach {
+            predicate => checkAnswer(sql(s"SELECT id FROM $search WHERE $predicate"), Seq(Row(2)))
+          }
           Seq(false, true).foreach {
             refine =>
               sql(
@@ -149,6 +159,15 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
       Seq(s"geom, $point", s"$point, geom").foreach {
         args =>
           val query = sql(s"SELECT id FROM t WHERE ST_Intersects($args)")
+          val projection = sql(s"SELECT ST_Intersects($args) FROM t").queryExecution.optimizedPlan
+          val Seq(call) = projection.expressions.flatMap(_.collect {
+            case f: ApplyFunctionExpression => f
+          })
+          // Binding the optimized children directly must select the same prepared geometry.
+          assert(call.children.count(_.foldable) == 1)
+          val rebound = spark.sessionState.functionRegistry
+            .lookupFunction(FunctionIdentifier("st_intersects"), call.children)
+          assert(call.function == rebound.asInstanceOf[ApplyFunctionExpression].function)
           val plan = query.queryExecution.executedPlan.toString()
           assert(plan.contains("BBoxIntersects"), plan)
           checkAnswer(query, Seq(Row(2)))

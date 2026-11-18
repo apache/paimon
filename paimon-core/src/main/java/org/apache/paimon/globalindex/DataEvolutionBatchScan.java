@@ -510,10 +510,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
             Optional<GlobalIndexEvaluator.Evaluation> result =
                     scanner.scanWithCoverage(globalIndexFilter);
             long lookupDuration = System.nanoTime() - lookupStart;
-            if (result.isPresent()) {
-                long coverageStart = System.nanoTime();
-                GlobalIndexResult finalResult =
-                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
+            long coverageStart = System.nanoTime();
+            Optional<GlobalIndexResult> finalResult =
+                    options.scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FAST
+                            ? scanner.fastCandidates(globalIndexFilter, result)
+                            : result.map(e -> e.result().or(scanner.unindexedRowsForEvaluation(e)));
+            if (finalResult.isPresent()) {
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(
@@ -524,9 +526,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         metadataDuration / 1_000_000,
                         lookupDuration / 1_000_000,
                         coverageDuration / 1_000_000);
-                return Optional.of(finalResult);
             }
-            return Optional.empty();
+            return finalResult;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

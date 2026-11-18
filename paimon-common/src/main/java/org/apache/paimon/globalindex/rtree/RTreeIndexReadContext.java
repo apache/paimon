@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex.rtree;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexReader.FileSearch;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.MapMaker;
 
@@ -59,21 +60,17 @@ final class RTreeIndexReadContext {
         return workersByExecutor.computeIfAbsent(executor, e -> new FileWorkers(fileConcurrency));
     }
 
-    interface FileWork extends Runnable {
-        void fail(Throwable cause);
-    }
-
     /** Queue excess shards here so waiting for a file slot never occupies their shared executor. */
     static final class FileWorkers {
         private final int limit;
-        private final ArrayDeque<FileWork> queue = new ArrayDeque<>();
+        private final ArrayDeque<FileSearch> queue = new ArrayDeque<>();
         private int workers;
 
         private FileWorkers(int limit) {
             this.limit = limit;
         }
 
-        void execute(ExecutorService executor, FileWork work) {
+        void execute(ExecutorService executor, FileSearch work) {
             synchronized (this) {
                 if (executor.isShutdown()) {
                     throw new RejectedExecutionException("R-tree file executor is shut down.");
@@ -87,7 +84,7 @@ final class RTreeIndexReadContext {
             try {
                 executor.execute(this::drain);
             } catch (RuntimeException e) {
-                List<FileWork> rejected = new ArrayList<>();
+                List<FileSearch> rejected = new ArrayList<>();
                 synchronized (this) {
                     queue.removeLastOccurrence(work);
                     if (--workers == 0) {
@@ -100,24 +97,20 @@ final class RTreeIndexReadContext {
             }
         }
 
-        void failAbandoned() {
-            List<FileWork> abandoned;
-            synchronized (this) {
-                if (queue.isEmpty()) {
-                    return;
+        synchronized void discardQueued(boolean terminated) {
+            Iterator<FileSearch> tasks = queue.iterator();
+            while (tasks.hasNext()) {
+                FileSearch task = tasks.next();
+                if (terminated || task.readerClosed()) {
+                    tasks.remove();
+                    task.discardIfIdle();
                 }
-                abandoned = new ArrayList<>(queue);
-                queue.clear();
             }
-            RejectedExecutionException error =
-                    new RejectedExecutionException(
-                            "R-tree file executor terminated before reading queued files.");
-            abandoned.forEach(work -> work.fail(error));
         }
 
         private void drain() {
             while (true) {
-                FileWork work;
+                FileSearch work;
                 synchronized (this) {
                     work = queue.pollFirst();
                     if (work == null) {

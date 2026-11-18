@@ -77,7 +77,9 @@ another spatial relation must retain its original predicate for exact refinement
 
 The index also supports `IS NULL` and `IS NOT NULL`. Empty geometries are
 non-null, have no spatial leaf entry, and do not match `bboxIntersects`.
-Unknown scalar predicates are left to the normal data path. Negating a spatial
+For an unsupported predicate on the indexed column, `fast` tests the original values
+within indexed coverage. Only indexes that support scalar search contribute coverage to a
+compound scalar filter. `full` and `detail` also include uncovered ranges. Negating a spatial
 candidate bitmap is not supported.
 
 ### Spark SQL
@@ -156,15 +158,18 @@ spatial traversal can issue up to four disjoint positioned reads within its own 
 Temporary batches, row lists and result bitmaps can grow with the number of active files.
 Independent indexers have separate cache and concurrency budgets.
 
-Closing a reader stops new queries. Each admitted query closes its own streams
-as its file traversals finish. Cached pages remain available to other readers
+Closing a reader stops new queries. If its executor is shutting down, closing also
+cancels queued searches of closed readers if they have no active worker. Once the executor has
+terminated, all queued searches are discarded. Each active traversal closes its own stream. Cached pages remain available to other readers
 until eviction or release of the owning indexer. Empty `IS NULL` / `IS NOT NULL` results are
 answered from metadata counts without reading the row-ID block.
 
 ## File Format, Version 1
 
 All integers and IEEE 754 doubles use big-endian byte order. The 80-byte header
-is also stored verbatim in `GlobalIndexIOMeta.metadata`.
+is also stored verbatim in `GlobalIndexIOMeta.metadata`. A manifest entry records the number of
+source rows in that physical file, including null and empty geometries. The Java writer reports
+this as `ResultEntry.fileRowCount()` and the total across its files as `ResultEntry.rowCount()`.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |

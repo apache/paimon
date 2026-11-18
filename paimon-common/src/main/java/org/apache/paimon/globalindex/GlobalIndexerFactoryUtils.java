@@ -81,9 +81,9 @@ public class GlobalIndexerFactoryUtils {
         return globalIndexerFactory;
     }
 
-    public static boolean supportsPredicate(String type, Predicate predicate) {
+    public static boolean supportsScalarSearch(String type) {
         GlobalIndexerFactory factory = find(type);
-        return factory == null || factory.supportsPredicate(predicate);
+        return factory == null || factory.supportsScalarSearch();
     }
 
     /** Keep unrecognized index types for the reader to resolve at execution time. */

@@ -28,11 +28,19 @@ public class ResultEntry {
     /** Total logical rows processed by the writer, including null/skipped rows. */
     private final long rowCount;
 
+    /** Source rows represented by this physical index file in the manifest. */
+    private final long fileRowCount;
+
     @Nullable private final byte[] meta;
 
     public ResultEntry(String fileName, long rowCount, @Nullable byte[] meta) {
+        this(fileName, rowCount, rowCount, meta);
+    }
+
+    public ResultEntry(String fileName, long rowCount, long fileRowCount, @Nullable byte[] meta) {
         this.fileName = fileName;
         this.rowCount = rowCount;
+        this.fileRowCount = fileRowCount;
         this.meta = meta;
     }
 
@@ -42,6 +50,10 @@ public class ResultEntry {
 
     public long rowCount() {
         return rowCount;
+    }
+
+    public long fileRowCount() {
+        return fileRowCount;
     }
 
     public byte[] meta() {

@@ -50,13 +50,23 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.FutureUtils.completedExceptionally;
 
 /** Demand-loaded R-tree reader using a shared byte-bounded cache and bounded page batches. */
 final class RTreeGlobalIndexReader implements GlobalIndexReader {
+
+    // CompletableFuture's default executor starts a new thread per completion on small JVMs.
+    // A work-stealing pool also permits a callback to wait for another query's completion.
+    private static final Executor COMPLETIONS =
+            ForkJoinPool.getCommonPoolParallelism() > 1
+                    ? ForkJoinPool.commonPool()
+                    : new ForkJoinPool(1);
 
     private final DataField field;
     private final GlobalIndexFileReader fileReader;
@@ -133,12 +143,15 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         if (closed) {
             return completedExceptionally(new IllegalStateException("R-tree reader is closed."));
         }
-        if (files.isEmpty()) {
-            return CompletableFuture.completedFuture(
-                    Optional.of(GlobalIndexResult.create(new RoaringNavigableMap64())));
+        int first = 0;
+        while (first < files.size() && !mayMatch(first, query, nulls)) {
+            first++;
         }
-        FileSearch search = new FileSearch(query, nulls);
-        int workers = Math.min(readFileConcurrency, files.size());
+        if (first == files.size()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        FileSearch search = new FileSearch(query, nulls, first);
+        int workers = Math.min(readFileConcurrency, files.size() - first);
         for (int i = 0; i < workers && search.hasWork(); i++) {
             try {
                 fileWorkers.execute(executor, search);
@@ -149,16 +162,16 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         }
         // Synchronous user continuations may submit and await another query on the same indexer.
         // Publish success and failure outside the file worker that still owns the scheduling slot.
-        return search.completion.whenCompleteAsync((ignored, error) -> {});
+        return search.completion.whenCompleteAsync((ignored, error) -> {}, COMPLETIONS);
     }
 
     /**
      * Only workers that actually start own work. An executor may discard queued tasks on shutdown.
      */
-    private final class FileSearch implements RTreeIndexReadContext.FileWork {
+    final class FileSearch implements Runnable {
         @Nullable private final BoundingBox query;
         private final boolean nulls;
-        private final AtomicInteger next = new AtomicInteger();
+        private final AtomicInteger next;
         private final CompletableFuture<Optional<GlobalIndexResult>> completion =
                 new CompletableFuture<>();
         private volatile Throwable failure;
@@ -166,7 +179,8 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         private int running;
         private RoaringNavigableMap64 rows;
 
-        private FileSearch(@Nullable BoundingBox query, boolean nulls) {
+        private FileSearch(@Nullable BoundingBox query, boolean nulls, int first) {
+            this.next = new AtomicInteger(first);
             this.query = query;
             this.nulls = nulls;
         }
@@ -197,8 +211,20 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
             }
         }
 
-        @Override
-        public synchronized void fail(Throwable cause) {
+        boolean readerClosed() {
+            return closed;
+        }
+
+        synchronized void discardIfIdle() {
+            // A worker that has started owns all remaining files of this search.
+            if (running == 0) {
+                fail(
+                        new RejectedExecutionException(
+                                "R-tree reader closed during executor shutdown."));
+            }
+        }
+
+        synchronized void fail(Throwable cause) {
             if (failure == null) {
                 failure = cause;
             }
@@ -230,12 +256,16 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
+    private boolean mayMatch(int file, @Nullable BoundingBox query, boolean nulls) {
+        RTreeIndexFile.Metadata meta = metadata.get(file);
+        return query != null
+                ? meta.bounds.intersects(query)
+                : (nulls ? meta.nulls : meta.nonNulls) != 0;
+    }
+
     private void searchFile(
             int file, @Nullable BoundingBox query, boolean nulls, RoaringNavigableMap64 result) {
-        RTreeIndexFile.Metadata meta = metadata.get(file);
-        if (query != null
-                ? !meta.bounds.intersects(query)
-                : (nulls ? meta.nulls : meta.nonNulls) == 0) {
+        if (!mayMatch(file, query, nulls)) {
             return;
         }
         try {
@@ -557,8 +587,8 @@ final class RTreeGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() {
         closed = true;
-        if (executor.isTerminated()) {
-            fileWorkers.failAbandoned();
+        if (executor.isShutdown()) {
+            fileWorkers.discardQueued(executor.isTerminated());
         }
     }
 }

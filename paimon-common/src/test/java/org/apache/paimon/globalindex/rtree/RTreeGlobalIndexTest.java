@@ -643,8 +643,10 @@ class RTreeGlobalIndexTest {
         }
     }
 
-    @Test
-    void testCloseFailsQueuedReadsAfterExecutorTerminates() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testCloseFailsQueuedReadsDuringOrAfterExecutorShutdown(boolean terminated)
+            throws Exception {
         RTreeGlobalIndexer indexer = indexer(2, 1, 0);
         List<GlobalIndexIOMeta> files = write(indexer, Collections.singletonList(point(1, 1)));
         ExecutorService pool = Executors.newSingleThreadExecutor();
@@ -664,19 +666,55 @@ class RTreeGlobalIndexTest {
                         1,
                         null,
                         pool);
-        try {
+        try (GlobalIndexReader sibling =
+                indexer.createReader(
+                        f -> {
+                            throw new AssertionError();
+                        },
+                        files,
+                        1,
+                        null,
+                        pool)) {
             assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<Optional<GlobalIndexResult>> siblingQuery =
+                    sibling.visitIsNotNull(ref);
+            sibling.close();
             CompletableFuture<Optional<GlobalIndexResult>> pending = reader.visitIsNotNull(ref);
             assertThat(pool.shutdownNow()).isNotEmpty();
-            release.countDown();
-            assertThat(pool.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            if (terminated) {
+                release.countDown();
+                assertThat(pool.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            }
             reader.close();
             assertThatThrownBy(() -> pending.get(5, TimeUnit.SECONDS))
+                    .hasRootCauseInstanceOf(RejectedExecutionException.class);
+            assertThatThrownBy(() -> siblingQuery.get(5, TimeUnit.SECONDS))
                     .hasRootCauseInstanceOf(RejectedExecutionException.class);
         } finally {
             release.countDown();
             pool.shutdownNow();
             reader.close();
+        }
+    }
+
+    @Test
+    void testMetadataPruningCompletesWithoutSubmittingWork() throws Exception {
+        RTreeGlobalIndexer indexer = indexer(2, 1, 0);
+        List<GlobalIndexIOMeta> files = write(indexer, Arrays.asList(point(0, 0), point(1, 1)));
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        // A terminated executor rejects any attempt to submit a file worker.
+        pool.shutdown();
+        try (GlobalIndexReader reader =
+                indexer.createReader(
+                        f -> {
+                            throw new AssertionError();
+                        },
+                        files,
+                        2,
+                        null,
+                        pool)) {
+            assertRows(reader.visitBBoxIntersects(ref, 2, 2, 3, 3), Collections.emptyList());
+            assertRows(reader.visitIsNull(ref), Collections.emptyList());
         }
     }
 
@@ -998,6 +1036,27 @@ class RTreeGlobalIndexTest {
     }
 
     @Test
+    void testMultiFileWriterReportsLogicalRowCount() throws Exception {
+        RTreeGlobalIndexer indexer = indexer(2, 2, 0);
+        List<GlobalIndexIOMeta> files;
+        try (RTreeGlobalIndexWriter writer = indexer.createWriter(output)) {
+            writer.write(null, 0);
+            writer.write(point(1, 1), 1);
+            writer.write(line(), 2);
+            List<ResultEntry> entries = writer.finish();
+            assertThat(entries).extracting(ResultEntry::rowCount).containsExactly(3L, 3L);
+            files = metas(entries);
+        }
+        assertThat(files).extracting(GlobalIndexIOMeta::rowCount).containsExactly(2L, 1L);
+        assertThat(files)
+                .extracting(file -> RTreeIndexFile.Metadata.read(file, 3).rowCount())
+                .containsExactly(2, 1);
+        try (GlobalIndexReader reader = reader(indexer, files, 3)) {
+            assertRows(reader.visitIsNotNull(ref), Arrays.asList(1L, 2L));
+        }
+    }
+
+    @Test
     void testEmptyGeometryOnlyAndPhysicalRowLimit() throws Exception {
         RTreeGlobalIndexer indexer = indexer(2, 10, 0);
         GlobalIndexIOMeta file = write(indexer, Collections.singletonList(line())).get(0);
@@ -1168,7 +1227,7 @@ class RTreeGlobalIndexTest {
             Path path = new Path(base, entry.fileName());
             files.add(
                     new GlobalIndexIOMeta(
-                            path, io.getFileSize(path), entry.rowCount(), entry.meta()));
+                            path, io.getFileSize(path), entry.fileRowCount(), entry.meta()));
         }
         return files;
     }

@@ -37,6 +37,11 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
 
     @Override
+    public boolean supportsScalarSearch() {
+        return false;
+    }
+
+    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         if (indexFields.size() != 1) {
             throw new UnsupportedOperationException(

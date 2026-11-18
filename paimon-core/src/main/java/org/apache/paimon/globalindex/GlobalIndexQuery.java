@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFi
 import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
+import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataInputView;
@@ -354,8 +355,7 @@ class GlobalIndexQuery {
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
             // Scalar lookups use independent single-field index definitions.
-            if (group.extraFields.isEmpty()
-                    && GlobalIndexerFactoryUtils.supportsPredicate(group.type, predicate)) {
+            if (group.extraFields.isEmpty()) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }
@@ -380,6 +380,12 @@ class GlobalIndexQuery {
     boolean hasCompositeQuery() {
         return groups.stream().anyMatch(IndexGroup::isCompositeBTree)
                 || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
+    }
+
+    boolean hasRTreeQuery() {
+        return groups.stream()
+                        .anyMatch(group -> RTreeGlobalIndexerFactory.IDENTIFIER.equals(group.type))
+                || children.stream().anyMatch(GlobalIndexQuery::hasRTreeQuery);
     }
 
     boolean hasScalarQuery() {

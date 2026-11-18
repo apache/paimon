@@ -30,6 +30,8 @@ import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry
 import org.apache.spark.sql.catalyst.expressions.{ApplyFunctionExpression, BoundReference, Expression, ExpressionInfo, Literal}
 import org.apache.spark.sql.catalyst.expressions.st.{ST_AsBinary, ST_Srid}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction
 import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Literal => V2Literal, NamedReference, UserDefinedScalarFunc}
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
@@ -46,6 +48,7 @@ private[shims] object SpatialIntersects {
     val id = FunctionIdentifier(Name)
     if (!FunctionRegistry.builtin.functionExists(id)) {
       extensions.injectFunction((id, new ExpressionInfo(classOf[Intersects].getName, Name), build))
+      extensions.injectOptimizerRule(_ => PrepareConstant)
     }
   }
 
@@ -62,23 +65,44 @@ private[shims] object SpatialIntersects {
     }
   }
 
+  // Geometry constructors become literals during constant folding, after function binding.
+  private object PrepareConstant extends Rule[LogicalPlan] {
+    override def apply(plan: LogicalPlan): LogicalPlan = plan.transformAllExpressions {
+      case expr @ ApplyFunctionExpression(fn: Intersects, args)
+          if fn.constant < 0 && args.exists(_.foldable) =>
+        expr.copy(function = fn.copy(constant = args.indexWhere(_.foldable)))
+    }
+  }
+
   // Only recognize the entire positive predicate. A negated envelope match would lose rows.
   def candidate(expression: V2Expression, rowType: RowType, ranked: Boolean): Option[Predicate] =
+    positiveFunction(expression).flatMap {
+      f =>
+        f.children() match {
+          case Array(col: NamedReference, lit: V2Literal[_]) => bounds(col, lit, rowType, ranked)
+          case Array(lit: V2Literal[_], col: NamedReference) => bounds(col, lit, rowType, ranked)
+          case _ => None
+        }
+    }
+
+  private def positiveFunction(expression: V2Expression): Option[UserDefinedScalarFunc] =
     expression match {
-      case p: SparkPredicate if p.name() == "BOOLEAN_EXPRESSION" =>
-        p.children() match {
-          case Array(f: UserDefinedScalarFunc) if f.canonicalName() == CanonicalName =>
-            f.children() match {
-              case Array(col: NamedReference, lit: V2Literal[_]) =>
-                bounds(col, lit, rowType, ranked)
-              case Array(lit: V2Literal[_], col: NamedReference) =>
-                bounds(col, lit, rowType, ranked)
-              case _ => None
-            }
+      case f: UserDefinedScalarFunc if f.canonicalName() == CanonicalName => Some(f)
+      case p: SparkPredicate =>
+        (p.name(), p.children()) match {
+          case ("BOOLEAN_EXPRESSION", Array(child)) => positiveFunction(child)
+          // Spark represents IS TRUE as null-safe equality with a boolean literal.
+          case ("<=>" | "=", Array(child, lit: V2Literal[_])) if isTrue(lit) =>
+            positiveFunction(child)
+          case ("<=>" | "=", Array(lit: V2Literal[_], child)) if isTrue(lit) =>
+            positiveFunction(child)
           case _ => None
         }
       case _ => None
     }
+
+  private def isTrue(lit: V2Literal[_]): Boolean =
+    lit.dataType() == BooleanType && java.lang.Boolean.TRUE == lit.value()
 
   private def bounds(
       col: NamedReference,
@@ -86,14 +110,17 @@ private[shims] object SpatialIntersects {
       rowType: RowType,
       ranked: Boolean): Option[Predicate] =
     (col.fieldNames(), lit.dataType()) match {
-      case (Array(name), t: GeometryType) if lit.value() != null && !t.isMixedSrid =>
+      case (Array(name), t: GeometryType) if lit.value() != null =>
         val index = rowType.getFieldNames.indexOf(name)
         if (index < 0) return None
+        val literal = Literal(lit.value(), t)
+        val srid =
+          if (t.isMixedSrid) ST_Srid(literal).replacement.eval().asInstanceOf[Int] else t.srid
         rowType.getTypeAt(index) match {
-          case geom: PaimonGeometryType if GeometryType(geom.getCrs).srid == t.srid =>
+          case geom: PaimonGeometryType if GeometryType(geom.getCrs).srid == srid =>
             // The V1 index accepts 2D WKB. Other valid geometries keep exact SQL evaluation.
             val wkb =
-              new ST_AsBinary(Literal(lit.value(), t)).replacement.eval().asInstanceOf[Array[Byte]]
+              new ST_AsBinary(literal).replacement.eval().asInstanceOf[Array[Byte]]
             val builder = new PredicateBuilder(rowType)
             if (ranked) {
               val exact = new GeometryIntersectsTransform(new FieldRef(index, name, geom), wkb)
