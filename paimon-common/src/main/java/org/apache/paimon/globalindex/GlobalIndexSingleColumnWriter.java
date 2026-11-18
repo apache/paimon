@@ -22,16 +22,20 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Index writer for single-column global index with relative row id (from 0 to rowCnt - 1). */
+/**
+ * Single-column global index writer. Range writers consume relative row IDs; centroid vector
+ * writers consume absolute Paimon row IDs, as recorded in their index metadata.
+ */
 public interface GlobalIndexSingleColumnWriter extends GlobalIndexWriter {
 
     /**
-     * Write the indexed key and its related relative row id to the index file.
+     * Write the indexed key and its row ID in the writer's declared encoding.
      *
      * @param key nullable index key
-     * @param relativeRowId local row id calculated by {@code rowId - rangeStart}
+     * @param rowId relative ID calculated by {@code absoluteRowId - rangeStart} for range writers,
+     *     or the absolute row ID for a centroid vector writer
      */
-    void write(@Nullable Object key, long relativeRowId);
+    void write(@Nullable Object key, long rowId);
 
     /**
      * Finishes a writer whose normalized entries cover {@code sourceRowCount} source rows.

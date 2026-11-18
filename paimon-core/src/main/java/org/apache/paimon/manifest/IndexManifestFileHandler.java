@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -235,6 +236,39 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }
+            boolean checkCentroidModels =
+                    prevIndexFiles.stream().anyMatch(entry -> entry.indexFile().isRoutingModel())
+                            || newIndexFiles.stream()
+                                    .anyMatch(
+                                            entry ->
+                                                    entry.indexFile().isRoutingModel()
+                                                            || CentroidVectorIndexUtils
+                                                                    .centroidBased(
+                                                                            entry.indexFile()));
+            if (!checkCentroidModels) {
+                return new ArrayList<>(indexEntries.values());
+            }
+            Map<BinaryRow, Map<String, List<IndexFileMeta>>> models = new HashMap<>();
+            for (IndexManifestEntry entry : indexEntries.values()) {
+                IndexFileMeta file = entry.indexFile();
+                if (!org.apache.paimon.globalindex.VectorIndexUtils.isVectorIndexType(
+                                file.indexType())
+                        || file.globalIndexMeta() == null) {
+                    continue;
+                }
+                models.computeIfAbsent(entry.partition(), p -> new HashMap<>())
+                        .computeIfAbsent(
+                                file.indexType() + ":" + file.globalIndexMeta().indexFieldId(),
+                                f -> new ArrayList<>())
+                        .add(file);
+            }
+            for (Map<String, List<IndexFileMeta>> partition : models.values()) {
+                for (List<IndexFileMeta> files : partition.values()) {
+                    if (files.stream().anyMatch(CentroidVectorIndexUtils::centroidBased)) {
+                        CentroidVectorIndexUtils.validateModel(files);
+                    }
+                }
+            }
             return new ArrayList<>(indexEntries.values());
         }
 
@@ -251,6 +285,7 @@ public class IndexManifestFileHandler {
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
                     if (addedMeta == null
+                            || !retained.partition().equals(added.partition())
                             || (retainedMeta.sourceMeta() != null
                                     && addedMeta.sourceMeta() != null
                                     && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(

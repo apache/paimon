@@ -22,6 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.errors.ErrorMessages;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -366,6 +368,11 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return exception;
         }
 
+        exception = checkCentroidSourceChanges(latestSnapshot, deltaIndexEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
         return checkForRowIdFromSnapshot(
                 latestSnapshot, deltaEntries, deltaIndexEntries, rowIdConflictChecker);
     }
@@ -616,19 +623,55 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         for (IndexManifestEntry indexEntry : indexesToCheck) {
             GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
             checkState(globalIndex != null, "Global index meta must not be null.");
-            Range indexRange = globalIndex.rowRange();
             RowRangeIndex rowRangeIndex =
                     rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
-            if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
-                return Optional.of(
-                        new RuntimeException(
-                                String.format(
-                                        "Global index row ID existence conflict: index file '%s' "
-                                                + "references row range %s, but this range "
-                                                + "is not fully covered by current data "
-                                                + "files. The referenced row IDs may have been "
-                                                + "reassigned or removed by a concurrent commit.",
-                                        indexEntry.indexFile().fileName(), indexRange)));
+            for (Range indexRange : CentroidVectorIndexUtils.coverage(indexEntry.indexFile())) {
+                if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
+                    return Optional.of(
+                            new RuntimeException(
+                                    String.format(
+                                            "Global index row ID existence conflict: index file '%s' "
+                                                    + "references row range %s, but this range "
+                                                    + "is not fully covered by current data "
+                                                    + "files. The referenced row IDs may have been "
+                                                    + "reassigned or removed by a concurrent commit.",
+                                            indexEntry.indexFile().fileName(), indexRange)));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkCentroidSourceChanges(
+            Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
+        for (IndexManifestEntry index : indexEntries) {
+            if (index.kind() != FileKind.ADD
+                    || !index.indexFile().isRoutingModel()
+                    || !CentroidVectorIndexUtils.centroidBased(index.indexFile())) {
+                continue;
+            }
+            long baseline =
+                    DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile()).scanSnapshotId();
+            List<Range> coverage = CentroidVectorIndexUtils.coverage(index.indexFile());
+            for (long id = baseline + 1; id <= latestSnapshot.id(); id++) {
+                Snapshot snapshot = snapshotManager.snapshot(id);
+                for (ManifestEntry change :
+                        commitScanner()
+                                .readIncrementalEntries(
+                                        snapshot, Collections.singletonList(index.partition()))) {
+                    if (change.file().firstRowId() == null) {
+                        continue;
+                    }
+                    for (Range source : coverage) {
+                        if (source.hasIntersection(change.file().nonNullRowIdRange())) {
+                            return Optional.of(
+                                    new RuntimeException(
+                                            "Centroid index source rows changed after training snapshot "
+                                                    + baseline
+                                                    + "; rebuild the index against the latest snapshot."));
+                        }
+                    }
+                }
             }
         }
         return Optional.empty();

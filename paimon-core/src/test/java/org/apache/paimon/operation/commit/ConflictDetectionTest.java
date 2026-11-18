@@ -1735,6 +1735,94 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCentroidIndexChecksSourceCoverageRatherThanSparseEnvelope() {
+        byte[] meta =
+                org.apache.paimon.globalindex.VectorIndexShardMeta.routing(
+                                "model",
+                                2,
+                                Arrays.asList(
+                                        new org.apache.paimon.utils.Range(10, 19),
+                                        new org.apache.paimon.utils.Range(100, 109)))
+                        .serialize();
+        IndexFileMeta file =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "routing",
+                        100,
+                        0,
+                        null,
+                        null,
+                        new GlobalIndexMeta(
+                                10,
+                                109,
+                                1,
+                                null,
+                                meta,
+                                new org.apache.paimon.index.DataEvolutionIndexSourceMeta(1)
+                                        .serialize()),
+                        IndexFileMeta.ROUTING_MODEL);
+        IndexManifestEntry index = new IndexManifestEntry(ADD, BinaryRow.EMPTY_ROW, 0, file);
+        List<SimpleFileEntry> data =
+                Arrays.asList(
+                        createFileEntryWithRowId("a", ADD, 10L, 10L),
+                        createFileEntryWithRowId("b", ADD, 100L, 10L));
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
+                                        snapshot(1),
+                                        data,
+                                        Collections.emptyList(),
+                                        Collections.singletonList(index),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isNotPresent();
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
+                                        snapshot(1),
+                                        data.subList(0, 1),
+                                        Collections.emptyList(),
+                                        Collections.singletonList(index),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isPresent();
+
+        Snapshot concurrent = snapshot(2);
+        SnapshotManager snapshots = mock(SnapshotManager.class);
+        when(snapshots.snapshot(2)).thenReturn(concurrent);
+        CommitScanner scanner = mock(CommitScanner.class);
+        ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
+        when(scanner.readIncrementalEntries(
+                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                .thenReturn(Collections.singletonList(updated));
+        ConflictDetection detection =
+                createConflictDetection(scanner, true, false, false, snapshots);
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
+        ManifestEntry appended = manifestEntry(ADD, "appended", 200L, new Range(200, 209));
+        when(scanner.readIncrementalEntries(
+                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                .thenReturn(Collections.singletonList(appended));
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isNotPresent();
+    }
+
+    @Test
     void testCheckGlobalIndexRowIdExistenceBaseFileRemoved() {
         DataEvolutionConflictDetection detection = createConflictDetection();
 

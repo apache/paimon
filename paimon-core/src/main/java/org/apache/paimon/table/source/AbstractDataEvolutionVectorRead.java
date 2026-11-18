@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -340,7 +341,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+        GlobalIndexReader effectiveReader =
+                CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
+                        ? reader
+                        : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
+        return effectiveReader
                 .visitVectorSearch(vectorSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
@@ -374,7 +379,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+        GlobalIndexReader effectiveReader =
+                CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
+                        ? reader
+                        : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
+        return effectiveReader
                 .visitBatchVectorSearch(batchVectorSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
@@ -436,6 +445,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                     new GlobalIndexIOMeta(
                             indexPathFactory.toPath(indexFile),
                             indexFile.fileSize(),
+                            indexFile.rowCount(),
                             meta.indexMeta()));
         }
         return indexIOMetaList;

@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
+import org.apache.paimon.index.IndexFileMetaV5Deserializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
@@ -34,7 +35,7 @@ public class IndexVectorSearchSplit extends VectorSearchSplit {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private static final ThreadLocal<IndexFileMetaSerializer> INDEX_SERIALIZER =
             ThreadLocal.withInitial(IndexFileMetaSerializer::new);
@@ -85,15 +86,21 @@ public class IndexVectorSearchSplit extends VectorSearchSplit {
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version != 1 && version != VERSION) {
             throw new IOException("Unsupported IndexVectorSearchSplit version: " + version);
         }
         IndexFileMetaSerializer serializer = INDEX_SERIALIZER.get();
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
         this.rowRangeStart = view.readLong();
         this.rowRangeEnd = view.readLong();
-        this.vectorIndexFiles = serializer.deserializeList(view);
-        this.scalarIndexFiles = serializer.deserializeList(view);
+        if (version == 1) {
+            IndexFileMetaV5Deserializer legacy = new IndexFileMetaV5Deserializer();
+            this.vectorIndexFiles = legacy.deserializeList(view);
+            this.scalarIndexFiles = legacy.deserializeList(view);
+        } else {
+            this.vectorIndexFiles = serializer.deserializeList(view);
+            this.scalarIndexFiles = serializer.deserializeList(view);
+        }
     }
 
     @Override

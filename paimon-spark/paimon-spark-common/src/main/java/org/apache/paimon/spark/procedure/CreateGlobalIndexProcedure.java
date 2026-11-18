@@ -186,7 +186,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         }
 
                         GlobalIndexTopologyBuilder topoBuilder =
-                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                        indexType, userOptions, indexFields.get(0).name());
 
                         List<CommitMessage> indexResults =
                                 topoBuilder.buildIndex(

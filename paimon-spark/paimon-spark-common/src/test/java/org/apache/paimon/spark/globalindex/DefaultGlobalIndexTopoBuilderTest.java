@@ -23,6 +23,7 @@ import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -45,6 +46,36 @@ public class DefaultGlobalIndexTopoBuilderTest {
     void testFMIndexUsesDefaultTopologyBuilder() {
         assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fm"))
                 .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
+    }
+
+    @Test
+    void testCentroidTopologyRespectsFieldAndExplicitOptionPrecedence() {
+        Map<String, String> stored = new HashMap<>();
+        stored.put("ivf-pq.shard", "range-based");
+        stored.put("fields.v.shard", "centroid-based");
+        assertThat(
+                        GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                "ivf-pq", new Options(stored), "v"))
+                .isInstanceOf(CentroidGlobalIndexTopoBuilder.class);
+        Options overridden =
+                new Options(stored, Collections.singletonMap("ivf-pq.shard", "range-based"));
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("ivf-pq", overridden, "v"))
+                .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
+        assertThat(
+                        GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                "ivf-pq", new Options(stored), "other"))
+                .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
+        for (String type : Arrays.asList("ivf-flat", "ivf-sq", "ivf-rq", "diskann")) {
+            assertThat(
+                            GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                    type, new Options(stored), "v"))
+                    .isInstanceOf(CentroidGlobalIndexTopoBuilder.class);
+        }
+        assertThatThrownBy(
+                        () ->
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                        "btree", new Options(stored), "v"))
+                .hasMessageContaining("supported vector index");
     }
 
     @Test

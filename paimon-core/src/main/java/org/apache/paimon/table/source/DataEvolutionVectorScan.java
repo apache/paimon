@@ -21,6 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -116,8 +118,9 @@ public class DataEvolutionVectorScan implements VectorScan {
                     return false;
                 };
 
+        List<IndexManifestEntry> indexEntries = indexFileHandler.scan(snapshot, indexFileFilter);
         List<IndexFileMeta> allIndexFiles =
-                indexFileHandler.scan(snapshot, indexFileFilter).stream()
+                indexEntries.stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         String vectorIndexType = vectorIndexType(allIndexFiles);
@@ -136,9 +139,12 @@ public class DataEvolutionVectorScan implements VectorScan {
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             if (isPrimaryColumn(meta, vectorColumn.id())) {
+                vectorIndexFiles.add(indexFile);
+                if (CentroidVectorIndexUtils.centroidBased(indexFile)) {
+                    continue;
+                }
                 Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
                 vectorByRange.computeIfAbsent(range, k -> new ArrayList<>()).add(indexFile);
-                vectorIndexFiles.add(indexFile);
             }
         }
 
@@ -163,6 +169,30 @@ public class DataEvolutionVectorScan implements VectorScan {
         }
 
         CoreOptions effectiveOptions = effectiveCoreOptions();
+        Map<BinaryRow, List<IndexFileMeta>> partitionVectors = new HashMap<>();
+        for (IndexManifestEntry entry : indexEntries) {
+            if (isPrimaryColumn(
+                    checkNotNull(entry.indexFile().globalIndexMeta()), vectorColumn.id())) {
+                partitionVectors
+                        .computeIfAbsent(entry.partition(), p -> new ArrayList<>())
+                        .add(entry.indexFile());
+            }
+        }
+        for (List<IndexFileMeta> files : partitionVectors.values()) {
+            if (files.stream().noneMatch(CentroidVectorIndexUtils::centroidBased)) {
+                continue;
+            }
+            IndexFileMeta routing = CentroidVectorIndexUtils.validateModel(files);
+            List<Range> coverage = CentroidVectorIndexUtils.metadata(routing).sourceRowRanges();
+            long from = coverage.get(0).from;
+            long to = coverage.get(coverage.size() - 1).to;
+            List<IndexFileMeta> scalarFiles = scalarIndexFiles(allIndexFiles, coverage);
+            splits.add(new IndexVectorSearchSplit(from, to, files, scalarFiles));
+            // FAST scalar fallback is restricted to actual source coverage, not the envelope.
+            for (Range range : coverage) {
+                vectorByRange.putIfAbsent(range, Collections.emptyList());
+            }
+        }
         GlobalIndexSearchMode vectorSearchMode = effectiveOptions.vectorIndexSearchMode();
         List<Range> rawRowRanges =
                 new DataEvolutionGlobalIndexCoverage(

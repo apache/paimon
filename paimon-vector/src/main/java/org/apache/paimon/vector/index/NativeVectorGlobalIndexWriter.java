@@ -24,7 +24,9 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
 import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.index.vector.VectorIndexWriter;
@@ -40,6 +42,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
@@ -76,6 +79,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private final Map<String, String> nativeOptions;
     private final int dim;
     private final double trainSampleRatio;
+    private final VectorIndexShardMeta shardMeta;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -107,6 +111,17 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             Map<String, String> options,
             String identifier,
             double trainSampleRatio) {
+        this(fileWriter, fieldType, options, identifier, trainSampleRatio, null);
+    }
+
+    NativeVectorGlobalIndexWriter(
+            GlobalIndexFileWriter fileWriter,
+            DataType fieldType,
+            Map<String, String> options,
+            String identifier,
+            double trainSampleRatio,
+            VectorIndexShardMeta shardMeta) {
+        this.shardMeta = shardMeta;
         this.fileWriter = fileWriter;
         this.identifier = identifier;
         validateFieldType(fieldType);
@@ -161,18 +176,22 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     @Override
-    public void write(Object fieldData, long relativeRowId) {
+    public void write(Object fieldData, long rowId) {
         if (fieldData == null) {
             rowCount++;
             return;
         }
 
-        float[] src = materializeAndValidate(fieldData, relativeRowId);
+        if (shardMeta != null && rowId < 0) {
+            throw new IllegalArgumentException(
+                    "Centroid shards require nonnegative absolute row IDs.");
+        }
+        float[] src = materializeAndValidate(fieldData, rowId);
 
         if (writeBuf.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
         }
-        writeBuf.putLong(relativeRowId);
+        writeBuf.putLong(rowId);
         for (int i = 0; i < dim; i++) {
             writeBuf.putFloat(src[i]);
         }
@@ -234,7 +253,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 writeChannel.close();
                 writeChannel = null;
                 writeBuf = null;
-                return Collections.emptyList();
+                if (shardMeta == null) {
+                    return Collections.emptyList();
+                }
+                String name = fileWriter.newFileName(fileNamePrefix());
+                try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
+                    out.write(new byte[] {'P', 'C', 'E', 'M', 'P', 'T', 'Y', '1'});
+                }
+                return Collections.singletonList(new ResultEntry(name, 0, shardMeta.serialize()));
             }
             flushWriteBuffer();
             writeChannel.close();
@@ -309,8 +335,10 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta meta = new VectorIndexMeta();
-            return new ResultEntry(fileName, rowCount, meta.serialize());
+            return new ResultEntry(
+                    fileName,
+                    shardMeta == null ? rowCount : count,
+                    shardMeta == null ? new VectorIndexMeta().serialize() : shardMeta.serialize());
         }
     }
 
@@ -319,13 +347,37 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     private VectorIndexTraining trainFromTempFile() throws IOException {
-        int trainCount = trainingVectorCount(count, trainSampleRatio);
-        int trainBatchSize = vectorBatchSize(TRAIN_BATCH_SIZE, dim);
-        float[] batchVectors = new float[trainBatchSize * dim];
-        logTrainingMemoryEstimate(trainCount);
+        Map<String, String> options = trainingOptions(nativeOptions, count);
+        if (shardMeta != null) {
+            options.put("expected-vector-count", Long.toString(count));
+            String nlist = options.get("nlist");
+            if (nlist != null && !"auto".equals(nlist)) {
+                options.put(
+                        "nlist",
+                        Integer.toString(
+                                Math.min(
+                                        trainingVectorCount(count, trainSampleRatio),
+                                        Integer.parseInt(nlist))));
+            }
+        }
+        if ("diskann".equals(identifier)) {
+            // nlist belongs to the global router, not an independent DiskANN graph.
+            options.remove("nlist");
+        }
+        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(options)) {
+            int trainCount = trainingVectorCount(count, trainSampleRatio);
+            logTrainingMemoryEstimate(trainCount);
+            addTrainingBatches(trainer, trainCount);
+            return trainer.finishTraining();
+        }
+    }
 
-        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(trainingOptions());
-                RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
+    private void addTrainingBatches(VectorIndexTrainer trainer, long trainCount)
+            throws IOException {
+        int trainBatchSize = Math.min(TRAIN_BATCH_SIZE, IO_BUFFER_SIZE / recordSizeInBytes);
+        float[] batchVectors = new float[trainBatchSize * dim];
+
+        try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
             ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
             readBuf.order(ByteOrder.nativeOrder());
@@ -369,13 +421,27 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                                 + " training vectors, but selected "
                                 + selected);
             }
-
-            return trainer.finishTraining();
         }
     }
 
-    private Map<String, String> trainingOptions() {
+    CentroidRouter finishRoutingModel(NativeVectorGlobalIndexer indexer) throws IOException {
+        if (count == 0) {
+            throw new IllegalArgumentException(
+                    "Cannot train a centroid model without non-null vectors.");
+        }
+        flushWriteBuffer();
+        try (VectorIndexTrainer trainer = indexer.createCoarseTrainer(count)) {
+            addTrainingBatches(trainer, trainingCandidateCount(count, trainSampleRatio));
+            try (VectorIndexTraining coarse = trainer.finishTraining()) {
+                return CentroidRouter.fromTraining(coarse);
+            }
+        }
+    }
+
+    private static Map<String, String> trainingOptions(
+            Map<String, String> nativeOptions, long count) {
         Map<String, String> options = new LinkedHashMap<>(nativeOptions);
+        options.remove("centroid.local-nlist");
         String indexType = options.get("index.type");
         String nlist = options.get("nlist");
         if (indexType != null
@@ -482,6 +548,17 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     static int trainingVectorCount(long vectorCount, double trainSampleRatio) {
+        long trainCount = trainingCandidateCount(vectorCount, trainSampleRatio);
+        if (trainCount > Integer.MAX_VALUE) {
+            throw new IllegalStateException(
+                    "Training vector count "
+                            + trainCount
+                            + " exceeds Java integer capacity. Reduce train.sample-ratio.");
+        }
+        return (int) trainCount;
+    }
+
+    static long trainingCandidateCount(long vectorCount, double trainSampleRatio) {
         if (vectorCount <= 0) {
             return 0;
         }
@@ -494,14 +571,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                             + trainSampleRatio);
         }
         long trainCount = (long) Math.ceil(vectorCount * trainSampleRatio);
-        trainCount = Math.max(1L, Math.min(vectorCount, trainCount));
-        if (trainCount > Integer.MAX_VALUE) {
-            throw new IllegalStateException(
-                    "Training vector count "
-                            + trainCount
-                            + " exceeds Java integer capacity. Reduce train.sample-ratio.");
-        }
-        return (int) trainCount;
+        return Math.max(1L, Math.min(vectorCount, trainCount));
     }
 
     static int vectorBatchSize(int requestedBatchSize, int dim) {
@@ -554,9 +624,15 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         return left * right;
     }
 
-    static long sampleIndex(long sampleOrdinal, long vectorCount, int trainCount) {
+    static long sampleIndex(long sampleOrdinal, long vectorCount, long trainCount) {
         long quotient = vectorCount / trainCount;
         long remainder = vectorCount % trainCount;
+        if (sampleOrdinal != 0 && remainder > Long.MAX_VALUE / sampleOrdinal) {
+            return BigInteger.valueOf(sampleOrdinal)
+                    .multiply(BigInteger.valueOf(vectorCount))
+                    .divide(BigInteger.valueOf(trainCount))
+                    .longValueExact();
+        }
         return sampleOrdinal * quotient + sampleOrdinal * remainder / trainCount;
     }
 

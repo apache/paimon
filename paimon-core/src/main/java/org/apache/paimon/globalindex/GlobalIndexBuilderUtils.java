@@ -125,7 +125,7 @@ public class GlobalIndexBuilderUtils {
         for (IndexManifestEntry entry : currentIndexes) {
             GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
             if (meta != null) {
-                indexedRanges.add(meta.rowRange());
+                indexedRanges.addAll(CentroidVectorIndexUtils.coverage(entry.indexFile()));
             }
         }
         indexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);

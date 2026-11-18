@@ -41,6 +41,9 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 @Public
 public class IndexFileMeta {
 
+    public static final String DATA_FILE = "INDEX";
+    public static final String ROUTING_MODEL = "ROUTING_MODEL";
+
     public static final RowType SCHEMA =
             new RowType(
                     false,
@@ -54,12 +57,14 @@ public class IndexFileMeta {
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
-                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
+                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA),
+                            new DataField(7, "_INDEX_FILE_KIND", newStringType(true))));
 
     private final String indexType;
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
+    private final String fileKind;
 
     @Nullable private final GlobalIndexMeta globalIndexMeta;
 
@@ -89,6 +94,26 @@ public class IndexFileMeta {
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath,
             @Nullable GlobalIndexMeta globalIndexMeta) {
+        this(
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                globalIndexMeta,
+                DATA_FILE);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable String externalPath,
+            @Nullable GlobalIndexMeta globalIndexMeta,
+            @Nullable String fileKind) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -96,6 +121,10 @@ public class IndexFileMeta {
         this.dvRanges = dvRanges;
         this.externalPath = externalPath;
         this.globalIndexMeta = globalIndexMeta;
+        this.fileKind = fileKind == null ? DATA_FILE : fileKind;
+        if (!DATA_FILE.equals(this.fileKind) && !ROUTING_MODEL.equals(this.fileKind)) {
+            throw new IllegalArgumentException("Unknown index file kind: " + fileKind);
+        }
     }
 
     public IndexFileMeta(
@@ -110,6 +139,14 @@ public class IndexFileMeta {
 
     public String indexType() {
         return indexType;
+    }
+
+    public String fileKind() {
+        return fileKind;
+    }
+
+    public boolean isRoutingModel() {
+        return ROUTING_MODEL.equals(fileKind);
     }
 
     @Nullable
@@ -148,6 +185,7 @@ public class IndexFileMeta {
         }
         IndexFileMeta that = (IndexFileMeta) o;
         return Objects.equals(indexType, that.indexType)
+                && Objects.equals(fileKind, that.fileKind)
                 && Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
@@ -159,7 +197,14 @@ public class IndexFileMeta {
     @Override
     public int hashCode() {
         return Objects.hash(
-                indexType, fileName, fileSize, rowCount, dvRanges, externalPath, globalIndexMeta);
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                globalIndexMeta,
+                fileKind);
     }
 
     @Override

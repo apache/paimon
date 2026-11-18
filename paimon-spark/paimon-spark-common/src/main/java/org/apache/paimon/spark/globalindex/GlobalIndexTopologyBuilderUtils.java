@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.globalindex;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
 
 /** Utility class for creating {@link GlobalIndexTopologyBuilder} implementations. */
@@ -28,5 +29,37 @@ public class GlobalIndexTopologyBuilderUtils {
             return new SortedIndexTopoBuilder();
         }
         return new DefaultGlobalIndexTopoBuilder();
+    }
+
+    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType, Options options) {
+        return createTopoBuilder(indexType, options, null);
+    }
+
+    public static GlobalIndexTopologyBuilder createTopoBuilder(
+            String indexType, Options options, String fieldName) {
+        String key = indexType + ".shard";
+        String fieldKey = "fields." + fieldName + ".shard";
+        java.util.Map<String, String> dynamic = options.dynamicOptions();
+        java.util.Map<String, String> stored = options.toMap();
+        String shard =
+                dynamic.containsKey(fieldKey)
+                        ? dynamic.get(fieldKey)
+                        : dynamic.containsKey(key)
+                                ? dynamic.get(key)
+                                : stored.getOrDefault(
+                                        fieldKey, stored.getOrDefault(key, "range-based"));
+        if (org.apache.paimon.globalindex.VectorIndexUtils.isVectorIndexType(indexType)) {
+            if ("centroid-based".equals(shard)) {
+                return new CentroidGlobalIndexTopoBuilder();
+            }
+            if (!"range-based".equals(shard)) {
+                throw new IllegalArgumentException("Unknown vector shard mode: " + shard);
+            }
+        }
+        if ("centroid-based".equals(shard)) {
+            throw new IllegalArgumentException(
+                    "Centroid sharding requires a supported vector index.");
+        }
+        return createTopoBuilder(indexType);
     }
 }

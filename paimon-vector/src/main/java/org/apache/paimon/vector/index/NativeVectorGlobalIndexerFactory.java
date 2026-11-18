@@ -182,6 +182,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             case "distance.metric":
             case "metric":
                 return "metric";
+            case "centroid.local-nlist":
             case "nlist":
             case "expected-vector-count":
             case "ivf.coarse-assignment":

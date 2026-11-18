@@ -516,16 +516,20 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                 .collect(Collectors.toList());
                 futures.add(
                         CompletableFuture.supplyAsync(
-                                () ->
-                                        new OffsetGlobalIndexReader(
-                                                globalIndexer.createReader(
-                                                        indexFileReadWrite,
-                                                        globalMetas,
-                                                        range.count(),
-                                                        null,
-                                                        executor),
-                                                range.from,
-                                                range.to),
+                                () -> {
+                                    GlobalIndexReader reader =
+                                            globalIndexer.createReader(
+                                                    indexFileReadWrite,
+                                                    globalMetas,
+                                                    range.count(),
+                                                    null,
+                                                    executor);
+                                    return CentroidVectorIndexUtils.centroidBased(
+                                                    indexFileMetas.get(0))
+                                            ? reader
+                                            : new OffsetGlobalIndexReader(
+                                                    reader, range.from, range.to);
+                                },
                                 executor));
             }
 

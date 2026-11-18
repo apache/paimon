@@ -145,6 +145,9 @@ public final class DataEvolutionChangesProvider implements CommitChangesProvider
                 indexes.add(entry);
                 continue;
             }
+            checkState(
+                    !org.apache.paimon.globalindex.CentroidVectorIndexUtils.centroidBased(file),
+                    "Cannot reuse centroid indexes across row-ID reassignment; rebuild the index.");
             Range range = assignment.mapRowRange(entry.partition(), meta.rowRange());
             GlobalIndexMeta mapped =
                     new GlobalIndexMeta(
@@ -166,7 +169,8 @@ public final class DataEvolutionChangesProvider implements CommitChangesProvider
                                     file.rowCount(),
                                     file.dvRanges(),
                                     file.externalPath(),
-                                    mapped)));
+                                    mapped,
+                                    file.fileKind())));
         }
         return new CommitChanges(files, changes.changelogFiles, indexes);
     }

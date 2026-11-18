@@ -33,6 +33,57 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
 
     @Test
+    void testRoutingModelKindRoundTrip() throws Exception {
+        IndexFileMeta routing =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "model.index",
+                        100,
+                        0,
+                        null,
+                        null,
+                        new GlobalIndexMeta(10, 1000, 7, null, new byte[] {1}),
+                        IndexFileMeta.ROUTING_MODEL);
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        assertThat(serializer.fromRow(serializer.toRow(routing))).isEqualTo(routing);
+        assertThat(serializer.fromRow(serializer.toRow(routing)).isRoutingModel()).isTrue();
+
+        org.apache.paimon.manifest.IndexManifestEntry entry =
+                new org.apache.paimon.manifest.IndexManifestEntry(
+                        org.apache.paimon.manifest.FileKind.ADD,
+                        org.apache.paimon.data.BinaryRow.EMPTY_ROW,
+                        0,
+                        routing);
+        org.apache.paimon.manifest.IndexManifestEntrySerializer manifest =
+                new org.apache.paimon.manifest.IndexManifestEntrySerializer();
+        assertThat(manifest.fromRow(manifest.toRow(entry))).isEqualTo(entry);
+    }
+
+    @Test
+    void testLegacySevenFieldMetadataDefaultsToDataFile() throws Exception {
+        IndexFileMeta old =
+                globalIndexFile(
+                        new GlobalIndexMeta(10, 1000, 7, null, new byte[] {1}, new byte[] {2}));
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        org.apache.paimon.types.RowType oldSchema =
+                new org.apache.paimon.types.RowType(
+                        false, IndexFileMeta.SCHEMA.getFields().subList(0, 7));
+        org.apache.paimon.io.DataOutputSerializer output =
+                new org.apache.paimon.io.DataOutputSerializer(128);
+        output.writeInt(1);
+        org.apache.paimon.data.serializer.InternalSerializers.create(oldSchema)
+                .serialize(
+                        new org.apache.paimon.utils.OffsetRow(7, 0).replace(serializer.toRow(old)),
+                        output);
+        assertThat(
+                        new IndexFileMetaV5Deserializer()
+                                .deserializeList(
+                                        new org.apache.paimon.io.DataInputDeserializer(
+                                                output.getCopyOfBuffer())))
+                .containsExactly(old);
+    }
+
+    @Test
     void testGlobalIndexSourceMetaRoundTrip() {
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         IndexFileMeta indexFile =

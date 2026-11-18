@@ -22,9 +22,8 @@ import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadUtils;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.vector.VectorIndexInput;
@@ -34,7 +33,6 @@ import org.apache.paimon.index.vector.VectorSearchBatchResult;
 import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.predicate.BatchVectorSearch;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -45,6 +43,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -61,7 +60,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <p>Each shard has exactly one vector index file. The reader lazily opens the index and performs
  * vector similarity search.
  */
-public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
+public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexReader {
 
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
@@ -77,6 +76,7 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final ExecutorService executor;
+    private final String expectedIndexType;
 
     private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
@@ -87,16 +87,29 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
             ExecutorService executor) {
+        this(fileReader, ioMetas, fieldType, executor, null);
+    }
+
+    NativeVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            DataType fieldType,
+            ExecutorService executor,
+            String expectedIndexType) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
+        this.expectedIndexType = expectedIndexType;
     }
 
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
+        if (ioMeta.rowCount() == 0) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
         return CompletableFuture.supplyAsync(
                 () -> {
                     try {
@@ -116,6 +129,10 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
             BatchVectorSearch batchVectorSearch) {
+        if (ioMeta.rowCount() == 0) {
+            return CompletableFuture.completedFuture(
+                    Collections.nCopies(batchVectorSearch.vectorCount(), Optional.empty()));
+        }
         return CompletableFuture.supplyAsync(
                 () -> {
                     try {
@@ -377,8 +394,16 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     VectorIndexReader reader = null;
                     try {
-                        reader = new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
+                        VectorIndexInput input = new SeekableStreamVectorIndexInput(in);
+                        reader = new VectorIndexReader(input);
                         nativeMeta = reader.metadata();
+                        if (expectedIndexType != null
+                                && !expectedIndexType.equals(
+                                        nativeMeta.indexType().replace('_', '-'))) {
+                            throw new IOException(
+                                    "Index file type differs from manifest index type: "
+                                            + ioMeta.filePath());
+                        }
                         reader.optimizeForSearch();
                         vectorReader = reader;
                         openStream = in;
@@ -529,89 +554,5 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             }
             return true;
         }
-    }
-
-    // =================== unsupported =====================
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
-            FieldRef fieldRef, List<Object> literals) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
-            FieldRef fieldRef, List<Object> literals) {
-        return CompletableFuture.completedFuture(Optional.empty());
     }
 }

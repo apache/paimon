@@ -118,6 +118,13 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         List<Range> rowRangesToBuild =
                 new ArrayList<>(
                         GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, currentIndexes));
+        checkArgument(
+                currentIndexes.stream()
+                        .noneMatch(
+                                entry ->
+                                        org.apache.paimon.globalindex.CentroidVectorIndexUtils
+                                                .centroidBased(entry.indexFile())),
+                "Cannot build range shards alongside a centroid model; drop the existing index or perform a full centroid rebuild.");
         byte[] sourceMeta = new DataEvolutionIndexSourceMeta(snapshot.id()).serialize();
         boolean detectDataFileChange =
                 new Options(table.options(), options.toMap()).get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
