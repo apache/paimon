@@ -52,7 +52,7 @@ public class GlobalIndexerFactoryUtils {
         }
     }
 
-    private static GlobalIndexerFactory find(String type) {
+    static GlobalIndexerFactory find(String type) {
         GlobalIndexerFactory factory = factories.get(type);
         if (factory != null) {
             return factory;

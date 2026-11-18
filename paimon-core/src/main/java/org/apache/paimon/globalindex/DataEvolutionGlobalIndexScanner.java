@@ -78,6 +78,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
+    private final boolean scalarTableScan;
     private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
     private final List<IndexFileMeta> indexFiles;
@@ -101,7 +102,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 fileIO,
                 indexPathFactory,
                 indexFiles,
-                indexFiles);
+                indexFiles,
+                false);
     }
 
     private DataEvolutionGlobalIndexScanner(
@@ -113,7 +115,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> coverageIndexFiles,
-            Collection<IndexFileMeta> indexFiles) {
+            Collection<IndexFileMeta> indexFiles,
+            boolean scalarTableScan) {
+        this.scalarTableScan = scalarTableScan;
         this.table = table;
         this.indexFiles = new ArrayList<>(indexFiles);
         this.fileIO = fileIO;
@@ -281,7 +285,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        indexFiles,
+                        indexFiles,
+                        true));
     }
 
     /**
@@ -319,7 +325,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         indexFiles,
-                        selectedIndexFiles));
+                        selectedIndexFiles,
+                        false));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -403,20 +410,29 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
         List<Predicate> residuals = new ArrayList<>();
+        boolean checkGroupCoverage =
+                scalarTableScan
+                        && indexFiles.stream()
+                                .anyMatch(
+                                        f -> GlobalIndexQuery.mayNeedReaderCoverage(f.indexType()));
         GlobalIndexQuery query =
-                predicate == null
-                                || indexFiles.stream()
-                                        .noneMatch(
-                                                DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
-                        ? null
-                        : GlobalIndexQuery.create(
+                predicate != null
+                                && (checkGroupCoverage
+                                        || indexFiles.stream()
+                                                .anyMatch(
+                                                        DataEvolutionGlobalIndexScanner
+                                                                ::isMultiFieldIndex))
+                        ? GlobalIndexQuery.create(
                                 rowType,
                                 predicate,
                                 indexFiles,
                                 indexPathFactory,
                                 options,
-                                residuals::add);
-        if (query != null && query.hasCompositeQuery()) {
+                                residuals::add)
+                        : null;
+        if (query != null
+                && (query.hasCompositeQuery()
+                        || (checkGroupCoverage && query.needsReaderCoverage(options)))) {
             try {
                 Optional<GlobalIndexEvaluator.Evaluation> evaluation =
                         query.evaluateWithCoverage(
@@ -435,7 +451,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                 e.coveredRanges(),
                                                 false));
             } catch (IOException e) {
-                throw new RuntimeException("Failed to evaluate composite global index query", e);
+                throw new RuntimeException("Failed to evaluate global index query", e);
             }
         }
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
@@ -455,6 +471,22 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluateTopN(topN);
     }
 
+    Optional<GlobalIndexResult> scanFast(Predicate predicate) throws IOException {
+        if (indexFiles.stream()
+                .anyMatch(f -> GlobalIndexQuery.mayNeedReaderCoverage(f.indexType()))) {
+            GlobalIndexQuery query =
+                    GlobalIndexQuery.create(
+                            rowType, predicate, indexFiles, indexPathFactory, options);
+            if (query != null && query.needsReaderCoverage(options)) {
+                query = query.resolveFastCoverage(fileIO, options);
+                return query == null
+                        ? Optional.empty()
+                        : Optional.of(query.fastCandidates(fileIO, options));
+            }
+        }
+        return scan(predicate);
+    }
+
     public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         GlobalIndexQuery query =
@@ -462,7 +494,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         ? null
                         : GlobalIndexQuery.create(
                                 rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
+        if (query != null
+                && ((scalarTableScan && query.needsReaderCoverage(options))
+                        || (query.hasCompositeQuery() && query.hasScalarQuery()))) {
             // Scalar shards can decline a predicate at runtime, so the legacy API must use
             // evaluated coverage as well. Internal callers retain the evaluation directly.
             Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);
