@@ -706,13 +706,9 @@ class RESTCatalog(Catalog):
     def get_prediction(
             self,
             prediction_id: str,
-            timeout_seconds: Optional[float] = None,
     ) -> Prediction:
         try:
-            return self.rest_api.get_prediction(
-                prediction_id,
-                timeout_seconds=timeout_seconds,
-            ).to_prediction()
+            return self.rest_api.get_prediction(prediction_id).to_prediction()
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_PREDICTION:
                 raise PredictionNotExistException(prediction_id) from e

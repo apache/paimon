@@ -25,7 +25,6 @@ from typing import Callable, Dict, Optional, Type, TypeVar
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-from urllib3.exceptions import TimeoutError as Urllib3TimeoutError
 
 from pypaimon.api.api_response import ErrorResponse
 from pypaimon.api.rest_exception import (AlreadyExistsException,
@@ -42,33 +41,6 @@ from pypaimon.common import user_agent
 from pypaimon.common.json_util import JSON
 
 T = TypeVar('T', bound='RESTResponse')
-
-
-def _is_transport_timeout(error: BaseException) -> bool:
-    pending = [error]
-    seen = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-        if isinstance(current, (
-                requests.exceptions.Timeout,
-                Urllib3TimeoutError,
-                TimeoutError,
-        )):
-            return True
-        for nested in (
-                getattr(current, "reason", None),
-                getattr(current, "__cause__", None),
-                getattr(current, "__context__", None),
-        ):
-            if isinstance(nested, BaseException):
-                pending.append(nested)
-        pending.extend(
-            value for value in getattr(current, "args", ())
-            if isinstance(value, BaseException))
-    return False
 
 
 class RESTRequest(ABC):
@@ -216,8 +188,7 @@ class RESTClient(ABC):
 
     @abstractmethod
     def get(self, path: str, response_type: Type[T],
-            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]],
-            timeout_seconds: Optional[float] = None) -> T:
+            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         pass
 
     @abstractmethod
@@ -344,14 +315,12 @@ class HttpClient(RESTClient):
         self.error_handler = error_handler
 
     def get(self, path: str, response_type: Type[T],
-            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]],
-            timeout_seconds: Optional[float] = None) -> T:
+            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         auth_headers = _get_headers(path, "GET", {}, "", rest_auth_function)
         url = self._get_request_url(path, None)
 
         return self._execute_request("GET", url, headers=auth_headers,
-                                     response_type=response_type,
-                                     timeout_seconds=timeout_seconds)
+                                     response_type=response_type)
 
     def get_with_params(self, path: str, query_params: Dict[str, str],
                         response_type: Type[T],
@@ -417,8 +386,7 @@ class HttpClient(RESTClient):
     def _execute_request(self, method: str, url: str,
                          data: Optional[str] = None,
                          headers: Optional[Dict[str, str]] = None,
-                         response_type: Optional[Type[T]] = None,
-                         timeout_seconds: Optional[float] = None) -> T:
+                         response_type: Optional[Type[T]] = None) -> T:
         try:
             start_time = int(time.time() * 1_000_000_000)
             response = self.session.request(
@@ -426,8 +394,7 @@ class HttpClient(RESTClient):
                 url=url,
                 data=data.encode('utf-8') if data else None,
                 headers=headers,
-                timeout=(self._timeout if timeout_seconds is None
-                         else timeout_seconds),
+                timeout=self._timeout,
             )
             duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
@@ -456,11 +423,5 @@ class HttpClient(RESTClient):
 
         except RESTException as e:
             raise e
-        except requests.exceptions.RequestException as e:
-            if (timeout_seconds is not None
-                    and _is_transport_timeout(e)):
-                raise TimeoutError(
-                    "REST request exceeded its time budget") from e
-            raise RESTException("rest exception", cause=e)
         except Exception as e:
             raise RESTException("rest exception", cause=e)

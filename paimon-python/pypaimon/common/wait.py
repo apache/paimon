@@ -45,7 +45,8 @@ class Wait(Generic[T]):
     ) -> T:
         """Delegate waiting and return the final value.
 
-        A timeout only stops this client-side wait; it does not cancel the
+        The timeout is checked between polling requests. An in-flight request
+        may finish after the deadline, and timing out does not cancel the
         server-side operation.
         """
         kwargs = self._bind.copy()

@@ -18,8 +18,6 @@
 import random
 import time
 from datetime import timedelta
-from queue import Empty, Queue
-from threading import Thread
 from typing import Callable, Optional
 
 from pypaimon.catalog.prediction import Prediction
@@ -51,17 +49,8 @@ def _wait_for_prediction(
 
     deadline = time.monotonic() + timeout.total_seconds()
     attempt = 1
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        try:
-            prediction = _get_prediction_with_deadline(
-                catalog, prediction_id, deadline)
-        except TimeoutError as e:
-            raise TimeoutError(
-                "Prediction {} did not finish within {}".format(
-                    prediction_id, timeout)) from e
+    while time.monotonic() < deadline:
+        prediction = catalog.get_prediction(prediction_id)
         if time.monotonic() >= deadline:
             break
         if prediction.status.terminal:
@@ -78,39 +67,3 @@ def _wait_for_prediction(
     raise TimeoutError(
         "Prediction {} did not finish within {}".format(
             prediction_id, timeout))
-
-
-def _get_prediction_with_deadline(
-        catalog,
-        prediction_id: str,
-        deadline: float,
-) -> Prediction:
-    completed = Queue(maxsize=1)
-
-    def get_prediction():
-        try:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    "Prediction GET exceeded its time budget")
-            completed.put((
-                True,
-                catalog.get_prediction(
-                    prediction_id, timeout_seconds=remaining),
-            ))
-        except Exception as error:
-            completed.put((False, error))
-
-    worker = Thread(target=get_prediction)
-    worker.daemon = True
-    worker.start()
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError("Prediction GET exceeded its time budget")
-    try:
-        succeeded, value = completed.get(timeout=remaining)
-    except Empty:
-        raise TimeoutError("Prediction GET exceeded its time budget")
-    if succeeded:
-        return value
-    raise value
