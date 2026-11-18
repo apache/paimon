@@ -25,7 +25,7 @@ public class ResultEntry {
 
     private final String fileName;
 
-    /** Number of source rows covered by this index file, including null or skipped rows. */
+    /** Total logical rows processed by the writer, including null/skipped rows. */
     private final long rowCount;
 
     @Nullable private final byte[] meta;

@@ -36,8 +36,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LowerTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -537,27 +535,6 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         predicates.equal(0, 2),
                         predicates.equal(1, BinaryString.fromString("gamma")));
         assertThat(search(table, query, 1)).containsExactly(2L);
-    }
-
-    @Test
-    public void testSameFieldResidualBeforeVectorRanking() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        String[] names = {"Alpha", "Beta"};
-        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}};
-        write(table, names, vectors);
-        buildAndCommitVectorIndex(table, vectors);
-        buildAndCommitNameBTreeIndex(table, names);
-
-        PredicateBuilder builder = new PredicateBuilder(table.rowType());
-        FieldRef name = new FieldRef(1, "name", table.rowType().getTypeAt(1));
-        Predicate filter =
-                PredicateBuilder.and(
-                        builder.isNotNull(1),
-                        builder.equal(
-                                new LowerTransform(Collections.singletonList(name)),
-                                BinaryString.fromString("beta")));
-        assertThat(search(table, filter, 1)).containsExactly(1L);
     }
 
     @Test

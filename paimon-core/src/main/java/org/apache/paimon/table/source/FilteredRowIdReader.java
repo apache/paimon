@@ -85,8 +85,7 @@ class FilteredRowIdReader {
     static boolean isExact(
             RowType rowType, Predicate filter, GlobalIndexEvaluator.Evaluation evaluation) {
         Set<Integer> filterFieldIds = collectFieldIds(rowType, filter);
-        if (!evaluation.allPredicatesEvaluated()
-                || !evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
+        if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
             return false;
         }
         return !hasCandidateOnlyLeaf(filter);
