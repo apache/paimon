@@ -511,22 +511,8 @@ partial-update costs in mind. See the [metadata reference](./data-evolution-file
 before enabling compact write-column encoding, and use the
 [`$files` query](./data-evolution-file-layout#inspect-the-layout) to inspect alignment.
 
-## Splitting large descriptor scans
+## Splitting descriptor scans
 
-A normal column file can overlap thousands of BLOB files by row ID. Such files
-normally form one indivisible scan group, so increasing reader parallelism alone
-cannot distribute its work.
-
-For batch reads using `blob-as-descriptor=true`, set
-`blob-descriptor.scan.max-files-per-split` to a positive value (for example, `1024`)
-to opt into row-range splitting. Each child retains the normal file, only its
-assigned BLOB files, and a disjoint row-ID range. This changes read planning only;
-it does not rewrite files or change their format.
-
-The default is `0` (disabled). The initial implementation supports only splits
-with one normal file, mutually disjoint BLOB ranges contained in that file, and
-no deletion-vector metadata. Other layouts retain the original scan. Streaming,
-query authorization, indexed/range-filtered scans, and LIMIT/TopN plans retain
-their existing behavior. Normal-file data may be read by multiple tasks; choose
-the limit with that IO and task-count tradeoff in mind. A single large BLOB file
-is not subdivided.
+For batch descriptor reads, `blob-descriptor.scan.max-files-per-split` limits BLOB
+files per split (`0`: disabled). Requires one normal file covering disjoint BLOB
+ranges without deletion vectors. Smaller splits may increase normal-file IO.
