@@ -32,13 +32,14 @@ import java.util.Map;
 /** Versioned Paimon envelope around the independently versioned native training payload. */
 public final class VectorTrainingModelIO {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String SHARD_MODE = "centroid-based";
 
     private VectorTrainingModelIO() {}
 
     public static void write(OutputStream out, byte[] payload, String modelId) throws IOException {
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("version", 1);
-        meta.put("shardMode", VectorIndexShardMeta.CENTROID_BASED);
+        meta.put("shardMode", SHARD_MODE);
         meta.put("modelId", modelId);
         byte[] header = MAPPER.writeValueAsBytes(meta);
         DataOutputStream data = new DataOutputStream(out);
@@ -67,7 +68,7 @@ public final class VectorTrainingModelIO {
         Map<String, Object> metadata =
                 MAPPER.readValue(header, new TypeReference<Map<String, Object>>() {});
         if (!Integer.valueOf(1).equals(metadata.get("version"))
-                || !VectorIndexShardMeta.CENTROID_BASED.equals(metadata.get("shardMode"))
+                || !SHARD_MODE.equals(metadata.get("shardMode"))
                 || !modelId.equals(metadata.get("modelId"))) {
             throw new IOException("Unsupported or mismatched routing model envelope.");
         }
