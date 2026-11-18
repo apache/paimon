@@ -208,6 +208,7 @@ const sidebars = {
           "multimodal-table/global-index/bitmap",
           "multimodal-table/global-index/multivalue",
           "multimodal-table/global-index/fm",
+          "multimodal-table/global-index/rtree",
           "multimodal-table/global-index/vector",
           "multimodal-table/global-index/full-text",
           "multimodal-table/global-index/hybrid-search"

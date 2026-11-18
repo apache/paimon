@@ -104,6 +104,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // scalar function extensions
+    SparkShimLoader.shim.injectSpatialFunctions(extensions)
     BucketExpression.supportedFnNames.foreach {
       fnName => extensions.injectFunction(BucketExpression.getFunctionInjection(fnName))
     }

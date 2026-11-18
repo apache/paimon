@@ -5240,7 +5240,8 @@ public class CoreOptions implements Serializable {
     }
 
     public static boolean isVectorIndexType(String type) {
-        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm", "rtree")
+                .contains(type);
     }
 
     public List<String> globalIndexColumns(String type) {

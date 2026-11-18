@@ -29,11 +29,13 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
@@ -342,6 +344,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    // An OR across a spatial and another column can require fallback for the entire predicate.
+    // Decide this before assigning splits: an individual split only sees its local index files.
+    private static boolean hasMixedSpatialDisjunction(Predicate predicate, boolean underMixedOr) {
+        if (predicate instanceof LeafPredicate) {
+            return underMixedOr
+                    && GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate).function()
+                            instanceof BBoxIntersects;
+        }
+        CompoundPredicate compound = (CompoundPredicate) predicate;
+        boolean mixed =
+                underMixedOr
+                        || (compound.function() instanceof Or
+                                && PredicateVisitor.collectFieldNames(compound).size() > 1);
+        return compound.children().stream()
+                .anyMatch(child -> hasMixedSpatialDisjunction(child, mixed));
+    }
+
     /** Plan complete data splits while deferring index evaluation to readers. */
     private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
@@ -355,7 +374,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return planEager();
         }
         Predicate indexFilter = rowIdSafeResidualFilter(filter);
-        if (indexFilter == null) {
+        if (indexFilter == null
+                || (table.coreOptions().scalarIndexSearchMode()
+                                == CoreOptions.GlobalIndexSearchMode.FAST
+                        && hasMixedSpatialDisjunction(indexFilter, false))) {
             return planEager();
         }
 
