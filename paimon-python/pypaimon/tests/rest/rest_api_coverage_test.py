@@ -71,7 +71,7 @@ _ARGUMENTS = {
     ),
     SubmitPredictionRequest: SubmitPredictionRequest(
         source=PredictionSource("db", "t"),
-        model="db.qwen_vl",
+        model=Identifier.create("db", "qwen_vl"),
         inputs={"video": "content"},
         instructions="classify",
     ),
