@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -86,27 +87,34 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
         fillDefaultTypes(record, schemaBuilder);
         Map<String, Object> recordMap =
                 convertValue(record, new TypeReference<Map<String, Object>>() {});
-        Map<String, String> rowData =
-                recordMap.entrySet().stream()
-                        .filter(entry -> Objects.nonNull(entry.getKey()))
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        entry -> {
-                                            if (Objects.nonNull(entry.getValue())
-                                                    && !TypeUtils.isBasicType(entry.getValue())) {
-                                                try {
-                                                    return writeValueAsString(entry.getValue());
-                                                } catch (JsonProcessingException e) {
-                                                    LOG.error("Failed to deserialize record.", e);
-                                                    return Objects.toString(entry.getValue());
-                                                }
-                                            }
-                                            return Objects.toString(entry.getValue());
-                                        }));
+        // A JSON null must stay null, so the value map has to accept null values, which
+        // Collectors.toMap does not.
+        Map<String, String> rowData = new HashMap<>(recordMap.size());
+        recordMap.forEach(
+                (key, value) -> {
+                    if (Objects.nonNull(key)) {
+                        rowData.put(key, toRowDataValue(value));
+                    }
+                });
         evalComputedAndMetadataColumns(rowData, schemaBuilder);
 
         return rowData;
+    }
+
+    @Nullable
+    private static String toRowDataValue(@Nullable Object value) {
+        if (Objects.isNull(value)) {
+            return null;
+        }
+        if (TypeUtils.isBasicType(value)) {
+            return Objects.toString(value);
+        }
+        try {
+            return writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            LOG.error("Failed to deserialize record.", e);
+            return Objects.toString(value);
+        }
     }
 
     @Override
