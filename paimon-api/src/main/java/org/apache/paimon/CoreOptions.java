@@ -3204,6 +3204,18 @@ public class CoreOptions implements Serializable {
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
 
+    public static final ConfigOption<Integer> VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR =
+            key("vector-index.post-filter.candidates-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Positive multiplier of the original Top-K for a single ANN query "
+                                    + "when scalar indexes cannot evaluate a DE vector search filter. "
+                                    + "The candidate count is at least the reranking limit and capped by "
+                                    + "the shard size and integer limit. Candidates are checked against "
+                                    + "the pinned data; fewer than Top-K matches are returned without retry "
+                                    + "or raw scoring of indexed ranges.");
+
     public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
             key("global-index.filter.refine-from-data")
                     .booleanType()
