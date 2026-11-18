@@ -34,6 +34,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Source coverage belongs to complete model generations, never to sparse shard bounds. */
 class CentroidVectorIndexUtilsTest {
     @Test
+    void onlyWrappedMetadataAffectsPlanning() {
+        byte[] opaque = {(byte) 0xff, 0, 7, 42};
+        assertThat(CentroidVectorIndexUtils.centroidBased(file(opaque, false))).isFalse();
+        VectorIndexShardMeta shard = VectorIndexShardMeta.centroid("g", 7);
+        byte[] wrapped = shard.wrap(opaque);
+        VectorIndexShardMeta decoded = VectorIndexShardMeta.deserialize(wrapped);
+        assertThat(decoded.payloadMeta()).containsExactly(opaque);
+        assertThat(decoded.centroid()).isEqualTo(7);
+        assertThat(decoded.modelId()).isEqualTo("g");
+        assertThat(VectorIndexShardMeta.deserialize(shard.wrap(new byte[0])).payloadMeta())
+                .isEmpty();
+        assertThat(VectorIndexShardMeta.deserialize(shard.serialize()).payloadMeta()).isNull();
+        assertThatThrownBy(
+                        () ->
+                                VectorIndexShardMeta.deserialize(
+                                        Arrays.copyOf(wrapped, wrapped.length - 1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        wrapped[4]++;
+        assertThatThrownBy(() -> VectorIndexShardMeta.deserialize(wrapped))
+                .hasMessageContaining("version");
+    }
+
+    @Test
     void testSparseShardsDoNotClaimEnvelopeCoverage() {
         List<IndexFileMeta> files = model("a");
         assertThat(CentroidVectorIndexUtils.validateModel(files)).isEqualTo(files.get(0));
@@ -88,7 +111,6 @@ class CentroidVectorIndexUtilsTest {
                 routing ? 0 : 10,
                 null,
                 null,
-                new GlobalIndexMeta(10, 1009, 7, null, meta),
-                routing ? IndexFileMeta.ROUTING_MODEL : IndexFileMeta.DATA_FILE);
+                new GlobalIndexMeta(10, 1009, 7, null, meta));
     }
 }

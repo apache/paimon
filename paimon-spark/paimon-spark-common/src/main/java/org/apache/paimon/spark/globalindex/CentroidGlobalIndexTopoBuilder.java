@@ -22,13 +22,13 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorTrainingModel;
@@ -96,10 +96,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             DataField indexField,
             Options options)
             throws IOException {
-        checkArgument(
-                org.apache.paimon.globalindex.VectorIndexUtils.isVectorIndexType(indexType),
-                "Unsupported centroid index type: %s",
-                indexType);
+        CentroidVectorGlobalIndexer indexer = createIndexer(indexType, indexField, options);
         checkArgument(
                 table.coreOptions().dataEvolutionEnabled(),
                 "Centroid sharding requires a Data Evolution table.");
@@ -157,7 +154,6 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 DefaultGlobalIndexTopoBuilder.parallelism(splits.size(), options))
                         .mapPartitions(
                                 input -> new VectorRows(BuildContext.restore(contextBytes), input));
-        VectorGlobalIndexer indexer = context.indexer();
         byte[] payload = train(sc, contextBytes, rows, indexer, context.getter());
         int nlist;
         try (VectorTrainingModel model = indexer.restoreTrainingModel(payload)) {
@@ -214,16 +210,6 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                                             .serialize())),
                                     context.sourceMeta())
                             .get(0);
-            modelMeta =
-                    new IndexFileMeta(
-                            modelMeta.indexType(),
-                            modelMeta.fileName(),
-                            modelMeta.fileSize(),
-                            0,
-                            null,
-                            modelMeta.externalPath(),
-                            modelMeta.globalIndexMeta(),
-                            IndexFileMeta.ROUTING_MODEL);
             messages.add(context.message(Collections.singletonList(modelMeta)));
             List<IndexFileMeta> old =
                     GlobalIndexBuilderUtils.currentIndexEntries(
@@ -279,7 +265,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             JavaSparkContext sc,
             byte[] contextBytes,
             JavaRDD<InternalRow> rows,
-            VectorGlobalIndexer indexer,
+            CentroidVectorGlobalIndexer indexer,
             InternalRow.FieldGetter getter) {
         // Count actual non-null rows at the pinned snapshot. Row-ID spans can contain
         // gaps, nulls and deletions, so a split's planned row count is insufficient.
@@ -423,6 +409,17 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
     }
 
+    static CentroidVectorGlobalIndexer createIndexer(
+            String indexType, DataField field, Options options) {
+        GlobalIndexer indexer =
+                GlobalIndexer.create(indexType, Collections.singletonList(field), options);
+        checkArgument(
+                indexer instanceof CentroidVectorGlobalIndexer,
+                "Index '%s' does not support centroid sharding.",
+                indexType);
+        return (CentroidVectorGlobalIndexer) indexer;
+    }
+
     private static final class BuildContext implements Serializable {
         private static final long serialVersionUID = 1L;
         private final FileStoreTable table;
@@ -458,9 +455,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                     bytes, CentroidGlobalIndexTopoBuilder.class.getClassLoader());
         }
 
-        VectorGlobalIndexer indexer() {
-            return (VectorGlobalIndexer)
-                    GlobalIndexer.create(indexType, Collections.singletonList(field), options);
+        CentroidVectorGlobalIndexer indexer() {
+            return createIndexer(indexType, field, options);
         }
 
         GlobalIndexFileReadWrite io() {

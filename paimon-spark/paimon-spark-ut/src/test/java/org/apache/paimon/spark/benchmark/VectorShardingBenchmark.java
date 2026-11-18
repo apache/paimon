@@ -26,11 +26,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -158,7 +158,7 @@ public final class VectorShardingBenchmark {
                 Arrays.asList(
                         System.getProperty("benchmark.modes", "range-based,centroid-based")
                                 .split(","));
-        if (!VectorIndexUtils.isVectorIndexType(indexType)
+        if (!Arrays.asList("ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann").contains(indexType)
                 || (readSnapshot != null && !skipBuild)
                 || configuredModes.isEmpty()
                 || new HashSet<>(configuredModes).size() != configuredModes.size()
@@ -372,7 +372,8 @@ public final class VectorShardingBenchmark {
                     if (files.isEmpty()) {
                         throw new IllegalStateException("Build produced no index");
                     }
-                    boolean centroid = files.stream().anyMatch(IndexFileMeta::isRoutingModel);
+                    boolean centroid =
+                            files.stream().anyMatch(CentroidVectorIndexUtils::isRoutingModel);
                     if (centroid != "centroid-based".equals(mode)) {
                         throw new IllegalStateException(
                                 "Existing index does not match the requested mode");

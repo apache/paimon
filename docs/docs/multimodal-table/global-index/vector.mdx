@@ -489,7 +489,12 @@ Queries load the routing model, select centroids with `centroid.nprobe`, and ope
 only their shard files. Inside each selected shard, `ivf.nprobe` controls how many
 local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
 Automatic probe sizing and filtered search remain available.
-Centroid shards store absolute row IDs. The model records the exact source row
+The trained outer centers live in the routing model file. In the manifest, each
+centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta`.
+For a shard, this descriptor identifies the model and centroid and wraps the local
+index writer’s metadata. The local reader receives those original bytes.
+
+Centroid shards store absolute row IDs. The model entry records the exact source row
 ranges so gaps belonging to other partitions remain eligible for raw search in
 `vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
 only indexed rows.

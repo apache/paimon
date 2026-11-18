@@ -23,12 +23,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-import org.apache.paimon.globalindex.VectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
 import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.VectorTrainingModel;
@@ -296,8 +296,11 @@ class CentroidVectorGlobalIndexTest {
                         ResultEntry result = writer.finish().get(0);
                         Path path = new Path(directory, result.fileName());
                         if (result.rowCount() > 0) {
-                            assertThat(VectorIndexShardMeta.deserialize(result.meta()).centroid())
-                                    .isEqualTo(c);
+                            VectorIndexShardMeta descriptor =
+                                    VectorIndexShardMeta.deserialize(result.meta());
+                            assertThat(descriptor.centroid()).isEqualTo(c);
+                            assertThat(descriptor.payloadMeta())
+                                    .isEqualTo(new VectorIndexMeta().serialize());
                             try (SeekableInputStream in = io.newInputStream(path);
                                     VectorIndexReader local =
                                             new VectorIndexReader(

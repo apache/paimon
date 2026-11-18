@@ -20,6 +20,8 @@ package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +37,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DefaultGlobalIndexTopoBuilder}. */
 public class DefaultGlobalIndexTopoBuilderTest {
+
+    @Test
+    void centroidBuildChecksIndexerCapability() {
+        DataField field = new DataField(0, "v", DataTypes.ARRAY(DataTypes.FLOAT()));
+        assertThatThrownBy(
+                        () ->
+                                CentroidGlobalIndexTopoBuilder.createIndexer(
+                                        "test-vector-ann", field, new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not support centroid sharding");
+    }
 
     @Test
     void testBitmapUsesSortedTopologyBuilder() {

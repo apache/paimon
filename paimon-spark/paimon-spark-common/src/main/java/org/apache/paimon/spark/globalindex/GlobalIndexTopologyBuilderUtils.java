@@ -18,8 +18,11 @@
 
 package org.apache.paimon.spark.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
+
+import java.util.Map;
 
 /** Utility class for creating {@link GlobalIndexTopologyBuilder} implementations. */
 public class GlobalIndexTopologyBuilderUtils {
@@ -39,8 +42,8 @@ public class GlobalIndexTopologyBuilderUtils {
             String indexType, Options options, String fieldName) {
         String key = indexType + ".shard";
         String fieldKey = "fields." + fieldName + ".shard";
-        java.util.Map<String, String> dynamic = options.dynamicOptions();
-        java.util.Map<String, String> stored = options.toMap();
+        Map<String, String> dynamic = options.dynamicOptions();
+        Map<String, String> stored = options.toMap();
         String shard =
                 dynamic.containsKey(fieldKey)
                         ? dynamic.get(fieldKey)
@@ -48,7 +51,7 @@ public class GlobalIndexTopologyBuilderUtils {
                                 ? dynamic.get(key)
                                 : stored.getOrDefault(
                                         fieldKey, stored.getOrDefault(key, "range-based"));
-        if (org.apache.paimon.globalindex.VectorIndexUtils.isVectorIndexType(indexType)) {
+        if (CoreOptions.isVectorIndexType(indexType)) {
             if ("centroid-based".equals(shard)) {
                 return new CentroidGlobalIndexTopoBuilder();
             }

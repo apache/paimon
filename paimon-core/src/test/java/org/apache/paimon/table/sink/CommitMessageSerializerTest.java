@@ -18,8 +18,12 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +33,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Arrays;
+import java.util.Base64;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
@@ -38,6 +43,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommitMessageSerializer}. */
 public class CommitMessageSerializerTest {
+
+    @Test
+    void readsPreviewRoutingCommit() throws IOException {
+        // Produced by the eight-field v15 writer. indexMeta contains its original JSON descriptor.
+        byte[] bytes =
+                Base64.getDecoder()
+                        .decode(
+                                "AAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAQAAMAAAAAAAAAgAAABIAAAAbW9k"
+                                        + "ZWwAAIUMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKAAAABQAAAADQAAAPAAAABpdmYtZmxh"
+                                        + "dAAIAAAAAAAADAAAAAAAAAATAAAAAAAAAAIAAAAAAAAAAAAAAAAAAABSAAAAOAAAABAAAACQAAAAeyJz"
+                                        + "aGFyZE1vZGUiOiJjZW50cm9pZC1iYXNlZCIsIm1vZGVsSWQiOiJnIiwibmxpc3QiOiIxIiwic291cmNl"
+                                        + "Um93UmFuZ2VzIjoiMTI6MTkifQAAAAAAAERFSVgAAAABAAAAAAAAAAVST1VUSU5HX01PREVMAAAAAAAA"
+                                        + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAF");
+        CommitMessageImpl message =
+                (CommitMessageImpl) new CommitMessageSerializer().deserialize(15, bytes);
+        IndexFileMeta model = message.newFilesIncrement().newIndexFiles().get(0);
+        assertThat(CentroidVectorIndexUtils.isRoutingModel(model)).isTrue();
+        assertThat(CentroidVectorIndexUtils.coverage(model)).containsExactly(new Range(12, 19));
+        assertThat(DataEvolutionIndexSourceMeta.fromIndexFile(model).scanSnapshotId()).isEqualTo(5);
+    }
 
     @Test
     public void test() throws IOException {

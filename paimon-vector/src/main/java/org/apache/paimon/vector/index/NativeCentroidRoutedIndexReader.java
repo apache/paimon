@@ -68,32 +68,43 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.executor = executor;
         this.indexType = indexType;
         GlobalIndexIOMeta routing = null;
+        VectorIndexShardMeta modelMeta = null;
+        String modelId = null;
         long count = 0;
         for (GlobalIndexIOMeta file : entries) {
-            VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
             checkArgument(
-                    meta.centroidBased(), "Cannot mix centroid-based and range-based shards.");
+                    VectorIndexShardMeta.isWrapped(file.metadata()),
+                    "Cannot mix centroid-based and range-based shards.");
+            VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
+            String id = meta.modelId();
+            checkArgument(modelId == null || modelId.equals(id), "Mismatched centroid model.");
+            modelId = id;
             if (meta.routingModel()) {
+                modelMeta = meta;
                 checkArgument(routing == null, "Multiple routing models.");
                 routing = file;
             } else {
                 checkArgument(
                         file.rowCount() >= 0, "Centroid shards must record their vector count.");
                 checkArgument(
-                        shards.put(meta.centroid(), file) == null, "Duplicate centroid shard.");
+                        shards.put(
+                                        meta.centroid(),
+                                        new GlobalIndexIOMeta(
+                                                file.filePath(),
+                                                file.fileSize(),
+                                                file.rowCount(),
+                                                meta.payloadMeta()))
+                                == null,
+                        "Duplicate centroid shard.");
                 count = Math.addExact(count, file.rowCount());
             }
         }
         checkArgument(routing != null, "Missing routing model.");
         this.routing = routing;
-        this.metadata = VectorIndexShardMeta.deserialize(routing.metadata());
+        this.metadata = modelMeta;
         checkArgument(shards.size() == metadata.nlist(), "Incomplete centroid shard set.");
-        for (Map.Entry<Integer, GlobalIndexIOMeta> shard : shards.entrySet()) {
-            VectorIndexShardMeta data =
-                    VectorIndexShardMeta.deserialize(shard.getValue().metadata());
-            checkArgument(
-                    shard.getKey() < metadata.nlist() && metadata.modelId().equals(data.modelId()),
-                    "Mismatched centroid model.");
+        for (int id : shards.keySet()) {
+            checkArgument(id < metadata.nlist(), "Invalid centroid ID.");
         }
         this.vectorCount = count;
     }

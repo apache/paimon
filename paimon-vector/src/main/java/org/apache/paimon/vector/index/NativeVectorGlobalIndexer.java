@@ -18,11 +18,11 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
 import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.VectorTrainingModel;
@@ -42,7 +42,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** Native vector global indexer backed by paimon-vector-index-java. */
-public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
+public class NativeVectorGlobalIndexer implements CentroidVectorGlobalIndexer {
 
     static final String DEFAULT_METRIC = "inner_product";
 
@@ -100,11 +100,7 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
             long totalRowCount,
             List<Range> rowRanges,
             ExecutorService executor) {
-        if (files.stream()
-                .anyMatch(
-                        file ->
-                                VectorIndexShardMeta.deserialize(file.metadata())
-                                        .centroidBased())) {
+        if (files.stream().anyMatch(file -> VectorIndexShardMeta.isWrapped(file.metadata()))) {
             return new NativeCentroidRoutedIndexReader(
                     fileReader, files, fieldType, executor, identifier);
         }

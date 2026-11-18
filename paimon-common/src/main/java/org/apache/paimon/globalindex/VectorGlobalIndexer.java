@@ -18,45 +18,9 @@
 
 package org.apache.paimon.globalindex;
 
-import java.io.Serializable;
-import java.util.Iterator;
-
 /** A {@link GlobalIndexer} that supports vector similarity search. */
 public interface VectorGlobalIndexer extends GlobalIndexer {
 
     /** Returns the metric name used to convert vector distances to comparable scores. */
     String metric();
-
-    /** Zero-based ordinals in the non-null input stream, in the order required for training. */
-    default long[] planGlobalTrainingSample(long vectorCount) {
-        throw new UnsupportedOperationException("Centroid training is not supported.");
-    }
-
-    /** Train using ordered, preselected batches and the full non-null corpus size. */
-    default VectorTrainingModel trainGlobalModel(
-            long vectorCount, Iterator<TrainingBatch> batches) {
-        throw new UnsupportedOperationException("Centroid training is not supported.");
-    }
-
-    /** A row-major batch selected by the distributed sampler. */
-    final class TrainingBatch implements Serializable {
-        private static final long serialVersionUID = 1L;
-        public final float[] vectors;
-        public final int count;
-
-        public TrainingBatch(float[] vectors, int count) {
-            this.vectors = vectors;
-            this.count = count;
-        }
-    }
-
-    default VectorGlobalModelTrainer createGlobalModelTrainer() {
-        throw new UnsupportedOperationException(
-                "Centroid sharding is not supported by this vector index.");
-    }
-
-    default VectorTrainingModel restoreTrainingModel(byte[] payload) {
-        throw new UnsupportedOperationException(
-                "Centroid sharding is not supported by this vector index.");
-    }
 }

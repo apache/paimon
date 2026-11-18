@@ -1759,8 +1759,7 @@ class ConflictDetectionTest {
                                 null,
                                 meta,
                                 new org.apache.paimon.index.DataEvolutionIndexSourceMeta(1)
-                                        .serialize()),
-                        IndexFileMeta.ROUTING_MODEL);
+                                        .serialize()));
         IndexManifestEntry index = new IndexManifestEntry(ADD, BinaryRow.EMPTY_ROW, 0, file);
         List<SimpleFileEntry> data =
                 Arrays.asList(

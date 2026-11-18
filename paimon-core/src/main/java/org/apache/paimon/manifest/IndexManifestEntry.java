@@ -55,7 +55,6 @@ public class IndexManifestEntry {
     public static final String DELETION_VECTORS_RANGES = "_DELETIONS_VECTORS_RANGES";
     public static final String EXTERNAL_PATH = "_EXTERNAL_PATH";
     public static final String GLOBAL_INDEX = "_GLOBAL_INDEX";
-    public static final String INDEX_FILE_KIND = "_INDEX_FILE_KIND";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -73,8 +72,7 @@ public class IndexManifestEntry {
                                     DELETION_VECTORS_RANGES,
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(8, EXTERNAL_PATH, newStringType(true)),
-                            new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA),
-                            new DataField(10, INDEX_FILE_KIND, newStringType(true))));
+                            new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA)));
 
     public static final RowType MANIFEST_ROW_TYPE =
             ManifestSchemaUtils.withFormatIdentifier(SCHEMA);

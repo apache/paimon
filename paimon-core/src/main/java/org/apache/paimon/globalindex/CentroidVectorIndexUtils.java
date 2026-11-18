@@ -18,9 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.Range;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -32,10 +34,13 @@ public final class CentroidVectorIndexUtils {
     private CentroidVectorIndexUtils() {}
 
     public static boolean centroidBased(IndexFileMeta file) {
-        return VectorIndexUtils.isVectorIndexType(file.indexType())
-                && file.globalIndexMeta() != null
-                && VectorIndexShardMeta.deserialize(file.globalIndexMeta().indexMeta())
-                        .centroidBased();
+        return file.globalIndexMeta() != null
+                && VectorIndexShardMeta.isWrapped(file.globalIndexMeta().indexMeta())
+                && CoreOptions.isVectorIndexType(file.indexType());
+    }
+
+    public static boolean isRoutingModel(IndexFileMeta file) {
+        return centroidBased(file) && metadata(file).routingModel();
     }
 
     public static VectorIndexShardMeta metadata(IndexFileMeta file) {
@@ -44,42 +49,43 @@ public final class CentroidVectorIndexUtils {
 
     public static IndexFileMeta validateModel(List<IndexFileMeta> files) {
         IndexFileMeta routing = null;
+        String modelId = null;
+        int nlist = 0;
+        Set<Integer> centroids = new HashSet<>();
         for (IndexFileMeta file : files) {
             checkArgument(
                     centroidBased(file),
                     "Cannot mix centroid-based and range-based vector shards.");
-            if (file.isRoutingModel()) {
+            VectorIndexShardMeta meta = metadata(file);
+            String id = meta.modelId();
+            checkArgument(
+                    modelId == null || modelId.equals(id),
+                    "Centroid shards belong to different models.");
+            modelId = id;
+            if (meta.routingModel()) {
                 checkArgument(
                         routing == null,
                         "Multiple routing models for the same partition and index.");
                 routing = file;
+                nlist = meta.nlist();
+                meta.sourceRowRanges();
+            } else {
+                checkArgument(centroids.add(meta.centroid()), "Duplicate centroid shard.");
             }
         }
         checkArgument(routing != null, "Missing centroid routing model.");
-        VectorIndexShardMeta model = metadata(routing);
-        Set<Integer> centroids = new HashSet<>();
-        for (IndexFileMeta file : files) {
-            checkArgument(
-                    model.modelId().equals(metadata(file).modelId()),
-                    "Centroid shards belong to different models.");
-            if (!file.isRoutingModel()) {
-                int centroid = metadata(file).centroid();
-                checkArgument(
-                        centroid < model.nlist() && centroids.add(centroid),
-                        "Duplicate or invalid centroid shard.");
-            }
+        for (int centroid : centroids) {
+            checkArgument(centroid < nlist, "Invalid centroid shard.");
         }
-        checkArgument(centroids.size() == model.nlist(), "Incomplete centroid model shard set.");
-        model.sourceRowRanges();
+        checkArgument(centroids.size() == nlist, "Incomplete centroid model shard set.");
         return routing;
     }
 
     public static List<Range> coverage(IndexFileMeta file) {
         if (!centroidBased(file)) {
-            return java.util.Collections.singletonList(file.globalIndexMeta().rowRange());
+            return Collections.singletonList(file.globalIndexMeta().rowRange());
         }
-        return file.isRoutingModel()
-                ? metadata(file).sourceRowRanges()
-                : java.util.Collections.emptyList();
+        VectorIndexShardMeta meta = metadata(file);
+        return meta.routingModel() ? meta.sourceRowRanges() : Collections.emptyList();
     }
 }

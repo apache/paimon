@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.globalindex.VectorGlobalIndexer.TrainingBatch;
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 
 import java.io.Serializable;

@@ -646,8 +646,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
         for (IndexManifestEntry index : indexEntries) {
             if (index.kind() != FileKind.ADD
-                    || !index.indexFile().isRoutingModel()
-                    || !CentroidVectorIndexUtils.centroidBased(index.indexFile())) {
+                    || !CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
                 continue;
             }
             long baseline =

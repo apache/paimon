@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.globalindex.{VectorIndexShardMeta, VectorTrainingModelIO}
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
 
@@ -81,7 +82,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
 
       val firstFiles = indexes.map(_.fileName()).toSet
       assert(indexes.size == 5)
-      assert(indexes.count(_.isRoutingModel()) == 1)
+      assert(indexes.count(f => CentroidVectorIndexUtils.isRoutingModel(f)) == 1)
       assert(nearest(300) == 300)
       // Partition 1 lies inside the indexed partition's min/max envelope, but is unindexed.
       assert(nearest(200) == 200)
@@ -138,7 +139,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
           .asScala
           .map(_.indexFile())
-          .find(_.isRoutingModel())
+          .find(f => CentroidVectorIndexUtils.isRoutingModel(f))
           .get
         val meta = VectorIndexShardMeta.deserialize(model.globalIndexMeta().indexMeta())
         val path = table.store().pathFactory().globalIndexFileFactory().toPath(model)
@@ -204,10 +205,11 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
             .scan(table.snapshotManager().latestSnapshot(), kind)
             .asScala
             .map(_.indexFile())
-          assert(files.size == 5 && files.count(_.isRoutingModel()) == 1)
+          assert(
+            files.size == 5 && files.count(f => CentroidVectorIndexUtils.isRoutingModel(f)) == 1)
           assert(nearest("centroid-based").toSeq == Seq(200))
           val centroids = files
-            .filterNot(_.isRoutingModel())
+            .filterNot(f => CentroidVectorIndexUtils.isRoutingModel(f))
             .map(f => VectorIndexShardMeta.deserialize(f.globalIndexMeta().indexMeta()).centroid())
           assert(centroids.toSet == Set(0, 1, 2, 3))
           spark

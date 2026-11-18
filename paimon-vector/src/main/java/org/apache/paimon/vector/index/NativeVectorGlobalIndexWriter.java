@@ -335,10 +335,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
+            byte[] payloadMeta = new VectorIndexMeta().serialize();
             return new ResultEntry(
                     fileName,
                     shardMeta == null ? rowCount : count,
-                    shardMeta == null ? new VectorIndexMeta().serialize() : shardMeta.serialize());
+                    shardMeta == null ? payloadMeta : shardMeta.wrap(payloadMeta));
         }
     }
 

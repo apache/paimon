@@ -26,8 +26,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,23 +38,77 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manifest metadata shared by vector implementations and engine-independent planning. */
 public final class VectorIndexShardMeta {
-    public static final String CENTROID_BASED = "centroid-based";
-    public static final String ABSOLUTE_ROW_ID = "ABSOLUTE_ROW_ID";
+    private static final byte[] MAGIC = {'P', 'C', 'S', 'M'};
+    private static final byte VERSION = 1;
+    // The preview writer emitted this key first in a LinkedHashMap.
+    private static final byte[] PREVIEW_PREFIX =
+            "{\"shardMode\":\"centroid-based\",".getBytes(StandardCharsets.UTF_8);
+    private static final String ABSOLUTE_ROW_ID = "ABSOLUTE_ROW_ID";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, String>> TYPE =
             new TypeReference<LinkedHashMap<String, String>>() {};
     private final Map<String, String> values;
+    @Nullable private final byte[] payloadMeta;
 
-    private VectorIndexShardMeta(Map<String, String> values) {
+    private VectorIndexShardMeta(Map<String, String> values, @Nullable byte[] payloadMeta) {
         this.values = values;
+        this.payloadMeta = payloadMeta;
     }
 
-    public static VectorIndexShardMeta deserialize(@Nullable byte[] bytes) {
+    /** Ordinary index metadata is opaque and can use any encoding. */
+    public static boolean isWrapped(@Nullable byte[] bytes) {
+        return startsWith(bytes, MAGIC) || startsWith(bytes, PREVIEW_PREFIX);
+    }
+
+    private static boolean startsWith(@Nullable byte[] bytes, byte[] prefix) {
+        if (bytes == null || bytes.length < prefix.length) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length; i++) {
+            if (bytes[i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static VectorIndexShardMeta deserialize(byte[] bytes) {
         try {
-            return new VectorIndexShardMeta(
-                    bytes == null ? Collections.emptyMap() : MAPPER.readValue(bytes, TYPE));
+            Map<String, String> descriptor;
+            byte[] payload = null;
+            if (startsWith(bytes, PREVIEW_PREFIX)) {
+                descriptor = MAPPER.readValue(bytes, TYPE);
+            } else {
+                checkArgument(
+                        startsWith(bytes, MAGIC)
+                                && bytes.length >= MAGIC.length + 1 + 2 * Integer.BYTES,
+                        "Invalid centroid metadata header.");
+                ByteBuffer input = ByteBuffer.wrap(bytes);
+                input.position(MAGIC.length);
+                checkArgument(input.get() == VERSION, "Unsupported centroid metadata version.");
+                int descriptorSize = input.getInt();
+                int payloadSize = input.getInt();
+                checkArgument(
+                        descriptorSize > 0
+                                && descriptorSize <= input.remaining()
+                                && payloadSize >= -1
+                                && input.remaining() - descriptorSize == Math.max(0, payloadSize),
+                        "Invalid centroid metadata lengths.");
+                descriptor = MAPPER.readValue(bytes, input.position(), descriptorSize, TYPE);
+                if (payloadSize >= 0) {
+                    input.position(input.position() + descriptorSize);
+                    payload = new byte[payloadSize];
+                    input.get(payload);
+                }
+            }
+            checkArgument(
+                    descriptor != null
+                            && descriptor.containsKey("nlist")
+                                    != descriptor.containsKey("centroid"),
+                    "Expected a routing model or a centroid shard.");
+            return new VectorIndexShardMeta(descriptor, payload);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Invalid vector shard metadata", e);
+            throw new IllegalArgumentException("Invalid centroid metadata", e);
         }
     }
 
@@ -68,7 +123,7 @@ public final class VectorIndexShardMeta {
                 Range.sortAndMergeOverlap(coverage, true).stream()
                         .map(r -> r.from + ":" + r.to)
                         .collect(Collectors.joining(",")));
-        return new VectorIndexShardMeta(values);
+        return new VectorIndexShardMeta(values, null);
     }
 
     public static VectorIndexShardMeta centroid(String modelId, int centroid) {
@@ -76,23 +131,23 @@ public final class VectorIndexShardMeta {
         Map<String, String> values = base(modelId);
         values.put("centroid", Integer.toString(centroid));
         values.put("rowIdEncoding", ABSOLUTE_ROW_ID);
-        return new VectorIndexShardMeta(values);
+        return new VectorIndexShardMeta(values, null);
     }
 
     private static Map<String, String> base(String modelId) {
         checkArgument(modelId != null && !modelId.isEmpty(), "Model id is required.");
         Map<String, String> values = new LinkedHashMap<>();
-        values.put("shardMode", CENTROID_BASED);
         values.put("modelId", modelId);
         return values;
     }
 
-    public boolean centroidBased() {
-        return CENTROID_BASED.equals(values.get("shardMode"));
+    public boolean routingModel() {
+        return values.containsKey("nlist");
     }
 
-    public boolean routingModel() {
-        return centroidBased() && values.containsKey("nlist");
+    @Nullable
+    public byte[] payloadMeta() {
+        return payloadMeta;
     }
 
     public String modelId() {
@@ -132,10 +187,27 @@ public final class VectorIndexShardMeta {
     }
 
     public byte[] serialize() {
+        return wrap(payloadMeta);
+    }
+
+    /** Store routing information and the underlying writer's opaque metadata in indexMeta. */
+    public byte[] wrap(@Nullable byte[] payload) {
         try {
-            return MAPPER.writeValueAsBytes(values);
+            byte[] descriptor = MAPPER.writeValueAsBytes(values);
+            int size = Math.addExact(MAGIC.length + 1 + 2 * Integer.BYTES, descriptor.length);
+            ByteBuffer output =
+                    ByteBuffer.allocate(Math.addExact(size, payload == null ? 0 : payload.length));
+            output.put(MAGIC)
+                    .put(VERSION)
+                    .putInt(descriptor.length)
+                    .putInt(payload == null ? -1 : payload.length)
+                    .put(descriptor);
+            if (payload != null) {
+                output.put(payload);
+            }
+            return output.array();
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot serialize vector shard metadata", e);
+            throw new IllegalStateException("Cannot serialize centroid metadata", e);
         }
     }
 }

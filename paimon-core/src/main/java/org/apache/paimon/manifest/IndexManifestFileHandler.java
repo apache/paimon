@@ -236,24 +236,15 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }
-            boolean checkCentroidModels =
-                    prevIndexFiles.stream().anyMatch(entry -> entry.indexFile().isRoutingModel())
-                            || newIndexFiles.stream()
-                                    .anyMatch(
-                                            entry ->
-                                                    entry.indexFile().isRoutingModel()
-                                                            || CentroidVectorIndexUtils
-                                                                    .centroidBased(
-                                                                            entry.indexFile()));
-            if (!checkCentroidModels) {
+            if (indexEntries.values().stream()
+                    .noneMatch(
+                            entry -> CentroidVectorIndexUtils.centroidBased(entry.indexFile()))) {
                 return new ArrayList<>(indexEntries.values());
             }
             Map<BinaryRow, Map<String, List<IndexFileMeta>>> models = new HashMap<>();
             for (IndexManifestEntry entry : indexEntries.values()) {
                 IndexFileMeta file = entry.indexFile();
-                if (!org.apache.paimon.globalindex.VectorIndexUtils.isVectorIndexType(
-                                file.indexType())
-                        || file.globalIndexMeta() == null) {
+                if (file.globalIndexMeta() == null) {
                     continue;
                 }
                 models.computeIfAbsent(entry.partition(), p -> new HashMap<>())

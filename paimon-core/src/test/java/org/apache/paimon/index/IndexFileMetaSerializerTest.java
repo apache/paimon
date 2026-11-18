@@ -19,11 +19,15 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
+import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Random;
 
@@ -34,19 +38,24 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
 
     @Test
     void testRoutingModelKindRoundTrip() throws Exception {
+        byte[] descriptor =
+                VectorIndexShardMeta.routing(
+                                "model", 1, Collections.singletonList(new Range(10, 1000)))
+                        .serialize();
         IndexFileMeta routing =
                 new IndexFileMeta(
                         "ivf-pq",
                         "model.index",
                         100,
                         0,
-                        null,
-                        null,
-                        new GlobalIndexMeta(10, 1000, 7, null, new byte[] {1}),
-                        IndexFileMeta.ROUTING_MODEL);
+                        new GlobalIndexMeta(10, 1000, 7, null, descriptor),
+                        null);
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         assertThat(serializer.fromRow(serializer.toRow(routing))).isEqualTo(routing);
-        assertThat(serializer.fromRow(serializer.toRow(routing)).isRoutingModel()).isTrue();
+        assertThat(
+                        CentroidVectorIndexUtils.isRoutingModel(
+                                serializer.fromRow(serializer.toRow(routing))))
+                .isTrue();
 
         org.apache.paimon.manifest.IndexManifestEntry entry =
                 new org.apache.paimon.manifest.IndexManifestEntry(
@@ -57,30 +66,6 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
         org.apache.paimon.manifest.IndexManifestEntrySerializer manifest =
                 new org.apache.paimon.manifest.IndexManifestEntrySerializer();
         assertThat(manifest.fromRow(manifest.toRow(entry))).isEqualTo(entry);
-    }
-
-    @Test
-    void testLegacySevenFieldMetadataDefaultsToDataFile() throws Exception {
-        IndexFileMeta old =
-                globalIndexFile(
-                        new GlobalIndexMeta(10, 1000, 7, null, new byte[] {1}, new byte[] {2}));
-        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
-        org.apache.paimon.types.RowType oldSchema =
-                new org.apache.paimon.types.RowType(
-                        false, IndexFileMeta.SCHEMA.getFields().subList(0, 7));
-        org.apache.paimon.io.DataOutputSerializer output =
-                new org.apache.paimon.io.DataOutputSerializer(128);
-        output.writeInt(1);
-        org.apache.paimon.data.serializer.InternalSerializers.create(oldSchema)
-                .serialize(
-                        new org.apache.paimon.utils.OffsetRow(7, 0).replace(serializer.toRow(old)),
-                        output);
-        assertThat(
-                        new IndexFileMetaV5Deserializer()
-                                .deserializeList(
-                                        new org.apache.paimon.io.DataInputDeserializer(
-                                                output.getCopyOfBuffer())))
-                .containsExactly(old);
     }
 
     @Test

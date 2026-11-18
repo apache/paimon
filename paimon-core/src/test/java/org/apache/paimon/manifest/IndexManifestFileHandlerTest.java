@@ -244,8 +244,7 @@ public class IndexManifestFileHandlerTest {
                             centroid == -1 ? 0 : 10,
                             null,
                             null,
-                            new GlobalIndexMeta(10, 100, 1, null, metadata),
-                            centroid == -1 ? IndexFileMeta.ROUTING_MODEL : IndexFileMeta.DATA_FILE);
+                            new GlobalIndexMeta(10, 100, 1, null, metadata));
             entries.add(new IndexManifestEntry(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, file));
         }
         return entries;

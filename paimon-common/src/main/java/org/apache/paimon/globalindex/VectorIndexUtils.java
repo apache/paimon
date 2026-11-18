@@ -25,14 +25,6 @@ import org.apache.paimon.data.InternalVector;
 public final class VectorIndexUtils {
     private VectorIndexUtils() {}
 
-    public static boolean isVectorIndexType(String type) {
-        return "ivf-flat".equals(type)
-                || "ivf-pq".equals(type)
-                || "ivf-sq".equals(type)
-                || "ivf-rq".equals(type)
-                || "diskann".equals(type);
-    }
-
     public static float[] toFloatArray(Object value) {
         if (value instanceof float[]) {
             return ((float[]) value).clone();
