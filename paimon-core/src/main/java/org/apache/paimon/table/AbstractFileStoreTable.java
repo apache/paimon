@@ -27,6 +27,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -680,10 +682,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             return Optional.empty();
         }
         TableSchema historicalSchema = schemaManager().schema(snapshot.schemaId());
-        return Optional.of(
-                historicalSchema.copy(
-                        excludeCurrentSchemaFieldOptions(
-                                historicalSchema, options, dynamicOptionKeys)));
+        Map<String, String> historicalOptions =
+                excludeCurrentSchemaFieldOptions(historicalSchema, options, dynamicOptionKeys);
+        if (DeleteOrderingGuardFile.mayContainGuards(snapshot)) {
+            DeleteOrderingGuardPolicy.restoreHistoricalOptions(
+                    historicalSchema, historicalOptions, dynamicOptionKeys);
+        }
+        return Optional.of(historicalSchema.copy(historicalOptions));
     }
 
     /** Prevents current column declarations from overriding a historical schema's field options. */
@@ -724,6 +729,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
+        validateDestructiveRollback();
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -750,6 +756,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        validateDestructiveRollback();
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -760,6 +767,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             rollbackHelper.cleanLargerThan(taggedSnapshot);
             rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
         }
+    }
+
+    private void validateDestructiveRollback() {
+        DeleteOrderingGuardPolicy.validateHistoryRewrite(
+                coreOptions(), snapshotManager(), "Destructive rollback");
     }
 
     @Override
@@ -930,6 +942,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void fastForward(String branchName) {
+        DeleteOrderingGuardPolicy.validateFastForward(
+                coreOptions(), snapshotManager(), schemaManager(), branchName);
         branchManager().fastForward(branchName);
     }
 

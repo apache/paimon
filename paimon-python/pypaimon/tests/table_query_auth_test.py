@@ -75,6 +75,7 @@ class _FakeSplit:
 
 class _FakeTable:
     def __init__(self, identifier=None):
+        self.is_primary_key_table = False
         self.identifier = identifier or Identifier("db", "table")
         self.options = SimpleNamespace(
             native_plan_enabled=lambda: False, native_read_enabled=lambda: False, query_auth_enabled=False)

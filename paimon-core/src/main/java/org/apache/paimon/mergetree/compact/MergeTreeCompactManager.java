@@ -27,6 +27,8 @@ import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.index.DeleteOrderingGuardConsolidator;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -70,6 +72,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final boolean forceRewriteAllFiles;
     private final boolean forceKeepDelete;
     private final String bucketInfo;
+    @Nullable private DeleteOrderingGuardState guardState;
+    @Nullable private DeleteOrderingGuardConsolidator guardConsolidator;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -113,6 +117,22 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return levels.numberOfSortedRuns() > numSortedRunStopTrigger;
     }
 
+    public MergeTreeCompactManager withDeleteOrderingGuardState(DeleteOrderingGuardState state) {
+        this.guardState = state;
+        return this;
+    }
+
+    public MergeTreeCompactManager withDeleteOrderingGuardConsolidator(
+            @Nullable DeleteOrderingGuardConsolidator consolidator) {
+        this.guardConsolidator = consolidator;
+        return this;
+    }
+
+    @Override
+    public List<IndexFileMeta> deleteOrderingGuards() {
+        return guardState == null ? Collections.emptyList() : guardState.files();
+    }
+
     @Override
     public boolean shouldWaitForPreparingCheckpoint() {
         // cast to long to avoid Numeric overflow
@@ -134,6 +154,15 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
+        if (!fullCompaction && taskFuture != null) {
+            return;
+        }
+        List<IndexFileMeta> guardSources = deleteOrderingGuards();
+        List<IndexFileMeta> consolidationSources =
+                guardConsolidator != null
+                                && guardConsolidator.shouldConsolidate(fullCompaction, guardSources)
+                        ? guardSources
+                        : Collections.emptyList();
         Optional<CompactUnit> optionalUnit;
         List<LevelSortedRun> runs = levels.levelSortedRuns();
         if (fullCompaction) {
@@ -152,7 +181,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             runs,
                             recordLevelExpire,
                             dvMaintainer,
-                            forceRewriteAllFiles);
+                            forceRewriteAllFiles || (guardState != null && !guardState.isEmpty()));
         } else {
             if (taskFuture != null) {
                 return;
@@ -199,8 +228,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                                                         file.fileSize()))
                                                 .collect(Collectors.joining(", ")));
                     }
-                    submitCompaction(unit, dropDelete);
+                    submitCompaction(unit, dropDelete, consolidationSources);
                 });
+        if (!optionalUnit.isPresent() && !consolidationSources.isEmpty()) {
+            submitTask(null, consolidationSources);
+        }
     }
 
     @VisibleForTesting
@@ -208,7 +240,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return levels;
     }
 
-    private void submitCompaction(CompactUnit unit, boolean dropDelete) {
+    private void submitCompaction(
+            CompactUnit unit, boolean dropDelete, List<IndexFileMeta> consolidationSources) {
         Supplier<CompactDeletionFile> compactDfSupplier = () -> null;
         if (dvMaintainer != null) {
             compactDfSupplier =
@@ -239,7 +272,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             metricsReporter,
                             compactDfSupplier,
                             recordLevelExpire,
-                            forceRewriteAllFiles,
+                            forceRewriteAllFiles || (guardState != null && !guardState.isEmpty()),
                             bucketInfo);
         }
 
@@ -255,7 +288,44 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
-        taskFuture = executor.submit(task);
+        submitTask(task, consolidationSources);
+    }
+
+    private void submitTask(
+            @Nullable CompactTask dataTask, List<IndexFileMeta> consolidationSources) {
+        CompactTask task =
+                dataTask == null
+                        ? new CompactTask(metricsReporter, bucketInfo) {
+                            @Override
+                            protected CompactResult doCompact() throws IOException {
+                                return guardConsolidator.rewrite(consolidationSources);
+                            }
+                        }
+                        : dataTask;
+        taskFuture =
+                executor.submit(
+                        () -> {
+                            CompactResult result = null;
+                            try {
+                                result = task.call();
+                                if (dataTask != null && !consolidationSources.isEmpty()) {
+                                    result.merge(guardConsolidator.rewrite(consolidationSources));
+                                }
+                                return result;
+                            } catch (Exception | Error failure) {
+                                if (result != null) {
+                                    try {
+                                        rewriter.abort(result);
+                                    } catch (Throwable cleanupFailure) {
+                                        failure.addSuppressed(cleanupFailure);
+                                    }
+                                    if (guardConsolidator != null) {
+                                        guardConsolidator.abort(result);
+                                    }
+                                }
+                                throw failure;
+                            }
+                        });
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
             metricsReporter.increaseCompactionsTotalCount();
@@ -276,6 +346,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                 r.after());
                     }
                     levels.update(r.before(), r.after());
+                    rewriter.release(r);
+                    if (guardConsolidator != null) {
+                        guardConsolidator.release(r);
+                    }
                     MetricUtils.safeCall(this::reportMetrics, LOG);
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
@@ -304,9 +378,15 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void close() throws IOException {
-        rewriter.close();
-        if (metricsReporter != null) {
-            MetricUtils.safeCall(metricsReporter::unregister, LOG);
+        try {
+            rewriter.close();
+        } finally {
+            if (guardConsolidator != null) {
+                guardConsolidator.close();
+            }
+            if (metricsReporter != null) {
+                MetricUtils.safeCall(metricsReporter::unregister, LOG);
+            }
         }
     }
 

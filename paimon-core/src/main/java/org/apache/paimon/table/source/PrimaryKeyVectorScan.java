@@ -265,6 +265,9 @@ public class PrimaryKeyVectorScan implements VectorScan {
                 dataSplit = unwrapDataSplit(split);
             }
             checkArgument(
+                    dataSplit.deleteOrderingGuards().isEmpty(),
+                    "Vector search with delete ordering guards requires guard-aware index visibility.");
+            checkArgument(
                     snapshotId == dataSplit.snapshotId()
                             && partition.equals(dataSplit.partition())
                             && bucket == dataSplit.bucket()

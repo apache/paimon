@@ -32,6 +32,7 @@ import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.index.DeleteOrderingGuardSerializer;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -39,7 +40,9 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -202,6 +205,8 @@ public class SchemaValidation {
         validateSequenceGroupSortOrder(schema, options);
 
         validateMergeFunction(schema);
+
+        validateDeleteOrderingGuards(schema, options);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
@@ -1225,6 +1230,49 @@ public class SchemaValidation {
                     CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
                     CoreOptions.WRITE_ONLY.key());
         }
+    }
+
+    private static void validateDeleteOrderingGuards(TableSchema schema, CoreOptions options) {
+        options.deleteOrderingGuardsCompactionMinFileNum();
+        if (!options.deleteOrderingGuardsEnabled()) {
+            return;
+        }
+        validateRetainedDeleteOrderingGuards(schema);
+    }
+
+    /** Retained bounds require the supported read/write scope even when new capture is disabled. */
+    public static void validateRetainedDeleteOrderingGuards(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "%s requires a primary-key table.",
+                CoreOptions.DELETE_ORDERING_GUARDS_ENABLED.key());
+        // Use the same metadata validation as capture, including merge engines and field
+        // aggregates.
+        new DeleteOrderingGuardSerializer(
+                schema.id(),
+                new RowType(
+                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR.keyFields(schema)),
+                schema.logicalRowType(),
+                options);
+        checkArgument(options.bucket() > 0, "Delete ordering guards require fixed buckets.");
+        checkArgument(
+                !options.deletionVectorsEnabled(),
+                "Delete ordering guards do not support deletion vectors.");
+        checkArgument(
+                !options.isChainTable(), "Delete ordering guards do not support chain tables.");
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                        == IcebergOptions.StorageType.DISABLED,
+                "Delete ordering guards do not support Iceberg compatibility.");
+        checkArgument(
+                VectorIndexOptions.columns(options.toConfiguration()).isEmpty()
+                        && options.fullTextIndexColumns().isEmpty()
+                        && options.btreeIndexColumns().isEmpty()
+                        && options.bitmapIndexColumns().isEmpty()
+                        && options.multiValueIndexColumns().isEmpty()
+                        && options.fmIndexColumns().isEmpty(),
+                "Delete ordering guards do not support primary-key indexes.");
     }
 
     private static void validateForDeletionVectors(CoreOptions options) {

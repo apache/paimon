@@ -31,7 +31,8 @@ def _table():
     options = Mock()
     options.native_commit_enabled.return_value = True
     options.snapshot_ignore_empty_commit.return_value = False
-    return SimpleNamespace(options=options, identifier='test', new_snapshot_commit=Mock())
+    return SimpleNamespace(
+        is_primary_key_table=False, options=options, identifier='test', new_snapshot_commit=Mock())
 
 
 def _message():

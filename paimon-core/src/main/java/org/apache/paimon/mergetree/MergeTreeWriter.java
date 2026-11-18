@@ -163,6 +163,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public List<IndexFileMeta> deleteOrderingGuards() {
+        return compactManager.deleteOrderingGuards();
+    }
+
+    @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
         this.writeBuffer =
                 new SortBufferWriteBuffer(
@@ -353,6 +358,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         compactAfter.addAll(result.after());
         compactChangelog.addAll(result.changelog());
+        for (IndexFileMeta deleted : result.deletedIndexFiles()) {
+            if (compactNewIndexFiles.remove(deleted)) {
+                writerFactory.deleteIndexFile(deleted);
+            } else {
+                compactDeletedIndexFiles.add(deleted);
+            }
+        }
+        compactNewIndexFiles.addAll(result.newIndexFiles());
 
         updateCompactDeletionFile(result.deletionFile());
     }
@@ -371,9 +384,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         writerFactory.abortManagedBlobWrites();
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
-        sync();
-        compactManager.close();
+        IOUtils.closeAll(this::sync, compactManager, this::cleanTemporaryFiles);
+    }
 
+    private void cleanTemporaryFiles() {
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
         newFiles.clear();
@@ -406,5 +420,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         if (compactDeletionFile != null) {
             compactDeletionFile.clean();
         }
+        newIndexFiles.forEach(writerFactory::deleteIndexFile);
+        compactNewIndexFiles.forEach(writerFactory::deleteIndexFile);
+        newIndexFiles.clear();
+        compactNewIndexFiles.clear();
     }
 }

@@ -32,7 +32,9 @@ import org.apache.paimon.data.BinaryRow;
  * <p>After a successful call, the returned rewriter owns the supplied rewriter and must close it
  * when closed. If creation fails or returns null, Paimon closes the supplied rewriter. The factory
  * must release any other resources it allocated before failing. Each call must return a rewriter
- * owned exclusively by that bucket; it is closed by Paimon's compaction manager.
+ * owned exclusively by that bucket; it is closed by Paimon's compaction manager. Wrappers must also
+ * forward {@link CompactRewriter#abort} and {@link CompactRewriter#release} so the delegate can
+ * discard failed output and transfer ownership of successful output.
  */
 @FunctionalInterface
 public interface CompactRewriterFactory {

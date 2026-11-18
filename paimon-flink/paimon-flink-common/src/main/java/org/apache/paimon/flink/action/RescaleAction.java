@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
@@ -86,6 +87,7 @@ public class RescaleAction extends TableActionBase {
                     "Table " + table.fullName() + " has no snapshot. No need to rescale.");
         }
         Snapshot snapshot = optionalSnapshot.get();
+        DeleteOrderingGuardPolicy.validateRescale(fileStoreTable, snapshot);
 
         // If someone commits while the rescale job is running, this commit will be lost.
         // So we use strict mode to make sure nothing is lost.

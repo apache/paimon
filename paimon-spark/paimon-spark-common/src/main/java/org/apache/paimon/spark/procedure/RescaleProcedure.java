@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
@@ -119,6 +120,7 @@ public class RescaleProcedure extends BaseProcedure {
                                         + " has no snapshot, no need to rescale.");
                     }
                     Snapshot snapshot = optionalSnapshot.get();
+                    DeleteOrderingGuardPolicy.validateRescale(fileStoreTable, snapshot);
 
                     // If someone commits while the rescale job is running, this commit will be
                     // lost.

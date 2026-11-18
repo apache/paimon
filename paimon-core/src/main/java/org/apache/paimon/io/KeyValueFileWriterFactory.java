@@ -33,6 +33,8 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -257,6 +259,15 @@ public class KeyValueFileWriterFactory {
         DataFilePathFactory pathFactory =
                 formatContext.pathFactory(new WriteFormatKey(file.level(), false));
         file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
+    }
+
+    public void deleteIndexFile(IndexFileMeta file) {
+        IndexPathFactory pathFactory =
+                formatContext
+                        .parentFactories
+                        .apply(formatContext.key2Format.apply(new WriteFormatKey(0, false)))
+                        .indexFileFactory(formatContext.partition, formatContext.bucket);
+        fileIO.deleteQuietly(pathFactory.toPath(file));
     }
 
     public FileIO getFileIO() {

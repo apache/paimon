@@ -202,17 +202,19 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        return wrapped.newSnapshotReader();
+        return wrapped.newSnapshotReader().withDeleteOrderingGuardBuckets();
     }
 
     @Override
     public DataTableScan newScan() {
-        return wrapped.newScan();
+        return wrapped.newScan().withDeleteOrderingGuardBuckets();
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return wrapped.newStreamScan();
+        StreamDataTableScan scan = wrapped.newStreamScan();
+        scan.withDeleteOrderingGuardBuckets();
+        return scan;
     }
 
     @Override

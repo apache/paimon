@@ -20,6 +20,10 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 
+import javax.annotation.Nullable;
+
+import java.util.function.Function;
+
 /**
  * Wrapper for {@link MergeFunction}s which works like a reducer.
  *
@@ -35,6 +39,7 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
 
     private KeyValue initialKv;
     private boolean isInitialized;
+    @Nullable private Function<KeyValue, KeyValue> guardResolver;
 
     public ReducerMergeFunctionWrapper(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;
@@ -69,6 +74,12 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Get current value of the {@link MergeFunction} helper. */
     @Override
     public KeyValue getResult() {
-        return isInitialized ? mergeFunction.getResult() : initialKv;
+        KeyValue result = isInitialized ? mergeFunction.getResult() : initialKv;
+        return guardResolver == null ? result : guardResolver.apply(result);
+    }
+
+    @Override
+    public void withDeleteOrderingGuardResolver(Function<KeyValue, KeyValue> resolver) {
+        guardResolver = resolver;
     }
 }

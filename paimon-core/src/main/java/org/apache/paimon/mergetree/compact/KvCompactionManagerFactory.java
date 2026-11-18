@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -38,6 +39,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -109,4 +111,24 @@ public interface KvCompactionManagerFactory extends Closeable {
             List<DataFileMeta> restoreFiles,
             @Nullable BucketedDvMaintainer dvMaintainer,
             boolean ignorePreviousFiles);
+
+    default CompactManager create(
+            BinaryRow partition,
+            int bucket,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> restoreFiles,
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles,
+            List<IndexFileMeta> deleteOrderingGuards) {
+        Preconditions.checkArgument(
+                deleteOrderingGuards.isEmpty(),
+                "This compaction manager cannot resolve delete ordering guards.");
+        return create(
+                partition,
+                bucket,
+                compactExecutor,
+                restoreFiles,
+                dvMaintainer,
+                ignorePreviousFiles);
+    }
 }

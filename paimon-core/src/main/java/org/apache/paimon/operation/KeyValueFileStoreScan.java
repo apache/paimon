@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FilteredManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -196,6 +197,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean isValueFilterEnabled() {
+        if (guardedBatchSnapshot()) {
+            return false;
+        }
         if (valueFilter == null) {
             return false;
         }
@@ -219,11 +223,19 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean wholeBucketFilterEnabled() {
-        return valueFilter != null && scanMode == ScanMode.ALL;
+        return valueFilter != null && scanMode == ScanMode.ALL && !guardedBatchSnapshot();
+    }
+
+    private boolean guardedBatchSnapshot() {
+        return scanMode == ScanMode.ALL
+                && DeleteOrderingGuardFile.mayContainGuards(currentSnapshot);
     }
 
     @VisibleForTesting
     public boolean limitPushdownEnabled() {
+        if (guardedBatchSnapshot()) {
+            return false;
+        }
         if (limit == null || limit <= 0) {
             return false;
         }
@@ -306,6 +318,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean filterByValueFilter(ManifestEntry entry) {
+        if (guardedBatchSnapshot()) {
+            return true;
+        }
         if (entry instanceof FilteredManifestEntry) {
             return ((FilteredManifestEntry) entry).selected();
         }

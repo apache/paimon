@@ -45,6 +45,11 @@ public class PrimaryKeyIndexedSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(Split split, Context context) {
+        if (split instanceof IndexedSplit
+                && !((IndexedSplit) split).dataSplit().deleteOrderingGuards().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Indexed reads with delete ordering guards require guard-aware index visibility.");
+        }
         return !context.forceKeepDelete() && split instanceof IndexedSplit;
     }
 

@@ -21,6 +21,8 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
+import org.apache.paimon.index.DeleteOrderingGuardSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -42,6 +44,10 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Default {@link CompactRewriter} for merge trees. */
 public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
@@ -53,6 +59,8 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
     @Nullable private CompactionMetrics.Reporter metricsReporter;
+    @Nullable private DeleteOrderingGuardCompactRewriter guardCapture;
+    @Nullable private DeleteOrderingGuardState guardState;
 
     public MergeTreeCompactRewriter(
             FileReaderFactory<KeyValue> readerFactory,
@@ -118,13 +126,80 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected <T> RecordReader<T> readerForMergeTree(
             List<List<SortedRun>> sections, MergeFunctionWrapper<T> mergeFunctionWrapper)
             throws IOException {
-        return MergeTreeReaders.readerForMergeTree(
-                sections,
-                readerFactory,
-                keyComparator,
-                userDefinedSeqComparator,
-                mergeFunctionWrapper,
-                mergeSorter);
+        if (guardCapture != null) {
+            mergeFunctionWrapper = guardCapture.wrap(mergeFunctionWrapper);
+        }
+        DeleteOrderingGuardReader guards =
+                guardState == null || guardState.isEmpty() ? null : guardState.open();
+        try {
+            if (guards != null) {
+                mergeFunctionWrapper = guards.wrap(mergeFunctionWrapper, userDefinedSeqComparator);
+            }
+            RecordReader<T> reader =
+                    MergeTreeReaders.readerForMergeTree(
+                            sections,
+                            readerFactory,
+                            keyComparator,
+                            userDefinedSeqComparator,
+                            mergeFunctionWrapper,
+                            mergeSorter);
+            return guards == null ? reader : guards.withDataReader(reader);
+        } catch (IOException | RuntimeException | Error failure) {
+            if (guards != null) {
+                try {
+                    guards.close();
+                } catch (Throwable cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            throw failure;
+        }
+    }
+
+    public void withDeleteOrderingGuardState(DeleteOrderingGuardState guardState) {
+        this.guardState = guardState;
+    }
+
+    @Override
+    public void release(CompactResult result) {
+        if (guardState != null) {
+            guardState.remove(result.deletedIndexFiles());
+            guardState.add(result.newIndexFiles());
+        }
+    }
+
+    /**
+     * Installs initial capture internally. Returned references must be committed with the
+     * source-file replacements. Bucket factories supply persisted guards for subsequent reads and
+     * compactions; ordinary table options do not enable initial capture.
+     */
+    public CompactRewriter withDeleteOrderingGuards(
+            DeleteOrderingGuardSerializer serializer, DeleteOrderingGuardFile guardFile) {
+        checkState(guardCapture == null, "Delete ordering guard capture is already installed.");
+        guardCapture = new DeleteOrderingGuardCompactRewriter(this, serializer, guardFile);
+        return guardCapture;
+    }
+
+    CompactRewriter ensureDeleteOrderingGuards(
+            CompactRewriter rewriter,
+            DeleteOrderingGuardSerializer serializer,
+            DeleteOrderingGuardFile guardFile) {
+        if (guardCapture == null) {
+            guardCapture = new DeleteOrderingGuardCompactRewriter(rewriter, serializer, guardFile);
+            return guardCapture;
+        }
+        return rewriter;
+    }
+
+    @Override
+    public void abort(CompactResult result) {
+        Set<String> before =
+                result.before().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+        result.after().stream()
+                .filter(file -> !before.contains(file.fileName()))
+                .forEach(writerFactory::deleteFile);
+        result.changelog().forEach(writerFactory::deleteFile);
+        result.newIndexFiles().forEach(writerFactory::deleteIndexFile);
     }
 
     protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}

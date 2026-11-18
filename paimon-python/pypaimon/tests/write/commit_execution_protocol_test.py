@@ -109,7 +109,7 @@ def test_public_commit_calls_one_executor_protocol_without_replay(backend, failu
     options = Mock()
     options.native_commit_enabled.return_value = backend == 'native'
     options.snapshot_ignore_empty_commit.return_value = False
-    table = Mock(options=options, identifier='default.test')
+    table = Mock(options=options, identifier='default.test', is_primary_key_table=False)
     owner = BatchTableCommit(table, 'user', None)
     executor = Mock()
     message = CommitMessage((), 0, [], deleted_files=[Mock()])

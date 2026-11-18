@@ -21,10 +21,13 @@ package org.apache.paimon.flink.sink.coordinator;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.DeleteOrderingGuardPartitions;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
@@ -36,6 +39,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -119,7 +123,8 @@ public class TableWriteCoordinator {
         if (snapshot == null) {
             return new PagedCoordinationResponse(
                     serializeObject(
-                            new ScanCoordinationResponse(null, null, null, null, null, null)),
+                            new ScanCoordinationResponse(
+                                    null, null, null, null, null, null, Collections.emptyList())),
                     null);
         }
 
@@ -162,7 +167,8 @@ public class TableWriteCoordinator {
     public synchronized ScanCoordinationResponse scan(ScanCoordinationRequest request)
             throws IOException {
         if (snapshot == null) {
-            return new ScanCoordinationResponse(null, null, null, null, null, null);
+            return new ScanCoordinationResponse(
+                    null, null, null, null, null, null, Collections.emptyList());
         }
 
         BinaryRow partition = deserializeBinaryRow(request.partition());
@@ -174,6 +180,14 @@ public class TableWriteCoordinator {
             List<ManifestEntry> entries =
                     scan.withPartitionBucket(partition, bucket).plan().files();
             totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        }
+
+        if (totalBuckets == null) {
+            PartitionEntry guardedPartition =
+                    DeleteOrderingGuardPartitions.read(snapshot).get(partition);
+            if (guardedPartition != null) {
+                totalBuckets = guardedPartition.totalBuckets();
+            }
         }
 
         IndexFileMeta dynamicBucketIndex = null;
@@ -199,7 +213,14 @@ public class TableWriteCoordinator {
                 restoreFiles,
                 dynamicBucketIndex,
                 deleteVectorsIndex,
-                vectorIndexPayloads);
+                vectorIndexPayloads,
+                DeleteOrderingGuardFile.mayContainGuards(snapshot)
+                        ? indexFileHandler.scan(
+                                snapshot,
+                                DeleteOrderingGuardFile.DELETE_ORDERING_GUARD,
+                                partition,
+                                bucket)
+                        : Collections.emptyList());
     }
 
     public synchronized long latestCommittedIdentifier(String user) {

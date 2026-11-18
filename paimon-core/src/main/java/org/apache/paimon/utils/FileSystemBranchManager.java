@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeleteOrderingGuardPolicy;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -170,6 +171,12 @@ public class FileSystemBranchManager implements BranchManager {
     public void fastForward(String branchName) {
         BranchManager.fastForwardValidate(branchName, snapshotManager.branch());
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
+        DeleteOrderingGuardPolicy.validateFastForward(
+                new CoreOptions(
+                        schemaManager.latestOrThrow("Missing fast-forward schema").options()),
+                snapshotManager,
+                schemaManager,
+                branchName);
 
         Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
         if (earliestSnapshotId == null) {

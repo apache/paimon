@@ -25,16 +25,19 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeleteOrderingGuardFile;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.DeleteOrderingGuardPartitions;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.CacheMetrics;
@@ -104,6 +107,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private ScanMode scanMode = ScanMode.ALL;
     private boolean hasNonPartitionFilter;
+    private boolean includeDeleteOrderingGuardBuckets;
+    @Nullable private Integer guardBucket;
+    @Nullable private Filter<Integer> guardBucketFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -307,6 +313,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withBucket(int bucket) {
         scan.withBucket(bucket);
+        guardBucket = bucket;
         return this;
     }
 
@@ -319,7 +326,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
         scan.withBucketFilter(bucketFilter);
+        guardBucketFilter = bucketFilter;
         return this;
+    }
+
+    @Override
+    public SnapshotReader withDeleteOrderingGuardBuckets() {
+        includeDeleteOrderingGuardBuckets = true;
+        return this;
+    }
+
+    @Override
+    public boolean includesDeleteOrderingGuardBuckets() {
+        return includeDeleteOrderingGuardBuckets;
     }
 
     @Override
@@ -407,8 +426,62 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
         List<DataSplit> splits =
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
+        if (includeDeleteOrderingGuardBuckets
+                && scanMode == ScanMode.ALL
+                && DeleteOrderingGuardFile.mayContainGuards(snapshot)) {
+            addGuardOnlyBuckets(snapshot, splits);
+        }
         return new PlanImpl(
                 plan.watermark(), snapshot == null ? null : snapshot.id(), snapshot, (List) splits);
+    }
+
+    private void addGuardOnlyBuckets(Snapshot snapshot, List<DataSplit> splits) {
+        Map<BinaryRow, PartitionEntry> guardPartitions =
+                DeleteOrderingGuardPartitions.read(snapshot);
+        Set<Pair<BinaryRow, Integer>> planned =
+                splits.stream()
+                        .map(split -> Pair.of(split.partition(), split.bucket()))
+                        .collect(Collectors.toSet());
+        PartitionPredicate partitionFilter = manifestsReader().partitionFilter();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> guardBuckets = new LinkedHashMap<>();
+        for (IndexManifestEntry entry :
+                indexFileHandler.scan(snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD)) {
+            if ((partitionFilter == null || partitionFilter.test(entry.partition()))
+                    && (guardBucket == null || guardBucket == entry.bucket())
+                    && (guardBucketFilter == null || guardBucketFilter.test(entry.bucket()))) {
+                Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+                if (!planned.contains(bucket)) {
+                    guardBuckets
+                            .computeIfAbsent(bucket, ignored -> new ArrayList<>())
+                            .add(entry.indexFile());
+                }
+            }
+        }
+        guardBuckets.forEach(
+                (bucket, guards) ->
+                        splits.add(
+                                DataSplit.builder()
+                                        .withSnapshot(snapshot.id())
+                                        .withPartition(bucket.getLeft())
+                                        .withBucket(bucket.getRight())
+                                        .withTotalBuckets(
+                                                guardPartitions.containsKey(bucket.getLeft())
+                                                        ? guardPartitions
+                                                                .get(bucket.getLeft())
+                                                                .totalBuckets()
+                                                        : options.bucket())
+                                        .withBucketPath(
+                                                pathFactory
+                                                        .bucketPath(
+                                                                bucket.getLeft(), bucket.getRight())
+                                                        .toString())
+                                        .withDataFiles(Collections.emptyList())
+                                        .withDeleteOrderingGuards(guards)
+                                        .rawConvertible(false)
+                                        .build()));
+        if (options.scanPlanSortPartition()) {
+            splits.sort((a, b) -> partitionComparator().compare(a.partition(), b.partition()));
+        }
     }
 
     private List<DataSplit> generateSplits(
@@ -417,6 +490,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> entries) {
         List<DataSplit> splits = new ArrayList<>();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> guardFiles =
+                !isStreaming && DeleteOrderingGuardFile.mayContainGuards(snapshot)
+                        ? indexFileHandler.scan(
+                                snapshot,
+                                DeleteOrderingGuardFile.DELETE_ORDERING_GUARD,
+                                entries.keySet())
+                        : Collections.emptyMap();
         // Read deletion indexes at once to reduce file IO
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFilesMap = null;
         if (!isStreaming) {
@@ -440,6 +520,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                         snapshot == null ? FIRST_SNAPSHOT_ID - 1 : snapshot.id())
                                 .withPartition(partition)
                                 .withBucket(bucket)
+                                .withDeleteOrderingGuards(
+                                        guardFiles.getOrDefault(
+                                                Pair.of(partition, bucket),
+                                                Collections.emptyList()))
                                 .withTotalBuckets(bucketEntry.getValue().get(0).totalBuckets())
                                 .isStreaming(isStreaming);
                 List<SplitGenerator.SplitGroup> splitGroups;
@@ -517,8 +601,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
+        // Empty before sides do not need predecessor metadata, which may already be expired.
         LazyField<Snapshot> beforeSnapshot =
-                new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
+                new LazyField<>(
+                        () ->
+                                beforeFiles.isEmpty()
+                                        ? null
+                                        : snapshotManager.snapshot(plan.snapshot().id() - 1));
         return toIncrementalPlan(
                 true, beforeSnapshot, beforeFiles, plan.snapshot(), plan.watermark(), afterFiles);
     }
@@ -530,12 +619,33 @@ public class SnapshotReaderImpl implements SnapshotReader {
             @Nullable Snapshot afterSnapshot,
             @Nullable Long afterWatermark,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
+        // Diff must resolve the complete logical state at each endpoint. Removing a shared
+        // data file can hide a before-image needed to compare the visible rows after guard
+        // resolution.
+        boolean resolveGuards =
+                !isStreaming || DeleteOrderingGuardFile.mayContainGuards(afterSnapshot);
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforeGuards =
+                resolveGuards ? incrementalGuards(beforeSnapshot.get()) : Collections.emptyMap();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> afterGuards =
+                resolveGuards ? incrementalGuards(afterSnapshot) : Collections.emptyMap();
         List<Split> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
         beforeFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
+        beforeGuards
+                .keySet()
+                .forEach(
+                        bucket ->
+                                buckets.computeIfAbsent(bucket.getLeft(), k -> new HashSet<>())
+                                        .add(bucket.getRight()));
+        afterGuards
+                .keySet()
+                .forEach(
+                        bucket ->
+                                buckets.computeIfAbsent(bucket.getLeft(), k -> new HashSet<>())
+                                        .add(bucket.getRight()));
         afterFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
@@ -557,6 +667,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             BinaryRow part = entry.getKey();
             for (Integer bucket : entry.getValue()) {
+                Pair<BinaryRow, Integer> partitionBucket = Pair.of(part, bucket);
+                List<IndexFileMeta> beforeGuardFiles =
+                        beforeGuards.getOrDefault(partitionBucket, Collections.emptyList());
+                List<IndexFileMeta> afterGuardFiles =
+                        afterGuards.getOrDefault(partitionBucket, Collections.emptyList());
                 List<ManifestEntry> beforeEntries =
                         beforeFiles
                                 .getOrDefault(part, Collections.emptyMap())
@@ -571,10 +686,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = dataEntries.get(0).totalBuckets();
                 } else if (!beforeEntries.isEmpty()) {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
+                } else {
+                    totalBuckets = options.bucket();
                 }
 
                 // deduplicate: remove entries common to both lists
-                deduplicate(beforeEntries, dataEntries);
+                if (beforeGuardFiles.isEmpty() && afterGuardFiles.isEmpty()) {
+                    deduplicate(beforeEntries, dataEntries);
+                }
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -611,7 +730,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 beforeDeletionFiles,
                                 after,
                                 afterDeletionFiles,
-                                isStreaming);
+                                isStreaming,
+                                beforeGuardFiles,
+                                afterGuardFiles);
 
                 splits.add(split);
             }
@@ -622,6 +743,27 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 afterSnapshot == null ? null : afterSnapshot.id(),
                 afterSnapshot,
                 splits);
+    }
+
+    private Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> incrementalGuards(
+            @Nullable Snapshot snapshot) {
+        if (!DeleteOrderingGuardFile.mayContainGuards(snapshot)) {
+            return Collections.emptyMap();
+        }
+        PartitionPredicate partitionFilter = manifestsReader().partitionFilter();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> result = new HashMap<>();
+        for (IndexManifestEntry entry :
+                indexFileHandler.scan(snapshot, DeleteOrderingGuardFile.DELETE_ORDERING_GUARD)) {
+            if ((partitionFilter == null || partitionFilter.test(entry.partition()))
+                    && (guardBucket == null || guardBucket == entry.bucket())
+                    && (guardBucketFilter == null || guardBucketFilter.test(entry.bucket()))) {
+                result.computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()),
+                                ignored -> new ArrayList<>())
+                        .add(entry.indexFile());
+            }
+        }
+        return result;
     }
 
     @Override

@@ -145,6 +145,7 @@ class TestTableCommit(unittest.TestCase):
     def _create_commit(self, cls, overwrite_partition=None):
         commit = cls.__new__(cls)
         commit.table = Mock()
+        commit.table.is_primary_key_table = False
         commit.table.identifier = 'default.test_table'
         commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'

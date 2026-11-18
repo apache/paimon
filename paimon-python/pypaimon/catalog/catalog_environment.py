@@ -91,11 +91,18 @@ class CatalogEnvironment:
         """Create a SnapshotLoader instance based on the catalog environment.
 
         Returns:
-            SnapshotLoader instance if catalog_loader is available, None otherwise
+            SnapshotLoader for catalog snapshots, or None for filesystem snapshots
         """
-        if self.catalog_loader is not None:
-            return SnapshotLoader(self.catalog_loader, self.identifier)
-        return None
+        if self.catalog_loader is None:
+            return None
+        from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
+
+        # The built-in JDBC catalog stores snapshots in FileIO and does not
+        # implement load_snapshot. Avoid opening a connection just to fall back.
+        # Subclasses may implement catalog snapshot loading.
+        if type(self.catalog_loader) is JdbcCatalogLoader:
+            return None
+        return SnapshotLoader(self.catalog_loader, self.identifier)
 
     def catalog_context(self) -> Optional[CatalogContext]:
         if self._catalog_context is not None:

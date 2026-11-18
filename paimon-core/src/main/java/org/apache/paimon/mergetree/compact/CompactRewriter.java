@@ -53,4 +53,10 @@ public interface CompactRewriter extends Closeable {
      * @throws Exception exception
      */
     CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
+
+    /** Discard newly written, uncommitted output after a compaction task fails. */
+    default void abort(CompactResult result) {}
+
+    /** Transfer completed output ownership from the rewriter to the bucket writer. */
+    default void release(CompactResult result) {}
 }

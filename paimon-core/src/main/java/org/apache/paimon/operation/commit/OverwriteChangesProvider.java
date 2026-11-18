@@ -91,6 +91,17 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
     }
 
     @Override
+    public boolean resetsDeleteOrderingGuards() {
+        return true;
+    }
+
+    @Nullable
+    @Override
+    public PartitionPredicate deleteOrderingGuardResetFilter() {
+        return partitionFilter;
+    }
+
+    @Override
     public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
         if (latestSnapshot == null) {
             return new CommitChanges(newChanges, Collections.emptyList(), newIndexFiles);

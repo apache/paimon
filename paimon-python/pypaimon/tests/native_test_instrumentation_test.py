@@ -119,6 +119,7 @@ def test_native_commit_tracking_forwards_batch_truncate(monkeypatch, operation, 
     instrumentation.pytest_configure(Mock())
     instrumentation._force_native_commit_for_test = True
     commit = object.__new__(BatchTableCommit)
+    commit.table = SimpleNamespace(is_primary_key_table=False)
     commit._batch_committed = False
     commit.overwrite_partition = None
     commit._python_commit = Mock()
