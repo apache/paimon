@@ -22,7 +22,7 @@ from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import Mock, patch
 
-from pypaimon.api.api_response import PagedList
+from pypaimon.api.api_response import ErrorResponse, PagedList
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.prediction import (
     GetPredictionResponse,
@@ -32,6 +32,7 @@ from pypaimon.api.prediction import (
     SubmitPredictionRequest,
 )
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.catalog.catalog_exception import DatabaseNotExistException
 from pypaimon.catalog.prediction import (
     Prediction,
     PredictionOutput,
@@ -405,6 +406,21 @@ class PredictionTest(unittest.TestCase):
         catalog.rest_api.cancel_prediction.side_effect = untyped
         with self.assertRaises(NoSuchResourceException):
             catalog.cancel_prediction("prediction-1")
+
+    def test_submit_prediction_maps_database_404(self):
+        catalog = object.__new__(RESTCatalog)
+        catalog.rest_api = Mock()
+        catalog.rest_api.submit_prediction.side_effect = NoSuchResourceException(
+            ErrorResponse.RESOURCE_TYPE_DATABASE,
+            "quality",
+            "database not found",
+        )
+
+        with self.assertRaises(DatabaseNotExistException) as context:
+            catalog.submit_prediction(
+                Identifier.create("quality", "clips"), _spec())
+
+        self.assertEqual("quality", context.exception.database)
 
     def test_rest_round_trip_paths_and_filters(self):
         calls = []

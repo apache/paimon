@@ -409,7 +409,7 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
-            throws TableNotExistException, ModelNotExistException {
+            throws DatabaseNotExistException, TableNotExistException, ModelNotExistException {
         return wrapped.submitPrediction(identifier, spec);
     }
 

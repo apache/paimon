@@ -1216,13 +1216,16 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
-            throws TableNotExistException, ModelNotExistException {
+            throws DatabaseNotExistException, TableNotExistException, ModelNotExistException {
         checkNotBranch(identifier, "submitPrediction");
         checkNotSystemTable(identifier, "submitPrediction");
         try {
             return api.submitPrediction(new SubmitPredictionRequest(identifier, spec))
                     .toPrediction();
         } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
+                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+            }
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
                 throw new ModelNotExistException(spec.model(), e);
             }

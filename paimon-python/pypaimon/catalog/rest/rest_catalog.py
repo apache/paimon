@@ -694,6 +694,9 @@ class RESTCatalog(Catalog):
             return self.rest_api.submit_prediction(
                 SubmitPredictionRequest.from_spec(identifier, spec)).to_prediction()
         except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DATABASE:
+                raise DatabaseNotExistException(
+                    identifier.get_database_name()) from e
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_MODEL:
                 raise ModelNotExistException(spec.model) from e
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TABLE:

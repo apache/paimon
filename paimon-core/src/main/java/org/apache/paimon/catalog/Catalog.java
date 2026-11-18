@@ -1201,7 +1201,7 @@ public interface Catalog extends AutoCloseable {
 
     /** Submit an asynchronous prediction over a table and its fixed snapshot. */
     default Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
-            throws TableNotExistException, ModelNotExistException {
+            throws DatabaseNotExistException, TableNotExistException, ModelNotExistException {
         throw new UnsupportedOperationException("Current Catalog does not support predictions");
     }
 
