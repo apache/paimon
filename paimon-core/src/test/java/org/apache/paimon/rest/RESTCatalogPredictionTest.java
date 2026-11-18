@@ -103,9 +103,10 @@ class RESTCatalogPredictionTest {
             Catalog catalog = catalog(server);
             Identifier table = Identifier.create("quality", "clips");
 
-            server.enqueue(notFound("DATABASE", "quality"));
+            server.enqueue(notFound("DATABASE", "models"));
             assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))
-                    .isInstanceOf(Catalog.DatabaseNotExistException.class);
+                    .isInstanceOf(Catalog.DatabaseNotExistException.class)
+                    .hasMessage("Database models does not exist.");
 
             server.enqueue(notFound("MODEL", "qwen_vl"));
             assertThatThrownBy(() -> catalog.submitPrediction(table, spec()))

@@ -1224,7 +1224,11 @@ public class RESTCatalog implements Catalog {
                     .toPrediction();
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DATABASE)) {
-                throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+                String databaseName =
+                        StringUtils.isNullOrWhitespaceOnly(e.resourceName())
+                                ? identifier.getDatabaseName()
+                                : e.resourceName();
+                throw new DatabaseNotExistException(databaseName, e);
             }
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_MODEL)) {
                 throw new ModelNotExistException(spec.model(), e);

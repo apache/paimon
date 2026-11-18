@@ -412,7 +412,7 @@ class PredictionTest(unittest.TestCase):
         catalog.rest_api = Mock()
         catalog.rest_api.submit_prediction.side_effect = NoSuchResourceException(
             ErrorResponse.RESOURCE_TYPE_DATABASE,
-            "quality",
+            "models",
             "database not found",
         )
 
@@ -420,7 +420,7 @@ class PredictionTest(unittest.TestCase):
             catalog.submit_prediction(
                 Identifier.create("quality", "clips"), _spec())
 
-        self.assertEqual("quality", context.exception.database)
+        self.assertEqual("models", context.exception.database)
 
     def test_rest_round_trip_paths_and_filters(self):
         calls = []
