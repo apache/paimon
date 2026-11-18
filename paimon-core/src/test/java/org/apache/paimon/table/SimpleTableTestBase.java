@@ -94,7 +94,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -1606,7 +1610,7 @@ public abstract class SimpleTableTestBase {
         SnapshotManager snapshotManager = table.snapshotManager();
 
         TableCommitImpl commit = table.newCommit(commitUser);
-        // occupy the async maintain thread, so only maintenance on the committing thread runs
+        // occupy the async maintain thread, so the maintenance of checkpoint commits stays queued
         CountDownLatch release = new CountDownLatch(1);
         commit.getMaintainExecutor()
                 .execute(
@@ -1617,6 +1621,7 @@ public abstract class SimpleTableTestBase {
                                 // interrupted by close()
                             }
                         });
+        ExecutorService endInputExecutor = Executors.newSingleThreadExecutor();
         try (StreamTableWrite write = table.newWrite(commitUser)) {
             for (int i = 0; i < 2; i++) {
                 write.write(rowData(i, 10 * i, 100L * i));
@@ -1624,23 +1629,41 @@ public abstract class SimpleTableTestBase {
             }
             // checkpoint commits keep expiring asynchronously
             assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1L);
-            assertThat(snapshotManager.latestSnapshotId()).isGreaterThan(1L);
+            assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2L);
 
-            // The end-input commit of a bounded job uses COMMIT_IDENTIFIER and is
-            // followed by close(), which interrupted or dropped the async expiration, so this
-            // commit expires on the committing thread before returning
+            // The end-input commit of a bounded job uses COMMIT_IDENTIFIER and is followed by
+            // close(), which interrupted or dropped the async expiration, so this commit waits
+            // for its maintenance before returning
             write.write(rowData(2, 20, 200L));
-            commit.filterAndCommit(
-                    Collections.singletonMap(
-                            BatchWriteBuilder.COMMIT_IDENTIFIER,
-                            write.prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER)));
+            List<CommitMessage> messages =
+                    write.prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            Future<?> endInput =
+                    endInputExecutor.submit(
+                            () ->
+                                    commit.filterAndCommit(
+                                            Collections.singletonMap(
+                                                    BatchWriteBuilder.COMMIT_IDENTIFIER,
+                                                    messages)));
+            while (!snapshotManager.snapshotExists(3)) {
+                Thread.sleep(10);
+            }
+            try {
+                // the commit returns at once if it does not wait for its maintenance, and then
+                // close() follows while the maintenance is still queued
+                endInput.get(2, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                // the end-input maintenance is queued behind the occupying task
+                release.countDown();
+                endInput.get();
+            }
         } finally {
             commit.close();
             release.countDown();
+            endInputExecutor.shutdownNow();
         }
 
-        assertThat(snapshotManager.earliestSnapshotId())
-                .isEqualTo(snapshotManager.latestSnapshotId());
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(3L);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3L);
     }
 
     @Test

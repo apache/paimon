@@ -39,6 +39,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.IndexFilePathFactories;
@@ -59,8 +60,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -404,10 +407,22 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        // COMMIT_IDENTIFIER marks the last commit of a bounded input, such as the end-input commit
-        // of a Flink batch job. close() follows it and would interrupt or drop async maintenance.
-        if (batchCommitted || identifier == COMMIT_IDENTIFIER) {
+        if (batchCommitted) {
             maintain(identifier, doExpire);
+        } else if (identifier == COMMIT_IDENTIFIER) {
+            // COMMIT_IDENTIFIER marks the last commit of a bounded input, such as the end-input
+            // commit of a Flink batch job. close() follows it and would interrupt or drop async
+            // maintenance, so wait for it. Queue it on the executor instead of running it here,
+            // because maintenance of earlier commits may still run there on the same managers.
+            Future<?> future = executor.submit(() -> maintain(identifier, doExpire));
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } catch (ExecutionException e) {
+                ExceptionUtils.rethrow(e.getCause());
+            }
         } else {
             executor.execute(
                     () -> {

@@ -23,9 +23,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -35,8 +38,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaUtils;
@@ -45,20 +50,28 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -69,11 +82,22 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT;
+import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -1599,5 +1623,256 @@ public class TableCommitTest {
         commit1.close();
         write2.close();
         commit2.close();
+    }
+
+    @Test
+    @Timeout(120)
+    public void testEndInputMaintenanceKeepsDataFilesOfRetainedTag() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        // so the held manifest read does not block the other maintenance pass on a single-CPU JVM
+        options.set(CoreOptions.SCAN_MANIFEST_PARALLELISM, 2);
+        // keep expired snapshots as changelogs, so changelog expiration deletes their data files
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 100);
+        HoldingFileIO fileIO = new HoldingFileIO();
+        FileStoreTable table = createTable(fileIO, Collections.singletonList("k"), options);
+        String user = UUID.randomUUID().toString();
+        // write without compaction, which would conflict with the overwrite
+        FileStoreTable writeOnlyTable = table.copy(singletonMap("write-only", "true"));
+
+        // Snapshot 2 overwrites the only data file of tag-1, so only tag-1 keeps that file.
+        // Snapshots 1 to 5 become changelogs 1 to 5.
+        try (TableWriteImpl<?> write = writeOnlyTable.newWrite(user);
+                TableCommitImpl commit = table.newCommit(user)) {
+            for (int i = 1; i <= 6; i++) {
+                write.write(GenericRow.of(i, (long) i));
+                commit.withOverwrite(i == 2 ? Collections.emptyMap() : null);
+                commit.commit(i, write.prepareCommit(false, i));
+                if (i == 1 || i == 3) {
+                    table.createTag("tag-" + i, i);
+                }
+            }
+        }
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(
+                CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE.key(),
+                CoreOptions.ExpireExecutionMode.ASYNC.toString());
+        dynamicOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(), "2");
+        FileStoreTable asyncTable = table.copy(dynamicOptions);
+        ChangelogManager changelogManager = asyncTable.changelogManager();
+        Set<String> changelog2DeltaManifests =
+                asyncTable.store().manifestListFactory().create()
+                        .read(changelogManager.changelog(2).deltaManifestList()).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+
+        ExecutorService endInputExecutor = Executors.newSingleThreadExecutor();
+        TableCommitImpl commit = asyncTable.newCommit(user);
+        // Hold the checkpoint maintenance after it read the deleted files of changelog 2, before
+        // it filters them with the files of tag-1. Changelog 1 is deleted just before that.
+        HoldingFileIO.Hold checkpointHold =
+                fileIO.holdAfterReading(
+                        file ->
+                                changelog2DeltaManifests.contains(file.getName())
+                                        && !changelogManager.longLivedChangelogExists(1));
+        try (TableWriteImpl<?> write = writeOnlyTable.newWrite(user)) {
+            write.write(GenericRow.of(7, 7L));
+            commit.commit(7, write.prepareCommit(false, 7));
+            assertThat(checkpointHold.awaitHeld(Duration.ofMinutes(1))).isTrue();
+
+            write.write(GenericRow.of(8, 8L));
+            List<CommitMessage> messages = write.prepareCommit(true, COMMIT_IDENTIFIER);
+            Future<?> endInput =
+                    endInputExecutor.submit(
+                            () ->
+                                    commit.filterAndCommit(
+                                            singletonMap(COMMIT_IDENTIFIER, messages)));
+            try {
+                endInput.get(5, TimeUnit.SECONDS);
+            } catch (TimeoutException ignored) {
+                // the end-input maintenance waits for the held maintenance
+            }
+            checkpointHold.release();
+            endInput.get();
+        } finally {
+            checkpointHold.release();
+            commit.close();
+            endInputExecutor.shutdownNow();
+        }
+
+        // tag-1 is still retained, so it reads the only row of snapshot 1, key 1, from its file
+        FileStoreTable tag1 = table.copy(singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "tag-1"));
+        List<Integer> keys = new ArrayList<>();
+        ReadBuilder readBuilder = tag1.newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> keys.add(row.getInt(0)));
+        }
+        assertThat(keys).containsExactly(1);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testEndInputMaintenanceCreatesEveryAutomaticTag() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(
+                CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE, CoreOptions.ExpireExecutionMode.ASYNC);
+        options.set(CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.WATERMARK);
+        options.set(CoreOptions.TAG_CREATION_PERIOD, CoreOptions.TagCreationPeriod.HOURLY);
+        options.set(CoreOptions.SINK_WATERMARK_TIME_ZONE, "UTC");
+        HoldingFileIO fileIO = new HoldingFileIO();
+        FileStoreTable table = createTable(fileIO, Collections.emptyList(), options);
+        SnapshotManager snapshotManager = table.snapshotManager();
+        String user = UUID.randomUUID().toString();
+        // Snapshot i has a watermark at 10:30 + i hours (UTC). The first snapshot creates a tag
+        // at once, and each later watermark passes the end of the next hourly tag. So maintenance
+        // passes that run one after another create tags for snapshots 1, 2 and 3.
+        long watermark = Instant.parse("2024-01-01T10:30:00Z").toEpochMilli();
+        long hour = Duration.ofHours(1).toMillis();
+
+        ExecutorService endInputExecutor = Executors.newSingleThreadExecutor();
+        Thread endInputThread = endInputExecutor.submit(Thread::currentThread).get();
+        TableCommitImpl commit = table.newCommit(user);
+        Thread maintainThread = commit.getMaintainExecutor().submit(Thread::currentThread).get();
+        // Hold the maintenance of checkpoint 1 after it read snapshot 1, before it creates a tag.
+        HoldingFileIO.Hold checkpointHold =
+                fileIO.holdAfterReading(
+                        file ->
+                                file.getName().equals("snapshot-1")
+                                        && Thread.currentThread() == maintainThread);
+        // Hold a final maintenance running on the end-input thread after it read snapshot 2,
+        // before it creates a tag. The condition on snapshot 3 skips the reads of the commit.
+        HoldingFileIO.Hold endInputHold =
+                fileIO.holdAfterReading(
+                        file ->
+                                file.getName().equals("snapshot-2")
+                                        && Thread.currentThread() == endInputThread
+                                        && snapshotManager.snapshotExists(3));
+        try (TableWriteImpl<?> write = table.newWrite(user)) {
+            for (int i = 1; i <= 2; i++) {
+                write.write(GenericRow.of(i, (long) i));
+                commit.commit(committable(i, watermark + i * hour, write.prepareCommit(false, i)));
+            }
+            assertThat(checkpointHold.awaitHeld(Duration.ofMinutes(1))).isTrue();
+
+            write.write(GenericRow.of(3, 3L));
+            ManifestCommittable last =
+                    committable(
+                            COMMIT_IDENTIFIER,
+                            watermark + 3 * hour,
+                            write.prepareCommit(true, COMMIT_IDENTIFIER));
+            Future<?> endInput =
+                    endInputExecutor.submit(
+                            () -> commit.filterAndCommitMultiple(singletonList(last)));
+            // the end-input maintenance never gets held when it waits for the held maintenance
+            endInputHold.awaitHeld(Duration.ofSeconds(5));
+            checkpointHold.release();
+            // wait for the maintenance queued before
+            commit.getMaintainExecutor().submit(() -> {}).get();
+            endInputHold.release();
+            endInput.get();
+        } finally {
+            checkpointHold.release();
+            endInputHold.release();
+            commit.close();
+            endInputExecutor.shutdownNow();
+        }
+
+        assertThat(table.tagManager().tags().keySet())
+                .extracting(Snapshot::id)
+                .containsExactly(1L, 2L, 3L);
+    }
+
+    private static ManifestCommittable committable(
+            long identifier, long watermark, List<CommitMessage> messages) {
+        ManifestCommittable committable = new ManifestCommittable(identifier, watermark);
+        messages.forEach(committable::addFileCommittable);
+        return committable;
+    }
+
+    private FileStoreTable createTable(
+            HoldingFileIO fileIO, List<String> primaryKeys, Options options) throws Exception {
+        Path path = new Path(tempDir.toString());
+        options.set(CoreOptions.PATH, path.toString());
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(fileIO, path),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                primaryKeys,
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(fileIO, path, tableSchema, CatalogEnvironment.empty());
+    }
+
+    /**
+     * A {@link LocalFileIO} that holds the thread closing a matching file after reading it, until
+     * the test releases it. Each hold applies once.
+     */
+    private static class HoldingFileIO extends LocalFileIO {
+
+        private final List<Hold> holds = new CopyOnWriteArrayList<>();
+
+        private Hold holdAfterReading(Predicate<Path> condition) {
+            Hold hold = new Hold(condition);
+            holds.add(hold);
+            return hold;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            return new SeekableInputStreamWrapper(super.newInputStream(path)) {
+                @Override
+                public void close() throws IOException {
+                    super.close();
+                    for (Hold hold : holds) {
+                        hold.holdIfMatches(path);
+                    }
+                }
+            };
+        }
+
+        private static class Hold {
+
+            private final Predicate<Path> condition;
+            private final AtomicBoolean matched = new AtomicBoolean(false);
+            private final CountDownLatch held = new CountDownLatch(1);
+            private final CountDownLatch released = new CountDownLatch(1);
+
+            private Hold(Predicate<Path> condition) {
+                this.condition = condition;
+            }
+
+            private void holdIfMatches(Path path) throws IOException {
+                if (released.getCount() > 0
+                        && condition.test(path)
+                        && matched.compareAndSet(false, true)) {
+                    held.countDown();
+                    try {
+                        released.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new InterruptedIOException();
+                    }
+                }
+            }
+
+            private boolean awaitHeld(Duration timeout) throws InterruptedException {
+                return held.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            }
+
+            private void release() {
+                released.countDown();
+            }
+        }
     }
 }
