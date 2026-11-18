@@ -2030,6 +2030,12 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
         </tr>
         <tr>
+            <td><h5>vector-index.post-filter.candidates-factor</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Positive multiplier of the original Top-K for a single ANN query when scalar indexes cannot evaluate a DE vector search filter. The candidate count is at least the reranking limit and capped by the shard size and integer limit. Candidates are checked against the pinned data; fewer than Top-K matches are returned without retry or raw scoring of indexed ranges.</td>
+        </tr>
+        <tr>
             <td><h5>vector-index.search-mode</h5></td>
             <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
