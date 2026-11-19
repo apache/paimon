@@ -61,6 +61,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -646,10 +647,18 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private Optional<RuntimeException> checkCentroidSourceChanges(
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
         Map<Long, List<IndexManifestEntry>> byBaseline = new HashMap<>();
+        // Job-provided factories belong to the current context classloader.
+        Map<String, Predicate<byte[]>> routerPredicates = new HashMap<>();
         long firstBaseline = latestSnapshot.id();
         for (IndexManifestEntry index : indexEntries) {
+            IndexFileMeta file = index.indexFile();
             if (index.kind() == FileKind.ADD
-                    && CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
+                    && file.globalIndexMeta() != null
+                    && routerPredicates
+                            .computeIfAbsent(
+                                    file.indexType(),
+                                    CentroidVectorIndexUtils::routingModelPredicate)
+                            .test(file.globalIndexMeta().indexMeta())) {
                 long baseline =
                         DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile())
                                 .scanSnapshotId();

@@ -665,7 +665,15 @@ class CentroidVectorGlobalIndexTest {
                 assertSameScores(joint, batch.get(1).get(), k);
                 assertSameScores(joint, batch.get(2).get(), k);
             }
-            RoaringNavigableMap64 single = new RoaringNavigableMap64();
+            AtomicInteger serializations = new AtomicInteger();
+            RoaringNavigableMap64 single =
+                    new RoaringNavigableMap64() {
+                        @Override
+                        public byte[] serialize() throws IOException {
+                            serializations.incrementAndGet();
+                            return super.serialize();
+                        }
+                    };
             single.add(0);
             try (GlobalIndexReader reader =
                     indexer.createReader(input, metas, 32768, null, executor)) {
@@ -690,6 +698,7 @@ class CentroidVectorGlobalIndexTest {
                                                 .containsExactly(0L));
                 // One routing task plus a single batch task for each of the 64 shards.
                 assertThat(worker.getTaskCount() - before).isEqualTo(65);
+                assertThat(serializations.getAndSet(0)).isOne();
             }
             // Qualifying row IDs can include null vectors. With this dense filter, automatic
             // routing starts at eight shards and widens until it finds the only indexed match.
@@ -713,6 +722,7 @@ class CentroidVectorGlobalIndexTest {
                                         assertThat(hit.get().results().toArray(1))
                                                 .containsExactly(0L));
                 assertThat(worker.getTaskCount() - before).isEqualTo(65);
+                assertThat(serializations.getAndSet(0)).isOne();
             }
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
             include.addRange(new Range(0, 32767));

@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.vector.index.NativeVectorGlobalIndexReader.SearchScope;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -253,6 +254,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> search(
             List<int[]> centers, BatchVectorSearch batch) {
         VectorSearch query = batch.forIndex(0);
+        SearchScope scope = SearchScope.of(batch.includeRowIds(), batch.limit());
         boolean considerJoint =
                 centers.get(0).length == 8
                         && metadata.nlist() == 64
@@ -292,13 +294,13 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                     plan.centers = Arrays.copyOf(plan.centers, JOINT_OUTER_PROBES);
                 }
             }
-            return searchRound(batch, plans);
+            return searchRound(batch, plans, scope);
         }
         legacy.replaceAll(
                 (centroid, ignored) ->
                         readShard(
                                 shard(centroid),
-                                reader -> probeLegacyShard(reader, centroid, batch, plans)));
+                                reader -> probeLegacyShard(reader, centroid, batch, plans, scope)));
         return CompletableFuture.allOf(legacy.values().toArray(new CompletableFuture[0]))
                 .thenComposeAsync(
                         done -> {
@@ -323,7 +325,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                     }
                                 }
                             }
-                            return searchRound(batch, plans);
+                            return searchRound(batch, plans, scope);
                         });
     }
 
@@ -334,7 +336,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             NativeVectorGlobalIndexReader reader,
             int centroid,
             BatchVectorSearch batch,
-            List<Route> plans)
+            List<Route> plans,
+            SearchScope scope)
             throws IOException {
         LegacyProbe probe = new LegacyProbe(reader.hasJointLayout());
         List<Integer> ordinary = new ArrayList<>();
@@ -351,8 +354,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                 }
             }
         }
-        searchSubset(reader, batch, ordinary, false, probe.ordinary::put);
-        searchSubset(reader, batch, joint, true, probe.joint::put);
+        searchSubset(reader, batch, scope, ordinary, false, probe.ordinary::put);
+        searchSubset(reader, batch, scope, joint, true, probe.joint::put);
         return probe;
     }
 
@@ -408,7 +411,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> searchRound(
-            BatchVectorSearch batch, List<Route> plans) {
+            BatchVectorSearch batch, List<Route> plans, SearchScope scope) {
         Map<GlobalIndexIOMeta, Map<Boolean, List<Integer>>> groups = new LinkedHashMap<>();
         for (int i = 0; i < plans.size(); i++) {
             Route route = plans.get(i);
@@ -438,6 +441,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                                 searchSubset(
                                                         reader,
                                                         batch,
+                                                        scope,
                                                         indices,
                                                         policy.getKey(),
                                                         (index, result) -> {
@@ -451,12 +455,13 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                             return null;
                                         })));
         return CompletableFuture.allOf(pending.toArray(new CompletableFuture[0]))
-                .thenComposeAsync(done -> finishRound(batch, plans));
+                .thenComposeAsync(done -> finishRound(batch, plans, scope));
     }
 
     private static void searchSubset(
             NativeVectorGlobalIndexReader reader,
             BatchVectorSearch batch,
+            SearchScope scope,
             List<Integer> indices,
             boolean joint,
             BiConsumer<Integer, Optional<ScoredGlobalIndexResult>> consumer) {
@@ -471,21 +476,18 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             }
             subset =
                     new BatchVectorSearch(
-                                    queries, batch.limit(), batch.fieldName(), batch.options())
-                            .withIncludeRowIds(batch.includeRowIds());
+                            queries, batch.limit(), batch.fieldName(), batch.options());
         }
-        List<Optional<ScoredGlobalIndexResult>> found = reader.searchShardBatch(subset, joint);
+        List<Optional<ScoredGlobalIndexResult>> found =
+                reader.searchShardBatch(subset, joint, scope);
         for (int i = 0; i < found.size(); i++) {
             consumer.accept(indices.get(i), found.get(i));
         }
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> finishRound(
-            BatchVectorSearch batch, List<Route> plans) {
-        long possible =
-                batch.includeRowIds() == null
-                        ? vectorCount
-                        : Math.min(vectorCount, batch.includeRowIds().getLongCardinality());
+            BatchVectorSearch batch, List<Route> plans, SearchScope scope) {
+        long required = Math.min(vectorCount, scope.effectiveK);
         boolean widen = false;
         List<Optional<ScoredGlobalIndexResult>> output = new ArrayList<>(plans.size());
         for (int i = 0; i < plans.size(); i++) {
@@ -500,8 +502,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                 int visited = route.visited.size();
                 if (!batch.options().containsKey("centroid.nprobe")
                         && visited < metadata.nlist()
-                        && merged.results().getLongCardinality()
-                                < Math.min(batch.limit(), possible)) {
+                        && merged.results().getLongCardinality() < required) {
                     int width = (int) Math.min(metadata.nlist(), (long) visited * 2);
                     route.centers = model().findNearestCentroids(batch.vectors()[i], width);
                     route.joint = false;
@@ -513,7 +514,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             output.add(
                     route.matches.isEmpty() ? Optional.empty() : Optional.of(route.matches.get(0)));
         }
-        return widen ? searchRound(batch, plans) : CompletableFuture.completedFuture(output);
+        return widen ? searchRound(batch, plans, scope) : CompletableFuture.completedFuture(output);
     }
 
     @Override

@@ -20,16 +20,20 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.index.IndexFileMeta;
 
+import java.util.function.Predicate;
+
 /** Identifies routed vector index files through their registered index type. */
 public final class CentroidVectorIndexUtils {
     private CentroidVectorIndexUtils() {}
 
     public static boolean isRoutingModel(IndexFileMeta file) {
-        if (file.globalIndexMeta() == null) {
-            return false;
-        }
-        CentroidVectorIndexFactory factory =
-                GlobalIndexerFactoryUtils.centroidFactory(file.indexType());
-        return factory != null && factory.isRoutingModel(file.globalIndexMeta().indexMeta());
+        return file.globalIndexMeta() != null
+                && routingModelPredicate(file.indexType()).test(file.globalIndexMeta().indexMeta());
+    }
+
+    /** Resolve the plugin once when checking multiple files of the same type. */
+    public static Predicate<byte[]> routingModelPredicate(String indexType) {
+        CentroidVectorIndexFactory factory = GlobalIndexerFactoryUtils.centroidFactory(indexType);
+        return factory == null ? meta -> false : factory::isRoutingModel;
     }
 }

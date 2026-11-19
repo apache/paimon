@@ -1741,6 +1741,45 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCentroidFactoryDiscoveryIsScopedToOneConflictCheck() {
+        byte[] routerMeta = {1};
+        byte[] shardMeta = {2};
+        List<IndexManifestEntry> files =
+                Arrays.asList(
+                        centroidRouter("shard", 0, 9, 1, shardMeta),
+                        centroidRouter("router", 0, 9, 1, routerMeta),
+                        createGlobalIndexEntry("scalar1", ADD, BinaryRow.EMPTY_ROW, 0, 4),
+                        createGlobalIndexEntry("scalar2", ADD, BinaryRow.EMPTY_ROW, 5, 9));
+        DataEvolutionConflictDetection detection = createConflictDetection();
+        List<SimpleFileEntry> data =
+                Collections.singletonList(createFileEntryWithRowId("data", ADD, 0L, 10L));
+        // A different job classloader may supply a different factory on the next check.
+        for (int i = 0; i < 2; i++) {
+            CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);
+            when(factory.isRoutingModel(routerMeta)).thenReturn(true);
+            try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                    mockStatic(GlobalIndexerFactoryUtils.class)) {
+                factories
+                        .when(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"))
+                        .thenReturn(factory);
+                assertThat(
+                                detection.checkConflicts(
+                                        snapshot(1),
+                                        data,
+                                        Collections.emptyList(),
+                                        files,
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                        .isEmpty();
+                factories.verify(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"));
+                factories.verify(() -> GlobalIndexerFactoryUtils.centroidFactory("btree"));
+                verify(factory).isRoutingModel(shardMeta);
+                verify(factory).isRoutingModel(routerMeta);
+            }
+        }
+    }
+
+    @Test
     void testCentroidIndexChecksContiguousSourceRange() {
         byte[] meta = {1};
         CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);

@@ -42,6 +42,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -122,7 +123,8 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     private Optional<ScoredGlobalIndexResult> searchShard(VectorSearch query) {
         try {
             ensureLoaded();
-            return Optional.ofNullable(search(query, false));
+            return Optional.ofNullable(
+                    search(query, false, SearchScope.of(query.includeRowIds(), query.limit())));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -139,17 +141,21 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
             return CompletableFuture.completedFuture(
                     Collections.nCopies(batch.vectorCount(), Optional.empty()));
         }
-        return CompletableFuture.supplyAsync(() -> searchShardBatch(batch, false), executor);
+        return CompletableFuture.supplyAsync(
+                () ->
+                        searchShardBatch(
+                                batch, false, SearchScope.of(batch.includeRowIds(), batch.limit())),
+                executor);
     }
 
     List<Optional<ScoredGlobalIndexResult>> searchShardBatch(
-            BatchVectorSearch batch, boolean joint) {
+            BatchVectorSearch batch, boolean joint, SearchScope scope) {
         if (ioMeta.rowCount() == 0) {
             return Collections.nCopies(batch.vectorCount(), Optional.empty());
         }
         try {
             ensureLoaded();
-            return searchBatch(batch, joint);
+            return searchBatch(batch, joint, scope);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -160,12 +166,13 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     }
 
     private List<Optional<ScoredGlobalIndexResult>> searchBatch(
-            BatchVectorSearch batchVectorSearch, boolean joint) throws IOException {
+            BatchVectorSearch batchVectorSearch, boolean joint, SearchScope scope)
+            throws IOException {
         int n = batchVectorSearch.vectorCount();
         // Single vector: reuse the scalar path; no batching benefit.
         if (n == 1) {
             List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
-            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0), joint)));
+            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0), joint, scope)));
             return results;
         }
 
@@ -176,9 +183,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         int dim = nativeMeta.dimension();
         String metric = nativeMeta.metric();
 
-        SearchScope scope =
-                resolveScope(batchVectorSearch.includeRowIds(), batchVectorSearch.limit());
-        if (scope == null) {
+        if (scope.effectiveK == 0) {
             return emptyResults(n);
         }
         VectorSearchParams searchParams =
@@ -203,22 +208,21 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                     buildScoredResult(
                             batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric);
             if (joint && incomplete(found, batchVectorSearch.limit())) {
-                found = Optional.ofNullable(search(batchVectorSearch.forIndex(i), false));
+                found = Optional.ofNullable(search(batchVectorSearch.forIndex(i), false, scope));
             }
             results.add(found);
         }
         return results;
     }
 
-    private ScoredGlobalIndexResult search(VectorSearch vectorSearch, boolean joint)
-            throws IOException {
+    private ScoredGlobalIndexResult search(
+            VectorSearch vectorSearch, boolean joint, SearchScope scope) throws IOException {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         String metric = nativeMeta.metric();
 
-        SearchScope scope = resolveScope(vectorSearch.includeRowIds(), limit);
-        if (scope == null) {
+        if (scope.effectiveK == 0) {
             return null;
         }
         VectorSearchResult result =
@@ -235,7 +239,9 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
 
         Optional<ScoredGlobalIndexResult> found =
                 buildScoredResult(result.ids(), result.distances(), metric);
-        return joint && incomplete(found, limit) ? search(vectorSearch, false) : found.orElse(null);
+        return joint && incomplete(found, limit)
+                ? search(vectorSearch, false, scope)
+                : found.orElse(null);
     }
 
     private static boolean incomplete(Optional<ScoredGlobalIndexResult> found, int limit) {
@@ -297,27 +303,30 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         return results;
     }
 
-    /** Resolves filter bytes and effective top-K; returns null when the filter selects no rows. */
-    private static SearchScope resolveScope(RoaringNavigableMap64 includeRowIds, int limit)
-            throws IOException {
-        if (includeRowIds == null) {
-            return new SearchScope(null, limit);
-        }
-        long cardinality = includeRowIds.getLongCardinality();
-        if (cardinality == 0) {
-            return null;
-        }
-        return new SearchScope(includeRowIds.serialize(), (int) Math.min(limit, cardinality));
-    }
-
-    /** Resolved filter state for a query. {@code filterBytes} is null when no filter is set. */
-    private static final class SearchScope {
+    /** The serialized filter and effective top-K for one search, shared by its shard reads. */
+    static final class SearchScope {
         private final byte[] filterBytes;
-        private final int effectiveK;
+        final int effectiveK;
 
         private SearchScope(byte[] filterBytes, int effectiveK) {
             this.filterBytes = filterBytes;
             this.effectiveK = effectiveK;
+        }
+
+        static SearchScope of(RoaringNavigableMap64 includeRowIds, int limit) {
+            if (includeRowIds == null) {
+                return new SearchScope(null, limit);
+            }
+            long cardinality = includeRowIds.getLongCardinality();
+            if (cardinality == 0) {
+                return new SearchScope(null, 0);
+            }
+            try {
+                return new SearchScope(
+                        includeRowIds.serialize(), (int) Math.min(limit, cardinality));
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot serialize the vector row-ID filter.", e);
+            }
         }
     }
 
