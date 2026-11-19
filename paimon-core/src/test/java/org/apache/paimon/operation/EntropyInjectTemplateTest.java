@@ -337,6 +337,24 @@ public class EntropyInjectTemplateTest {
     }
 
     @Test
+    public void testDropTableReclaimsFilesFromDroppedBranch() throws Exception {
+        FileStoreTable table = createTable("t1");
+        write(table, 1, "main");
+        table.createTag("fork");
+        table.createBranch("dev", "fork");
+        write(table.switchToBranch("dev"), 2, "dev");
+        Set<String> files = sharedTableFiles("t1");
+        assertThat(files).hasSize(2);
+
+        table.branchManager().dropBranch("dev");
+
+        assertThat(table.branchManager().branches()).doesNotContain("dev");
+        assertThat(sharedTableFiles("t1")).isEqualTo(files);
+        catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
+        assertThat(sharedTableFiles("t1")).isEmpty();
+    }
+
+    @Test
     public void testDropPlanSpillsPathsInBatches() throws Exception {
         FileStoreTable table = createTable("batched");
         LocalFileIO fileIO = LocalFileIO.create();

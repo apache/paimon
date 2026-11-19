@@ -43,6 +43,7 @@ public final class TemplateFileDeletionPlan {
     private static final Logger LOG = LoggerFactory.getLogger(TemplateFileDeletionPlan.class);
     private static final int BATCH_SIZE = 1024;
     private static final String CLEANUP_DIRECTORY = ".paimon-template-drops";
+    private static final String BRANCH_PREFIX = "branch-";
     private static final String TABLE_PREFIX = "table-";
     private static final String SEALED = "sealed";
     private static final String TABLE_DROPPED = "table-dropped";
@@ -63,6 +64,12 @@ public final class TemplateFileDeletionPlan {
     public static TemplateFileDeletionPlan prepare(FileIO fileIO, Path tablePath) {
         return new TemplateFileDeletionPlan(
                 fileIO, tablePath, tableCleanupPath(tablePath), TABLE_PREFIX);
+    }
+
+    /** Keeps branch candidates under the table directory until the table is dropped. */
+    public static TemplateFileDeletionPlan prepareBranch(FileIO fileIO, Path tablePath) {
+        return new TemplateFileDeletionPlan(
+                fileIO, tablePath, tableCleanupPath(tablePath), BRANCH_PREFIX);
     }
 
     void add(Path path) throws IOException {
@@ -88,8 +95,8 @@ public final class TemplateFileDeletionPlan {
     }
 
     /**
-     * Preserve the table candidates before DROP removes their table directory. Returns an archived
-     * plan that can be confirmed after the catalog accepts the drop.
+     * Preserve the table and branch candidates before DROP removes their table directory. Returns
+     * an archived plan that can be confirmed after the catalog accepts the drop.
      */
     public TemplateFileDeletionPlan archiveForTableDrop() {
         TemplateFileDeletionPlan archived =
@@ -98,6 +105,14 @@ public final class TemplateFileDeletionPlan {
         try {
             seal();
             copyBatches(fileIO, plan, archived);
+            for (FileStatus status : fileIO.listStatus(tableCleanupPath(tablePath))) {
+                Path candidate = status.getPath();
+                if (status.isDir()
+                        && candidate.getName().startsWith(BRANCH_PREFIX)
+                        && fileIO.exists(new Path(candidate, SEALED))) {
+                    copyBatches(fileIO, candidate, archived);
+                }
+            }
             archived.seal();
             return archived;
         } catch (IOException | RuntimeException e) {
