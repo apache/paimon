@@ -250,6 +250,18 @@ def merge_into(
         target_table, source, *, on, when_matched=(), when_not_matched=(),
         commit_user, commit_identifier=BATCH_COMMIT_IDENTIFIER):
     """Select MERGE execution before consuming source input or staging files."""
+    # Refuse Partial Update keytime sources before Native/Python selection so
+    # create_native_merge_into returning None cannot silently fall through to
+    # an incorrect Python MERGE read of sequence-group aggregators.
+    from pypaimon.execution.native.keytime_merge_guard import (
+        refuse_partial_update_keytime_merge_source,
+    )
+    from pypaimon.write.merge_inputs import _is_self_merge, _normalize_on
+
+    target_on, source_on = _normalize_on(on)
+    if not _is_self_merge(target_table, source, target_on, source_on):
+        refuse_partial_update_keytime_merge_source(source)
+
     if target_table.options.native_write_enabled():
         from pypaimon.write.backend_dispatch import prepare_native_merge_into
 

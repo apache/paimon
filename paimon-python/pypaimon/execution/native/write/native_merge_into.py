@@ -20,6 +20,12 @@
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.execution.native.keytime_capability import (
+    table_has_string_keytime,
+)
+from pypaimon.execution.native.keytime_merge_guard import (
+    refuse_partial_update_keytime_merge_source,
+)
 from pypaimon.execution.native.table import _native_variant_write_supported
 from pypaimon.execution.native.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.execution.native.write.native_update import (
@@ -29,12 +35,61 @@ from pypaimon.execution.native.write.native_update import (
 from pypaimon.execution.native.write.merge_transform import encode_merge_clause
 
 
+def _python_materialize_merge_source(source, columns):
+    """Read a table source with Python UTF-16 keytime semantics as Arrow.
+
+    Loads the full projected snapshot into memory via ``to_arrow()``. Native
+    MERGE currently accepts Arrow / native table sources only; there is no
+    streaming materialize API, so large STRING keytime sources pay full-table
+    memory cost before the Native MERGE join runs.
+    """
+    table = source.copy({
+        'read.native.enabled': 'false',
+        'scan.native-plan.enabled': 'false',
+    })
+    builder = table.new_read_builder().with_projection(columns)
+    return builder.new_read().to_arrow(builder.new_scan().plan().splits())
+
+
+def _native_merge_table_source_supported(source) -> bool:
+    """Shared Native MERGE constraints for table sources.
+
+    Applies whether Core opens the source natively or Python materializes it
+    to Arrow first. Keeps FileStoreTable, parquet formats, video-frame, PK
+    shape, scan-mode, incremental and blob-view gates aligned with the
+    historical Native source path so materialization does not widen support.
+    """
+    from pypaimon.execution.native.table import _native_blob_view_supported
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if (type(source) is not FileStoreTable
+            or not _native_update_formats_supported(source)
+            or source.options.video_frame_fields()
+            or (source.is_primary_key_table and not source.trimmed_primary_keys)):
+        return False
+    from pypaimon.read.scan_config import _validate_scan_mode
+    _validate_scan_mode(source)
+    if not _native_blob_view_supported(source, source.field_names):
+        return False
+    # Core resolves a full snapshot or PyPaimon's existing timestamp window.
+    if (source.options.scan_mode() not in (
+            'default', 'latest', 'latest-full', 'from-snapshot',
+            'from-snapshot-full', 'from-timestamp', 'incremental')
+            or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
+                   for key in source.table_schema.options)):
+        return False
+    return True
+
+
 def create_native_merge_into(table, source, on, matched, not_matched, commit_user, commit_identifier):
     from pypaimon.write.merge_inputs import _is_self_merge, _is_table_like, _prepare
     from pypaimon.write.merge_inputs import _normalize_on, _union_update_cols
 
     target_keys, source_keys = _normalize_on(on)
     self_merge = _is_self_merge(table, source, target_keys, source_keys)
+    # Refuse before Native target init, Native source open, or Python MERGE.
+    if _is_table_like(source) and not self_merge:
+        refuse_partial_update_keytime_merge_source(source)
     if not_matched and (table.options.video_frame_fields() or not _native_variant_write_supported(table)):
         return None
     native_table = _native_row_id_table(table)
@@ -43,43 +98,37 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
     source_schema = None
     native_source = None
     if _is_table_like(source) and not self_merge:
-        # The source can be an append or PK table; only the target requires DE.
-        from pypaimon.execution.native.table import (_native_blob_view_supported)
-        from pypaimon.table.file_store_table import FileStoreTable
-        if (type(source) is not FileStoreTable
-                or not _native_update_formats_supported(source)
-                or source.options.video_frame_fields()
-                or (source.is_primary_key_table and not source.trimmed_primary_keys)):
+        # Shared table-source gates apply before either Native open or
+        # Python Arrow materialization (do not widen the supported set).
+        if not _native_merge_table_source_supported(source):
             return None
-        from pypaimon.read.scan_config import _validate_scan_mode
-        _validate_scan_mode(source)
-        if not _native_blob_view_supported(source, source.field_names):
-            return None
-        # Core resolves a full snapshot or PyPaimon's existing timestamp window.
-        if (source.options.scan_mode() not in (
-                'default', 'latest', 'latest-full', 'from-snapshot',
-                'from-snapshot-full', 'from-timestamp', 'incremental')
-                or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
-                       for key in source.table_schema.options)):
-            return None
-        from pypaimon.schema.data_types import PyarrowFieldParser
-        projection = list(dict.fromkeys(list(source.field_names) + source_keys))
-        source_fields = source.new_read_builder().with_projection(projection).read_type()
-        source_schema = PyarrowFieldParser.from_paimon_schema(source_fields)
-        if source.options.query_auth_enabled:
-            from pypaimon.execution.native.table import (_native_query_auth_supported, _native_table)
-            from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
-            if not _rest_catalog_supported(source) or not _native_query_auth_supported(source):
-                return None
-            # A source is a read, not a write. Core obtains a fresh REST grant
-            # and requires it to be unrestricted, as Python plan_all does.
-            native_source = _native_table(source)
+        # STRING keytime: materialize via Python so Native MERGE never opens
+        # the source table through create_native_write_table / Rust UTF-8.
+        if table_has_string_keytime(source):
+            # Query auth is enforced by the Python read used for materialize;
+            # Native REST-grant checks below apply only when Core opens the
+            # source table itself.
+            projection = list(dict.fromkeys(list(source.field_names) + source_keys))
+            source = _python_materialize_merge_source(source, projection)
         else:
-            native_source = create_native_write_table(source)
-            if native_source is None:
-                return None
-            from pypaimon.execution.native.table import (_with_native_read_snapshot)
-            native_source = _with_native_read_snapshot(source, native_source)
+            from pypaimon.schema.data_types import PyarrowFieldParser
+            projection = list(dict.fromkeys(list(source.field_names) + source_keys))
+            source_fields = source.new_read_builder().with_projection(projection).read_type()
+            source_schema = PyarrowFieldParser.from_paimon_schema(source_fields)
+            if source.options.query_auth_enabled:
+                from pypaimon.execution.native.table import (_native_query_auth_supported, _native_table)
+                from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
+                if not _rest_catalog_supported(source) or not _native_query_auth_supported(source):
+                    return None
+                # A source is a read, not a write. Core obtains a fresh REST grant
+                # and requires it to be unrestricted, as Python plan_all does.
+                native_source = _native_table(source)
+            else:
+                native_source = create_native_write_table(source)
+                if native_source is None:
+                    return None
+                from pypaimon.execution.native.table import (_with_native_read_snapshot)
+                native_source = _with_native_read_snapshot(source, native_source)
     source, matched, not_matched, context = _prepare(
         table, source, list(matched), list(not_matched), on, source_schema=source_schema)
     if not _native_update_columns_supported(table, _union_update_cols(matched)):

@@ -27,10 +27,19 @@ from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
+from pypaimon.execution.native import keytime_capability as _keytime_capability
+from pypaimon.execution.native.keytime_capability import (
+    native_string_keytime_read_supported as _native_merge_map_keytime_timestamp_supported,
+    partial_update_keytime_unsupported_message as _partial_update_keytime_unsupported_message,
+)
 from pypaimon.execution.native.read import builder as native_builder
+from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField, MapType
+
+# Re-export for tests and call sites that probe effective keytime fields.
+_table_uses_merge_map_keytime = _keytime_capability.table_uses_merge_map_keytime
 
 _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC,
@@ -40,74 +49,62 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
-# merge_map_with_keytime is unsafe on Native until Rust matches Java
-# UTF-16 string order (e.g. U+E000 vs U+10000):
-# * AGGREGATE: fall back to the Python aggregator before Native opens.
-# * PARTIAL_UPDATE (incl. sequence-group field aggregators): Python
-#   cannot run this config either, so raise before Native opens rather
-#   than returning a wrong UTF-8 winner.
-_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 
+def _accessed_field_names(read):
+    """Underlying fields this Native read may evaluate.
 
-def _field_agg_func_name(field_name, primary_keys, options_map, sequence_fields):
-    # Same precedence as Python ``resolve_agg_func_name`` / Java
-    # ``AggregateMergeFunction.getAggFuncName``, inlined to avoid a
-    # Native → Python execution import.
-    if field_name in sequence_fields:
-        return "last_value"
-    if field_name in primary_keys:
-        return "primary_key"
-    return (
-        options_map.get("fields.{}.aggregate-function".format(field_name))
-        or options_map.get("fields.default-aggregate-function")
-        or "last_non_null_value"
-    )
-
-
-def _table_uses_merge_map_keytime(table) -> bool:
-    """True when a field aggregator actually resolves to keytime.
-
-    Covers Aggregate and Partial Update (including sequence-group tables
-    that set ``fields.<f>.aggregate-function=merge_map_with_keytime`` on
-    a group member). Detection follows field-aggregator precedence; it
-    does not treat ``sequence-group`` alone as keytime.
+    Collects projection / adapter / scan types, predicate leaves, nested
+    projection roots and output-projection roots. Returns ``None`` when the
+    dependency set cannot be established so callers stay conservative.
     """
-    if not getattr(table, 'is_primary_key_table', False):
-        return False
-    options = table.options
-    if options.merge_engine() not in (
-            MergeEngine.AGGREGATE, MergeEngine.PARTIAL_UPDATE):
-        return False
+    names = set()
+    saw_schema = False
+    for source in (
+            getattr(read, '_scan_read_type', None),
+            getattr(read, 'read_type', None),
+            getattr(read, '_adapter_read_type', None),
+            getattr(read, '_predicate_extra_fields', None),
+    ):
+        if source is None:
+            continue
+        saw_schema = True
+        for field in source:
+            names.add(field.name)
 
-    options_map = options.options.to_map()
-    pk_set = set(table.primary_keys)
-    sequence_fields = set(options.sequence_field())
-    for field in table.fields:
-        if _field_agg_func_name(
-                field.name, pk_set, options_map, sequence_fields
-        ) == _MERGE_MAP_WITH_KEYTIME:
-            return True
-    return False
+    predicate = getattr(read, 'predicate', None)
+    if predicate is not None:
+        extracted = predicate_field_names(predicate)
+        if not extracted:
+            # Non-empty predicate we cannot attribute to columns: refuse to
+            # narrow past STRING keytime fields.
+            return None
+        names.update(extracted)
+
+    nested_paths = getattr(read, 'nested_name_paths', None)
+    if nested_paths:
+        for path in nested_paths:
+            if path:
+                names.add(path[0])
+
+    output_projection = getattr(read, 'output_projection', None)
+    if output_projection is not None:
+        columns = getattr(output_projection, 'columns', None)
+        if columns is None and hasattr(output_projection, '__iter__'):
+            columns = output_projection
+        if columns is not None:
+            for item in columns:
+                path = item[1] if isinstance(item, tuple) and len(item) > 1 else None
+                if path:
+                    names.add(path[0])
+
+    if not names and not saw_schema:
+        return None
+    return names
 
 
-def _native_merge_map_keytime_timestamp_supported(table) -> bool:
-    """Whether Native can run ``merge_map_with_keytime`` for this table.
-
-    Always ``False`` when any field uses ``merge_map_with_keytime`` on a
-    PK aggregation or partial-update table. Non-PK / other engines /
-    other aggregators are unchanged and still clear this gate.
-    """
-    return not _table_uses_merge_map_keytime(table)
-
-
-def _partial_update_keytime_unsupported_message():
-    return (
-        "merge_map_with_keytime with merge-engine 'partial-update' is not "
-        "supported: the native reader compares STRING timestamps as UTF-8 "
-        "while Java/Python use UTF-16, and the Python reader does not "
-        "implement per-field aggregators or sequence-group on "
-        "partial-update tables"
-    )
+def _read_hits_unsafe_string_keytime(read) -> bool:
+    return not _native_merge_map_keytime_timestamp_supported(
+        read.table, _accessed_field_names(read))
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,
@@ -183,15 +180,15 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
-        # Keytime: Aggregate falls back to Python; Partial Update has no
-        # correct Python path either, so fail before Native opens.
-        if not _native_merge_map_keytime_timestamp_supported(read.table):
+        # STRING keytime only when this read actually touches those fields.
+        # Unrelated projections (e.g. VARIANT) stay on Native.
+        if _read_hits_unsafe_string_keytime(read):
             if read.table.options.merge_engine() == MergeEngine.PARTIAL_UPDATE:
                 raise NotImplementedError(
                     _partial_update_keytime_unsupported_message())
             return self._fallback(
-                "merge_map_with_keytime is not supported by the native "
-                "reader; falling back to Python")
+                "merge_map_with_keytime STRING timestamps are not supported "
+                "by the native reader; falling back to Python")
         try:
             if not self._orc_shared_shredding_supported(splits):
                 return self._fallback("ORC shared-shredding MAP columns require the Python reader")
