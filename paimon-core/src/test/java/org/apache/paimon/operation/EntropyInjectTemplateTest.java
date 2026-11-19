@@ -35,6 +35,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -280,6 +281,31 @@ public class EntropyInjectTemplateTest {
 
         assertThat(table.newReadBuilder().newScan().plan().splits()).isNotEmpty();
         assertThat(Files.isDirectory(sharedRoot.resolve("{hash}").resolve("literal"))).isTrue();
+    }
+
+    @Test
+    public void testTemplateRequiresAnExternalPathOnCreateAndAlter() throws Exception {
+        String strategy = CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        String template = ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString();
+        Identifier identifier = Identifier.create(DATABASE, "missing_path");
+        assertThatThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        identifier,
+                                        schemaBuilder().option(strategy, template).build(),
+                                        false))
+                .rootCause()
+                .hasMessageContaining("requires a non-empty template");
+        catalog.createTable(identifier, schemaBuilder().build(), false);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Collections.singletonList(
+                                                SchemaChange.setOption(strategy, template)),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires a non-empty template");
     }
 
     @Test

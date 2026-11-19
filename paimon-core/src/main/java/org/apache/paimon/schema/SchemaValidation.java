@@ -445,39 +445,33 @@ public class SchemaValidation {
     }
 
     private static void validateExternalPaths(CoreOptions options) {
-        String externalPaths = options.dataFileExternalPaths();
-        if (externalPaths == null || externalPaths.isEmpty()) {
+        if (options.externalPathStrategy() != ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE) {
             return;
         }
 
-        boolean templateStrategy =
-                options.externalPathStrategy() == ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE;
-        String[] paths = externalPaths.split(",");
-
-        if (templateStrategy && paths.length > 1) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "'%s' only accepts a single path when '%s' is '%s', but got %s.",
-                            CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
-                            CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
-                            ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
-                            paths.length));
-        }
-
-        for (String externalPath : paths) {
-            if (templateStrategy
-                    && !TemplateEntropyInjectExternalPathProvider.isTemplate(
-                            new Path(externalPath.trim()).toUri().getPath())) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "External path '%s' must contain the '%s' placeholder when '%s' is '%s'.",
-                                externalPath.trim(),
-                                TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER,
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
-                                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE));
-            }
-
-        }
+        String externalPaths = options.dataFileExternalPaths();
+        checkArgument(
+                externalPaths != null && !externalPaths.trim().isEmpty(),
+                "'%s' requires a non-empty template when '%s' is '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE);
+        String[] paths = externalPaths.split(",", -1);
+        checkArgument(
+                paths.length == 1,
+                "'%s' only accepts a single path when '%s' is '%s', but got %s.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
+                paths.length);
+        checkArgument(
+                TemplateEntropyInjectExternalPathProvider.isTemplate(
+                        new Path(paths[0].trim()).toUri().getPath()),
+                "External path '%s' must contain the '%s' placeholder when '%s' is '%s'.",
+                paths[0].trim(),
+                TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER,
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE);
     }
 
     /**
