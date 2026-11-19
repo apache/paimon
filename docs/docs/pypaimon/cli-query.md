@@ -38,6 +38,7 @@ paimon table read mydb.users
 **Options:**
 
 - `--select, -s`: Select specific columns to read (comma-separated)
+- `--snapshot-id` reads all rows visible at the specified positive snapshot ID on the table's branch. Use the column names from that snapshot in `--select` and `--where`.
 - `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
 - `--format, -f`: Output format: `table` (default) or `json`
@@ -50,6 +51,9 @@ paimon table read mydb.users -l 50
 
 # Read specific columns
 paimon table read mydb.users -s id,name,age
+
+# Read the rows visible at snapshot 5 using the column names at that time
+paimon table read mydb.users --snapshot-id 5 -s id,name -w "age >= 20"
 
 # Filter with WHERE clause
 paimon table read mydb.users --where "age > 18"
@@ -122,6 +126,7 @@ paimon table explain mydb.events
 **Options:**
 
 - `--select, -s`: Project specific columns (comma-separated)
+- `--snapshot-id` plans the scan for the specified positive snapshot ID using the same branch, schema, and selection rules as `table read`.
 - `--where, -w`: Filter condition in SQL-like syntax (same operators as `table read`)
 - `--limit, -l`: Row limit to push down
 - `--verbose, -v`: List every split with its files
@@ -132,6 +137,9 @@ paimon table explain mydb.events
 ```shell
 # Whole-table scan plan
 paimon table explain mydb.events
+
+# Inspect the plan for the snapshot 5 query from the Table Read example
+paimon table explain mydb.users --snapshot-id 5 -s id,name -w "age >= 20" --verbose
 
 # Push filter and projection through the planner
 paimon table explain mydb.events --where "dt = '2026-05-16' AND id = 7" -s dt,id,val

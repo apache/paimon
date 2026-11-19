@@ -214,6 +214,252 @@ class CliTableTest(unittest.TestCase):
         self.assertEqual('', err)
         return out
 
+    def _append_table_row(self, identifier, **values):
+        builder = self.catalog.get_table(identifier).new_batch_write_builder()
+        writer = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            columns = {
+                name: pa.array([value.as_py()], type=value.type) if isinstance(value, pa.Scalar) else [value]
+                for name, value in values.items()
+            }
+            writer.write_arrow(pa.Table.from_pydict(columns))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    def test_cli_table_read_explain_snapshot_schema(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_schema_reads'
+        schema = pa.schema([('id', pa.int64()), ('message', pa.string())])
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(schema), False)
+        self._append_table_row(identifier, id=1, message='old')
+        self.catalog.alter_table(identifier, [SchemaChange.rename_column('message', 'body')])
+        self._append_table_row(identifier, id=2, body='new')
+        self._append_table_row(identifier, id=3, body='later')
+
+        def read(*args):
+            return json.loads(self._run_table_command_success('read', identifier, *args, '-f', 'json'))
+
+        self.assertEqual([{'id': 1, 'message': 'old'}], read('--snapshot-id', '1'))
+        self.assertEqual([{'id': 1}], read('--snapshot-id', '1', '--s', 'id', '-w', "message = 'old'", '-l', '1'))
+        self.assertCountEqual([{'id': 1, 'body': 'old'}, {'id': 2, 'body': 'new'}], read('--snapshot-id', '2'))
+        self.assertCountEqual([{'id': 1}, {'id': 2}, {'id': 3}], read('-s', 'id'))
+        self.assertEqual(1, len(read('--snapshot-id', '2', '-l', '1')))
+        plan = json.loads(self._run_table_command_success(
+            'explain', identifier, '--snapshot-id', '1', '--s', 'id', '-w', "message = 'old'",
+            '-l', '1', '-f', 'json'))
+        self.assertEqual((1, 0, ['id'], 1), (plan['snapshot_id'], plan['schema_id'], plan['projection'], plan['limit']))
+        self.assertIn('message', plan['predicate'])
+        verbose_plan = self._run_table_command_success('explain', identifier, '--snapshot-id', '2', '--verbose')
+        self.assertRegex(verbose_plan, r'Snapshot:\s+2\s+\(schema 1\)')
+        self.assertRegex(verbose_plan, r'(?m)^ +file: \S')
+        self.assertIn('old', self._run_table_command_success('read', identifier, '--snapshot-id', '1', '-s', 'message'))
+
+        for command in ('read', 'explain'):
+            for option, value in (('--select', 'body'), ('--where', "body = 'new'")):
+                with self.subTest(command=command, option=option):
+                    out, err, code = self._run_table_command(command, identifier, '--snapshot-id', '1', option, value)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn('body', err)
+
+        # Reusing a name gets a new field ID, even before a fourth data snapshot exists.
+        self.catalog.alter_table(identifier, [SchemaChange.drop_column('body'),
+                                              SchemaChange.add_column('message', AtomicType('STRING'))])
+        self.assertEqual([{'message': 'old'}], read('--snapshot-id', '1', '-s', 'message'))
+        self.assertEqual([{'message': None}] * 3, read('-s', 'message'))
+
+    def test_cli_table_read_snapshot_aggregation(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_aggregation'
+        schema = pa.schema([('id', pa.int64()), ('v', pa.int64())])
+        options = {'bucket': '1', 'merge-engine': 'aggregation', 'fields.v.aggregate-function': 'sum',
+                   'write-only': 'true'}
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(schema, primary_keys=['id'], options=options),
+                                  False)
+        self._append_table_row(identifier, id=1, v=4)
+        self._append_table_row(identifier, id=1, v=6)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('fields.v.aggregate-function', 'max')])
+        self._append_table_row(identifier, id=2, v=3)
+
+        rows = json.loads(self._run_table_command_success('read', identifier, '--snapshot-id', '2', '-f', 'json'))
+        self.assertEqual([{'id': 1, 'v': 10}], rows)
+        latest = json.loads(self._run_table_command_success('read', identifier, '-f', 'json'))
+        self.assertCountEqual([{'id': 1, 'v': 6}, {'id': 2, 'v': 3}], latest)
+        table = self.catalog.get_table(identifier)
+        for override, expected in (('min', 4), (None, 6)):
+            view = table.copy_without_time_travel({'fields.v.aggregate-function': override})
+            with self.subTest(override=override), patch.object(type(self.catalog), 'get_table', return_value=view):
+                rows = json.loads(self._run_table_command_success(
+                    'read', identifier, '--snapshot-id', '2', '-f', 'json'))
+                self.assertEqual([{'id': 1, 'v': expected}], rows)
+
+    def test_cli_table_read_snapshot_sequence_field(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_sequence'
+        schema = pa.schema([('id', pa.int64()), ('seq', pa.int64())])
+        options = {'bucket': '1', 'sequence.field': 'seq', 'write-only': 'true'}
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(schema, primary_keys=['id'], options=options),
+                                  False)
+        self._append_table_row(identifier, id=1, seq=20)
+        self._append_table_row(identifier, id=1, seq=10)
+        self.catalog.alter_table(identifier, [SchemaChange.rename_column('seq', 'rev'),
+                                              SchemaChange.set_option('sequence.field.sort-order', 'descending')])
+
+        rows = json.loads(self._run_table_command_success('read', identifier, '--snapshot-id', '2', '-f', 'json'))
+        self.assertEqual([{'id': 1, 'seq': 20}], rows)
+
+    def test_cli_table_read_explain_snapshot_deletion_vectors_merge_on_read(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_deletion_vectors'
+        key = 'deletion-vectors.merge-on-read'
+        schema = pa.schema([('id', pa.int64())])
+        options = {'bucket': '1', 'deletion-vectors.enabled': 'true', 'write-only': 'true'}
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(schema, primary_keys=['id'], options=options),
+                                  False)
+
+        # Each commit adds one level-0 file. The option in that snapshot determines its visibility.
+        for snapshot_id, change, expected in (
+                (1, SchemaChange.set_option(key, 'true'), []),
+                (2, SchemaChange.remove_option(key), [{'id': 1}, {'id': 2}])):
+            self._append_table_row(identifier, id=snapshot_id)
+            self.catalog.alter_table(identifier, [change])
+            args = (identifier, '--snapshot-id', str(snapshot_id), '-f', 'json')
+            with self.subTest(snapshot_id=snapshot_id):
+                rows = json.loads(self._run_table_command_success('read', *args))
+                plan = json.loads(self._run_table_command_success('explain', *args))
+                self.assertCountEqual(expected, rows)
+                self.assertEqual(len(expected), plan['file_count'])
+
+    def test_cli_table_read_explain_snapshot_partition_paths(self):
+        from contextlib import closing
+
+        from pypaimon.schema.schema_change import SchemaChange
+
+        for suffix, pt, option, value, names in (
+                ('null', pa.scalar(None, pa.string()), 'partition.default-name', 'EMPTY',
+                 ('__DEFAULT_PARTITION__', 'EMPTY')),
+                ('date', pa.scalar(date(1970, 1, 2), pa.date32()), 'partition.legacy-name', 'false',
+                 ('1', '1970-01-02'))):
+            identifier = 'test_db.snapshot_partition_' + suffix
+            schema = pa.schema([('id', pa.int64()), ('pt', pt.type)])
+            self.catalog.create_table(identifier, Schema.from_pyarrow_schema(schema, partition_keys=['pt']), False)
+            self._append_table_row(identifier, id=1, pt=pt)
+            self.catalog.alter_table(identifier, [SchemaChange.set_option(option, value)])
+            table = self.catalog.get_table(identifier)
+            # Replace the old data so each snapshot uses a single partition layout.
+            with closing(table.new_batch_write_builder().new_commit()) as commit:
+                commit.truncate_table()
+            self._append_table_row(identifier, id=2, pt=pt)
+
+            for snapshot_id, row_id, name, override in ((1, 1, names[0], value), (3, 2, names[1], None)):
+                with self.subTest(option=option, snapshot=snapshot_id):
+                    args = (identifier, '--snapshot-id', str(snapshot_id))
+                    plan = self._run_table_command_success('explain', *args, '--verbose')
+                    planned = [Path(line.split('file: ', 1)[1]) for line in plan.splitlines()
+                               if line.lstrip().startswith('file: ')]
+                    path = next((Path(table.table_path) / ('pt=' + name)).rglob('*.parquet'))
+                    self.assertEqual([path], planned)
+                    read_args = ('read', *args, '-s', 'id', '-f', 'json')
+                    rows = json.loads(self._run_table_command_success(*read_args))
+                    self.assertEqual([{'id': row_id}], rows)
+
+                    # A catalog override cannot move files already written with the old layout.
+                    view = table.copy_without_time_travel({option: override})
+                    with patch.object(type(self.catalog), 'get_table', return_value=view):
+                        self.assertEqual(rows, json.loads(self._run_table_command_success(*read_args)))
+
+    def test_cli_table_read_explain_snapshot_branch_and_selectors(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_branch_reads'
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(pa.schema([('id', pa.int64())])), False)
+        self._append_table_row(identifier, id=1)
+        self.catalog.get_table(identifier).create_tag('base')
+        self.catalog.create_branch(identifier, 'dev', 'base')
+        branch = identifier + '$branch_dev'
+        self._append_table_row(branch, id=20)
+        self._append_table_row(identifier, id=2)
+
+        for name, extra_id in ((branch, 20), (identifier, 2)):
+            rows = json.loads(self._run_table_command_success('read', name, '--snapshot-id', '2', '-f', 'json'))
+            self.assertCountEqual([{'id': 1}, {'id': extra_id}], rows)
+            plan = json.loads(self._run_table_command_success('explain', name, '--snapshot-id', '2', '-f', 'json'))
+            self.assertEqual((name, 2), (plan['table_identifier'], plan['snapshot_id']))
+
+        for key, value, default_id in (('scan.tag-name', 'base', 1), ('incremental-between', '1,2', 2)):
+            with self.subTest(key=key):
+                self.catalog.alter_table(identifier, [SchemaChange.set_option(key, value)])
+                self.assertEqual([{'id': default_id}], json.loads(self._run_table_command_success(
+                    'read', identifier, '-f', 'json')))
+                rows = json.loads(self._run_table_command_success(
+                    'read', identifier, '--snapshot-id', '2', '-f', 'json'))
+                self.assertCountEqual([{'id': 1}, {'id': 2}], rows)
+                plan = json.loads(self._run_table_command_success(
+                    'explain', identifier, '--snapshot-id', '2', '-f', 'json'))
+                self.assertEqual((2, 2), (plan['snapshot_id'], plan['estimated_row_count']))
+                self.catalog.alter_table(identifier, [SchemaChange.remove_option(key)])
+
+        # The tag still retains snapshot 1 after its numbered snapshot file expires.
+        table = self.catalog.get_table(identifier)
+        os.remove(table.snapshot_manager().get_snapshot_path(1))
+        for command in ('read', 'explain'):
+            out, err, code = self._run_table_command(command, identifier, '--snapshot-id', '1')
+            self.assertEqual(('', 1), (out, code))
+            self.assertIn('Snapshot 1 not found', err)
+
+    def test_cli_table_read_explain_snapshot_query_auth(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier = 'test_db.snapshot_authorized_reads'
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(pa.schema([('id', pa.int64())])), False)
+        self._append_table_row(identifier, id=1)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('query-auth.enabled', 'true')])
+        for command in ('read', 'explain'):
+            denial = PermissionError('catalog denied SELECT')
+            with self.subTest(command=command), patch.object(
+                    type(self.catalog), 'auth_table_query', side_effect=denial) as auth:
+                out, err, code = self._run_table_command(command, identifier, '--snapshot-id', '1')
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('catalog denied SELECT', err)
+                auth.assert_called_once()
+
+    def test_cli_table_read_explain_snapshot_errors(self):
+        identifier, _ = self._create_snapshot_table([
+            self._snapshot(3, schema_id=99), self._snapshot(4, schema_id=None)])
+        empty, _ = self._create_snapshot_table([], suffix='empty')
+        for command in ('read', 'explain'):
+            for target, snapshot_id, message in (
+                    (empty, '1', 'not found'), (identifier, '2', 'not found'), (identifier, '3', 'Schema 99'),
+                    (identifier, '4', 'does not contain a schema ID'),
+                    (identifier + '$snapshots', '3', 'FileStoreTable')):
+                with self.subTest(command=command, target=target, snapshot_id=snapshot_id):
+                    out, err, code = self._run_table_command(command, target, '--snapshot-id', snapshot_id)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(target, err)
+                    self.assertIn(snapshot_id, err)
+                    self.assertIn(message, err)
+            with patch.object(SnapshotManager, 'get_snapshot_by_id', side_effect=OSError('metadata unavailable')):
+                out, err, code = self._run_table_command(command, identifier, '--snapshot-id', '3')
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('metadata unavailable', err)
+                self.assertIn(identifier, err)
+                self.assertIn('3', err)
+            for invalid in ('0', '-1', 'abc'):
+                with self.subTest(command=command, invalid=invalid):
+                    out, err, code = self._run_table_command(command, identifier, '--snapshot-id', invalid)
+                    self.assertEqual(('', 2), (out, code))
+                    self.assertIn('positive integer', err)
+            help_text = self._run_table_command_success(command, '--help')
+            self.assertIn('--snapshot-id', help_text)
+            self.assertNotRegex(help_text, r'--s\b')
+
     def test_cli_table_read_basic(self):
         """Test basic table read via CLI."""
         # Simulate CLI command: paimon -c <config> table read test_db.users
