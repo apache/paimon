@@ -169,6 +169,9 @@ Or you can use Flink managed memory for your write buffer to avoid OOM, set tabl
 sink.use-managed-memory-allocator=true
 ```
 
+For an append-only table, this also requires `write-buffer-for-append=true`; otherwise rows bypass the write buffer
+and managed memory is not used.
+
 ## Commit Memory
 
 Committer node may use a large memory if the amount of data written to the table is particularly large, OOM may occur
