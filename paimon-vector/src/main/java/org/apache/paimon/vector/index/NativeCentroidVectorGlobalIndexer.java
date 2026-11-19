@@ -171,6 +171,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
         Map<String, String> local = new LinkedHashMap<>(options);
         if ("diskann".equals(identifier)) {
             local.remove("nlist");
+            local.remove("ivf.train.max-points-per-centroid");
         } else {
             local.put("nlist", localNlist == null ? "auto" : localNlist);
         }

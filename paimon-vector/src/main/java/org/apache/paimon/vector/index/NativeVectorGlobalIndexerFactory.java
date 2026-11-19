@@ -175,6 +175,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         entry.getKey(),
                         entry.getKey(),
                         entry.getValue(),
+                        identifier,
                         algorithm,
                         validate);
             }
@@ -187,6 +188,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey,
                         optionKey.substring(optionPrefix.length()),
                         entry.getValue(),
+                        identifier,
                         algorithm,
                         validate);
             }
@@ -199,6 +201,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey,
                         optionKey.substring(fieldPrefix.length()),
                         entry.getValue(),
+                        identifier,
                         algorithm,
                         validate);
             }
@@ -269,12 +272,14 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             String optionSuffix,
             String value,
             String identifier,
+            String algorithm,
             boolean validate) {
         String nativeKey = nativeOptionKey(optionSuffix);
         if (nativeKey == null) {
             return;
         }
-        if (is050BuildOption(nativeKey) && !isAllowed050BuildOption(nativeKey, identifier)) {
+        if (is050BuildOption(nativeKey)
+                && !isAllowed050BuildOption(nativeKey, identifier, algorithm)) {
             if (validate) {
                 throw new IllegalArgumentException(
                         "Option '"
@@ -295,15 +300,20 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 || "pq.train.max-points-per-centroid".equals(key);
     }
 
-    private static boolean isAllowed050BuildOption(String key, String identifier) {
+    private static boolean isAllowed050BuildOption(
+            String key, String identifier, String algorithm) {
+        if (!identifier.equals(algorithm) && "ivf.train.max-points-per-centroid".equals(key)) {
+            // All centroid layouts train the outer router with IVF-FLAT.
+            return true;
+        }
         if ("ivf.pq-encoding".equals(key)) {
-            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
         }
         if ("pq.train.max-points-per-centroid".equals(key)) {
-            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)
-                    || DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm)
+                    || DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
         }
-        return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
+        return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
     }
 
     private static int dimension(

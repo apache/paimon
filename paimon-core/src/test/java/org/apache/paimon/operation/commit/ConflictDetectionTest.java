@@ -38,7 +38,9 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -1778,8 +1780,17 @@ class ConflictDetectionTest {
             SnapshotManager snapshots = mock(SnapshotManager.class);
             when(snapshots.snapshot(2)).thenReturn(concurrent);
             CommitScanner scanner = mock(CommitScanner.class);
+            TableSchema schema =
+                    TableSchema.create(
+                            0,
+                            new Schema.Builder()
+                                    .column("label", new IntType())
+                                    .column("v", new IntType())
+                                    .build());
+            when(scanner.schema(0)).thenReturn(schema);
             ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
             when(updated.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+            when(updated.file().writeCols()).thenReturn(Collections.singletonList("v"));
             when(scanner.readIncrementalEntries(
                             concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
                     .thenReturn(Collections.singletonList(updated));
@@ -1795,11 +1806,22 @@ class ConflictDetectionTest {
                                     Snapshot.CommitKind.APPEND))
                     .hasValueSatisfying(
                             error -> assertThat(error).hasMessageContaining("source rows changed"));
+            when(updated.file().writeCols()).thenReturn(Collections.singletonList("label"));
+            assertThat(
+                            detection.checkConflicts(
+                                    concurrent,
+                                    data,
+                                    Collections.emptyList(),
+                                    Collections.singletonList(index),
+                                    null,
+                                    Snapshot.CommitKind.APPEND))
+                    .isEmpty();
             // A second router starts at snapshot 2. The change in its interval in that
             // snapshot is already included in its training data. Both are active in snapshot 3.
             IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
             ManifestEntry appended = manifestEntry(ADD, "appended", 100L, new Range(100, 109));
             when(appended.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+            when(appended.file().writeCols()).thenReturn(null);
             List<BinaryRow> partitions = Collections.singletonList(BinaryRow.EMPTY_ROW);
             when(scanner.readIncrementalEntries(concurrent, partitions))
                     .thenReturn(Collections.singletonList(appended));
@@ -1814,7 +1836,7 @@ class ConflictDetectionTest {
                                     null,
                                     Snapshot.CommitKind.APPEND))
                     .isNotPresent();
-            verify(scanner, times(2)).readIncrementalEntries(concurrent, partitions);
+            verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
             verify(scanner).readIncrementalEntries(latest, partitions);
 
             when(scanner.readIncrementalEntries(latest, partitions))

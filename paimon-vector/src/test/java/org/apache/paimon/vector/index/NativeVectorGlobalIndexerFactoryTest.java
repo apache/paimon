@@ -18,8 +18,13 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.VectorTrainingModel;
+import org.apache.paimon.index.vector.CentroidRouter;
+import org.apache.paimon.index.vector.VectorIndexTrainer;
+import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -66,6 +71,47 @@ public class NativeVectorGlobalIndexerFactoryTest {
         options.setString(algorithm + ".shard", "centroid-based");
         assertThatThrownBy(() -> GlobalIndexer.create(algorithm, fields, options))
                 .hasMessageContaining("index type");
+    }
+
+    @Test
+    void diskAnnCentroidUsesTheIvfRouterTrainingOption() throws Exception {
+        float[] values = new float[256];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = i % 47;
+        }
+        String key = "diskann-centroid.ivf.train.max-points-per-centroid";
+        for (boolean dynamic : new boolean[] {false, true}) {
+            Options options = new Options(Collections.singletonMap(key, "4"));
+            if (dynamic) {
+                options.setString(key, "2");
+            }
+            options.setString("diskann-centroid.nlist", "4");
+            options.setString("diskann-centroid.dimension", "2");
+            options.setString("diskann-centroid.metric", "l2");
+            NativeCentroidVectorGlobalIndexer indexer =
+                    (NativeCentroidVectorGlobalIndexer)
+                            GlobalIndexer.create(
+                                    "diskann-centroid",
+                                    Collections.singletonList(
+                                            new DataField(
+                                                    0, "vec", new ArrayType(new FloatType()))),
+                                    options);
+            Map<String, String> coarse = new HashMap<>();
+            coarse.put("index.type", "ivf_flat");
+            coarse.put("nlist", "4");
+            coarse.put("dimension", "2");
+            coarse.put("metric", "l2");
+            coarse.put("ivf.train.max-points-per-centroid", dynamic ? "2" : "4");
+            try (VectorIndexTraining training = VectorIndexTrainer.train(coarse, values, 128);
+                    CentroidRouter expected = CentroidRouter.fromTraining(training);
+                    VectorTrainingModel model =
+                            indexer.trainGlobalModel(
+                                    128,
+                                    Collections.singletonList(new TrainingBatch(values, 128))
+                                            .iterator())) {
+                assertThat(model.serialize()).isEqualTo(expected.serialize());
+            }
+        }
     }
 
     @Test

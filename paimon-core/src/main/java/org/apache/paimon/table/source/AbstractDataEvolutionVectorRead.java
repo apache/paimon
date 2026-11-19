@@ -157,20 +157,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer indexer = createGlobalIndexer(firstFile.indexType(), firstMeta);
         if (indexer instanceof CentroidVectorGlobalIndexer) {
-            // Empty coverage markers have no scored candidates. Prefer a populated range
-            // when selecting the metric for exact refinement and raw fallback.
-            List<IndexFileMeta> files = splits.get(0).vectorIndexFiles();
-            for (IndexVectorSearchSplit split : splits) {
-                if (split.vectorIndexFiles().stream().anyMatch(file -> file.rowCount() > 0)) {
-                    files = split.vectorIndexFiles();
-                    break;
-                }
-            }
             return ((CentroidVectorGlobalIndexer) indexer)
                     .forRead(
                             file -> table.fileIO().newInputStream(file.filePath()),
                             buildIOMetaList(
-                                    table.store().pathFactory().globalIndexFileFactory(), files));
+                                    table.store().pathFactory().globalIndexFileFactory(),
+                                    splits.get(0).vectorIndexFiles()));
         }
         return indexer;
     }

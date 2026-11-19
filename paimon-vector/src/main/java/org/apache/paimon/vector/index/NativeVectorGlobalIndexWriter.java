@@ -85,7 +85,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private ByteBuffer writeBuf;
 
     private final int recordSizeInBytes;
-    private final float[] vectorBuf;
+    private float[] vectorBuf;
     private long count;
     private boolean closed;
 
@@ -138,7 +138,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
+    }
+
+    private void openSpillFile() {
         this.vectorBuf = new float[dim];
+        this.writeBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE).order(ByteOrder.nativeOrder());
 
         try {
             this.tempVectorFile = File.createTempFile("paimon-vector-vectors-", ".bin");
@@ -146,9 +150,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             @SuppressWarnings("resource")
             RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "rw");
             this.writeChannel = raf.getChannel();
-            this.writeBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
-            this.writeBuf.order(ByteOrder.nativeOrder());
         } catch (IOException e) {
+            close();
             throw new RuntimeException("Failed to create temp vector file", e);
         }
     }
@@ -176,6 +179,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     @Override
     public void write(Object fieldData, long rowId) {
+        if (closed) {
+            throw new IllegalStateException("Vector index writer is closed.");
+        }
         if (fieldData == null) {
             rowCount++;
             return;
@@ -184,6 +190,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         if (shardMeta != null && rowId < 0) {
             throw new IllegalArgumentException(
                     "Centroid shards require nonnegative relative row IDs.");
+        }
+        if (writeBuf == null) {
+            openSpillFile();
         }
         float[] src = materializeAndValidate(fieldData, rowId);
 
@@ -247,11 +256,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     @Override
     public List<ResultEntry> finish() {
+        if (closed) {
+            throw new IllegalStateException("Vector index writer is closed.");
+        }
         try {
             if (count == 0) {
-                writeChannel.close();
-                writeChannel = null;
-                writeBuf = null;
                 if (shardMeta == null) {
                     return Collections.emptyList();
                 }
@@ -269,10 +278,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         } catch (IOException e) {
             throw new RuntimeException("Failed to write vector global index", e);
         } finally {
-            if (tempVectorFile != null) {
-                tempVectorFile.delete();
-                tempVectorFile = null;
-            }
+            close();
         }
     }
 
@@ -648,6 +654,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             } catch (IOException ignored) {
             }
             writeBuf = null;
+            vectorBuf = null;
             if (tempVectorFile != null) {
                 tempVectorFile.delete();
                 tempVectorFile = null;

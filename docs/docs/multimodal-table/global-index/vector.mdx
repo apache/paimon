@@ -565,9 +565,9 @@ For example, use `index_type => 'diskann-centroid'` and
 `map('centroid.nprobe','8','diskann.l_search','64')`. Persist
 `diskann-centroid.dimension` and `diskann-centroid.metric` on the table for raw fallback.
 
-If source rows change while the build is running, including through compaction,
-the commit fails and the build must be retried. Appends outside its source ranges
-can proceed. When row IDs are reassigned, a whole range that moves by a constant offset can
+If a concurrent write or compaction replaces indexed vectors within a source range,
+the commit fails and the build must be retried. Updates to other columns and appends
+outside the source ranges can proceed. When row IDs are reassigned, a whole range that moves by a constant offset can
 reuse its router and shards with the updated manifest range.
 
 This build mode and its reader currently require the Java/Spark implementation

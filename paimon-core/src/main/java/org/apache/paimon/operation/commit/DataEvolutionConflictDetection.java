@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -65,6 +66,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Conflict detection for Data Evolution tables. */
@@ -656,33 +658,56 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             }
         }
 
-        Map<BinaryRow, RowRangeIndex> active = new HashMap<>();
+        Map<BinaryRow, Map<Integer, RowRangeIndex>> active = new HashMap<>();
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIds = new HashMap<>();
         for (long baseline = firstBaseline; baseline < latestSnapshot.id(); baseline++) {
             List<IndexManifestEntry> starting = byBaseline.get(baseline);
             if (starting != null) {
-                Map<BinaryRow, List<Range>> additions = new HashMap<>();
+                Map<Pair<BinaryRow, Integer>, List<Range>> additions = new HashMap<>();
                 for (IndexManifestEntry index : starting) {
+                    GlobalIndexMeta meta = index.indexFile().globalIndexMeta();
                     additions
-                            .computeIfAbsent(index.partition(), ignored -> new ArrayList<>())
-                            .add(index.indexFile().globalIndexMeta().rowRange());
+                            .computeIfAbsent(
+                                    Pair.of(index.partition(), meta.indexFieldId()),
+                                    ignored -> new ArrayList<>())
+                            .add(meta.rowRange());
                 }
                 additions.forEach(
-                        (partition, ranges) -> {
-                            RowRangeIndex existing = active.get(partition);
+                        (key, ranges) -> {
+                            Map<Integer, RowRangeIndex> fields =
+                                    active.computeIfAbsent(
+                                            key.getLeft(), ignored -> new HashMap<>());
+                            RowRangeIndex existing = fields.get(key.getRight());
                             if (existing != null) {
                                 ranges.addAll(existing.ranges());
                             }
-                            active.put(partition, RowRangeIndex.create(ranges));
+                            fields.put(key.getRight(), RowRangeIndex.create(ranges));
                         });
             }
             Snapshot snapshot = snapshotManager.snapshot(baseline + 1);
             for (ManifestEntry change :
                     commitScanner()
                             .readIncrementalEntries(snapshot, new ArrayList<>(active.keySet()))) {
-                RowRangeIndex ranges = active.get(change.partition());
-                if (ranges != null && change.file().firstRowId() != null) {
-                    Range changed = change.file().nonNullRowIdRange();
-                    if (ranges.intersects(changed.from, changed.to)) {
+                DataFileMeta file = change.file();
+                Map<Integer, RowRangeIndex> fields = active.get(change.partition());
+                if (fields == null || file.firstRowId() == null) {
+                    continue;
+                }
+                Range changed = file.nonNullRowIdRange();
+                for (Map.Entry<Integer, RowRangeIndex> field : fields.entrySet()) {
+                    if (!field.getValue().intersects(changed.from, changed.to)) {
+                        continue;
+                    }
+                    Set<Integer> written =
+                            fileFieldIds.computeIfAbsent(
+                                    Pair.of(file.schemaId(), file.writeCols()),
+                                    key ->
+                                            fileFieldIds(
+                                                    schemas.computeIfAbsent(
+                                                            key.getLeft(), commitScanner()::schema),
+                                                    file));
+                    if (written.contains(field.getKey())) {
                         return Optional.of(
                                 new RuntimeException(
                                         "Centroid index source rows changed in snapshot "

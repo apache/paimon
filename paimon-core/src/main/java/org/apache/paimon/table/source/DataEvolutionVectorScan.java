@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
@@ -143,14 +144,25 @@ public class DataEvolutionVectorScan implements VectorScan {
 
         List<VectorSearchSplit> splits = new ArrayList<>();
         List<Range> indexedRanges = new ArrayList<>();
+        String scoringIndexType = null;
         for (Map.Entry<Pair<Range, String>, List<IndexFileMeta>> entry : rangeGroups.entrySet()) {
+            List<IndexFileMeta> files = entry.getValue();
+            // An all-null range still supplies coverage, but has no vectors to search or score.
+            if (files.stream().allMatch(file -> file.rowCount() == 0)
+                    && files.stream().anyMatch(CentroidVectorIndexUtils::isRoutingModel)) {
+                continue;
+            }
+            String type = entry.getKey().getRight();
+            if (scoringIndexType == null || type.compareTo(scoringIndexType) < 0) {
+                scoringIndexType = type;
+            }
             Range range = entry.getKey().getLeft();
             indexedRanges.add(range);
             splits.add(
                     new IndexVectorSearchSplit(
                             range.from,
                             range.to,
-                            entry.getValue(),
+                            files,
                             scalarIndexFiles(allIndexFiles, Collections.singletonList(range))));
         }
         CoreOptions effectiveOptions = effectiveCoreOptions();
@@ -184,10 +196,9 @@ public class DataEvolutionVectorScan implements VectorScan {
                     new RawVectorSearchSplit(
                             rawRowRanges,
                             scalarIndexFiles(allIndexFiles, rawRowRanges),
-                            vectorIndexFiles.stream()
-                                    .map(IndexFileMeta::indexType)
-                                    .min(String::compareTo)
-                                    .orElseGet(this::configuredVectorIndexType)));
+                            scoringIndexType == null
+                                    ? configuredVectorIndexType()
+                                    : scoringIndexType));
         }
 
         @Nullable Snapshot planSnapshot = snapshot;

@@ -84,6 +84,26 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
                   |options=>'ivf-pq-centroid.dimension=2,ivf-pq-centroid.pq.m=1')""".stripMargin)
       spark.sql("""INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES
                   |(1,array(1.0f,0.0f),1),(2,array(10.0f,10.0f),1) AS x(id,v,p)""".stripMargin)
+      // The empty marker still covers p=0. It must not supply its inner-product metric
+      // to an exact search over p=1, with either the default L2 or an explicit cosine metric.
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('vector-index.search-mode'='detail')")
+      def rawNearest(): Int = spark
+        .sql("SELECT id FROM vector_search('T','v',array(1.0f,0.0f),1)")
+        .collect()
+        .head
+        .getInt(0)
+      assert(rawNearest() == 1)
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('fields.v.metric'='cosine')")
+      assert(rawNearest() == 1)
+      val rawBatch = loadTable("T")
+        .newBatchVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVectors(Array(Array(1.0f, 0.0f), Array(0.0f, 1.0f)))
+        .withLimit(1)
+        .executeBatchLocal()
+      assert(rawBatch.get(0).results().toArray(1).toSeq == Seq(1L))
+      assert(rawBatch.get(1).results().toArray(1).toSeq == Seq(2L))
+      spark.sql("ALTER TABLE T UNSET TBLPROPERTIES ('fields.v.metric')")
       spark.sql(
         """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
           |index_type=>'ivf-pq-centroid',partitions=>'p=1',options=>'ivf-pq-centroid.dimension=2,

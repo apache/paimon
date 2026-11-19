@@ -42,7 +42,6 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -106,74 +105,66 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         this.expectedIndexType = expectedIndexType;
     }
 
-    boolean supportsJointProbes(int topK) {
-        // With 64 lists, 16 probes must still admit the normal four-candidates-per-result budget.
+    boolean supportsJointProbes(int topK) throws IOException {
+        // Check the header without loading the search structures. The shard may not be selected.
         if (ioMeta.rowCount() < (long) JOINT_INNER_PROBES * topK) {
             return false;
         }
-        try {
-            ensureLoaded();
-            return nativeMeta.nlist() == 64 && "l2".equals(nativeMeta.metric());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        try (SeekableInputStream in = fileReader.getInputStream(ioMeta);
+                VectorIndexReader reader =
+                        new VectorIndexReader(new SeekableStreamVectorIndexInput(in))) {
+            VectorIndexMetadata header = reader.metadata();
+            return header.nlist() == 64 && "l2".equals(header.metric());
         }
     }
 
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
-        return visitVectorSearch(vectorSearch, false);
-    }
-
-    CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
-            VectorSearch vectorSearch, boolean joint) {
         if (ioMeta.rowCount() == 0) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    try {
-                        ensureLoaded();
-                        return Optional.ofNullable(search(vectorSearch, joint));
-                    } catch (IOException e) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Failed vector index search: field=%s, limit=%d",
-                                        vectorSearch.fieldName(), vectorSearch.limit()),
-                                e);
-                    }
-                },
-                executor);
+        return CompletableFuture.supplyAsync(() -> searchShard(vectorSearch), executor);
+    }
+
+    private Optional<ScoredGlobalIndexResult> searchShard(VectorSearch query) {
+        try {
+            ensureLoaded();
+            return Optional.ofNullable(search(query, false));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed vector index search: field=%s, limit=%d",
+                            query.fieldName(), query.limit()),
+                    e);
+        }
     }
 
     @Override
     public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
-            BatchVectorSearch batchVectorSearch) {
-        return visitBatchVectorSearch(batchVectorSearch, false);
-    }
-
-    CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
-            BatchVectorSearch batchVectorSearch, boolean joint) {
+            BatchVectorSearch batch) {
         if (ioMeta.rowCount() == 0) {
             return CompletableFuture.completedFuture(
-                    Collections.nCopies(batchVectorSearch.vectorCount(), Optional.empty()));
+                    Collections.nCopies(batch.vectorCount(), Optional.empty()));
         }
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    try {
-                        ensureLoaded();
-                        return searchBatch(batchVectorSearch, joint);
-                    } catch (IOException e) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Failed batch vector index search: field=%s, limit=%d, vectorCount=%d",
-                                        batchVectorSearch.fieldName(),
-                                        batchVectorSearch.limit(),
-                                        batchVectorSearch.vectorCount()),
-                                e);
-                    }
-                },
-                executor);
+        return CompletableFuture.supplyAsync(() -> searchShardBatch(batch, false), executor);
+    }
+
+    List<Optional<ScoredGlobalIndexResult>> searchShardBatch(
+            BatchVectorSearch batch, boolean joint) {
+        if (ioMeta.rowCount() == 0) {
+            return Collections.nCopies(batch.vectorCount(), Optional.empty());
+        }
+        try {
+            ensureLoaded();
+            return searchBatch(batch, joint);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed batch vector index search: field=%s, limit=%d, vectorCount=%d",
+                            batch.fieldName(), batch.limit(), batch.vectorCount()),
+                    e);
+        }
     }
 
     private List<Optional<ScoredGlobalIndexResult>> searchBatch(

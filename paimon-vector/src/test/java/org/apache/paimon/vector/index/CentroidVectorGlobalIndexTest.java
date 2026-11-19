@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -44,6 +45,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,6 +54,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -62,7 +65,9 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -221,7 +226,9 @@ class CentroidVectorGlobalIndexTest {
         options.put("index.type", type.replace('-', '_'));
         options.put("metric", "l2");
         options.put("nlist", "4");
-        if (!diskann) {
+        if (diskann) {
+            options.put("ivf.train.max-points-per-centroid", "32");
+        } else {
             options.put("centroid.local-nlist", "8");
         }
         if ("ivf-pq".equals(type) || diskann) {
@@ -263,6 +270,8 @@ class CentroidVectorGlobalIndexTest {
                                 VectorIndexShardMeta.routing(id, model.nlist(), "l2").serialize()));
                 GlobalIndexSingleColumnWriter empty = model.createCentroidWriter(files, 0, id);
                 try {
+                    empty.write(null, 0);
+                    assertThat(empty).extracting("tempVectorFile", "writeBuf").containsOnlyNulls();
                     ResultEntry result = empty.finish().get(0);
                     Path path = new Path(directory, result.fileName());
                     emptyMeta = new GlobalIndexIOMeta(path, io.getFileSize(path), 0, result.meta());
@@ -330,14 +339,39 @@ class CentroidVectorGlobalIndexTest {
                         new ArrayType(new FloatType()), otherMetric, type, 1);
         assertThat(fromTable.forRead(file -> io.newInputStream(file.filePath()), legacy).metric())
                 .isEqualTo("l2");
-        // A single worker also guards against waiting for child futures on the same executor.
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor =
+                new SemaphoredDelegatingExecutor(Executors.newSingleThreadExecutor(), 1, false);
+        CountDownLatch releaseRouter = new CountDownLatch(1);
+        AtomicInteger liveStreams = new AtomicInteger();
+        AtomicInteger peakStreams = new AtomicInteger();
         Map<Path, AtomicInteger> opened = new ConcurrentHashMap<>();
         GlobalIndexFileReader fileReader =
                 meta -> {
                     opened.computeIfAbsent(meta.filePath(), p -> new AtomicInteger())
                             .incrementAndGet();
-                    return io.newInputStream(meta.filePath());
+                    if (meta.filePath().equals(router.filePath())) {
+                        try {
+                            if (!releaseRouter.await(30, TimeUnit.SECONDS)) {
+                                throw new IOException(
+                                        "Timed out waiting for the query to submit its continuations.");
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException(e);
+                        }
+                    }
+                    SeekableInputStream in = io.newInputStream(meta.filePath());
+                    peakStreams.accumulateAndGet(liveStreams.incrementAndGet(), Math::max);
+                    return new SeekableInputStreamWrapper(in) {
+                        @Override
+                        public void close() throws IOException {
+                            try {
+                                super.close();
+                            } finally {
+                                liveStreams.decrementAndGet();
+                            }
+                        }
+                    };
                 };
         long rowCount = 101L * (vectors.length - 1) + 1;
         try (GlobalIndexReader reader =
@@ -382,10 +416,11 @@ class CentroidVectorGlobalIndexTest {
                             .get(30, TimeUnit.SECONDS);
             assertThat(empty).allSatisfy(result -> assertThat(result).isEmpty());
             assertThat(opened).isEmpty();
-            ScoredGlobalIndexResult one =
-                    reader.visitVectorSearch(new VectorSearch(vectors[0], 1, "v", search))
-                            .get(30, TimeUnit.SECONDS)
-                            .get();
+            CompletableFuture<Optional<ScoredGlobalIndexResult>> pending =
+                    reader.visitVectorSearch(new VectorSearch(vectors[0], 1, "v", search));
+            releaseRouter.countDown();
+            ScoredGlobalIndexResult one = pending.get(30, TimeUnit.SECONDS).get();
+            assertThat(liveStreams.get()).isZero();
             assertThat(one.results().contains(BASE)).isTrue();
             assertThat(opened).hasSize(2); // routing model and the selected centroid only
             for (GlobalIndexIOMeta file : metas.subList(1, metas.size())) {
@@ -394,10 +429,13 @@ class CentroidVectorGlobalIndexTest {
                                 == centroidByRow[0];
                 assertThat(opened.containsKey(file.filePath())).isEqualTo(selected);
             }
+            opened.clear();
             float[][] queries = {vectors[0], vectors[200], vectors[0]};
             List<Optional<ScoredGlobalIndexResult>> batch =
                     reader.visitBatchVectorSearch(new BatchVectorSearch(queries, 1, "v", search))
                             .get(30, TimeUnit.SECONDS);
+            assertThat(liveStreams.get()).isZero();
+            assertThat(peakStreams.get()).isOne();
             assertThat(batch).hasSize(3);
             assertThat(batch.get(0).get().results().contains(BASE)).isTrue();
             assertThat(batch.get(1).get().results().contains(BASE + 101L * 200)).isTrue();
@@ -562,6 +600,29 @@ class CentroidVectorGlobalIndexTest {
                                         assertThat(hit.get().results().toArray(k))
                                                 .containsExactly(0L));
                 // One routing task plus a single batch task for each of the 64 shards.
+                assertThat(executor.getTaskCount() - before).isEqualTo(65);
+            }
+            // Qualifying row IDs can include null vectors. With this dense filter, automatic
+            // routing starts at eight shards and widens until it finds the only indexed match.
+            single.addRange(new Range(32768, 65535));
+            try (GlobalIndexReader reader =
+                    indexer.createReader(input, metas, 65536, null, executor)) {
+                long before = executor.getTaskCount();
+                List<Optional<ScoredGlobalIndexResult>> hits =
+                        reader.visitBatchVectorSearch(
+                                        new BatchVectorSearch(
+                                                        new float[][] {
+                                                            landmarks[63], landmarks[63]
+                                                        },
+                                                        1,
+                                                        "v")
+                                                .withIncludeRowIds(single))
+                                .get(30, TimeUnit.SECONDS);
+                assertThat(hits)
+                        .allSatisfy(
+                                hit ->
+                                        assertThat(hit.get().results().toArray(1))
+                                                .containsExactly(0L));
                 assertThat(executor.getTaskCount() - before).isEqualTo(65);
             }
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
