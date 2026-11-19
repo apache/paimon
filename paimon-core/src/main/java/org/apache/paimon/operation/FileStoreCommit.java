@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.List;
@@ -39,6 +40,8 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
+
+    FileStoreCommit withTagAutoCreation(TagAutoCreation tagAutoCreation);
 
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 

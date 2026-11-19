@@ -110,6 +110,9 @@ public class TableCommitImpl implements InnerTableCommit {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
+        if (tagAutoManager != null && tagAutoManager.getTagAutoCreation() != null) {
+            commit.withTagAutoCreation(tagAutoManager.getTagAutoCreation());
+        }
 
         this.commit = commit;
         this.expireSnapshots = expireSnapshots;

@@ -27,14 +27,21 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.SINK_PROCESS_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
@@ -48,8 +55,12 @@ import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
 import static org.apache.paimon.CoreOptions.TAG_DEFAULT_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 
 /** Test for tag automatic creation. */
 public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
@@ -153,6 +164,174 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         assertThat(tagManager.allTagNames())
                 .containsOnly("2023-07-18 11", "2023-07-18 12", "2023-07-18 13");
         commit.close();
+    }
+
+    @Test
+    public void testInvalidWatermarkDoesNotPublishSnapshot() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        FileStoreTable table = this.table.copy(options.toMap());
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            long micros = 1726000000000000L;
+            long millis = 1726003600000L;
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(1, micros)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(String.valueOf(micros))
+                    .hasMessageContaining("epoch milliseconds");
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+            assertThat(table.tagManager().allTagNames()).isEmpty();
+
+            commit.commit(new ManifestCommittable(1, millis));
+            assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(millis);
+            assertThat(table.tagManager().allTagNames()).containsExactly("2024-09-10 20");
+        }
+    }
+
+    @Test
+    public void testWatermarkBeforeExistingTag() throws Exception {
+        Options options = new Options();
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.PROCESS_TIME);
+        FileStoreTable processTimeTable = table.copy(options.toMap());
+        try (TableCommitImpl commit =
+                processTimeTable.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(1, Long.MIN_VALUE));
+        }
+        List<String> existingTags = processTimeTable.tagManager().allTagNames();
+        assertThat(existingTags).hasSize(1);
+
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        FileStoreTable watermarkTable = table.copy(options.toMap());
+        try (TableCommitImpl commit =
+                watermarkTable.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            // The previous hour falls in year -1, but the existing tag is already ahead.
+            long watermark = utcMills("0000-01-01T00:00:00");
+            commit.commit(new ManifestCommittable(2, watermark));
+            assertThat(watermarkTable.snapshotManager().latestSnapshot().watermark())
+                    .isEqualTo(watermark);
+            assertThat(watermarkTable.tagManager().allTagNames()).isEqualTo(existingTags);
+        }
+    }
+
+    @Test
+    public void testManualTagDoesNotAdvanceRunningCommitter() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_AUTOMATIC_COMPLETION, true);
+        FileStoreTable table = this.table.copy(options.toMap());
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(1, Long.MIN_VALUE));
+            table.createTag("2024-09-10 19", 1);
+
+            long micros = 1726000000000000L;
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(2, micros)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(String.valueOf(micros));
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+
+            commit.commit(new ManifestCommittable(2, 1726003600000L));
+            assertThat(table.tagManager().allTagNames())
+                    .containsExactlyInAnyOrder("2024-09-10 19", "2024-09-10 20");
+        }
+    }
+
+    @Test
+    public void testExpiredTagDoesNotResetRunningCommitter() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        FileStoreTable table = this.table.copy(options.toMap());
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(1, Long.MIN_VALUE));
+        }
+        table.createTag("2024-09-10 19", 1, Duration.ZERO);
+
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(2, Long.MIN_VALUE));
+            assertThat(table.tagManager().allTagNames()).isEmpty();
+
+            long watermark = utcMills("0000-01-01T00:00:00");
+            commit.commit(new ManifestCommittable(3, watermark));
+            assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(watermark);
+            assertThat(table.tagManager().allTagNames()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testWriteOnlyWatermarkAfterTagExpires() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        FileStoreTable table = this.table.copy(options.toMap());
+        FileStoreTable writer = table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"));
+        try (TableCommitImpl commit = writer.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            long watermark = utcMills("0000-01-01T00:00:00");
+            // On an empty table, the first hourly tag would fall in year -1.
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(1, watermark)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(String.valueOf(watermark));
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+
+            commit.commit(new ManifestCommittable(1, Long.MIN_VALUE));
+            table.createTag("2024-09-10 19", 1, Duration.ZERO);
+            TagAutoManager maintainer = table.newTagAutoManager();
+            maintainer.run();
+            assertThat(table.tagManager().allTagNames()).isEmpty();
+
+            // The maintainer still remembers the expired tag, so no tag is due.
+            commit.commit(new ManifestCommittable(2, watermark));
+            maintainer.run();
+            Snapshot latest = table.snapshotManager().latestSnapshot();
+            assertThat(latest.id()).isEqualTo(2L);
+            assertThat(latest.watermark()).isEqualTo(watermark);
+            assertThat(table.tagManager().allTagNames()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testUnprintablePendingTagDoesNotAdvanceTagProgress() throws Exception {
+        long micros = 1726000000000000L;
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(1, micros));
+        }
+
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        FileStoreTable watermarkTable = table.copy(options.toMap());
+        try (TableCommitImpl commit =
+                watermarkTable.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(2, micros + 1)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(String.valueOf(micros + 1));
+            assertThat(watermarkTable.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+            assertThat(watermarkTable.tagManager().allTagNames()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testDelayedWatermarkAtTagYearBoundary() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_CREATION_DELAY, Duration.ofMinutes(15));
+        FileStoreTable table = this.table.copy(options.toMap());
+        long first = utcMills("9999-12-31T23:45:00");
+        long second = utcMills("+10000-01-01T01:05:00");
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            // With no previous tag the delay does not apply.
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(1, second)))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+
+            commit.commit(new ManifestCommittable(1, first));
+            commit.commit(new ManifestCommittable(2, second));
+            assertThat(table.tagManager().allTagNames())
+                    .containsExactlyInAnyOrder("9999-12-31 22", "9999-12-31 23");
+            assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(second);
+        }
     }
 
     @Test
@@ -592,6 +771,52 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         // After threshold -> true
         assertThat(tagAutoCreation.forceCreatingSnapshotProcessTime(thresholdUtc.plusHours(1)))
                 .isTrue();
+    }
+
+    @Test
+    public void testProcessTimeDoesNotForceSnapshotDuringTagRetention() throws Exception {
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            commit.commit(new ManifestCommittable(1));
+            commit.commit(new ManifestCommittable(2));
+        }
+        String oldTag = "2000-01-01";
+        table.createTag(oldTag, 1);
+
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.PROCESS_TIME);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        options.set(TAG_NUM_RETAINED_MAX, 1);
+        options.set(SINK_PROCESS_TIME_ZONE, "UTC");
+        CountDownLatch deleting = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        TagCallback callback = mock(TagCallback.class);
+        doAnswer(
+                        ignored -> {
+                            deleting.countDown();
+                            resume.await();
+                            return null;
+                        })
+                .when(callback)
+                .notifyDeletion(oldTag);
+        TagAutoCreation creation =
+                TagAutoCreation.create(
+                        table.copy(options.toMap()).coreOptions(),
+                        table.snapshotManager(),
+                        table.tagManager(),
+                        Collections.singletonList(callback));
+        LocalDateTime checkpointTime =
+                LocalDateTime.ofInstant(
+                        Instant.ofEpochMilli(table.snapshotManager().snapshot(2).timeMillis()),
+                        ZoneOffset.UTC);
+        assertThat(creation.forceCreatingSnapshotProcessTime(checkpointTime)).isTrue();
+        CompletableFuture<Void> maintenance = CompletableFuture.runAsync(creation::run);
+        try {
+            assertThat(deleting.await(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creation.forceCreatingSnapshotProcessTime(checkpointTime)).isFalse();
+        } finally {
+            resume.countDown();
+            maintenance.get(30, TimeUnit.SECONDS);
+        }
     }
 
     private long localZoneMills(String timestamp) {
