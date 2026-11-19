@@ -36,10 +36,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -52,6 +54,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
 
     private final GlobalIndexFileReader files;
     private final GlobalIndexIOMeta routing;
+    private final List<GlobalIndexIOMeta> entries;
+    private String metric;
     private final VectorIndexShardMeta metadata;
     private final Map<Integer, GlobalIndexIOMeta> shards = new HashMap<>();
     private final Map<Integer, NativeVectorGlobalIndexReader> readers = new HashMap<>();
@@ -69,6 +73,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             ExecutorService executor,
             String indexType) {
         this.files = files;
+        this.entries = entries;
         this.fieldType = fieldType;
         this.executor = executor;
         this.indexType = indexType;
@@ -97,6 +102,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         checkArgument(routing != null, "Missing routing model.");
         this.routing = routing;
         this.metadata = modelMeta;
+        this.metric = modelMeta.metric();
         this.vectorCount = count;
     }
 
@@ -140,6 +146,13 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                 indexType));
     }
 
+    private synchronized String metric() {
+        if (metric == null) {
+            metric = NativeCentroidVectorGlobalIndexer.storedMetric(files, entries);
+        }
+        return metric;
+    }
+
     private int initialWidth(VectorSearch query) {
         String width = query.options().get("centroid.nprobe");
         if ("diskann".equals(indexType) && query.options().containsKey("ivf.nprobe")) {
@@ -151,6 +164,11 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             int probes = Integer.parseInt(width);
             checkArgument(probes > 0, "centroid.nprobe must be greater than 0");
             return Math.min(probes, nlist);
+        }
+        // The coarse router orders Euclidean distances. A distant, high-norm shard can
+        // contain every maximum inner product, even when nearer shards fill top-K.
+        if ("inner_product".equals(metric())) {
+            return nlist;
         }
         return automaticWidth(
                 nlist,
@@ -194,6 +212,15 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         return CompletableFuture.supplyAsync(
                         () -> {
                             int width = initialWidth(query);
+                            if (automatic(query)
+                                    && width == metadata.nlist()
+                                    && "inner_product".equals(metric())) {
+                                int[] all = new int[width];
+                                for (int i = 0; i < width; i++) {
+                                    all[i] = i;
+                                }
+                                return Collections.nCopies(vectors.length, all);
+                            }
                             List<int[]> centers = new ArrayList<>(vectors.length);
                             for (float[] vector : vectors) {
                                 centers.add(model().findNearestCentroids(vector, width));
@@ -268,7 +295,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch query) {
-        if (query.includeRowIds() != null && query.includeRowIds().isEmpty()) {
+        if (vectorCount == 0
+                || (query.includeRowIds() != null && query.includeRowIds().isEmpty())) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
         return routes(new float[][] {query.vector()}, query)
@@ -277,21 +305,18 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                 search(
                                         query,
                                         plans.get(0),
-                                        Collections.emptyList(),
+                                        new HashSet<>(),
                                         Collections.emptyList()));
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> search(
             VectorSearch query,
             Route route,
-            List<Integer> visited,
+            Set<Integer> visited,
             List<ScoredGlobalIndexResult> previous) {
-        int width = route.centers.length;
-        List<Integer> nextVisited = new ArrayList<>(visited);
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> pending = new ArrayList<>();
         for (int centroid : route.centers) {
-            if (!visited.contains(centroid)) {
-                nextVisited.add(centroid);
+            if (visited.add(centroid)) {
                 pending.add(reader(centroid).visitVectorSearch(query, route.joint));
             }
         }
@@ -303,22 +328,27 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                     pending) {
                                 future.join().ifPresent(results::add);
                             }
-                            ScoredGlobalIndexResult merged =
-                                    ScoredGlobalIndexResult.merge(results).topK(query.limit());
-                            if (automatic(query)
-                                    && merged.results().getLongCardinality() < query.limit()
-                                    && width < metadata.nlist()) {
-                                int nextWidth = (int) Math.min(metadata.nlist(), (long) width * 2);
-                                int[] nearest =
-                                        model().findNearestCentroids(query.vector(), nextWidth);
-                                return search(
-                                        query, new Route(nearest, false), nextVisited, results);
-                            }
-                            return CompletableFuture.completedFuture(
-                                    merged.results().isEmpty()
-                                            ? Optional.empty()
-                                            : Optional.of(merged));
+                            return finishSearch(query, visited, results);
                         });
+    }
+
+    private CompletableFuture<Optional<ScoredGlobalIndexResult>> finishSearch(
+            VectorSearch query, Set<Integer> visited, List<ScoredGlobalIndexResult> results) {
+        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.merge(results).topK(query.limit());
+        long possible =
+                query.includeRowIds() == null
+                        ? vectorCount
+                        : Math.min(vectorCount, query.includeRowIds().getLongCardinality());
+        if (automatic(query)
+                && visited.size() < metadata.nlist()
+                && merged.results().getLongCardinality() < Math.min(query.limit(), possible)) {
+            int nextWidth = (int) Math.min(metadata.nlist(), (long) visited.size() * 2);
+            int[] nearest = model().findNearestCentroids(query.vector(), nextWidth);
+            return search(
+                    query, new Route(nearest, false), visited, Collections.singletonList(merged));
+        }
+        return CompletableFuture.completedFuture(
+                merged.results().isEmpty() ? Optional.empty() : Optional.of(merged));
     }
 
     @Override
@@ -326,11 +356,12 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             BatchVectorSearch batch) {
         int count = batch.vectorCount();
         checkArgument(count > 0, "Batch vector count must be positive.");
-        if (batch.includeRowIds() != null && batch.includeRowIds().isEmpty()) {
+        if (vectorCount == 0
+                || (batch.includeRowIds() != null && batch.includeRowIds().isEmpty())) {
             return CompletableFuture.completedFuture(Collections.nCopies(count, Optional.empty()));
         }
         return routes(batch.vectors(), batch.forIndex(0))
-                .thenApply(
+                .thenCompose(
                         plans -> {
                             Map<Pair<Integer, Boolean>, List<Integer>> groups =
                                     new LinkedHashMap<>();
@@ -343,10 +374,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                             .add(i);
                                 }
                             }
-                            return groups;
-                        })
-                .thenCompose(
-                        groups -> {
+
                             List<List<ScoredGlobalIndexResult>> results = new ArrayList<>();
                             for (int i = 0; i < count; i++) {
                                 results.add(new ArrayList<>());
@@ -398,23 +426,15 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                                                                                 ScoredGlobalIndexResult>>>
                                                         merged = new ArrayList<>();
                                                 for (int i = 0; i < count; i++) {
-                                                    VectorSearch query = batch.forIndex(i);
-                                                    ScoredGlobalIndexResult result =
-                                                            ScoredGlobalIndexResult.merge(
-                                                                            results.get(i))
-                                                                    .topK(batch.limit());
-                                                    if (automatic(query)
-                                                            && result.results().getLongCardinality()
-                                                                    < batch.limit()) {
-                                                        merged.add(visitVectorSearch(query));
-                                                    } else {
-                                                        merged.add(
-                                                                CompletableFuture.completedFuture(
-                                                                        result.results().isEmpty()
-                                                                                ? Optional.empty()
-                                                                                : Optional.of(
-                                                                                        result)));
+                                                    Set<Integer> visited = new HashSet<>();
+                                                    for (int center : plans.get(i).centers) {
+                                                        visited.add(center);
                                                     }
+                                                    merged.add(
+                                                            finishSearch(
+                                                                    batch.forIndex(i),
+                                                                    visited,
+                                                                    results.get(i)));
                                                 }
                                                 return CompletableFuture.allOf(
                                                                 merged.toArray(

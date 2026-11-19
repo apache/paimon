@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -154,7 +155,24 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected GlobalIndexer createGlobalIndexer(List<IndexVectorSearchSplit> splits) {
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
-        return createGlobalIndexer(firstFile.indexType(), firstMeta);
+        GlobalIndexer indexer = createGlobalIndexer(firstFile.indexType(), firstMeta);
+        if (indexer instanceof CentroidVectorGlobalIndexer) {
+            // Empty coverage markers have no scored candidates. Prefer a populated range
+            // when selecting the metric for exact refinement and raw fallback.
+            List<IndexFileMeta> files = splits.get(0).vectorIndexFiles();
+            for (IndexVectorSearchSplit split : splits) {
+                if (split.vectorIndexFiles().stream().anyMatch(file -> file.rowCount() > 0)) {
+                    files = split.vectorIndexFiles();
+                    break;
+                }
+            }
+            return ((CentroidVectorGlobalIndexer) indexer)
+                    .forRead(
+                            file -> table.fileIO().newInputStream(file.filePath()),
+                            buildIOMetaList(
+                                    table.store().pathFactory().globalIndexFileFactory(), files));
+        }
+        return indexer;
     }
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {

@@ -62,7 +62,7 @@ class CentroidVectorIndexUtilsTest {
     void identifiesTheRoutingModelFromPrivateMetadata() {
         assertThat(
                         CentroidVectorIndexUtils.isRoutingModel(
-                                file(VectorIndexShardMeta.routing("a", 2).serialize(), true)))
+                                file(VectorIndexShardMeta.routing("a", 2, "l2").serialize(), true)))
                 .isTrue();
         assertThat(
                         CentroidVectorIndexUtils.isRoutingModel(

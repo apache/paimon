@@ -30,13 +30,15 @@ import java.util.List;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
 
+import scala.Tuple2;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CentroidTrainingSampleTest {
     @Test
     void restoresSlotOrderAcrossEmptyAndUnevenSplits() {
         long[] bySlot = {155, 0, 99, 98, 156, 10};
-        CentroidTrainingSample plan = new CentroidTrainingSample(bySlot);
+        Tuple2<long[], int[]> plan = CentroidTrainingSample.plan(bySlot);
         TreeMap<Integer, float[]> shuffled = new TreeMap<>();
         int start = 0;
         for (int end : new int[] {0, 1, 3, 98, 98, 156, 200}) {
@@ -44,7 +46,8 @@ class CentroidTrainingSampleTest {
                     IntStream.range(start, end)
                             .<InternalRow>mapToObj(i -> GenericRow.of(new float[] {i}))
                             .iterator();
-            plan.select(rows, row -> ((GenericRow) row).getField(0), start, end)
+            CentroidTrainingSample.select(
+                            plan, rows, row -> ((GenericRow) row).getField(0), start, end)
                     .forEachRemaining(
                             pair -> {
                                 assertThat(shuffled.put(pair._1(), pair._2())).isNull();

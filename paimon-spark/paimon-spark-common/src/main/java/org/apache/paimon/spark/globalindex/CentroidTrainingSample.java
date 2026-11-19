@@ -22,7 +22,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 
-import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -30,31 +29,36 @@ import java.util.NoSuchElementException;
 import scala.Tuple2;
 
 /** Look up retained source rows during a sequential split scan and shuffle by reservoir slot. */
-final class CentroidTrainingSample implements Serializable {
-    private static final long serialVersionUID = 1L;
-    private final long[] positions;
-    private final int[] slots;
+final class CentroidTrainingSample {
+    private CentroidTrainingSample() {}
 
-    CentroidTrainingSample(long[] positionsBySlot) {
-        positions = positionsBySlot.clone();
+    static Tuple2<long[], int[]> plan(long[] positionsBySlot) {
+        long[] positions = positionsBySlot.clone();
         Arrays.sort(positions);
-        slots = new int[positions.length];
+        int[] slots = new int[positions.length];
         for (int slot = 0; slot < slots.length; slot++) {
             slots[Arrays.binarySearch(positions, positionsBySlot[slot])] = slot;
         }
+        return new Tuple2<>(positions, slots);
     }
 
-    private int lowerBound(long position) {
+    private static int lowerBound(long[] positions, long position) {
         int i = Arrays.binarySearch(positions, position);
         return i < 0 ? -i - 1 : i;
     }
 
-    Iterator<Tuple2<Integer, float[]>> select(
-            Iterator<InternalRow> input, InternalRow.FieldGetter getter, long start, long end) {
+    static Iterator<Tuple2<Integer, float[]>> select(
+            Tuple2<long[], int[]> plan,
+            Iterator<InternalRow> input,
+            InternalRow.FieldGetter getter,
+            long start,
+            long end) {
+        long[] positions = plan._1();
+        int[] slots = plan._2();
         return new Iterator<Tuple2<Integer, float[]>>() {
             private long row = start;
-            private int sample = lowerBound(start);
-            private final int limit = lowerBound(end);
+            private int sample = lowerBound(positions, start);
+            private final int limit = lowerBound(positions, end);
 
             @Override
             public boolean hasNext() {

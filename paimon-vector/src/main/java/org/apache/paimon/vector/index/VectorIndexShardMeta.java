@@ -82,12 +82,15 @@ public final class VectorIndexShardMeta {
         }
     }
 
-    public static VectorIndexShardMeta routing(String modelId, int nlist) {
+    public static VectorIndexShardMeta routing(String modelId, int nlist, @Nullable String metric) {
         checkArgument(
-                modelId != null && !modelId.isEmpty() && nlist > 0,
+                modelId != null && !modelId.isEmpty() && nlist >= 0,
                 "Invalid routing model metadata.");
         Map<String, String> values = base(modelId);
         values.put("nlist", Integer.toString(nlist));
+        if (metric != null) {
+            values.put("metric", metric);
+        }
         return new VectorIndexShardMeta(values, null);
     }
 
@@ -126,9 +129,14 @@ public final class VectorIndexShardMeta {
         return centroid;
     }
 
+    @Nullable
+    String metric() {
+        return values.get("metric");
+    }
+
     public int nlist() {
         int nlist = Integer.parseInt(values.get("nlist"));
-        checkArgument(nlist > 0, "Invalid nlist.");
+        checkArgument(nlist >= 0, "Invalid nlist.");
         return nlist;
     }
 

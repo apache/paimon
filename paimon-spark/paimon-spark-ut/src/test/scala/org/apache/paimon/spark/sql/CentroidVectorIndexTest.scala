@@ -48,6 +48,66 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       .getInt(0)
   }
 
+  test("automatic inner product routing preserves maximum scores under query scaling") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT cast(id AS INT), array(cast(
+                  |(CASE WHEN id<32 THEN 1 WHEN id<64 THEN 2 WHEN id<96 THEN 4 ELSE 100 END)
+                  |+ 0.001 * (id % 32) AS FLOAT), 0.0f) FROM range(128)""".stripMargin)
+      spark.sql("""CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+                  |index_type=>'ivf-flat-centroid', options=>'ivf-flat-centroid.dimension=2,
+                  |ivf-flat-centroid.nlist=4,ivf-flat-centroid.centroid.local-nlist=1,
+                  |ivf-flat-centroid.train.sample-ratio=1')""".stripMargin.replace("\n", ""))
+      Seq("1.0f", "100.0f").foreach {
+        q =>
+          val ids = spark
+            .sql(s"""SELECT id FROM vector_search('T','v',array($q,0.0f),10)
+                    |ORDER BY id""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSeq
+          assert(ids == (118 until 128))
+      }
+    }
+  }
+
+  test("cosine refinement uses the build metric for scalar and batch search") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (0,cast(NULL AS ARRAY<FLOAT>),0)")
+      spark.sql("""CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+                  |index_type=>'ivf-pq-centroid',partitions=>'p=0',
+                  |options=>'ivf-pq-centroid.dimension=2,ivf-pq-centroid.pq.m=1')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES
+                  |(1,array(1.0f,0.0f),1),(2,array(10.0f,10.0f),1) AS x(id,v,p)""".stripMargin)
+      spark.sql(
+        """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+          |index_type=>'ivf-pq-centroid',partitions=>'p=1',options=>'ivf-pq-centroid.dimension=2,
+          |ivf-pq-centroid.distance.metric=cosine,ivf-pq-centroid.nlist=1,
+          |ivf-pq-centroid.centroid.local-nlist=1,ivf-pq-centroid.pq.m=1')""".stripMargin
+          .replace("\n", ""))
+      val query = Array(1.0f, 0.0f)
+      val ids = spark
+        .sql("""SELECT id FROM vector_search('T','v',array(1.0f,0.0f),1,
+               |map('ivf.refine_factor','2'))""".stripMargin)
+        .collect()
+      assert(ids.map(_.getInt(0)).toSeq == Seq(1))
+      val batch = loadTable("T")
+        .newBatchVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVectors(Array(query, Array(0.0f, 1.0f)))
+        .withLimit(1)
+        .withOption("ivf.refine_factor", "2")
+        .executeBatchLocal()
+      assert(batch.get(0).results().toArray(1).toSeq == Seq(1L))
+      assert(batch.get(1).results().toArray(1).toSeq == Seq(2L))
+    }
+  }
+
   test("centroid build routes absolute IDs, preserves raw coverage and atomically rebuilds") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p)
@@ -137,8 +197,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
         routers
           .map(f => (f.globalIndexMeta().rowRangeStart(), f.globalIndexMeta().rowRangeEnd()))
           .toSet ==
-          Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L)))
-      assert(routers.size == 4)
+          Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L), (448L, 448L)))
+      assert(routers.size == 5)
+      assert(indexes.count(_.globalIndexMeta().rowRangeStart() == 448L) == 1)
       assert(nearest(200) == 200)
 
       def fileRanges = indexes.map(f => f.fileName() -> f.globalIndexMeta().rowRange()).toMap

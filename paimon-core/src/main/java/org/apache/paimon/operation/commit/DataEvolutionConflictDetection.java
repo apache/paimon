@@ -643,28 +643,50 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
     private Optional<RuntimeException> checkCentroidSourceChanges(
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
+        Map<Long, List<IndexManifestEntry>> byBaseline = new HashMap<>();
+        long firstBaseline = latestSnapshot.id();
         for (IndexManifestEntry index : indexEntries) {
-            if (index.kind() != FileKind.ADD
-                    || !CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
-                continue;
+            if (index.kind() == FileKind.ADD
+                    && CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
+                long baseline =
+                        DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile())
+                                .scanSnapshotId();
+                byBaseline.computeIfAbsent(baseline, ignored -> new ArrayList<>()).add(index);
+                firstBaseline = Math.min(firstBaseline, baseline);
             }
-            Range source = index.indexFile().globalIndexMeta().rowRange();
-            long baseline =
-                    DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile()).scanSnapshotId();
-            for (long id = baseline + 1; id <= latestSnapshot.id(); id++) {
-                Snapshot snapshot = snapshotManager.snapshot(id);
-                for (ManifestEntry change :
-                        commitScanner()
-                                .readIncrementalEntries(
-                                        snapshot, Collections.singletonList(index.partition()))) {
-                    if (change.file().firstRowId() == null) {
-                        continue;
-                    }
-                    if (source.hasIntersection(change.file().nonNullRowIdRange())) {
+        }
+
+        Map<BinaryRow, RowRangeIndex> active = new HashMap<>();
+        for (long baseline = firstBaseline; baseline < latestSnapshot.id(); baseline++) {
+            List<IndexManifestEntry> starting = byBaseline.get(baseline);
+            if (starting != null) {
+                Map<BinaryRow, List<Range>> additions = new HashMap<>();
+                for (IndexManifestEntry index : starting) {
+                    additions
+                            .computeIfAbsent(index.partition(), ignored -> new ArrayList<>())
+                            .add(index.indexFile().globalIndexMeta().rowRange());
+                }
+                additions.forEach(
+                        (partition, ranges) -> {
+                            RowRangeIndex existing = active.get(partition);
+                            if (existing != null) {
+                                ranges.addAll(existing.ranges());
+                            }
+                            active.put(partition, RowRangeIndex.create(ranges));
+                        });
+            }
+            Snapshot snapshot = snapshotManager.snapshot(baseline + 1);
+            for (ManifestEntry change :
+                    commitScanner()
+                            .readIncrementalEntries(snapshot, new ArrayList<>(active.keySet()))) {
+                RowRangeIndex ranges = active.get(change.partition());
+                if (ranges != null && change.file().firstRowId() != null) {
+                    Range changed = change.file().nonNullRowIdRange();
+                    if (ranges.intersects(changed.from, changed.to)) {
                         return Optional.of(
                                 new RuntimeException(
-                                        "Centroid index source rows changed after training snapshot "
-                                                + baseline
+                                        "Centroid index source rows changed in snapshot "
+                                                + snapshot.id()
                                                 + "; rebuild the index against the latest snapshot."));
                     }
                 }

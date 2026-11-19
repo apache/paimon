@@ -497,13 +497,17 @@ the exact row ordinals that the outer IVF-FLAT trainer would retain. Each
 map task reads its own splits and shuffles selected vectors by reservoir slot.
 Within each contiguous range, one task trains a router on those vectors in the original
 training order. Spark broadcasts that router and shuffles the range's vectors by centroid.
-Ranges containing only null vectors produce no index files. One call atomically replaces the
+Independent ranges can build concurrently within the global build parallelism budget. A range
+containing only null vectors records its coverage with one empty router entry. Queries skip it.
+One call atomically replaces the
 selected partitions' previous routers and shards of the requested type.
 
 Queries load each selected range's routing model, select centroids with `centroid.nprobe`,
 and open their shard files. Inside each selected shard, `ivf.nprobe` controls how many
 local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
-Paimon chooses the initial outer width per row-ID range. The minimum is three for a four-centroid
+For inner product, automatic routing searches every outer shard. A high-norm vector in a distant
+shard can have the largest inner product. Set an explicit outer width to trade recall for fewer
+shard reads. For cosine and L2, Paimon chooses the initial width per row-ID range. The minimum is three for a four-centroid
 router, four for an eight-centroid router, and eight otherwise, capped at the number of centroids.
 Paimon budgets at least one sixteenth of the shards and four candidate rows per requested result
 using the average shard size. A row-ID filter scales the initial width by the inverse of its
@@ -528,6 +532,7 @@ The router and its shards share one `GlobalIndexMeta.rowRange`, as with BTree. E
 the range start back to matching IDs. Gaps belonging to other partitions remain eligible for raw search in
 `vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
 only indexed rows.
+Exact refinement of centroid index candidates uses the metric recorded at build time.
 For raw fallback, set the column’s metric in the table properties so unindexed rows use the
 same distance as the index. For the example above, use `fields.embedding.metric=cosine`.
 You can also set `fields.embedding.dimension=768` there to reuse the dimension in later builds.

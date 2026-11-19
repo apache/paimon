@@ -48,8 +48,10 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+import org.apache.paimon.shade.guava30.com.google.common.collect.PeekingIterator;
 
 import org.apache.spark.HashPartitioner;
 import org.apache.spark.TaskContext;
@@ -68,6 +70,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -76,6 +79,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import scala.Tuple2;
@@ -125,7 +129,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         Map<BinaryRow, Map<Range, List<IndexedSplit>>> groups =
                 GlobalIndexBuilderUtils.groupSplitsByRange(partitionSplits);
         JavaSparkContext sc = new JavaSparkContext(spark.sparkContext());
-        List<CommitMessage> messages = new ArrayList<>();
+        List<Pair<BuildContext, List<IndexedSplit>>> ranges = new ArrayList<>();
         for (Map.Entry<BinaryRow, Map<Range, List<IndexedSplit>>> partition : groups.entrySet()) {
             for (Map.Entry<Range, List<IndexedSplit>> group : partition.getValue().entrySet()) {
                 BuildContext context =
@@ -138,7 +142,41 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 snapshot.id(),
                                 group.getKey(),
                                 indexType);
-                messages.addAll(buildRange(sc, context, group.getValue(), indexer));
+                ranges.add(Pair.of(context, group.getValue()));
+            }
+        }
+        List<CommitMessage> messages = new ArrayList<>();
+        if (!ranges.isEmpty()) {
+            int budget = DefaultGlobalIndexTopoBuilder.parallelism(Integer.MAX_VALUE, options);
+            // Bound both the number of driver-side training plans and concurrent Spark tasks.
+            int driverSlots =
+                    Math.min(sc.defaultParallelism(), Runtime.getRuntime().availableProcessors());
+            int workers = Math.min(ranges.size(), Math.min(driverSlots, budget));
+            int slotsPerRange = budget / workers;
+            ExecutorService pool =
+                    ThreadPoolUtils.createCachedThreadPool(workers, "centroid-build");
+            try (ThreadPoolUtils.CloseableBatchIterator<CommitMessage> built =
+                    ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                            pool,
+                            range -> {
+                                try {
+                                    return buildRange(
+                                            sc,
+                                            range.getLeft(),
+                                            range.getRight(),
+                                            indexer,
+                                            slotsPerRange);
+                                } catch (IOException e) {
+                                    throw new UncheckedIOException(e);
+                                }
+                            },
+                            ranges,
+                            workers)) {
+                built.forEachRemaining(messages::add);
+            } catch (UncheckedIOException e) {
+                throw e.getCause();
+            } finally {
+                pool.shutdown();
             }
         }
         Map<BinaryRow, List<IndexFileMeta>> previous =
@@ -172,7 +210,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             JavaSparkContext sc,
             BuildContext context,
             List<IndexedSplit> splits,
-            CentroidVectorGlobalIndexer indexer)
+            CentroidVectorGlobalIndexer indexer,
+            int slots)
             throws IOException {
         List<byte[]> serializedSplits = new ArrayList<>(splits.size());
         for (IndexedSplit split : splits) {
@@ -180,73 +219,79 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
         byte[] contextBytes = InstantiationUtil.serializeObject(context);
         JavaRDD<InternalRow> rows =
-                sc.parallelize(
-                                serializedSplits,
-                                DefaultGlobalIndexTopoBuilder.parallelism(
-                                        splits.size(), context.options))
+                sc.parallelize(serializedSplits, Math.min(splits.size(), slots))
                         .mapPartitions(
                                 input -> new VectorRows(BuildContext.restore(contextBytes), input));
         byte[] payload = train(sc, contextBytes, rows, indexer, context.getter());
+        String modelId = UUID.randomUUID().toString();
         if (payload == null) {
-            return Collections.emptyList();
+            // Record coverage so an all-null interval also satisfies index visibility checks.
+            return Collections.singletonList(
+                    writeRouter(context, indexer, new byte[0], modelId, 0));
         }
         int nlist;
         try (VectorTrainingModel model = indexer.restoreTrainingModel(payload)) {
             nlist = model.nlist();
         }
-        String modelId = UUID.randomUUID().toString();
         Broadcast<byte[]> broadcast = sc.broadcast(payload);
         try {
-            int parallelism = DefaultGlobalIndexTopoBuilder.parallelism(nlist, context.options);
-            JavaPairRDD<Integer, RoutedVector> assigned =
+            int parallelism = Math.min(nlist, slots);
+            JavaPairRDD<Integer, Tuple2<Long, float[]>> assigned =
                     rows.mapPartitionsToPair(
                             input ->
                                     route(
                                             BuildContext.restore(contextBytes),
                                             input,
                                             broadcast.value()));
-            // Seed every centroid so empty lists also have an explicit, verifiable shard file.
-            List<Tuple2<Integer, RoutedVector>> emptyLists = new ArrayList<>();
-            for (int c = 0; c < nlist; c++) {
-                emptyLists.add(new Tuple2<>(c, new RoutedVector(-1, null)));
-            }
             List<byte[]> results =
-                    assigned.union(sc.parallelizePairs(emptyLists, parallelism))
-                            .repartitionAndSortWithinPartitions(new HashPartitioner(parallelism))
-                            .mapPartitions(
-                                    input ->
+                    assigned.repartitionAndSortWithinPartitions(new HashPartitioner(parallelism))
+                            .mapPartitionsWithIndex(
+                                    (partition, input) ->
                                             writeShards(
                                                     BuildContext.restore(contextBytes),
                                                     input,
+                                                    partition,
+                                                    parallelism,
                                                     broadcast.value(),
-                                                    modelId))
+                                                    modelId),
+                                    false)
                             .collect();
             List<CommitMessage> messages = CommitMessageSerializer.deserializeAll(results);
-            GlobalIndexFileReadWrite io = context.io();
-            String modelFile =
-                    "vector-"
-                            + context.indexType
-                            + "-global-index-training-model-"
-                            + modelId
-                            + ".index";
-            IndexFileMeta modelMeta =
-                    GlobalIndexBuilderUtils.toIndexFileMetas(
-                                    context.table.fileIO(),
-                                    context.table.store().pathFactory().globalIndexFileFactory(),
-                                    context.table.coreOptions(),
-                                    context.rowRange,
-                                    Collections.singletonList(context.field),
-                                    context.indexType,
-                                    Collections.singletonList(
-                                            indexer.writeRoutingModel(
-                                                    io, modelFile, payload, modelId, nlist)),
-                                    context.sourceMeta())
-                            .get(0);
-            messages.add(context.message(Collections.singletonList(modelMeta)));
+            messages.add(writeRouter(context, indexer, payload, modelId, nlist));
             return messages;
         } finally {
             broadcast.destroy();
         }
+    }
+
+    private static CommitMessage writeRouter(
+            BuildContext context,
+            CentroidVectorGlobalIndexer indexer,
+            byte[] payload,
+            String modelId,
+            int nlist)
+            throws IOException {
+        GlobalIndexFileReadWrite io = context.io();
+        String modelFile =
+                "vector-"
+                        + context.indexType
+                        + "-global-index-training-model-"
+                        + modelId
+                        + ".index";
+        IndexFileMeta modelMeta =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                                context.table.fileIO(),
+                                context.table.store().pathFactory().globalIndexFileFactory(),
+                                context.table.coreOptions(),
+                                context.rowRange,
+                                Collections.singletonList(context.field),
+                                context.indexType,
+                                Collections.singletonList(
+                                        indexer.writeRoutingModel(
+                                                io, modelFile, payload, modelId, nlist)),
+                                context.sourceMeta())
+                        .get(0);
+        return context.message(Collections.singletonList(modelMeta));
     }
 
     @Override
@@ -308,18 +353,18 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 sampleSize,
                 total,
                 counts.size());
-        Broadcast<CentroidTrainingSample> plan =
-                sc.broadcast(new CentroidTrainingSample(positions));
+        Broadcast<Tuple2<long[], int[]>> plan =
+                sc.broadcast(CentroidTrainingSample.plan(positions));
         try {
             JavaRDD<Tuple2<Integer, float[]>> samples =
                     rows.mapPartitionsWithIndex(
                             (partition, input) ->
-                                    plan.value()
-                                            .select(
-                                                    input,
-                                                    getter,
-                                                    offsets[partition],
-                                                    offsets[partition + 1]),
+                                    CentroidTrainingSample.select(
+                                            plan.value(),
+                                            input,
+                                            getter,
+                                            offsets[partition],
+                                            offsets[partition + 1]),
                             false);
             return JavaPairRDD.fromJavaRDD(samples)
                     .repartitionAndSortWithinPartitions(new HashPartitioner(1))
@@ -343,7 +388,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
     }
 
-    private static Iterator<Tuple2<Integer, RoutedVector>> route(
+    private static Iterator<Tuple2<Integer, Tuple2<Long, float[]>>> route(
             BuildContext context, Iterator<InternalRow> input, byte[] payload) {
         VectorTrainingModel model = context.indexer().restoreTrainingModel(payload);
         closeOnTaskCompletion(model);
@@ -355,7 +400,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                     float[] vector = VectorIndexUtils.toFloatArray(getter.getFieldOrNull(row));
                     return new Tuple2<>(
                             model.assignCentroid(vector),
-                            new RoutedVector(row.getLong(idPosition), vector));
+                            new Tuple2<>(row.getLong(idPosition), vector));
                 });
     }
 
@@ -375,34 +420,31 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
 
     private static Iterator<byte[]> writeShards(
             BuildContext context,
-            Iterator<Tuple2<Integer, RoutedVector>> rows,
+            Iterator<Tuple2<Integer, Tuple2<Long, float[]>>> rows,
+            int partition,
+            int parallelism,
             byte[] payload,
             String modelId)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
+        PeekingIterator<Tuple2<Integer, Tuple2<Long, float[]>>> input =
+                Iterators.peekingIterator(rows);
         try (VectorTrainingModel model = context.indexer().restoreTrainingModel(payload)) {
-            GlobalIndexSingleColumnWriter writer = null;
-            Integer centroid = null;
-            try {
-                while (rows.hasNext()) {
-                    Tuple2<Integer, RoutedVector> row = rows.next();
-                    if (!row._1().equals(centroid)) {
-                        if (writer != null) {
-                            commits.add(context.finish(writer));
-                            close(writer);
-                        }
-                        centroid = row._1();
-                        writer = model.createCentroidWriter(context.io(), centroid, modelId);
+            // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
+            // as well, without a second set of input tasks to shuffle sentinel records.
+            int nlist = model.nlist();
+            for (int centroid = partition; centroid < nlist; centroid += parallelism) {
+                GlobalIndexSingleColumnWriter writer =
+                        model.createCentroidWriter(context.io(), centroid, modelId);
+                try {
+                    while (input.hasNext() && input.peek()._1() == centroid) {
+                        Tuple2<Long, float[]> row = input.next()._2();
+                        writer.write(row._2(), row._1() - context.rowRange.from);
                     }
-                    if (row._2().vector != null) {
-                        writer.write(row._2().vector, row._2().id - context.rowRange.from);
-                    }
-                }
-                if (writer != null) {
                     commits.add(context.finish(writer));
+                } finally {
+                    close(writer);
                 }
-            } finally {
-                close(writer);
             }
         }
         return commits.iterator();
@@ -411,17 +453,6 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
     private static void close(Object resource) throws IOException {
         if (resource instanceof Closeable) {
             ((Closeable) resource).close();
-        }
-    }
-
-    private static final class RoutedVector implements Serializable {
-        private static final long serialVersionUID = 1L;
-        private final long id;
-        private final float[] vector;
-
-        RoutedVector(long id, float[] vector) {
-            this.id = id;
-            this.vector = vector;
         }
     }
 
