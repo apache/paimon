@@ -20,7 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkTable}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FallbackReadFileStoreTable, FileStoreTable}
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerBlockUpdated}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -288,6 +288,44 @@ class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with Adapti
       assert(pinned.isDefined, "A different branch is a distinct source identity")
       sql("INSERT INTO target VALUES (2,20,'main-only')")
       checkAnswer(createDataset(spark, pinned.get), Seq(Row(1, 10, "branch-base")))
+    }
+  }
+
+  test("narrow source preserves newer fallback branch partitions with the flag on or off") {
+    Seq(false, true).foreach {
+      narrow =>
+        withTables() {
+          sql("DROP TABLE source")
+          sql("""CREATE TABLE source (id INT, value INT, insert_payload STRING, p INT)
+                |PARTITIONED BY (p) TBLPROPERTIES ('bucket'='-1')""".stripMargin)
+          sql("INSERT INTO source VALUES (1,100,'unused',0)")
+          sql("CALL sys.create_tag(table => 'test.source', tag => 'base', snapshot => 1)")
+          sql("CALL sys.create_branch(table => 'test.source', branch => 'other', tag => 'base')")
+          sql("ALTER TABLE source SET TBLPROPERTIES ('scan.fallback-branch'='other')")
+          // Keep the main data snapshot's schema current so schema mismatch cannot mask pinning.
+          sql("INSERT INTO source VALUES (2,200,'main',0)")
+          sql("INSERT INTO `source$branch_other` VALUES (4,400,'fallback',1)")
+          val source = loadTable("source").asInstanceOf[FallbackReadFileStoreTable]
+          val mainSnapshot = source.latestSnapshot().get()
+          assert(mainSnapshot.schemaId() == source.schema().id())
+          assert(source.other().latestSnapshot().get().timeMillis() > mainSnapshot.timeMillis())
+          checkAnswer(
+            sql("SELECT id,value,insert_payload FROM source"),
+            Seq(Row(1, 100, "unused"), Row(2, 200, "main"), Row(4, 400, "fallback")))
+          sql(
+            s"""ALTER TABLE target SET TBLPROPERTIES (
+               |'data-evolution.merge-into.join-reuse.narrow-source.enabled'='$narrow')""".stripMargin)
+          sql("INSERT INTO target VALUES (1,10,'old')")
+          withNarrowPlan(expectNarrow = false) {
+            sql("""MERGE INTO target t USING source s ON t.id=s.id
+                  |WHEN MATCHED THEN UPDATE SET value=s.value
+                  |WHEN NOT MATCHED THEN INSERT (id,value,payload)
+                  |VALUES (s.id,s.value,s.insert_payload)""".stripMargin)
+            checkAnswer(
+              sql("SELECT * FROM target"),
+              Seq(Row(1, 100, "old"), Row(2, 200, "main"), Row(4, 400, "fallback")))
+          }
+        }
     }
   }
 

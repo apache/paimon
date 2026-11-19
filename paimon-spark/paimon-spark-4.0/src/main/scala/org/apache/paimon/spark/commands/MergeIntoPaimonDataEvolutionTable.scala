@@ -35,7 +35,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FallbackReadFileStoreTable, FileStoreTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
@@ -1522,6 +1522,8 @@ object MergeIntoPaimonDataEvolutionTable {
         relation.table match {
           case sparkTable: SparkTable =>
             sparkTable.getTable match {
+              // Pinning one branch would time-travel the other branch as well.
+              case _: FallbackReadFileStoreTable => None
               case source: FileStoreTable
                   if source.primaryKeys().isEmpty && identity(source) != identity(target) &&
                     Set(
