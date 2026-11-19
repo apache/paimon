@@ -388,6 +388,7 @@ public abstract class AbstractCatalog implements Catalog {
 
         Set<Path> externalPaths = new HashSet<>();
         List<EntropyInjectTemplateFilesDeletion> templateDeletions = new ArrayList<>();
+        List<Path> retainedBranchFiles = Collections.emptyList();
         Path tablePath = getTableLocation(identifier);
         if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
             TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
@@ -404,7 +405,8 @@ public abstract class AbstractCatalog implements Catalog {
                             .ifPresent(templateDeletions::add);
                 }
                 for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
-                    List<TableSchema> branchSchemas = schemaManager.copyWithBranch(branch).listAll();
+                    List<TableSchema> branchSchemas =
+                            schemaManager.copyWithBranch(branch).listAll();
                     externalPaths.addAll(getSchemaExternalPaths(branchSchemas));
                     if (deletesData) {
                         EntropyInjectTemplateFilesDeletion.collectIfTemplate(
@@ -412,11 +414,19 @@ public abstract class AbstractCatalog implements Catalog {
                                 .ifPresent(templateDeletions::add);
                     }
                 }
+                if (deletesData) {
+                    retainedBranchFiles =
+                            EntropyInjectTemplateFilesDeletion.retainedBranchFiles(
+                                    tableFileIO, tablePath);
+                }
             }
         }
 
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
         templateDeletions.forEach(EntropyInjectTemplateFilesDeletion::deleteCollectedFiles);
+        if (!retainedBranchFiles.isEmpty()) {
+            fileIO(tablePath).deleteFilesQuietly(retainedBranchFiles);
+        }
     }
 
     protected boolean tableExists(Identifier identifier) {

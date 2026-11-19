@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -35,17 +36,20 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.DataFilePathFactories;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -81,6 +85,9 @@ public class EntropyInjectTemplateFilesDeletion {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(EntropyInjectTemplateFilesDeletion.class);
+
+    private static final String DROPPED_BRANCH_FILES = "dropped-branch-template-files";
+    private static final String DROP_FILE_PREFIX = "drop-";
 
     private final FileStoreTable table;
     private final Set<Path> files;
@@ -145,6 +152,51 @@ public class EntropyInjectTemplateFilesDeletion {
                     table.fullName());
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    /** Retains the branch's file references outside its metadata directory before it is dropped. */
+    public void retainForTableDrop() {
+        if (files.isEmpty()) {
+            return;
+        }
+        Path directory = new Path(table.location(), DROPPED_BRANCH_FILES);
+        Path path = new Path(directory, DROP_FILE_PREFIX + UUID.randomUUID());
+        try {
+            if (!table.fileIO()
+                    .tryToWriteAtomic(
+                            path,
+                            JsonSerdeUtil.toJson(
+                                    files.stream().map(Path::toString).toArray(String[]::new)))) {
+                throw new IOException("Could not publish " + path);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Failed to retain template files for " + table.fullName(), e);
+        }
+    }
+
+    /** Reads files retained by previous branch drops while the table still exists. */
+    public static List<Path> retainedBranchFiles(FileIO fileIO, Path tablePath) {
+        Path directory = new Path(tablePath, DROPPED_BRANCH_FILES);
+        Set<Path> retained = new LinkedHashSet<>();
+        try {
+            if (fileIO.exists(directory)) {
+                for (FileStatus status : fileIO.listStatus(directory)) {
+                    Path path = status.getPath();
+                    if (!status.isDir() && path.getName().startsWith(DROP_FILE_PREFIX)) {
+                        String[] paths =
+                                JsonSerdeUtil.fromJson(fileIO.readFileUtf8(path), String[].class);
+                        for (String file : paths) {
+                            retained.add(new Path(file));
+                        }
+                    }
+                }
+            }
+            return new ArrayList<>(retained);
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Failed to read retained branch files in " + directory, e);
         }
     }
 
