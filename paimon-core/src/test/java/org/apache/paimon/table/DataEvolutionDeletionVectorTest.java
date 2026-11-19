@@ -1062,8 +1062,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                 fullyDeleted ? new long[] {0, 1, 2} : new long[] {1})));
         commitGlobalIndex(
                 table, partition(table, "b"), globalIndexFile("untouched-index", new Range(3, 5)));
-        if ("before".equals(indexTiming) || fullyDeleted) {
-            commitGlobalIndex(table, partitionA, globalIndexFile("old-index", new Range(0, 2)));
+        IndexFileMeta oldIndex = globalIndexFile("old-index", new Range(0, 2));
+        if (!"after".equals(indexTiming)) {
+            commitGlobalIndex(table, partitionA, oldIndex);
         }
         List<String> rowsBefore = readPartitionedRows(table);
         Snapshot snapshot = table.latestSnapshot().get();
@@ -1090,12 +1091,17 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                 Path path = invocation.getArgument(0);
                                 if (path.getName().startsWith("snapshot-")
                                         && publicationAttempts.getAndIncrement() == 0) {
-                                    // Publish after this attempt prepared its changes, forcing
-                                    // retry.
-                                    commitGlobalIndex(
+                                    // Replace old-index after this attempt generated its deletions.
+                                    // The retry must regenerate DELETE concurrent-index.
+                                    commit(
                                             table,
-                                            partitionA,
-                                            globalIndexFile("concurrent-index", new Range(0, 2)));
+                                            Collections.singletonList(
+                                                    indexCompactMessage(
+                                                            partitionA,
+                                                            oldIndex,
+                                                            globalIndexFile(
+                                                                    "concurrent-index",
+                                                                    new Range(0, 2)))));
                                 }
                                 return invocation.callRealMethod();
                             })

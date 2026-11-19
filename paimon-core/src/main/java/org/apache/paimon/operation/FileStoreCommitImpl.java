@@ -1029,18 +1029,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         return latestSnapshot -> {
-            List<IndexManifestEntry> indexFiles =
-                    changes.indexFiles.stream()
-                            // Replace global-index deletions prepared against an older snapshot.
-                            .filter(
-                                    entry ->
-                                            entry.kind() != FileKind.DELETE
-                                                    || entry.indexFile().globalIndexMeta() == null
-                                                    || !materializedBuckets.contains(
-                                                            Pair.of(
-                                                                    entry.partition(),
-                                                                    entry.bucket())))
-                            .collect(Collectors.toList());
+            List<IndexManifestEntry> indexFiles = new ArrayList<>(changes.indexFiles);
 
             // This provider is invoked again after every optimistic-commit conflict. Scanning the
             // latest snapshot here guarantees that an index committed concurrently is either
