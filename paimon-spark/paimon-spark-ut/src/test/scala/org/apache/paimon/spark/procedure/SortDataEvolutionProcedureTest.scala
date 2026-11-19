@@ -18,13 +18,56 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.data.{GenericRow, Timestamp}
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 
 class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
+
+  test("range sort preserves nanoseconds and signed zeros in sort keys") {
+    withTable("T") {
+      val schema = Schema
+        .newBuilder()
+        .column("id", DataTypes.INT())
+        .column("ts", DataTypes.TIMESTAMP(9))
+        .column("f", DataTypes.FLOAT())
+        .column("d", DataTypes.DOUBLE())
+        .option("data-evolution.enabled", "true")
+        .option("row-tracking.enabled", "true")
+        .build()
+      paimonCatalog.createTable(Identifier.create(dbName0, "T"), schema, false)
+      val builder = loadTable("T").newBatchWriteBuilder()
+      val write = builder.newWrite()
+      val commit = builder.newCommit()
+      try {
+        // Write with the Paimon API so that the input retains sub-microsecond precision.
+        val values = Seq((200, -1f, -1d), (100, 0f, 0d), (100, -0.0f, 0d), (100, -0.0f, -0.0d))
+        values.zipWithIndex.foreach {
+          case ((nanos, f, d), id) =>
+            write.write(
+              GenericRow
+                .of(Int.box(id), Timestamp.fromEpochMillis(0, nanos), Float.box(f), Double.box(d)))
+        }
+        commit.commit(write.prepareCommit())
+      } finally {
+        write.close()
+        commit.close()
+      }
+      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+        checkAnswer(sql("CALL sys.sort_data_evolution('T', '[0,3]', 'ts,f,d')"), Row(1) :: Nil)
+      }
+      assert(
+        sql("SELECT id FROM T ORDER BY _ROW_ID")
+          .collect()
+          .toList == List(Row(3), Row(2), Row(1), Row(0)))
+    }
+  }
 
   test("sort preserves disjoint global index files in the same partition") {
     withTable("T") {
@@ -136,7 +179,7 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(ranges == Seq(Row(0L, 3L), Row(7L, 9L)))
       val start = ranges.head.getLong(0)
       val end = ranges.last.getLong(1)
-      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+      withSQLConf("spark.sql.shuffle.partitions" -> "2", "spark.sql.adaptive.enabled" -> "true") {
         checkAnswer(
           sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
           Row(1) :: Nil)

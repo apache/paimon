@@ -20,22 +20,24 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionRangeShuffle, DataEvolutionRangeSortTask}
-import org.apache.paimon.data.{BinaryRow, InternalRow}
-import org.apache.paimon.data.serializer.InternalRowSerializer
+import org.apache.paimon.data.{BinaryString, Decimal, InternalRow, Timestamp}
 import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.io.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.paimon.memory.MemorySegment
 import org.apache.paimon.mergetree.compact.ConcatRecordReader
 import org.apache.paimon.reader.ReaderSupplier
+import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.spark.sort.OrderSorter
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessageSerializer
-import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.{KeyComparatorSupplier, ProjectedRow}
+import org.apache.paimon.types.DataTypeRoot._
+import org.apache.paimon.utils.SortUtil
 
 import org.apache.spark.TaskContext
 import org.apache.spark.api.java.JavaSparkContext
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.types.{BinaryType, IntegerType, StructField, StructType}
 import org.apache.spark.storage.StorageLevel
 
 import java.util
@@ -73,11 +75,22 @@ object SparkDataEvolutionRangeSort {
       }
       .toVector
     val exchange = new DataEvolutionRangeShuffle(table, fields)
-    val keyType = exchange.keyType()
-    implicit val ordering: Ordering[Array[Byte]] = new KeyOrdering(keyType)
+    val exchangeType = exchange.exchangeType()
+    val schema = StructType(exchangeType.getFields.asScala.map {
+      field =>
+        val dataType = field.`type`()
+        val sparkType = dataType.getTypeRoot match {
+          case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE | FLOAT | DOUBLE |
+              CHAR | VARCHAR =>
+            BinaryType
+          case DATE => IntegerType
+          case _ => SparkTypeUtils.fromPaimonType(dataType)
+        }
+        StructField(field.name(), sparkType, dataType.isNullable)
+    }.toSeq)
     val sc = spark.sparkContext
     val commitUser = CoreOptions.createCommitUser(table.coreOptions().toConfiguration)
-    val keyed = sc
+    val rows = sc
       .parallelize(splits, SparkProcedureUtils.readParallelism(splits.asJava, spark))
       .mapPartitions {
         inputs =>
@@ -90,32 +103,27 @@ object SparkDataEvolutionRangeSort {
                 })
             .toList
             .asJava
-          val rows = ConcatRecordReader.create(readers).toCloseableIterator
-          TaskContext.get().addTaskCompletionListener[Unit](_ => rows.close())
-          val project = ProjectedRow.from(keyType, exchange.exchangeType())
-          val serializer = new InternalRowSerializer(keyType)
-          rows.asScala.map {
-            row =>
-              (
-                serializer.toBinaryRow(project.replaceRow(row)).copy().toBytes,
-                row.getBinary(exchange.payloadIndex()))
+          val input = ConcatRecordReader.create(readers).toCloseableIterator
+          TaskContext.get().addTaskCompletionListener[Unit](_ => input.close())
+          val getters = Array.tabulate(exchangeType.getFieldCount) {
+            i => InternalRow.createFieldGetter(exchangeType.getTypeAt(i), i)
           }
+          input.asScala.map(
+            row =>
+              Row.fromSeq(getters.iterator.map(g => sparkValue(g.getFieldOrNull(row))).toVector))
       }
-      .persist(StorageLevel.DISK_ONLY)
+    val input = spark.createDataFrame(rows, schema).persist(StorageLevel.DISK_ONLY)
     try {
-      // RangePartitioner samples keys, then the Spark shuffle sorts each reducer's run.
-      val outputs = keyed
-        .sortByKey(ascending = true, numPartitions = parallelism)
+      val outputs = OrderSorter
+        .sortByRange(input, exchange.sortColumns(), parallelism)
+        .queryExecution
+        .toRdd
         .mapPartitions {
           rows =>
             val writer = exchange.createWriter(commitUser)
             try {
-              val key = new BinaryRow(keyType.getFieldCount)
-              rows.foreach {
-                case (bytes, payload) =>
-                  key.pointTo(MemorySegment.wrap(bytes), 0, bytes.length)
-                  writer.write(key.getBinary(0), payload)
-              }
+              rows.foreach(
+                row => writer.write(row.getBinary(0), row.getBinary(exchange.payloadIndex())))
               CommitMessageSerializer.serializeAll(writer.finish()).asScala.toVector.iterator
             } finally writer.close()
         }
@@ -131,18 +139,25 @@ object SparkDataEvolutionRangeSort {
           CommitMessageSerializer.deserializeAll(outputs)),
         commitUser,
         spark)
-    } finally keyed.unpersist(false)
+    } finally input.unpersist(false)
   }
 
-  private class KeyOrdering(keyType: RowType) extends Ordering[Array[Byte]] with Serializable {
-    @transient private lazy val comparator = new KeyComparatorSupplier(keyType).get()
-    @transient private lazy val leftRow = new BinaryRow(keyType.getFieldCount)
-    @transient private lazy val rightRow = new BinaryRow(keyType.getFieldCount)
-
-    override def compare(left: Array[Byte], right: Array[Byte]): Int = {
-      leftRow.pointTo(MemorySegment.wrap(left), 0, left.length)
-      rightRow.pointTo(MemorySegment.wrap(right), 0, right.length)
-      comparator.compare(leftRow, rightRow)
-    }
+  // Preserve Paimon's timestamp precision, signed-zero ordering and binary string comparison.
+  private def sparkValue(value: AnyRef): AnyRef = value match {
+    case t: Timestamp =>
+      val bytes = new Array[Byte](12)
+      SortUtil.putTimestampNormalizedKey(t, MemorySegment.wrap(bytes), 0, bytes.length)
+      bytes
+    case f: java.lang.Float =>
+      val bytes = new Array[Byte](4)
+      SortUtil.putFloatNormalizedKey(f, MemorySegment.wrap(bytes), 0, bytes.length)
+      bytes
+    case d: java.lang.Double =>
+      val bytes = new Array[Byte](8)
+      SortUtil.putDoubleNormalizedKey(d, MemorySegment.wrap(bytes), 0, bytes.length)
+      bytes
+    case s: BinaryString => s.toBytes
+    case d: Decimal => d.toBigDecimal
+    case other => other
   }
 }

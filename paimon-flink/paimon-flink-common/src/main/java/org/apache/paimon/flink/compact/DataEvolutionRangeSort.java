@@ -103,7 +103,7 @@ public class DataEvolutionRangeSort {
 
         TableSortInfo info =
                 new TableSortInfo.Builder()
-                        .setSortColumns(exchange.keyType().getFieldNames())
+                        .setSortColumns(exchange.sortColumns())
                         .setSinkParallelism(parallelism)
                         .setRangeNumber(parallelism)
                         .setLocalSampleSize(parallelism * options.getLocalSampleMagnification())

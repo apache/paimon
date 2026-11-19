@@ -79,8 +79,8 @@ public class DataEvolutionRangeShuffle implements Serializable {
         return exchangeType;
     }
 
-    public RowType keyType() {
-        return exchangeType.project(exchangeType.getFieldNames().subList(0, payloadIndex()));
+    public List<String> sortColumns() {
+        return new ArrayList<>(exchangeType.getFieldNames().subList(0, payloadIndex()));
     }
 
     public int payloadIndex() {
