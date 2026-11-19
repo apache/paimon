@@ -64,7 +64,7 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
             Long startRowId,
             Long endRowId,
             String orderBy,
-            String where)
+            String... where)
             throws Exception {
         StreamExecutionEnvironment env = context.getExecutionEnvironment();
         checkArgument(!FlinkSink.isStreaming(env), "Sorting data evolution requires batch mode.");
@@ -76,8 +76,11 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
         FileStoreTable table = (FileStoreTable) target;
         List<String> fields = DataEvolutionRangeSortTask.parseSortFields(orderBy);
         DataEvolutionRangeSortTask.validate(table, startRowId, endRowId, fields);
+        // Flink 1.18 infers optional positional arguments from Java varargs.
+        checkArgument(where.length <= 1, "Specify at most one partition filter.");
         PartitionPredicate filter =
-                ActionPartitionPredicate.create(table, null, nullable(where), identifier());
+                ActionPartitionPredicate.create(
+                        table, null, where.length == 0 ? null : nullable(where[0]), identifier());
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         DataStream<Long> trigger = env.fromSequence(0, 0).setParallelism(1);

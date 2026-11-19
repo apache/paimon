@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
@@ -37,6 +38,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Ensure that the legacy multiply overloaded CALL with positional arguments can be invoked. */
 public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testSortDataEvolution() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T (id INT, p INT) PARTITIONED BY (p) WITH ("
+                        + "'data-evolution.enabled'='true', 'row-tracking.enabled'='true', "
+                        + "'file.format'='avro')");
+        assertThat(sql("CALL sys.sort_data_evolution('default.T', 0, 1, 'id')"))
+                .containsExactly(Row.of("Success"));
+        assertThat(sql("CALL sys.sort_data_evolution('default.T', 0, 1, 'id', 'p = 2')"))
+                .containsExactly(Row.of("Success"));
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.sort_data_evolution('default.T', 0, 1, 'id', 'p = 1', 'p = 2')"))
+                .hasRootCauseMessage("Specify at most one partition filter.");
+        assertThat(paimonTable("T").latestSnapshot()).isEmpty();
+    }
 
     @Test
     public void testCompactDatabaseAndTable() {
