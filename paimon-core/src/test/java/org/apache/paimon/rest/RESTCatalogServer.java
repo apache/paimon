@@ -262,6 +262,7 @@ public class RESTCatalogServer {
     private final Map<String, Function> functionStore = new ConcurrentHashMap<>();
     private final RESTCatalogModelHandler modelHandler =
             new RESTCatalogModelHandler(databaseStore, databaseLifecycleLocks);
+    private final RESTCatalogPredictionHandler predictionHandler;
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
     private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
@@ -300,6 +301,14 @@ public class RESTCatalogServer {
             throw new UncheckedIOException(e);
         }
         this.catalog = new RESTFileSystemCatalog(fileIO, warehousePath, catalogContext);
+        this.predictionHandler =
+                new RESTCatalogPredictionHandler(
+                        this,
+                        catalog,
+                        modelHandler,
+                        databaseStore,
+                        tableMetadataStore,
+                        resourcePaths.predictions());
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -322,7 +331,13 @@ public class RESTCatalogServer {
     }
 
     public void shutdown() throws IOException {
+        predictionHandler.close();
         server.shutdown();
+    }
+
+    public Runnable pausePredictionExecution() {
+        predictionHandler.pauseExecution();
+        return predictionHandler::resumeExecution;
     }
 
     public void setTableSnapshot(
@@ -498,6 +513,10 @@ public class RESTCatalogServer {
                     } else if (StringUtils.startsWith(
                             request.getPath(), resourcePaths.functions())) {
                         return functionsHandle(parameters);
+                    } else if (resourcePaths.predictions().equals(resourcePath)
+                            || resourcePath.startsWith(resourcePaths.predictions() + "/")) {
+                        return predictionHandler.handle(
+                                restAuthParameter.method(), resourcePath, data, parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 resourcePath.substring((databaseUri + "/").length()).split("/");

@@ -27,8 +27,13 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
 import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSpec;
+import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.management.ListPermissionsRequest;
@@ -188,6 +193,111 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         catalog.dropDatabase(database, false, false);
         assertThatThrownBy(() -> catalog.getModel(identifier))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
+    }
+
+    @Test
+    void testPredictionReferenceIntegration() throws Exception {
+        String database = "prediction_reference";
+        Identifier sourceIdentifier = Identifier.create(database, "clips");
+        Identifier modelIdentifier = Identifier.create(database, "echo_model");
+        catalog.createDatabase(database, false);
+        catalog.createTable(
+                sourceIdentifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("content", DataTypes.STRING())
+                        .build(),
+                false);
+        FileStoreTable source = (FileStoreTable) catalog.getTable(sourceIdentifier);
+        commitRows(source, GenericRow.of(1, BinaryString.fromString("first")));
+
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "reference",
+                        "echo",
+                        Collections.singletonList(new ModelField("text", "STRING", null)),
+                        Collections.singletonList(new ModelField("response", "STRING", null)),
+                        Collections.emptyMap());
+        catalog.createModel(
+                modelIdentifier,
+                new Model(modelIdentifier, "Deterministic reference model", definition),
+                false);
+
+        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        sourceIdentifier,
+                        new PredictionSpec(
+                                "snapshot-readback",
+                                modelIdentifier,
+                                Collections.singletonMap("text", "content"),
+                                Collections.singletonList("id"),
+                                "Echo the input",
+                                null,
+                                Collections.emptyMap(),
+                                "reference-success"));
+        long pinnedSnapshot = submitted.snapshotId();
+
+        commitRows(source, GenericRow.of(2, BinaryString.fromString("second")));
+        assertThat(
+                        ((FileStoreTable) catalog.getTable(sourceIdentifier))
+                                .snapshotManager()
+                                .latestSnapshotId())
+                .isGreaterThan(pinnedSnapshot);
+
+        resumePredictionExecution.run();
+        Prediction completed = waitForPrediction(submitted.predictionId());
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        assertThat(completed.snapshotId()).isEqualTo(pinnedSnapshot);
+        assertThat(completed.output()).isNotNull();
+        assertThat(batchRead(catalog.getTable(completed.output().table().toIdentifier())))
+                .containsExactly("+I[1, {\"text\":\"first\"}, null]");
+
+        resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        Prediction toCancel =
+                catalog.submitPrediction(
+                        sourceIdentifier,
+                        new PredictionSpec(
+                                "cancel-reference",
+                                modelIdentifier,
+                                Collections.singletonMap("text", "content"),
+                                Collections.singletonList("id"),
+                                "Echo the input",
+                                null,
+                                Collections.emptyMap(),
+                                "reference-cancel"));
+        waitForPredictionState(toCancel.predictionId(), PredictionStatus.State.RUNNING);
+        Prediction canceled = catalog.cancelPrediction(toCancel.predictionId());
+        assertThat(canceled.status().state()).isEqualTo(PredictionStatus.State.TERMINATED);
+        assertThat(canceled.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
+        assertThat(canceled.output()).isNull();
+        resumePredictionExecution.run();
+    }
+
+    private Prediction waitForPrediction(String predictionId) throws Exception {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            Prediction prediction = catalog.getPrediction(predictionId);
+            if (prediction.status().isTerminal()) {
+                return prediction;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Prediction did not terminate: " + predictionId);
+    }
+
+    private void waitForPredictionState(String predictionId, PredictionStatus.State expectedState)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            if (catalog.getPrediction(predictionId).status().state() == expectedState) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Prediction did not reach " + expectedState + ": " + predictionId);
     }
 
     @Test
