@@ -46,12 +46,12 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -156,77 +156,71 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     private RecordReader<InternalRow> createReader(
             AppendOnlyFileStore store, RowType readType, String bucketPath) throws IOException {
-        Map<String, DeletionFile> deletions = new HashMap<>();
-        for (int i = 0; i < compactBefore.size(); i++) {
-            if (deletionFiles.get(i) != null) {
-                deletions.put(compactBefore.get(i).fileName(), deletionFiles.get(i));
-            }
-        }
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        // A sort may cover thousands of disjoint groups. Only search for spanning dedicated
-        // files within the connected component of each normal range.
-        for (List<DataFileMeta> component : rangeHelper.mergeOverlappingRanges(compactBefore)) {
-            DataSplit split =
-                    DataSplit.builder()
-                            .withPartition(partition)
-                            .withBucket(0)
-                            .withDataFiles(component)
-                            .withDataDeletionFiles(
-                                    component.stream()
-                                            .map(f -> deletions.get(f.fileName()))
-                                            .collect(Collectors.toList()))
-                            .withBucketPath(bucketPath)
-                            .rawConvertible(false)
-                            .build();
-            addReaders(store, readType, split, rangeHelper, readers);
+        for (Map.Entry<Range, List<Integer>> group : filesByNormalRange().entrySet()) {
+            Range range = group.getKey();
+            List<Integer> positions = group.getValue();
+            readers.add(
+                    () -> {
+                        DataSplit split =
+                                DataSplit.builder()
+                                        .withPartition(partition)
+                                        .withBucket(0)
+                                        .withBucketPath(bucketPath)
+                                        .withDataFiles(
+                                                positions.stream()
+                                                        .map(compactBefore::get)
+                                                        .collect(Collectors.toList()))
+                                        .withDataDeletionFiles(
+                                                positions.stream()
+                                                        .map(deletionFiles::get)
+                                                        .collect(Collectors.toList()))
+                                        .rawConvertible(false)
+                                        .build();
+                        return store.newDataEvolutionRead()
+                                .withReadType(readType)
+                                .createReader(
+                                        new IndexedSplit(
+                                                split, Collections.singletonList(range), null));
+                    });
         }
-        checkArgument(!readers.isEmpty(), "Row range rewrite contains no normal files.");
         return ConcatRecordReader.create(readers);
     }
 
-    private void addReaders(
-            AppendOnlyFileStore store,
-            RowType readType,
-            DataSplit dataSplit,
-            RangeHelper<DataFileMeta> rangeHelper,
-            List<ReaderSupplier<InternalRow>> readers) {
-        List<DataFileMeta> normalFiles = new ArrayList<>();
-        for (DataFileMeta file : dataSplit.dataFiles()) {
-            if (!isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())) {
-                normalFiles.add(file);
-            }
-        }
-
-        for (List<DataFileMeta> normalGroup : rangeHelper.mergeOverlappingRanges(normalFiles)) {
+    private NavigableMap<Range, List<Integer>> filesByNormalRange() {
+        List<DataFileMeta> normalFiles =
+                compactBefore.stream()
+                        .filter(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()))
+                        .collect(Collectors.toList());
+        checkArgument(!normalFiles.isEmpty(), "Row range rewrite contains no normal files.");
+        RangeHelper<DataFileMeta> helper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        NavigableMap<Range, List<Integer>> groups =
+                new TreeMap<>(Comparator.comparingLong(range -> range.to));
+        for (List<DataFileMeta> normalGroup : helper.mergeOverlappingRanges(normalFiles)) {
             checkArgument(
-                    rangeHelper.areAllRangesSame(normalGroup),
+                    helper.areAllRangesSame(normalGroup),
                     "Normal data files %s should have the same row id range.",
                     normalGroup);
-            Range range = normalGroup.get(0).nonNullRowIdRange();
-            Set<DataFileMeta> normalGroupFiles = new HashSet<>(normalGroup);
-            DataSplit rangeSplit =
-                    dataSplit
-                            .filterDataFile(
-                                    file ->
-                                            normalGroupFiles.contains(file)
-                                                    || ((isBlobFile(file.fileName())
-                                                                    || isVectorStoreFile(
-                                                                            file.fileName()))
-                                                            && file.nonNullRowIdRange()
-                                                                    .hasIntersection(range)))
-                            .orElseThrow(
-                                    () ->
-                                            new IllegalStateException(
-                                                    "Cannot find files for row id range " + range));
-            IndexedSplit indexedSplit =
-                    new IndexedSplit(rangeSplit, Collections.singletonList(range), null);
-            readers.add(
-                    () ->
-                            store.newDataEvolutionRead()
-                                    .withReadType(readType)
-                                    .createReader(indexedSplit));
+            groups.put(normalGroup.get(0).nonNullRowIdRange(), new ArrayList<>());
         }
+
+        // Normal ranges are disjoint. Seek the first one whose end reaches the file's start,
+        // then visit only ranges it spans. Keep manifest order and the matching DV position.
+        for (int i = 0; i < compactBefore.size(); i++) {
+            Range file = compactBefore.get(i).nonNullRowIdRange();
+            Range firstEnd = new Range(file.from, file.from);
+            for (Map.Entry<Range, List<Integer>> group :
+                    groups.tailMap(firstEnd, true).entrySet()) {
+                if (group.getKey().from > file.to) {
+                    break;
+                }
+                group.getValue().add(i);
+            }
+        }
+        return groups;
     }
 
     @Override

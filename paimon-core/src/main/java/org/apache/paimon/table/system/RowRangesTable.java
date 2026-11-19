@@ -134,7 +134,9 @@ public class RowRangesTable implements ReadonlyTable {
                     return Collections::emptyList;
                 }
                 List<BinaryRow> partitions =
-                        table.newSnapshotReader().withSnapshot(snapshot).partitions();
+                        table.partitionKeys().isEmpty()
+                                ? Collections.singletonList(BinaryRow.EMPTY_ROW)
+                                : table.newSnapshotReader().withSnapshot(snapshot).partitions();
                 CastExecutor<InternalRow, BinaryString> cast = partitionCast();
                 List<Split> splits =
                         partitions.stream()

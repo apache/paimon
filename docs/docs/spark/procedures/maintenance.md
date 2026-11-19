@@ -87,7 +87,8 @@ inside the range. An endpoint that
 cuts a file causes the call to fail before writing. The result is the number of
 rewritten partitions, including zero for an empty selection.
 Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
-to find complete ranges for a partition.
+to find complete ranges for a partition. The procedure requires `query-auth.enabled = false`
+because it reads and rewrites the underlying physical files.
 
 ```sql
 CALL sys.sort_data_evolution(

@@ -331,7 +331,8 @@ The optional `where` expression selects partitions. Every live file that interse
 the selection must fit entirely inside the range. A partial file group fails the job
 before writing.
 Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
-to find complete ranges for a partition.
+to find complete ranges for a partition. The procedure requires `query-auth.enabled = false`
+because it reads and rewrites the underlying physical files.
 
 ```sql
 SET 'execution.runtime-mode' = 'batch';

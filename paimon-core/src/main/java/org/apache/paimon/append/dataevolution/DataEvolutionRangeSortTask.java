@@ -105,6 +105,9 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
                 table.coreOptions().dataEvolutionEnabled(),
                 "Range sorting requires a data evolution table.");
         checkArgument(
+                !table.coreOptions().queryAuthEnabled(),
+                "Range sorting does not support tables with query auth enabled.");
+        checkArgument(
                 range.from >= 0 && range.from <= range.to,
                 "Invalid inclusive row ID range %s.",
                 range);

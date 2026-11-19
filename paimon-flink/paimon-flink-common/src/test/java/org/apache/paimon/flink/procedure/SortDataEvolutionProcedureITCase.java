@@ -194,6 +194,16 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
         assertThat(paimonTable("T").latestSnapshot()).isEmpty();
     }
 
+    @Test
+    public void testRejectQueryAuthBeforePlanning() {
+        sql(
+                "CREATE TABLE T (id INT) WITH ('row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', 'query-auth.enabled'='true')");
+        assertThatThrownBy(() -> sql("CALL sys.sort_data_evolution('default.T', '[0,1]', 'id')"))
+                .hasRootCauseMessage(
+                        "Range sorting does not support tables with query auth enabled.");
+    }
+
     private void createTable() {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql(
