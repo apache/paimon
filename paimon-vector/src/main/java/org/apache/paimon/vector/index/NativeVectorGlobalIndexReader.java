@@ -42,6 +42,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -62,6 +63,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexReader {
 
+    private static final int JOINT_INNER_PROBES = 16;
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
     private static final String MAX_INITIAL_FILTER_EXPANSION_FACTOR_PARAMETER =
@@ -104,9 +106,27 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         this.expectedIndexType = expectedIndexType;
     }
 
+    boolean supportsJointProbes(int topK) {
+        // With 64 lists, 16 probes must still admit the normal four-candidates-per-result budget.
+        if (ioMeta.rowCount() < (long) JOINT_INNER_PROBES * topK) {
+            return false;
+        }
+        try {
+            ensureLoaded();
+            return nativeMeta.nlist() == 64 && "l2".equals(nativeMeta.metric());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
+        return visitVectorSearch(vectorSearch, false);
+    }
+
+    CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch, boolean joint) {
         if (ioMeta.rowCount() == 0) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
@@ -114,7 +134,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 () -> {
                     try {
                         ensureLoaded();
-                        return Optional.ofNullable(search(vectorSearch));
+                        return Optional.ofNullable(search(vectorSearch, joint));
                     } catch (IOException e) {
                         throw new RuntimeException(
                                 String.format(
@@ -129,6 +149,11 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     @Override
     public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
             BatchVectorSearch batchVectorSearch) {
+        return visitBatchVectorSearch(batchVectorSearch, false);
+    }
+
+    CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch, boolean joint) {
         if (ioMeta.rowCount() == 0) {
             return CompletableFuture.completedFuture(
                     Collections.nCopies(batchVectorSearch.vectorCount(), Optional.empty()));
@@ -137,7 +162,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 () -> {
                     try {
                         ensureLoaded();
-                        return searchBatch(batchVectorSearch);
+                        return searchBatch(batchVectorSearch, joint);
                     } catch (IOException e) {
                         throw new RuntimeException(
                                 String.format(
@@ -151,13 +176,13 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 executor);
     }
 
-    private List<Optional<ScoredGlobalIndexResult>> searchBatch(BatchVectorSearch batchVectorSearch)
-            throws IOException {
+    private List<Optional<ScoredGlobalIndexResult>> searchBatch(
+            BatchVectorSearch batchVectorSearch, boolean joint) throws IOException {
         int n = batchVectorSearch.vectorCount();
         // Single vector: reuse the scalar path; no batching benefit.
         if (n == 1) {
             List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
-            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0))));
+            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0), joint)));
             return results;
         }
 
@@ -174,7 +199,8 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
             return emptyResults(n);
         }
         VectorSearchParams searchParams =
-                batchSearchParams(batchVectorSearch.options(), scope.effectiveK);
+                batchSearchParams(
+                        shardOptions(batchVectorSearch.options(), joint), scope.effectiveK);
 
         // Flatten query vectors into one contiguous array for a single native call.
         float[] queries = new float[n * dim];
@@ -190,14 +216,19 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         // result i corresponds to vectors[i], matching input order.
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            results.add(
+            Optional<ScoredGlobalIndexResult> found =
                     buildScoredResult(
-                            batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric));
+                            batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric);
+            if (joint && incomplete(found, batchVectorSearch.limit())) {
+                found = Optional.ofNullable(search(batchVectorSearch.forIndex(i), false));
+            }
+            results.add(found);
         }
         return results;
     }
 
-    private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
+    private ScoredGlobalIndexResult search(VectorSearch vectorSearch, boolean joint)
+            throws IOException {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
@@ -215,9 +246,26 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                                 scope.filterBytes)
                         : vectorReader.search(
                                 queryVector,
-                                searchParams(vectorSearch.options(), scope.effectiveK));
+                                searchParams(
+                                        shardOptions(vectorSearch.options(), joint),
+                                        scope.effectiveK));
 
-        return buildScoredResult(result.ids(), result.distances(), metric).orElse(null);
+        Optional<ScoredGlobalIndexResult> found =
+                buildScoredResult(result.ids(), result.distances(), metric);
+        return joint && incomplete(found, limit) ? search(vectorSearch, false) : found.orElse(null);
+    }
+
+    private static boolean incomplete(Optional<ScoredGlobalIndexResult> found, int limit) {
+        return !found.isPresent() || found.get().results().getLongCardinality() < limit;
+    }
+
+    private static Map<String, String> shardOptions(Map<String, String> options, boolean joint) {
+        if (!joint) {
+            return options;
+        }
+        Map<String, String> widened = new HashMap<>(options);
+        widened.put(NPROBE_PARAMETER, String.valueOf(JOINT_INNER_PROBES));
+        return widened;
     }
 
     static Optional<ScoredGlobalIndexResult> buildScoredResult(

@@ -509,6 +509,15 @@ With the small-router tuning in the native library, automatic outer probing star
 of four centroids or four of eight. A larger top-K or a row-ID filter can raise that initial
 width. If the search returns fewer than top-K results, automatic routing can probe additional
 shards. Set `centroid.nprobe` explicitly to use a fixed outer width.
+
+For unfiltered L2 queries on `ivf-flat-centroid` and `ivf-pq-centroid`, Paimon can choose both
+widths together. With 64 outer centers, an automatic outer width of eight, and top-K from 10
+through 100, it checks the four nearest shard headers. If all four have 64 local lists and at
+least 16 × top-K vectors each, it searches those four shards with 16 local probes each.
+Other layouts use independent automatic widths. Setting either probe width explicitly, or
+setting `ivf.max_initial_filter_expansion_factor`, also selects independent sizing.
+The decision uses the stored indexes and applies to single and batched queries.
+
 The trained outer centers live in the routing model file. In the manifest, each
 centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta`.
 For a shard, this descriptor identifies the model and centroid and wraps the local

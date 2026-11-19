@@ -42,6 +42,7 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -225,19 +228,7 @@ class CentroidVectorGlobalIndexTest {
         NativeCentroidVectorGlobalIndexer indexer =
                 new NativeCentroidVectorGlobalIndexer(
                         new ArrayType(new FloatType()), options, type, 1.0);
-        GlobalIndexFileWriter files =
-                new GlobalIndexFileWriter() {
-                    @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
-                    }
-
-                    @Override
-                    public PositionOutputStream newOutputStream(String name)
-                            throws java.io.IOException {
-                        return io.newOutputStream(new Path(directory, name), false);
-                    }
-                };
+        GlobalIndexFileWriter files = fileWriter(io, directory);
         float[][] vectors = new float[256][];
         for (int i = 0; i < vectors.length; i++) {
             vectors[i] = new float[] {(i / 64) * 100f + (i % 64) * 0.1f, i % 11};
@@ -424,5 +415,181 @@ class CentroidVectorGlobalIndexTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void joinProbesUsingTheNearestShardLayoutsForSingleAndBatchSearch() throws Exception {
+        FileIO io = new LocalFileIO();
+        NativeCentroidVectorGlobalIndexer indexer = flatIndexer(64);
+        float[][] landmarks = new float[64][8];
+        List<GlobalIndexIOMeta> metas = buildMixedShards(io, indexer, landmarks);
+        Set<Path> opened = ConcurrentHashMap.newKeySet();
+        GlobalIndexFileReader input =
+                meta -> {
+                    opened.add(meta.filePath());
+                    return io.newInputStream(meta.filePath());
+                };
+        // No dependency on a spare executor thread to open a shard or complete a planned search.
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            int k = 10;
+            Map<String, String> fixed = new HashMap<>();
+            fixed.put("centroid.nprobe", "4");
+            fixed.put("ivf.nprobe", "16");
+            VectorSearch near = new VectorSearch(landmarks[59], k, "v");
+            VectorSearch far = new VectorSearch(landmarks[63], k, "v");
+            ScoredGlobalIndexResult joint;
+            try (GlobalIndexReader reader =
+                    indexer.createReader(input, metas, 32768, null, executor)) {
+                joint = reader.visitVectorSearch(near).get(30, TimeUnit.SECONDS).get();
+                assertThat(opened).hasSize(5);
+                assertSameScores(
+                        joint,
+                        reader.visitVectorSearch(new VectorSearch(landmarks[59], k, "v", fixed))
+                                .get()
+                                .get(),
+                        k);
+            }
+            opened.clear();
+            try (GlobalIndexReader reader =
+                    indexer.createReader(input, metas, 32768, null, executor)) {
+                ScoredGlobalIndexResult independent =
+                        reader.visitVectorSearch(far).get(30, TimeUnit.SECONDS).get();
+                assertThat(opened).hasSize(9);
+                List<Optional<ScoredGlobalIndexResult>> batch =
+                        reader.visitBatchVectorSearch(
+                                        new BatchVectorSearch(
+                                                new float[][] {
+                                                    landmarks[63], landmarks[59], landmarks[59]
+                                                },
+                                                k,
+                                                "v"))
+                                .get(30, TimeUnit.SECONDS);
+                assertSameScores(independent, batch.get(0).get(), k);
+                assertSameScores(joint, batch.get(1).get(), k);
+                assertSameScores(joint, batch.get(2).get(), k);
+            }
+            RoaringNavigableMap64 include = new RoaringNavigableMap64();
+            include.addRange(new Range(0, 32767));
+            for (VectorSearch other :
+                    Arrays.asList(
+                            new VectorSearch(
+                                    landmarks[59],
+                                    k,
+                                    "v",
+                                    Collections.singletonMap("ivf.nprobe", "8")),
+                            new VectorSearch(
+                                    landmarks[59],
+                                    k,
+                                    "v",
+                                    Collections.singletonMap("centroid.nprobe", "8")),
+                            new VectorSearch(
+                                    landmarks[59],
+                                    k,
+                                    "v",
+                                    Collections.singletonMap(
+                                            "ivf.max_initial_filter_expansion_factor", "2")),
+                            new VectorSearch(landmarks[59], k, "v").withIncludeRowIds(include),
+                            new VectorSearch(landmarks[59], 1, "v"),
+                            new VectorSearch(landmarks[59], 101, "v"))) {
+                opened.clear();
+                try (GlobalIndexReader reader =
+                        indexer.createReader(input, metas, 32768, null, executor)) {
+                    assertThat(
+                                    reader.visitVectorSearch(other)
+                                            .get()
+                                            .get()
+                                            .results()
+                                            .getLongCardinality())
+                            .isEqualTo(other.limit());
+                    assertThat(opened).hasSize(9);
+                }
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static NativeCentroidVectorGlobalIndexer flatIndexer(int localLists) {
+        Map<String, String> options = new HashMap<>();
+        options.put("dimension", "8");
+        options.put("index.type", "ivf_flat");
+        options.put("metric", "l2");
+        options.put("nlist", "64");
+        options.put("centroid.local-nlist", String.valueOf(localLists));
+        return new NativeCentroidVectorGlobalIndexer(
+                new ArrayType(new FloatType()), options, "ivf-flat", 1.0);
+    }
+
+    private List<GlobalIndexIOMeta> buildMixedShards(
+            FileIO io, NativeCentroidVectorGlobalIndexer indexer, float[][] landmarks)
+            throws Exception {
+        Path directory = new Path(temp.toString());
+        GlobalIndexFileWriter files = fileWriter(io, directory);
+        float[] sample = new float[64 * 8];
+        for (int i = 0; i < 64; i++) {
+            landmarks[i][0] = i * 100;
+            sample[8 * i] = i * 100;
+        }
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        String id = "joint-probes";
+        try (VectorTrainingModel model =
+                indexer.trainGlobalModel(
+                        64, Collections.singletonList(new TrainingBatch(sample, 64)).iterator())) {
+            ResultEntry routing =
+                    indexer.writeRoutingModel(
+                            files, "router", model.serialize(), id, model.nlist());
+            metas.add(toIOMeta(io, directory, routing));
+            NativeCentroidVectorGlobalIndexer smallIndexer = flatIndexer(4);
+            Random random = new Random(42);
+            for (int i = 0; i < landmarks.length; i++) {
+                int centroid = model.assignCentroid(landmarks[i]);
+                // Neighbours of the last landmark encounter one small shard.
+                GlobalIndexSingleColumnWriter writer =
+                        (i == 63 ? smallIndexer : indexer).createLocalWriter(files, centroid, id);
+                try {
+                    for (int j = 0; j < 512; j++) {
+                        float[] row = landmarks[i].clone();
+                        for (int dim = 0; dim < row.length; dim++) {
+                            row[dim] += random.nextFloat() - 0.5f;
+                        }
+                        writer.write(row, 512L * i + j);
+                    }
+                    metas.add(toIOMeta(io, directory, writer.finish().get(0)));
+                } finally {
+                    ((Closeable) writer).close();
+                }
+            }
+        }
+        return metas;
+    }
+
+    private static void assertSameScores(
+            ScoredGlobalIndexResult expected, ScoredGlobalIndexResult actual, int k) {
+        assertThat(actual.results().toArray(k)).containsExactly(expected.results().toArray(k));
+        for (long row : expected.results()) {
+            assertThat(actual.scoreGetter().score(row))
+                    .isEqualTo(expected.scoreGetter().score(row));
+        }
+    }
+
+    private static GlobalIndexIOMeta toIOMeta(FileIO io, Path directory, ResultEntry entry)
+            throws java.io.IOException {
+        Path path = new Path(directory, entry.fileName());
+        return new GlobalIndexIOMeta(path, io.getFileSize(path), entry.rowCount(), entry.meta());
+    }
+
+    private static GlobalIndexFileWriter fileWriter(FileIO io, Path directory) {
+        return new GlobalIndexFileWriter() {
+            @Override
+            public String newFileName(String prefix) {
+                return prefix + "-" + UUID.randomUUID() + ".index";
+            }
+
+            @Override
+            public PositionOutputStream newOutputStream(String name) throws java.io.IOException {
+                return io.newOutputStream(new Path(directory, name), false);
+            }
+        };
     }
 }
