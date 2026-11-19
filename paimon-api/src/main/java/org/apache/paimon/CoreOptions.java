@@ -4527,6 +4527,7 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(String::trim)
                 .map(
                         x ->
                                 PartitionMarkDoneAction.valueOf(
@@ -5240,7 +5241,8 @@ public class CoreOptions implements Serializable {
     }
 
     public static boolean isVectorIndexType(String type) {
-        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm", "rtree")
+                .contains(type);
     }
 
     public List<String> globalIndexColumns(String type) {

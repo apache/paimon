@@ -41,6 +41,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -1007,15 +1008,18 @@ public class FileStoreCommitTest {
     public void testMaterializedCompactionOnlyRefreshesGlobalIndexInSameBucket() throws Exception {
         TestFileStore store = createStore(false, 2);
         BinaryRow partition = gen.getPartition(gen.next());
-        IndexManifestEntry materializedBucketDelete =
-                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
-        IndexManifestEntry otherBucketDelete =
-                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+        IndexManifestEntry materializedBucketIndex =
+                globalIndexEntry(partition, 0, "materialized-bucket-index");
+        IndexManifestEntry otherBucketIndex = globalIndexEntry(partition, 1, "other-bucket-index");
+        IndexManifestFile manifestFile = store.indexManifestFileFactory().create();
+        String manifest =
+                manifestFile.writeWithoutRolling(
+                        Arrays.asList(materializedBucketIndex, otherBucketIndex));
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.indexManifest()).thenReturn(manifest);
         CommitChanges changes =
                 new CommitChanges(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =
@@ -1023,18 +1027,23 @@ public class FileStoreCommitTest {
                                     changes,
                                     Snapshot.CommitKind.COMPACT,
                                     Collections.singleton(Pair.of(partition, 0)))
-                            .provide(null);
+                            .provide(snapshot);
 
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+            assertThat(refreshed.indexFiles)
+                    .containsExactly(materializedBucketIndex.toDeleteEntry());
+            String refreshedManifest =
+                    manifestFile.writeIndexFiles(
+                            manifest, refreshed.indexFiles, store.bucketMode());
+            assertThat(manifestFile.read(refreshedManifest)).containsExactly(otherBucketIndex);
         }
     }
 
-    private static IndexManifestEntry globalIndexDeleteEntry(
+    private static IndexManifestEntry globalIndexEntry(
             BinaryRow partition, int bucket, String fileName) {
         IndexFileMeta file =
                 new IndexFileMeta(
                         "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
-        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
+        return new IndexManifestEntry(FileKind.ADD, partition, bucket, file);
     }
 
     @Test

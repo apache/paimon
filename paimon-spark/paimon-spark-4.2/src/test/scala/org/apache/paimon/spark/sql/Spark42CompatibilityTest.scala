@@ -25,7 +25,7 @@ import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
 import org.apache.spark.sql.test.SharedSparkSession
 
 import java.nio.file.Files
@@ -83,6 +83,20 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       checkAnswer(sql("SELECT * FROM t"), Seq(Row(3, "c", "x"), Row(4, "d", "y")))
       sql("CREATE TABLE copied TBLPROPERTIES ('file.format'='avro') AS SELECT * FROM t")
       checkAnswer(sql("SELECT * FROM copied"), sql("SELECT * FROM t"))
+    }
+  }
+
+  test("replace table rejects table constraints and keeps the old table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (7)")
+      val e = intercept[AnalysisException] {
+        sql(
+          "CREATE OR REPLACE TABLE t (id INT, CONSTRAINT positive CHECK (id > 0)) " +
+            "TBLPROPERTIES ('file.format'='avro')")
+      }
+      assert(e.getCondition === "UNSUPPORTED_FEATURE.TABLE_OPERATION")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(7)))
     }
   }
 
@@ -193,6 +207,20 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
             "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)), ST_Srid(g), ST_Srid(a[0]) FROM typed"),
         Seq(Row(1, point, point, point, 3857, 3857))
       )
+    }
+  }
+
+  test("spatial SQL passes a constant geometry to the Paimon scan") {
+    val point =
+      "ST_SetSrid(ST_GeomFromWKB(unhex('01010000000000000000000000000000000000F03F')), 4326)"
+    withTable("locations") {
+      sql("""CREATE TABLE locations (geom GEOMETRY(4326)) TBLPROPERTIES (
+            | 'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            | 'data-evolution.enabled' = 'true')""".stripMargin)
+      sql(s"INSERT INTO locations VALUES ($point), (NULL)")
+      val query = sql(s"SELECT ST_Srid(geom) FROM locations WHERE ST_Intersects(geom, $point)")
+      assert(query.queryExecution.executedPlan.toString().contains("BBoxIntersects"))
+      checkAnswer(query, Seq(Row(4326)))
     }
   }
 }

@@ -344,6 +344,19 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: REPLACE TABLE rejects table constraints and keeps the old table") {
+    assume(gteqSpark4_1)
+    withTable("t") {
+      sql("CREATE TABLE t (id INT) USING paimon")
+      sql("INSERT INTO t VALUES (7)")
+      val error = intercept[AnalysisException] {
+        sql("CREATE OR REPLACE TABLE t (id INT, CONSTRAINT positive CHECK (id > 0)) USING paimon")
+      }
+      Assertions.assertEquals("UNSUPPORTED_FEATURE.TABLE_OPERATION", error.getErrorClass)
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(7)))
+    }
+  }
+
   test("Paimon DDL: CREATE TABLE fails when table exists") {
     withTable("t") {
       sql("CREATE TABLE t (id BIGINT, data STRING) USING paimon")

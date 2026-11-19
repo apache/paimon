@@ -39,8 +39,10 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -48,6 +50,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /** Test static methods and methods with default implementations of {@link FileIO}. */
 public class FileIOTest {
@@ -268,6 +271,23 @@ public class FileIOTest {
         readThread.join();
 
         assertThat(exception.get()).isNull();
+    }
+
+    @Test
+    public void testListStatusIterative() throws IOException {
+        Files.createFile(tempDir.resolve("file"));
+        Files.createFile(Files.createDirectory(tempDir.resolve("dir")).resolve("nested"));
+
+        RemoteIterator<FileStatus> entries =
+                LocalFileIO.create().listStatusIterative(new Path(tempDir.toUri()));
+        List<FileStatus> statuses = new ArrayList<>();
+        while (entries.hasNext()) {
+            statuses.add(entries.next());
+        }
+        assertThat(statuses)
+                .extracting(
+                        s -> s.getPath().getName(), FileStatus::isDir, FileStatus::getStorageClass)
+                .containsExactlyInAnyOrder(tuple("file", false, null), tuple("dir", true, null));
     }
 
     @Test

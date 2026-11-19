@@ -74,6 +74,11 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitContains(FieldRef fieldRef, Object literal);
 
+    default T visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        throw new UnsupportedOperationException();
+    }
+
     default T visitNotContains(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException();
     }
