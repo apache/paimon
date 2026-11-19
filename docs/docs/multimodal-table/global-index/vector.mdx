@@ -351,7 +351,7 @@ Search-time options are passed with each vector search request:
 | Option | Default | Description |
 |---|---|---|
 | `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
-| `centroid.nprobe` | Automatic | Number of centroid shards to search. Within each selected shard, `ivf.nprobe` controls the IVF lists to search and `diskann.l_search` controls the DiskANN graph search width. |
+| `centroid.nprobe` | Automatic | Number of centroid shards to search per row-ID range. Paimon chooses this width when omitted. Within each selected shard, `ivf.nprobe` controls the IVF lists to search and `diskann.l_search` controls the DiskANN graph search width. |
 | `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
 | `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
 | `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
@@ -505,10 +505,12 @@ selected partitions' previous routers and shards of the requested type.
 Queries load each selected range's routing model, select centroids with `centroid.nprobe`,
 and open their shard files. Inside each selected shard, `ivf.nprobe` controls how many
 local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
-With the small-router tuning in the native library, automatic outer probing starts at three
-of four centroids or four of eight. A larger top-K or a row-ID filter can raise that initial
-width. If the search returns fewer than top-K results, automatic routing can probe additional
-shards. Set `centroid.nprobe` explicitly to use a fixed outer width.
+Paimon chooses the initial outer width per row-ID range. The minimum is three for a four-centroid
+router, four for an eight-centroid router, and eight otherwise, capped at the number of centroids.
+Paimon budgets at least one sixteenth of the shards and four candidate rows per requested result
+using the average shard size. A row-ID filter scales the initial width by the inverse of its
+selectivity, up to all shards. If there are fewer than top-K results, automatic routing can
+probe additional shards. Set `centroid.nprobe` explicitly to use a fixed outer width.
 
 For unfiltered L2 queries on `ivf-flat-centroid` and `ivf-pq-centroid`, Paimon can choose both
 widths together. With 64 outer centers, an automatic outer width of eight, and top-K from 10

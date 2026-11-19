@@ -48,6 +48,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.Closeable;
@@ -385,6 +386,31 @@ class CentroidVectorGlobalIndexTest {
             assertThat(batch.get(2).get().results().contains(BASE)).isTrue();
             assertThat(opened.values()).allSatisfy(count -> assertThat(count.get()).isEqualTo(1));
 
+            // The first batch may already have opened shards near either query. Count fresh opens.
+            try (GlobalIndexReader fresh =
+                    indexer.createReader(fileReader, metas, rowCount, null, executor)) {
+                opened.clear();
+                assertThat(fresh.visitVectorSearch(new VectorSearch(vectors[0], 1, "v")).get())
+                        .isPresent();
+                assertThat(opened).hasSize(4); // router and three of four shards
+                VectorSearch all =
+                        new VectorSearch(
+                                vectors[0],
+                                1,
+                                "v",
+                                Collections.singletonMap("centroid.nprobe", "100"));
+                assertThat(fresh.visitVectorSearch(all).get()).isPresent();
+                assertThat(opened).hasSize(5);
+                VectorSearch invalid =
+                        new VectorSearch(
+                                vectors[0],
+                                1,
+                                "v",
+                                Collections.singletonMap("centroid.nprobe", "0"));
+                assertThatThrownBy(() -> fresh.visitVectorSearch(invalid).get())
+                        .hasRootCauseInstanceOf(IllegalArgumentException.class);
+            }
+
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
             include.add(BASE - 1);
             include.add(BASE + 101L * 200);
@@ -415,6 +441,30 @@ class CentroidVectorGlobalIndexTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        // nlist, indexed vectors in the range, top-K, eligible row IDs (-1 for no filter), probes
+        "3, 25000, 100, -1, 3",
+        "4, 25000, 100, -1, 3",
+        "5, 25000, 100, -1, 5",
+        "7, 25000, 100, -1, 7",
+        "8, 25000, 100, -1, 4",
+        "9, 25000, 100, -1, 8",
+        "64, 1000000, 100, -1, 8",
+        "129, 1000000, 100, -1, 9",
+        "8, 25000, 5000, -1, 7",
+        "8, 25000, 2147483647, -1, 8",
+        "8, 25000, 100, 20000, 5",
+        "8, 25000, 100, 12500, 8",
+        "8, 25000, 100, 0, 1",
+        "4, 25000, 100, 26000, 3",
+        "8, 9223372036854775807, 100, 9223372036854775806, 5"
+    })
+    void sizesInitialOuterProbes(int nlist, long rows, int topK, long matching, int probes) {
+        assertThat(NativeCentroidRoutedIndexReader.automaticWidth(nlist, rows, topK, matching))
+                .isEqualTo(probes);
     }
 
     @Test

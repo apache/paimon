@@ -30,6 +30,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Pair;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -144,17 +146,48 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             throw new IllegalArgumentException(
                     "Use centroid.nprobe for DiskANN outer routing and diskann.l_search for graph search");
         }
-        org.apache.paimon.index.vector.VectorSearchParams params =
-                width == null
-                        ? org.apache.paimon.index.vector.VectorSearchParams.automatic(query.limit())
-                        : org.apache.paimon.index.vector.VectorSearchParams.ivf(
-                                query.limit(), Integer.parseInt(width));
-        return model().resolveNprobe(
-                        params,
-                        vectorCount,
-                        query.includeRowIds() == null
-                                ? -1
-                                : query.includeRowIds().getLongCardinality());
+        int nlist = metadata.nlist();
+        if (width != null) {
+            int probes = Integer.parseInt(width);
+            checkArgument(probes > 0, "centroid.nprobe must be greater than 0");
+            return Math.min(probes, nlist);
+        }
+        return automaticWidth(
+                nlist,
+                vectorCount,
+                query.limit(),
+                query.includeRowIds() == null ? -1 : query.includeRowIds().getLongCardinality());
+    }
+
+    static int automaticWidth(int nlist, long vectorCount, int topK, long matchingCount) {
+        checkArgument(vectorCount > 0, "Centroid routing requires a positive vector count.");
+        int floor = 8;
+        if (nlist == 4) {
+            floor = 3;
+        } else if (nlist == 8) {
+            floor = 4;
+        }
+        // Probe at least 1/16 of the shards and budget four candidates per requested result.
+        long rowsPerShard = divideRoundingUp(vectorCount, nlist);
+        long candidateShards = divideRoundingUp(4L * topK, rowsPerShard);
+        long minimumShards = Math.max(floor, divideRoundingUp(nlist, 16));
+        long width = Math.min(nlist, Math.max(minimumShards, candidateShards));
+        if (matchingCount == 0) {
+            return 1;
+        }
+        if (matchingCount < 0 || matchingCount >= vectorCount || width == nlist) {
+            return (int) width;
+        }
+        // Scale by inverse selectivity. The product may exceed a long for large row-ID ranges.
+        return BigDecimal.valueOf(vectorCount)
+                .multiply(BigDecimal.valueOf(width))
+                .divide(BigDecimal.valueOf(matchingCount), 0, RoundingMode.CEILING)
+                .min(BigDecimal.valueOf(nlist))
+                .intValueExact();
+    }
+
+    private static long divideRoundingUp(long count, long divisor) {
+        return 1 + (count - 1) / divisor;
     }
 
     private CompletableFuture<List<Route>> routes(float[][] vectors, VectorSearch query) {
