@@ -412,7 +412,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     if (generation == null) {
                         return;
                     }
-                    // a failed earlier attempt skipped the normal post-publication cleanup
+                    // a failed earlier attempt skipped the normal post-publication cleanup. The
+                    // repair made this snapshot the head and moved the pointer of the catalog,
+                    // which is what lets it retire the versions above the head
                     String pending = readRetirePending();
                     List<Path> files = applicableMetadataFiles(snapshotId);
                     files.addAll(olderFilesUnreachableFrom(snapshotId, generation));
@@ -472,38 +474,49 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
 
+            // whether this callback made the snapshot the head, moving the hint and the pointer
+            // of the external catalog to it
+            boolean publishedHead = false;
             if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(
-                        fileChangesCollector,
-                        indexFiles.stream()
-                                .filter(
-                                        index ->
-                                                index.indexFile()
-                                                        .indexType()
-                                                        .equals(DELETION_VECTORS_INDEX))
-                                .collect(Collectors.toList()),
-                        snapshot,
-                        baseMetadataPath,
-                        abandonedLastColumnId,
-                        abandonedNextRowId);
+                publishedHead =
+                        createMetadataWithBase(
+                                fileChangesCollector,
+                                indexFiles.stream()
+                                        .filter(
+                                                index ->
+                                                        index.indexFile()
+                                                                .indexType()
+                                                                .equals(DELETION_VECTORS_INDEX))
+                                        .collect(Collectors.toList()),
+                                snapshot,
+                                baseMetadataPath,
+                                abandonedLastColumnId,
+                                abandonedNextRowId);
             } else {
                 RebuildRequest rebuild =
                         new RebuildRequest(
                                 abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
                 if (missingBaseStrategy == IcebergOptions.MissingBaseStrategy.REPLAY) {
-                    rebuild = replayOrRebuild(snapshot, fileChangesCollector, rebuild);
+                    ReplayOutcome replayed =
+                            replayOrRebuild(snapshot, fileChangesCollector, rebuild);
+                    rebuild = replayed.rebuild;
+                    publishedHead = replayed.publishedHead;
                 }
                 if (rebuild != null) {
-                    createMetadataWithoutBase(
-                            snapshot,
-                            rebuild.inheritUuid,
-                            rebuild.lastColumnIdFloor,
-                            rebuild.nextRowIdFloor);
+                    publishedHead =
+                            createMetadataWithoutBase(
+                                    snapshot,
+                                    rebuild.inheritUuid,
+                                    rebuild.lastColumnIdFloor,
+                                    rebuild.nextRowIdFloor);
                 }
             }
 
-            // only after the replacement is durable, so readers keep a working head
-            boolean retired = !retireSuffix || retireAbandonedSuffix(snapshot);
+            // only after the replacement is durable, so readers keep a working head, and only by
+            // the callback whose own publication moved the hint and the pointer of the catalog to
+            // this snapshot: the head being this snapshot now does not say that the catalog left
+            // the versions above it. The leftovers wait for the next head, and the marker stays
+            boolean retired = !retireSuffix || (publishedHead && retireAbandonedSuffix(snapshot));
             if (suspectRollback && retired) {
                 // the listing ran and every leftover above the head is gone
                 clearRetirePending(snapshot, pending);
@@ -559,8 +572,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * Rebuilds the metadata from every data file of the snapshot that was checked. The snapshot is
      * not read again by its id: a rollback can give the id to another commit, and the work is
      * abandoned when the snapshot on disk is not the checked one any more.
+     *
+     * <p>Returns whether the publication of the rebuild made the snapshot the head, which moved the
+     * hint and the pointer of the external catalog to it.
      */
-    private void createMetadataWithoutBase(
+    private boolean createMetadataWithoutBase(
             Snapshot paimonSnapshot,
             @Nullable String inheritUuid,
             int lastColumnIdFloor,
@@ -570,7 +586,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         replayPoint(ReplayPoint.REBUILD, snapshotId);
         if (!isCurrentSource(paimonSnapshot)) {
             abandonRebuild(paimonSnapshot);
-            return;
+            return false;
         }
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(paimonSnapshot);
         SchemaCache schemaCache = new SchemaCache();
@@ -589,7 +605,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             // a rollback deletes the manifests of the snapshots it drops
             if (isMissingFile(e) && !isCurrentSource(paimonSnapshot)) {
                 abandonRebuild(paimonSnapshot);
-                return;
+                return false;
             }
             throw e;
         }
@@ -716,7 +732,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 publishUnderLock(
                         paimonSnapshot,
                         lock -> writeAndPoint(lock, paimonSnapshot, metadata, null, null));
-        if (publication != null && publication.head) {
+        boolean head = publication != null && publication.head;
+        if (head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references. The
             // files are chosen here and deleted under the lock, while the publication stands
@@ -730,6 +747,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             files.addAll(applicableMetadataFiles(snapshotId));
             deleteUnderLock(paimonSnapshot, publication.generation, files);
         }
+        return head;
     }
 
     private void abandonRebuild(Snapshot paimonSnapshot) {
@@ -891,12 +909,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * commit so a retry finishes the job; the manifests they reference stay on storage (the shared
      * prefix makes reference counting non-trivial), and nothing removes them later.
      *
-     * <p>The head retires them, and so does a snapshot that a later commit overtook, once the hint
-     * names no version above the head: until a head is published, the hint and the pointer of the
-     * catalog may still name one of them. The versions above the head are listed here, and deleted
-     * under the table lock, which checks the head again for every one of them: a commit that came
-     * after the listing makes its own version a valid one. Returns false, and deletes nothing more,
-     * when the versions may not be retired or the publication of the snapshot was replaced.
+     * <p>Only the head retires them, and only the callback whose own publication made the snapshot
+     * the head: until a head is published, the hint and the pointer of the catalog may still name
+     * one of them. The hint cannot say that the catalog left them, because it is written before the
+     * pointer moves, and a snapshot that a later commit overtook never retires them. The versions
+     * above the head are listed here, and deleted under the table lock, which checks the head again
+     * for every one of them: a commit that came after the listing makes its own version a valid
+     * one. Returns false, and deletes nothing more, when the versions may not be retired or the
+     * publication of the snapshot was replaced.
      */
     private boolean retireAbandonedSuffix(Snapshot source) throws IOException {
         List<Path> abandoned = new ArrayList<>();
@@ -1171,15 +1191,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     /**
-     * Whether the metadata of the snapshot is in place, and the snapshot is the head, or the hint,
-     * and the pointer of the catalog that moves with it, names no version above the head.
+     * Whether the metadata of the snapshot is in place and its snapshot is the current head. The
+     * caller is a callback whose own publication made the snapshot the head, see {@link
+     * #retireAbandonedSuffix}: the hint is written before the external catalog pointer, so neither
+     * the hint nor the head alone says that the catalog no longer refers to an abandoned version.
+     *
+     * <p>The hint must name the head as well. The callback published the head at some time, but a
+     * later commit may have moved the hint and the pointer past it, and a rollback to the snapshot
+     * makes it the head again while the catalog still names that later version. An unreadable hint
+     * does not name the head either.
      */
     private boolean mayRetireAboveHead(Snapshot source) {
         if (!isPublished(source, null)) {
             return false;
         }
         Long latest = table.snapshotManager().latestSnapshotId();
-        return latest != null && (latest == source.id() || readVersionHint() <= latest);
+        return latest != null && latest == source.id() && readVersionHint() == latest;
     }
 
     /** Deletions that run under the table lock. */
@@ -1609,8 +1636,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return identity == null || identity.equals(commitIdentity(snapshot));
     }
 
-    /** Builds the metadata on top of the base file, then exposes it or falls back to a rebuild. */
-    private void createMetadataWithBase(
+    /**
+     * Builds the metadata on top of the base file, then exposes it or falls back to a rebuild.
+     * Returns whether the publication made the snapshot the head, which moved the hint and the
+     * pointer of the external catalog to it.
+     */
+    private boolean createMetadataWithBase(
             FileChangesCollector fileChangesCollector,
             List<IndexManifestEntry> indexFiles,
             Snapshot snapshot,
@@ -1630,17 +1661,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         true);
         switch (result.kind) {
             case STALE_SOURCE:
-                return;
+                return false;
             case NEEDS_REBUILD:
-                createMetadataWithoutBase(
+                return createMetadataWithoutBase(
                         snapshot,
                         result.inheritUuid,
                         result.lastColumnIdFloor,
                         result.nextRowIdFloor);
-                return;
             case COMPLETED:
-                exposeMetadataWithBase(result, snapshot, baseMetadata, baseMetadataPath);
-                return;
+                return exposeMetadataWithBase(result, snapshot, baseMetadata, baseMetadataPath);
             default:
                 throw new IllegalStateException("Unknown build result " + result.kind);
         }
@@ -2010,8 +2039,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return BuildResult.completed(metadata, toExpireExceptLast);
     }
 
-    /** Writes the built metadata, and publishes it and cleans up when it is the head. */
-    private void exposeMetadataWithBase(
+    /**
+     * Writes the built metadata, and publishes it and cleans up when it is the head. Returns
+     * whether the publication made the snapshot the head.
+     */
+    private boolean exposeMetadataWithBase(
             BuildResult result,
             Snapshot snapshot,
             IcebergMetadata baseMetadata,
@@ -2027,7 +2059,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         lock ->
                                 writeAndPoint(
                                         lock, snapshot, metadata, baseMetadata, baseMetadataPath));
-        if (publication != null && publication.head) {
+        boolean head = publication != null && publication.head;
+        if (head) {
             // cleanup only after the catalog serves the new head: a skipped or failed
             // publication must not delete files an external pointer still references. The
             // files are chosen here and deleted under the lock, while the publication stands
@@ -2042,6 +2075,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
             deleteUnderLock(snapshot, publication.generation, files);
         }
+        return head;
     }
 
     interface FileChangesCollector {
@@ -3072,6 +3106,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
     }
 
+    /** What the replay of a missing base left to do, and whether it published the head. */
+    static final class ReplayOutcome {
+
+        /** What a rebuild has to inherit, or null when nothing is left to do. */
+        @Nullable final RebuildRequest rebuild;
+        /**
+         * Whether the replay made the snapshot the head, see {@link
+         * IcebergCommitCallback#publishUnderLock}.
+         */
+        final boolean publishedHead;
+
+        ReplayOutcome(@Nullable RebuildRequest rebuild, boolean publishedHead) {
+            this.rebuild = rebuild;
+            this.publishedHead = publishedHead;
+        }
+    }
+
     /** The reason a replay is not attempted, or null when the table is eligible. */
     @Nullable
     private String replayIneligibleReason() {
@@ -3100,16 +3151,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     /**
      * Replays the Iceberg snapshots after the newest valid older metadata version instead of
-     * rebuilding from every data file. Returns null when nothing is left to do, and what a rebuild
-     * has to inherit when no replay was possible, or it failed before it exposed anything, and the
-     * snapshot is still the head.
+     * rebuilding from every data file. The outcome has no rebuild when nothing is left to do, and
+     * what a rebuild has to inherit when no replay was possible, or it failed before it exposed
+     * anything, and the snapshot is still the head. It also says whether the replay made the
+     * snapshot the head.
      */
-    @Nullable
-    private RebuildRequest replayOrRebuild(
+    private ReplayOutcome replayOrRebuild(
             Snapshot snapshot, FileChangesCollector collector, RebuildRequest rebuild)
             throws IOException {
         if (snapshot.id() == Snapshot.FIRST_SNAPSHOT_ID) {
-            return rebuild;
+            return new ReplayOutcome(rebuild, false);
         }
         String reason = replayIneligibleReason();
         if (reason != null) {
@@ -3117,7 +3168,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     "Table {} does not replay missing Iceberg metadata ({}), so it is rebuilt.",
                     table.fullName(),
                     reason);
-            return rebuild;
+            return new ReplayOutcome(rebuild, false);
         }
         // A rollback can replace the snapshot after the last check of it and before the metadata
         // is written, and only a lock that the rollbacks and the commits of the table take closes
@@ -3136,7 +3187,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             IcebergOptions.METADATA_MISSING_BASE_STRATEGY.key(),
                             IcebergOptions.MissingBaseStrategy.REBUILD));
         }
-        return new IcebergGapReplay(this, snapshot, collector, rebuild).run();
+        IcebergGapReplay replay = new IcebergGapReplay(this, snapshot, collector, rebuild);
+        RebuildRequest next = replay.run();
+        return new ReplayOutcome(next, replay.publishedHead());
     }
 
     // -------------------------------------------------------------------------------------

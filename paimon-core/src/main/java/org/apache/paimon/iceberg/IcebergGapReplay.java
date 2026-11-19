@@ -121,6 +121,10 @@ final class IcebergGapReplay {
     // true once the metadata file may exist: from then on no file of the replay is deleted
     private boolean exposing = false;
 
+    // true once the publication of the replay made the snapshot the head, which moved the hint
+    // and the pointer of the external catalog to it
+    private boolean publishedHead = false;
+
     IcebergGapReplay(
             IcebergCommitCallback callback,
             Snapshot snapshot,
@@ -144,6 +148,15 @@ final class IcebergGapReplay {
         this.maxBaseManifestBytes =
                 options.get(IcebergOptions.REPLAY_MAX_BASE_MANIFEST_BYTES).getBytes();
         this.maxDurationNanos = nanosOf(options.get(IcebergOptions.REPLAY_MAX_DURATION));
+    }
+
+    /**
+     * Whether the publication of the replay made the snapshot the head. Only then did the replay
+     * move the hint and the pointer of the external catalog, and only then may its callback retire
+     * the versions above the head.
+     */
+    boolean publishedHead() {
+        return publishedHead;
     }
 
     private static long nanosOf(Duration duration) {
@@ -862,6 +875,7 @@ final class IcebergGapReplay {
             exposing = false;
             deleteCreatedFiles();
         }
+        publishedHead = publication.head;
         if (publication.head) {
             // chosen here, and deleted under the lock while the publication stands. What
             // depends on the files the metadata lists is chosen from the replay's own

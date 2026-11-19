@@ -1202,7 +1202,8 @@ public class IcebergGapReplayTest {
                 .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, retained + 1));
 
         // and so is the marker that a rollback left, unless another rollback wrote it again
-        // after the versions were listed: that one left versions that are not in the listing
+        // after the versions were listed. The commit in between has no Iceberg metadata, so the
+        // hint still names the head, which is what lets the versions above it be retired
         t.append(t.enabled, 82);
         t.append(t.enabled, 83);
         retained = t.latest() - 1;
@@ -1218,13 +1219,49 @@ public class IcebergGapReplayTest {
                 IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
                 -1,
                 () -> {
-                    t.append(t.enabled, 84);
+                    t.append(t.disabled, 84);
                     t.enabled.rollbackTo(again);
                 });
         assertThat(versionFiles(t.enabled)).doesNotContain("v" + (retained + 1) + ".metadata.json");
         assertThat(metadataFileNames(t.enabled)).contains("retire-pending");
 
-        // the same holds when the callback publishes the metadata of the snapshot itself
+        // but not when a commit that came after published its own version: the hint names it,
+        // and so may the pointer of the catalog, which a rollback to the snapshot does not move
+        // back. The callback published the head before that commit, and that does not make the
+        // version above the head its to retire. It stays with the marker, and the next head
+        // replaces it
+        t.append(t.enabled, 110);
+        t.append(t.enabled, 111);
+        retained = t.latest() - 1;
+        retainedIdentifier = t.identifier - 1;
+        t.enabled.rollbackTo(retained);
+        long kept = retained;
+        events = new ArrayList<>();
+        interruptOnce(
+                t,
+                Collections.emptyMap(),
+                retainedIdentifier,
+                events,
+                IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
+                -1,
+                () -> {
+                    t.append(t.enabled, 112);
+                    t.enabled.rollbackTo(kept);
+                });
+        assertThat(t.latest()).isEqualTo(retained);
+        assertThat(versionFiles(t.enabled)).contains("v" + (retained + 1) + ".metadata.json");
+        assertThat(readVersionHint(t.enabled)).isEqualTo(retained + 1);
+        assertThat(metadataFileNames(t.enabled)).contains("retire-pending");
+        t.append(t.enabled, 113);
+        assertThat(readVersionHint(t.enabled)).isEqualTo(t.latest());
+        assertThat(versionFiles(t.enabled))
+                .doesNotContain("v" + (t.latest() + 1) + ".metadata.json");
+        assertThat(metadataFileNames(t.enabled)).doesNotContain("retire-pending");
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrderElementsOf(paimonRows(t.enabled, t.latest()));
+
+        // the marker is kept in the same way when the callback publishes the metadata of the
+        // snapshot itself
         t.append(t.enabled, 85);
         t.append(t.enabled, 86);
         t.append(t.enabled, 87);
@@ -1240,7 +1277,7 @@ public class IcebergGapReplayTest {
                 IcebergCommitCallback.ReplayPoint.BEFORE_CLEANUP,
                 -1,
                 () -> {
-                    t.append(t.enabled, 89);
+                    t.append(t.disabled, 89);
                     t.enabled.rollbackTo(published);
                 });
         assertThat(events).contains("CLEANUP_LOCKED:" + published);
