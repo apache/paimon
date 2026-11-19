@@ -34,6 +34,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
@@ -72,13 +73,15 @@ public class KeyValueFileWriterFactory {
     private final FileIndexOptions fileIndexOptions;
     private final Set<String> managedBlobFields;
     @Nullable private final PrimaryKeyBlobExternalizer blobExternalizer;
+    @Nullable private final int[] deleteRowFieldsProjection;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
             long schemaId,
             FileWriterContextFactory formatContext,
             long suggestedFileSize,
-            CoreOptions options) {
+            CoreOptions options,
+            @Nullable TableSchema tableSchema) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = formatContext.keyType;
@@ -87,6 +90,10 @@ public class KeyValueFileWriterFactory {
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
         this.fileIndexOptions = options.indexColumnsOptions();
+        this.deleteRowFieldsProjection =
+                tableSchema == null
+                        ? null
+                        : DeleteRowFieldsProjector.createProjection(tableSchema, options);
         this.managedBlobFields = managedBlobFields();
         this.blobExternalizer =
                 managedBlobFields.isEmpty()
@@ -203,7 +210,10 @@ public class KeyValueFileWriterFactory {
                 formatContext.thinModeEnabled,
                 options,
                 fileIndexOptions,
-                isExternalPath);
+                isExternalPath,
+                deleteRowFieldsProjection == null
+                        ? null
+                        : new DeleteRowFieldsProjector(deleteRowFieldsProjection));
     }
 
     private KeyValueDataFileWriter createDataFileWriter(
@@ -216,6 +226,10 @@ public class KeyValueFileWriterFactory {
         FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
         Set<String> dataFileManagedBlobFields =
                 key.isChangelog ? Collections.emptySet() : managedBlobFields;
+        DeleteRowFieldsProjector deleteRowFieldsProjector =
+                key.isChangelog || deleteRowFieldsProjection == null
+                        ? null
+                        : new DeleteRowFieldsProjector(deleteRowFieldsProjection);
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -230,7 +244,8 @@ public class KeyValueFileWriterFactory {
                         fileSource,
                         indexOptions,
                         isExternalPath,
-                        dataFileManagedBlobFields)
+                        dataFileManagedBlobFields,
+                        deleteRowFieldsProjector)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
                         formatContext.fileWriterContext(key, writerFactory),
@@ -244,7 +259,8 @@ public class KeyValueFileWriterFactory {
                         fileSource,
                         indexOptions,
                         isExternalPath,
-                        dataFileManagedBlobFields);
+                        dataFileManagedBlobFields,
+                        deleteRowFieldsProjector);
     }
 
     private Set<String> managedBlobFields() {
@@ -269,6 +285,25 @@ public class KeyValueFileWriterFactory {
 
     public static Builder builder(
             FileIO fileIO,
+            TableSchema schema,
+            RowType keyType,
+            RowType valueType,
+            FileFormat fileFormat,
+            Function<String, FileStorePathFactory> format2PathFactory,
+            long suggestedFileSize) {
+        return new Builder(
+                fileIO,
+                schema.id(),
+                keyType,
+                valueType,
+                fileFormat,
+                format2PathFactory,
+                suggestedFileSize,
+                schema);
+    }
+
+    public static Builder builder(
+            FileIO fileIO,
             long schemaId,
             RowType keyType,
             RowType valueType,
@@ -282,7 +317,8 @@ public class KeyValueFileWriterFactory {
                 valueType,
                 fileFormat,
                 format2PathFactory,
-                suggestedFileSize);
+                suggestedFileSize,
+                null);
     }
 
     /** Builder of {@link KeyValueFileWriterFactory}. */
@@ -295,6 +331,7 @@ public class KeyValueFileWriterFactory {
         private final FileFormat fileFormat;
         private final Function<String, FileStorePathFactory> format2PathFactory;
         private final long suggestedFileSize;
+        @Nullable private final TableSchema tableSchema;
 
         private Builder(
                 FileIO fileIO,
@@ -303,7 +340,8 @@ public class KeyValueFileWriterFactory {
                 RowType valueType,
                 FileFormat fileFormat,
                 Function<String, FileStorePathFactory> format2PathFactory,
-                long suggestedFileSize) {
+                long suggestedFileSize,
+                @Nullable TableSchema tableSchema) {
             this.fileIO = fileIO;
             this.schemaId = schemaId;
             this.keyType = keyType;
@@ -311,6 +349,7 @@ public class KeyValueFileWriterFactory {
             this.fileFormat = fileFormat;
             this.format2PathFactory = format2PathFactory;
             this.suggestedFileSize = suggestedFileSize;
+            this.tableSchema = tableSchema;
         }
 
         public KeyValueFileWriterFactory build(
@@ -325,7 +364,7 @@ public class KeyValueFileWriterFactory {
                             format2PathFactory,
                             options);
             return new KeyValueFileWriterFactory(
-                    fileIO, schemaId, context, suggestedFileSize, options);
+                    fileIO, schemaId, context, suggestedFileSize, options, tableSchema);
         }
     }
 
