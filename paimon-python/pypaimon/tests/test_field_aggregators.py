@@ -2171,6 +2171,56 @@ class FieldNestedUpdateAggTest(unittest.TestCase):
         )
         self.assertCountEqual(accumulator, [self.row(0, 1, "A_eq2", 1, 10, fields=fields)])
 
+    def test_field_nested_update_row_sequence_uses_schema_order_and_nulls_first(self):
+        seq_fields = [
+            DataField(0, "z", AtomicType("INT")),
+            DataField(1, "a", AtomicType("INT")),
+        ]
+        fields = [
+            DataField(0, "k0", AtomicType("INT")),
+            DataField(1, "v", AtomicType("STRING")),
+            DataField(2, "seq", RowType(True, seq_fields)),
+        ]
+        agg = self._make(
+            self._make_data_type(fields=fields),
+            CoreOptions(
+                Options(
+                    {
+                        "fields.field0.nested-key": "k0",
+                        "fields.field0.nested-sequence-field": "seq",
+                        "fields.field0.nested-sequence-overwrite-on-equal": "false",
+                    }
+                )
+            ),
+        )
+
+        def nested(value, z_value, a_value):
+            # Insert ``a`` before ``z`` so comparison cannot follow dict order.
+            return {"k0": 1, "v": value, "seq": {"a": a_value, "z": z_value}}
+
+        accumulator = agg.agg(None, [nested("first", 1, 9)])
+        accumulator = agg.agg(accumulator, [nested("second", 1, 9)])
+        self.assertEqual([row["v"] for row in accumulator], ["first"])
+
+        # Schema order compares z before a. A larger z wins even when a is smaller.
+        accumulator = agg.agg(accumulator, [nested("greater-z", 2, 0)])
+        self.assertEqual([row["v"] for row in accumulator], ["greater-z"])
+
+        # NULLS FIRST: a null z is older than a non-null z.
+        accumulator = agg.agg(accumulator, [nested("null-z", None, 100)])
+        self.assertEqual([row["v"] for row in accumulator], ["greater-z"])
+
+        row_agg_input = [
+            self.row(1, "row-first", GenericRow([1, 9], seq_fields), fields=fields),
+            self.row(1, "row-second", GenericRow([1, 9], seq_fields), fields=fields),
+        ]
+        accumulator = agg.agg(None, row_agg_input[:1])
+        accumulator = agg.agg(accumulator, row_agg_input[1:])
+        self.assertCountEqual(
+            accumulator,
+            [self.row(1, "row-first", GenericRow([1, 9], seq_fields), fields=fields)],
+        )
+
     def test_field_nested_update_with_count_limit_with_sequence_field_without_nested_key(self):
         with self.assertRaisesRegex(
                 ValueError,

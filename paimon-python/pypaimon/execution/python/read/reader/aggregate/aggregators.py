@@ -216,11 +216,13 @@ def is_blank(s: str) -> bool:
     return True
 
 
-def _compare_objects(left: Any, right: Any) -> int:
+def _compare_objects(left: Any, right: Any, data_type: Optional[DataType] = None) -> int:
     """
     Compare two comparable Python objects using Paimon's ordering.
 
-    Nulls are ordered before non-null values (Nulls First).
+    Nulls are ordered before non-null values (Nulls First). ROW values are
+    compared recursively in schema field order. MAP and ARRAY stay on the
+    scalar comparison path.
     """
 
     if left is None:
@@ -229,16 +231,56 @@ def _compare_objects(left: Any, right: Any) -> int:
     if right is None:
         return 1
 
+    if isinstance(data_type, RowType):
+        return _compare_row_values(left, right, data_type)
+
     return (left > right) - (left < right)
 
 
-def _compare_tuple(left: Tuple[Any, ...], right: Tuple[Any, ...]) -> int:
+def _compare_row_values(left: Any, right: Any, row_type: RowType) -> int:
+    """Compare ROW sequence values field-by-field in schema order."""
+
+    for index, field in enumerate(row_type.fields):
+        cmp = _compare_objects(
+            _row_sequence_field(left, field, index),
+            _row_sequence_field(right, field, index),
+            field.type,
+        )
+        if cmp != 0:
+            return cmp
+    return 0
+
+
+def _row_sequence_field(value: Any, field, index: int) -> Any:
+    """Read one ROW field by schema name, then by schema position."""
+
+    if isinstance(value, dict):
+        return value.get(field.name)
+    if isinstance(value, InternalRow):
+        named_fields = getattr(value, "fields", None)
+        if named_fields is not None:
+            for position, candidate in enumerate(named_fields):
+                if candidate.name == field.name:
+                    return value.get_field(position)
+        return value.get_field(index)
+    raise TypeError(
+        "Cannot compare ROW sequence value of type '{}'."
+        .format(type(value).__name__)
+    )
+
+
+def _compare_tuple(
+        left: Tuple[Any, ...],
+        right: Tuple[Any, ...],
+        field_types: Optional[List[DataType]] = None,
+) -> int:
     """
     Lexicographical comparison with Nulls First.
     """
 
-    for l, r in zip(left, right):
-        cmp = _compare_objects(l, r)
+    for index, (l, r) in enumerate(zip(left, right)):
+        data_type = None if field_types is None else field_types[index]
+        cmp = _compare_objects(l, r, data_type)
         if cmp != 0:
             return cmp
 
@@ -944,13 +986,20 @@ class FieldNestedUpdateAgg(FieldAggregator):
             self.key_projection = None
 
         if self.nested_sequence_field:
+            sequence_indexes = [
+                nested_type.get_field_index(name) for name in self.nested_sequence_field
+            ]
             self.sequence_projection = FieldProjection.from_fields(
-                [nested_type.get_field_index(name) for name in self.nested_sequence_field],
+                sequence_indexes,
                 self.nested_sequence_field
             )
+            self.sequence_field_types = [
+                nested_type.fields[index].type for index in sequence_indexes
+            ]
             self.has_sequence_field = True
         else:
             self.sequence_projection = None
+            self.sequence_field_types = None
             self.has_sequence_field = False
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
@@ -1058,7 +1107,7 @@ class FieldNestedUpdateAgg(FieldAggregator):
         new_seq_key = self.sequence_projection.apply(new_row)
         old_seq_key = self.sequence_projection.apply(old_row)
 
-        return _compare_tuple(new_seq_key, old_seq_key)
+        return _compare_tuple(new_seq_key, old_seq_key, self.sequence_field_types)
 
     def _add_non_null_rows(
             self,

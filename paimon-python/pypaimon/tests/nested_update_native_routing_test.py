@@ -29,6 +29,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
 from pypaimon.common.native_compatibility import (
     nested_update_overwrite_on_equal_false_reason,
     require_native_compatible,
@@ -276,3 +277,118 @@ def test_default_aggregate_function_nested_update_false_routes_to_python(tmp_pat
     native_read.assert_not_called()
     with pytest.raises(RuntimeError, match='without a Python fallback'):
         require_native_compatible(reopened.options, allow_python_fallback=False)
+
+
+def _commit_arrow(table, data):
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(data)
+        messages = writer.prepare_commit()
+        assert messages
+        commit.commit(messages)
+        return messages
+    finally:
+        writer.close()
+        commit.close()
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+def test_table_source_overwrite_on_equal_false_falls_back_before_native_source(tmp_path):
+    """A Paimon source with overwrite=false must use Python MERGE."""
+    source = _table(tmp_path, 'false', name='merge_source')
+    _commit_arrow(source, _batch('first', 'second'))
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'merge_target')})
+    catalog.create_database('default', True)
+    catalog.create_table(
+        'default.t',
+        Schema.from_pyarrow_schema(_SCHEMA, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+            'write.native.enabled': 'false',
+        }),
+        False)
+    target = catalog.get_table('default.t')
+    _commit_arrow(target, pa.Table.from_pylist([
+        {'id': 1, 'updates': [{'key': 1, 'value': 'seed', 'seq': 1}]},
+    ], schema=_SCHEMA))
+    merge_target = target.copy({'write.native.enabled': 'true'})
+
+    def _reject_native_source(table):
+        if table.table_path == source.table_path:
+            raise AssertionError('Native source must not be created')
+        return object()
+
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table',
+                  side_effect=_reject_native_source), \
+            patch('pypaimon.execution.native.write.native_commit.create_native_write_table',
+                  side_effect=_reject_native_source), \
+            patch('pypaimon.execution.native.table._native_table',
+                  side_effect=AssertionError('Native source must not be created')):
+        builder = merge_target.new_batch_write_builder()
+        update, commit = builder.new_update(), builder.new_commit()
+        try:
+            messages = update.merge_into(
+                source, on=['id'],
+                when_matched=[WhenMatched.update({'updates': source_col('updates')})])
+            assert messages
+            commit.commit(messages)
+        finally:
+            commit.close()
+
+    reopened = CatalogFactory.create({'warehouse': str(tmp_path / 'merge_target')}).get_table('default.t')
+    assert _read_values(reopened) == ['first']
+
+
+_ROW_SEQ = pa.struct([('event', pa.int64()), ('sub', pa.int32())])
+_ROW_NESTED = pa.struct([
+    ('key', pa.int64()),
+    ('value', pa.string()),
+    ('seq', _ROW_SEQ),
+])
+_ROW_SCHEMA = pa.schema([
+    ('id', pa.int64()),
+    ('updates', pa.list_(_ROW_NESTED)),
+])
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+def test_row_sequence_equal_keeps_first_across_commit(tmp_path):
+    """Same nested key and ROW sequence keeps the first payload."""
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'row_seq')})
+    catalog.create_database('default', True)
+    options = _options('false')
+    catalog.create_table(
+        'default.t',
+        Schema.from_pyarrow_schema(_ROW_SCHEMA, primary_keys=['id'], options=options),
+        False)
+    table = catalog.get_table('default.t')
+    sequence = {'event': 5, 'sub': 1}
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, BatchTableWrite)
+        assert not isinstance(writer, NativeBatchTableWrite)
+        writer.write_arrow(pa.Table.from_pylist([
+            {'id': 1, 'updates': [{'key': 7, 'value': 'first', 'seq': sequence}]},
+        ], schema=_ROW_SCHEMA))
+        writer.write_arrow(pa.Table.from_pylist([
+            {'id': 1, 'updates': [{'key': 7, 'value': 'second', 'seq': dict(sequence)}]},
+        ], schema=_ROW_SCHEMA))
+        messages = writer.prepare_commit()
+        assert messages
+        commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+
+    reopened = CatalogFactory.create({'warehouse': str(tmp_path / 'row_seq')}).get_table('default.t')
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.table_read.NativeTableRead') as native_read:
+        assert _read_values(reopened) == ['first']
+    native_read.assert_not_called()
