@@ -27,7 +27,9 @@ import org.apache.paimon.utils.Range;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.List;
@@ -67,7 +69,7 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
         checkArgument(!args.isNullAt(2), "The order_by argument is required.");
         List<String> fields = DataEvolutionRangeSortPlan.parseSortFields(args.getString(2));
         String where = args.isNullAt(3) ? null : args.getString(3);
-        return modifySparkTable(
+        return modifySparkTableRefreshingCacheOnFailure(
                 ident,
                 sparkTable -> {
                     checkArgument(
@@ -93,6 +95,15 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                     }
                     return new InternalRow[] {newInternalRow(plans.size())};
                 });
+    }
+
+    @Override
+    protected void refreshSparkCache(Identifier ident, Table table) {
+        super.refreshSparkCache(ident, table);
+        // Spark analyzes queries reading _ROW_ID with a separate metadata-bearing relation.
+        SparkShimLoader.shim()
+                .classicApi()
+                .recacheByPlan(spark(), createRelation(ident, table).withMetadataColumns());
     }
 
     @Override

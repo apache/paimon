@@ -50,6 +50,9 @@ public interface FileStoreCommit extends AutoCloseable {
      */
     FileStoreCommit dataEvolutionRangeSortCheck();
 
+    /** Whether this committer rejected its last range sort with this failure before publication. */
+    boolean isRangeSortConflict(RuntimeException failure);
+
     FileStoreCommit withOperation(Snapshot.Operation operation);
 
     /** Find out which committables need to be retried when recovering from the failure. */

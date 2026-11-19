@@ -193,6 +193,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
     private RowIdCheck rowIdCheck = RowIdCheck.DEFAULT;
+    @Nullable private RuntimeException rangeSortConflict;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -306,6 +307,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public FileStoreCommit dataEvolutionRangeSortCheck() {
         rowIdCheck = RowIdCheck.RANGE_SORT;
         return this;
+    }
+
+    @Override
+    public boolean isRangeSortConflict(RuntimeException failure) {
+        return rangeSortConflict != null && rangeSortConflict == failure;
     }
 
     @Override
@@ -898,6 +904,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private Map<Pair<BinaryRow, Integer>, Long> prepareConflictChecks(
             List<CommitMessage> commitMessages) {
+        rangeSortConflict = null;
         if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
@@ -1477,6 +1484,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
+                }
+                if (rowIdCheck == RowIdCheck.RANGE_SORT && commitKind == CommitKind.COMPACT) {
+                    rangeSortConflict = exception.get();
                 }
                 throw exception.get();
             }

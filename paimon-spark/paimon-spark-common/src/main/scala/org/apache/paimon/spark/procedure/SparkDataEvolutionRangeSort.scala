@@ -51,7 +51,7 @@ object SparkDataEvolutionRangeSort {
       fields: util.List[String],
       plans: util.List[DataEvolutionRangeSortPlan],
       spark: SparkSession): Unit = {
-    val parallelism = spark.sessionState.conf.numShufflePartitions
+    val parallelism = spark.sessionState.conf.defaultNumShufflePartitions
     val splits = plans.asScala
       .flatMap(_.readSplits().asScala)
       .map {

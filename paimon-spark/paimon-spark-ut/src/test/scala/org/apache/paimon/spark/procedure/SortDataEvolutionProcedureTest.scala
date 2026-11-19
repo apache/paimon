@@ -18,17 +18,89 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.data.{GenericRow, Timestamp}
+import org.apache.paimon.fs.Path
+import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.{CommitCallback, CommitMessage, CommitMessageImpl}
 import org.apache.paimon.types.DataTypes
+import org.apache.paimon.utils.Range
 
 import org.apache.spark.sql.Row
+import org.assertj.core.api.Assertions.assertThatThrownBy
 
 import scala.collection.JavaConverters._
 
 class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
+
+  test("a post-commit sort failure refreshes cached row IDs") {
+    withTable("T") {
+      val callback = classOf[FailingRangeSortCallback].getName
+      sql(s"""CREATE TABLE T (id INT) TBLPROPERTIES (
+             |'data-evolution.enabled'='true', 'row-tracking.enabled'='true',
+             |'write-only'='true', 'commit.callbacks'='$callback')""".stripMargin)
+      sql("INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES (2),(1) AS s(id)")
+      def rowIds = sql("SELECT _ROW_ID, id FROM T")
+      val cached = rowIds.cache()
+      try {
+        checkAnswer(cached, Seq(Row(0L, 2), Row(1L, 1)))
+        assertThatThrownBy(() => sql("CALL sys.sort_data_evolution('T', '[0,1]', 'id')").collect())
+          .hasStackTraceContaining("File deletion conflicts detected")
+        val table = loadTable("T")
+        assert(table.latestSnapshot().get().id() == 2L)
+        val files = table.newSnapshotReader().read().dataSplits().asScala.flatMap {
+          split =>
+            split.dataFiles().asScala.map(file => new Path(split.bucketPath(), file.fileName()))
+        }
+        assert(files.nonEmpty && files.forall(table.fileIO().exists))
+        checkAnswer(rowIds, Seq(Row(2L, 1), Row(3L, 2)))
+      } finally {
+        cached.unpersist()
+      }
+    }
+  }
+
+  test("a rejected range sort removes its staged files and keeps the winning sort") {
+    withTable("T") {
+      sql("""CREATE TABLE T (id INT, payload BINARY, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+            |'data-evolution.enabled'='true', 'row-tracking.enabled'='true', 'write-only'='true',
+            |'blob-field'='payload', 'vector-field'='embedding', 'field.embedding.vector-dim'='1',
+            |'vector.file.format'='parquet')""".stripMargin)
+      sql("""INSERT INTO T SELECT /*+ COALESCE(1) */ id, CAST(CAST(id AS STRING) AS BINARY),
+            |array(CAST(id AS FLOAT)) FROM VALUES (2),(1) AS s(id)""".stripMargin)
+      val table = loadTable("T")
+      val snapshot = table.latestSnapshot().get()
+      val fields = Seq("id").asJava
+      val plans = DataEvolutionRangeSortPlan.plan(table, snapshot, new Range(0, 1), null, fields)
+      def bucketFiles: Set[String] =
+        table
+          .fileIO()
+          .listStatus(new Path(table.location(), "bucket-0"))
+          .map(_.getPath.getName)
+          .toSet
+
+      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+        checkAnswer(sql("CALL sys.sort_data_evolution('T', '[0,1]', 'id')"), Row(1) :: Nil)
+        val committed = table.latestSnapshot().get().id()
+        val files = bucketFiles
+        assert(files.exists(_.endsWith(".blob")) && files.exists(_.contains(".vector.")))
+        assertThatThrownBy(
+          () => SparkDataEvolutionRangeSort.execute(table, snapshot, fields, plans, spark))
+          .hasStackTraceContaining("File deletion conflicts detected")
+        assert(table.latestSnapshot().get().id() == committed)
+        assert(bucketFiles == files)
+        checkAnswer(
+          sql("SELECT _ROW_ID, _SEQUENCE_NUMBER, id, CAST(payload AS STRING), embedding[0] FROM T"),
+          Seq(Row(2L, committed, 1, "1", 1f), Row(3L, committed, 2, "2", 2f))
+        )
+      }
+    }
+  }
 
   test("range sort preserves nanoseconds and signed zeros in sort keys") {
     withTable("T") {
@@ -190,9 +262,13 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(ranges == Seq(Row(0L, 3L), Row(7L, 9L)))
       val start = ranges.head.getLong(0)
       val end = ranges.last.getLong(1)
+      val adaptiveInitialPartitions = if (workers == 1) "2" else "1"
       withSQLConf(
         "spark.sql.shuffle.partitions" -> workers.toString,
-        "spark.sql.adaptive.enabled" -> "true") {
+        "spark.sql.adaptive.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.initialPartitionNum" -> adaptiveInitialPartitions
+      ) {
         checkAnswer(
           sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
           Row(1) :: Nil)
@@ -212,4 +288,34 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(loadTable("T").latestSnapshot().get().id() == before + 1)
     }
   }
+}
+
+class FailingRangeSortCallback extends CommitCallback {
+
+  private var table: FileStoreTable = _
+
+  override def setTable(table: FileStoreTable): Unit = this.table = table
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (context.snapshot.commitKind() == CommitKind.COMPACT) {
+      val previous = table.snapshotManager().snapshot(context.snapshot.id() - 1)
+      val input = DataEvolutionRangeSortPlan
+        .plan(table, previous, new Range(0, 1), null, Seq("id").asJava)
+        .get(0)
+        .inputFiles()
+        .asInstanceOf[CommitMessageImpl]
+        .withCheckFromSnapshot(previous.id())
+      // Reuse the outer commit user and expose the inner rejection to its post-commit callback.
+      val nested = table.newCommit(context.snapshot.commitUser())
+      try {
+        nested.dataEvolutionRangeSortCheck().commit(Seq[CommitMessage](input).asJava)
+      } finally {
+        nested.close()
+      }
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
 }

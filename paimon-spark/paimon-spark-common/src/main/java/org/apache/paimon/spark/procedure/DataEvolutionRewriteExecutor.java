@@ -326,7 +326,12 @@ final class DataEvolutionRewriteExecutor {
                 try {
                     commit.commit(preparedMessages);
                 } catch (RuntimeException conflict) {
-                    if (isMergeConflict(conflict)) {
+                    if (commitConfigurer == RANGE_SORT_COMMIT) {
+                        // A post-commit callback can propagate a different writer's conflict.
+                        if (commit.isRangeSortConflict(conflict)) {
+                            abortRetryArtifacts(commit, preparedMessages, conflict, table);
+                        }
+                    } else if (isMergeConflict(conflict)) {
                         abortRetryArtifacts(commit, abortMessages, conflict, table);
                     }
                     throw conflict;
