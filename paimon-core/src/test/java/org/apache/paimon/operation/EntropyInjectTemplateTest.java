@@ -262,25 +262,24 @@ public class EntropyInjectTemplateTest {
     }
 
     @Test
-    public void testPlaceholderNeedsTemplateStrategy() {
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create(DATABASE, "bad"),
-                                        schemaBuilder()
-                                                .option(
-                                                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
-                                                        "file://" + sharedRoot + "/{hash}/bad")
-                                                .option(
-                                                        CoreOptions
-                                                                .DATA_FILE_EXTERNAL_PATHS_STRATEGY
-                                                                .key(),
-                                                        ExternalPathStrategy.ROUND_ROBIN.toString())
-                                                .build(),
-                                        false))
-                .rootCause()
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("{hash}");
+    public void testRoundRobinAcceptsLiteralPlaceholderDirectory() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE, "literal");
+        catalog.createTable(
+                identifier,
+                schemaBuilder()
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                "file://" + sharedRoot + "/{hash}/literal")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                ExternalPathStrategy.ROUND_ROBIN.toString())
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        write(table, 1, "a");
+
+        assertThat(table.newReadBuilder().newScan().plan().splits()).isNotEmpty();
+        assertThat(Files.isDirectory(sharedRoot.resolve("{hash}").resolve("literal"))).isTrue();
     }
 
     @Test

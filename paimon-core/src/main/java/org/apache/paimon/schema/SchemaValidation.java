@@ -476,16 +476,6 @@ public class SchemaValidation {
             if (templateStrategy) {
                 TemplateEntropyInjectExternalPathProvider.checkTemplate(
                         new Path(externalPath.trim()));
-            } else if (externalPath.contains(
-                    TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER)) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "External path '%s' can only contain the '%s' placeholder when '%s' is '%s', but it is '%s'.",
-                                externalPath.trim(),
-                                TemplateEntropyInjectExternalPathProvider.HASH_PLACEHOLDER,
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
-                                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
-                                options.externalPathStrategy()));
             }
         }
     }
