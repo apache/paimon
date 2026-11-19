@@ -19,11 +19,15 @@
 """Vector search read to read index files."""
 
 import logging
+import math
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import ExitStack, closing
+from heapq import nsmallest
 from threading import Lock
-from typing import TYPE_CHECKING, Callable, Dict, Generator, Iterable, Iterator, List, Optional
+from typing import (
+    TYPE_CHECKING, Callable, Container, Dict, Generator, Iterable, Iterator, List, Optional, Sequence, Tuple,
+)
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -33,7 +37,7 @@ from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.globalindex.vector_search import VectorSearch
-from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult, vector_score_order
 from pypaimon.table.source.search_types import BatchVectorSearchRead, VectorSearchRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.vector_search_split import (
@@ -384,9 +388,13 @@ class AbstractVectorSearchReadImpl:
 
     def _score_raw_batches(self, batches, query_vector, metric, score_candidates=None, reject_nan=False):
         """Score bounded Arrow batches, shared by local and distributed reads."""
-        import math
+        scores = self._iter_raw_scores(batches, query_vector, metric, score_candidates, reject_nan)
+        return _top_vector_scores(scores, self._limit)
 
-        top_k_heap = []
+    def _iter_raw_scores(
+        self, batches: "Iterable[pa.RecordBatch]", query_vector: Sequence[float], metric: str,
+        score_candidates: Optional[Container[int]], reject_nan: bool,
+    ) -> Iterator[Tuple[int, float]]:
         # Bound the Arrow take as well as the scoring matrix for wide vectors.
         blocks = batches if score_candidates is None else _slice_batches(batches, _score_block_size(query_vector))
         for block in blocks:
@@ -404,12 +412,12 @@ class AbstractVectorSearchReadImpl:
             for row_id, score in zip(
                 row_ids, _iter_arrow_scores(vectors, query_vector, metric)
             ):
-                if score is not None:
-                    if reject_nan and math.isnan(score):
-                        raise ValueError("Ray vector search cannot rank NaN scores.")
-                    _offer_score(top_k_heap, self._limit, row_id, score)
+                if score is None:
+                    continue
+                if reject_nan and math.isnan(score):
+                    raise ValueError("Ray vector search cannot rank NaN scores.")
+                yield row_id, score
             del block, row_ids, vectors
-        return _scored_result(top_k_heap)
 
     def _read_raw_vectors(self, candidates, include_filter=True, snapshot=None):
         return self._read_raw_candidate_vectors(
@@ -730,11 +738,11 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
 
-        indexed = (
-            DictBasedScoredIndexResult({})
-            if not index_splits
-            else self._read_indexed(index_splits, self._query_vector, snapshot)
-        )
+        indexed = None
+        if index_splits:
+            indexed = self._read_indexed(index_splits, self._query_vector, snapshot)
+            if not raw_splits:
+                return indexed
         raw_result = self._read_raw_search(
             _raw_row_ranges(raw_splits),
             self._raw_pre_filter(raw_splits, snapshot),
@@ -742,7 +750,12 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
             _raw_search_index_type(raw_splits),
             snapshot=snapshot,
         )
-        return indexed.or_(raw_result).top_k(self._limit)
+        if indexed is None:
+            return raw_result
+        merged_scores = {}
+        _merge_index_scores(merged_scores, indexed)
+        _merge_index_scores(merged_scores, raw_result)
+        return _top_vector_scores(merged_scores.items(), self._limit)
 
     def _read_indexed(self, splits, query_vector, snapshot):
         index_type = _vector_index_type(splits)
@@ -754,7 +767,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
                 _merge_index_scores(merged_scores, split_result)
                 del split_result
 
-        indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
+        indexed = _top_vector_scores(merged_scores.items(), search_limit)
         return self._maybe_rerank_indexed_result(
             indexed, index_type, query_vector, snapshot)
 
@@ -930,6 +943,11 @@ def _read_one_batch_ahead(reader: "Iterator[pa.RecordBatch]", close_reader: Call
         current = following
     close_reader()
     yield current
+
+
+def _top_vector_scores(scores: Iterable[Tuple[int, float]], limit: int) -> DictBasedScoredIndexResult:
+    best = nsmallest(limit, scores, key=vector_score_order)
+    return DictBasedScoredIndexResult(dict(best))
 
 
 def _merge_index_scores(merged_scores, result):

@@ -2925,7 +2925,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
                     return _completed_future(
-                        DictBasedScoredIndexResult({1: 0.1}))
+                        DictBasedScoredIndexResult({0: float("nan"), 1: float("-inf")}))
 
                 def close(self_inner):
                     pass
@@ -2953,6 +2953,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
         raw_read.assert_called_once()
         self.assertEqual([1, 8], sorted(list(result.results())))
+        self.assertEqual(float("-inf"), result.score_getter()(1))
 
     def test_batch_merges_raw_search_results(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader

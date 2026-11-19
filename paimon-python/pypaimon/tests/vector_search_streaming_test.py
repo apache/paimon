@@ -19,7 +19,7 @@ import threading
 import unittest
 import weakref
 from contextlib import ExitStack
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from unittest import mock
 
 import numpy as np
@@ -27,6 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.execution.python.read.search import vector_search_read as search
+from pypaimon.multimodal.query import VectorQuery
 from pypaimon.read.split import Split
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
 from pypaimon.tests.vector_search_filter_test import _field
@@ -221,3 +222,38 @@ class SingleVectorParallelReadTest(BatchModeMixin, DataEvolutionTestBase, unitte
         expected = query(1)
         assert len(expected) == 2
         assert query(2) == expected
+
+    def test_nan_last_in_either_split_completion_order(self) -> None:
+        table = self._create_table(partition_keys=["pt"]).copy({"read.parallelism": "2"})
+        nan = float("nan")
+        for pt, values in enumerate(([nan, 1.0], [1.0, nan])):
+            self._write_arrow(table, pa.table({"embedding": [[v, 0.0] for v in values], "pt": [pt, pt]},
+                                              schema=self.pa_schema))
+
+        read_ahead = search._read_one_batch_ahead
+
+        def run(order: Tuple[int, int], limit: int) -> pa.Table:
+            first_consumed = threading.Event()
+            observed = []
+
+            def gated(reader: Iterator[pa.RecordBatch], close_reader: Callable[[], None]) -> Iterator[pa.RecordBatch]:
+                for block in read_ahead(reader, close_reader):
+                    row_id = block.column("_ROW_ID")[0].as_py()
+                    if row_id != order[0]:
+                        assert first_consumed.wait(timeout=5)
+                    observed.append(row_id)
+                    yield block
+                    first_consumed.set()
+
+            with mock.patch.object(search, "_read_one_batch_ahead", gated):
+                rows = (VectorQuery(table, [1.0, 0.0], "embedding", {"metric": "l2"})
+                        .select(["_ROW_ID"]).limit(limit).with_score().order_by_score().to_arrow())
+            assert observed == list(order)
+            return rows
+
+        for order in ((0, 2), (2, 0)):
+            for limit in (1, 2, 3, 4):
+                with self.subTest(order=order, limit=limit):
+                    rows = run(order, limit)
+                    assert rows.column("_ROW_ID").to_pylist() == [1, 2, 0, 3][:limit]
+                    np.testing.assert_equal(rows.column("_score").to_pylist(), [1.0, 1.0, nan, nan][:limit])
