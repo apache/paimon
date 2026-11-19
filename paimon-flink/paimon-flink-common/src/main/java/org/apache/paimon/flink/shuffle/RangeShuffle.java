@@ -661,7 +661,7 @@ public class RangeShuffle {
             long restSize = sampledData.stream().mapToLong(t -> (long) t.f1).sum();
             double stepRange = restSize / (double) rangesNum;
 
-            int currentWeight = 0;
+            long currentWeight = 0;
             int index = 0;
 
             for (int i = 0; i < boundarySize; i++) {
