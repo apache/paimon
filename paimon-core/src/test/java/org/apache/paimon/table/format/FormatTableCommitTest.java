@@ -46,6 +46,8 @@ import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExe
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import javax.security.auth.Subject;
@@ -1270,15 +1272,20 @@ class FormatTableCommitTest {
         }
     }
 
-    @Test
-    void testOverwritingAPrefixClearsTheDefaultPartitionDirectory() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+        "__DEFAULT_PARTITION__,__DEFAULT_PARTITION__",
+        // The directory has the escaped default name, as every partition value is escaped.
+        "__NULL/VALUE__,__NULL%2FVALUE__"
+    })
+    void testOverwritingAPrefixClearsTheDefaultPartitionDirectory(
+            String defaultName, String defaultDirectory) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         // Value-only layout: the directory of a null partition value is the default partition
         // name, which starts with '_' without being a staging directory. The scan reads it, so an
         // overwrite has to clear it too.
-        Path defaultPartition =
-                new Path(tablePath, "2025/" + PARTITION_DEFAULT_NAME.defaultValue());
+        Path defaultPartition = new Path(tablePath, "2025/" + defaultDirectory);
         Path staleFile = new Path(defaultPartition, "data-old.csv");
         fileIO.writeFile(staleFile, "1", false);
         Path staleSibling = new Path(tablePath, "2025/10/data-old.csv");
@@ -1297,7 +1304,7 @@ class FormatTableCommitTest {
                         Arrays.asList("year", "month"),
                         fileIO,
                         true,
-                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        defaultName,
                         true,
                         Identifier.create("overwrite_db", "overwrite_table"),
                         Collections.singletonMap("year", "2025"),

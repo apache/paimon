@@ -724,10 +724,23 @@ public class PartitionPathUtils {
     private static boolean isHiddenFile(
             Path path, boolean onlyValueInPath, @Nullable String defaultPartValue) {
         String name = path.getName();
-        if (onlyValueInPath && defaultPartValue != null && defaultPartValue.equals(name)) {
+        if (onlyValueInPath && name.equals(defaultPartitionDirName(defaultPartValue))) {
             return false;
         }
         return isHiddenName(name);
+    }
+
+    /**
+     * The directory name of the default partition, which the writer escapes as every value. In the
+     * value-only layout, scans and cleanups do not hide it although it may start with {@code '_'}
+     * or {@code '.'}. Null when there is no default partition name or it is empty, which names no
+     * directory.
+     */
+    @Nullable
+    public static String defaultPartitionDirName(@Nullable String defaultPartValue) {
+        return defaultPartValue == null || defaultPartValue.isEmpty()
+                ? null
+                : escapePathName(defaultPartValue);
     }
 
     /** Whether a single path component is hidden by the {@code '_'} / {@code '.'} convention. */
