@@ -28,12 +28,12 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ChannelWriterOutputView;
-import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import java.io.IOException;
@@ -120,6 +120,12 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                 maxDiskSize);
     }
 
+    /** Enforce the disk budget on automatic spills as well as intermediate merge files. */
+    public BinaryExternalSortBuffer enforceSpillDiskLimit() {
+        channelManager.setMaxDiskBytes(maxDiskSize.getBytes());
+        return this;
+    }
+
     @Override
     public int size() {
         if (numRecords > Integer.MAX_VALUE) {
@@ -153,22 +159,13 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public boolean flushMemory() throws IOException {
-        boolean isFull = getDiskUsage() >= maxDiskSize.getBytes();
+        boolean isFull = channelManager.spillBytes() >= maxDiskSize.getBytes();
         if (isFull) {
             return false;
         } else {
             spill();
             return true;
         }
-    }
-
-    private long getDiskUsage() {
-        long bytes = 0;
-
-        for (ChannelWithMeta spillChannelID : spillChannelIDs) {
-            bytes += spillChannelID.getNumBytes();
-        }
-        return bytes;
     }
 
     @VisibleForTesting
@@ -252,28 +249,22 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
         // open next channel
         FileIOChannel.ID channel = enumerator.next();
-        channelManager.addChannel(channel);
-
         ChannelWriterOutputView output = null;
-        int blockCount;
 
         try {
             output =
-                    FileChannelUtil.createOutputView(
+                    channelManager.openWriter(
                             ioManager, channel, compressionCodecFactory, compressionBlockSize);
             new QuickSort().sort(inMemorySortBuffer);
             inMemorySortBuffer.writeToOutput(output);
-            output.close();
-            blockCount = output.getBlockCount();
-        } catch (IOException e) {
+            spillChannelIDs.add(channelManager.finishWriter(channel, output));
+        } catch (Throwable failure) {
             if (output != null) {
-                output.close();
-                output.getChannel().deleteChannel();
+                IOUtils.closeQuietly(output.getChannel()::closeAndDelete);
             }
-            throw e;
+            throw failure;
         }
 
-        spillChannelIDs.add(new ChannelWithMeta(channel, blockCount, output.getWriteBytes()));
         inMemorySortBuffer.clear();
     }
 }

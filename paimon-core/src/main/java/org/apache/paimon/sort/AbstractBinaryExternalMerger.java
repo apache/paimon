@@ -27,6 +27,7 @@ import org.apache.paimon.disk.ChannelWriterOutputView;
 import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.slf4j.Logger;
@@ -102,19 +103,28 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
 
         final List<MutableObjectIterator<Entry>> iterators = new ArrayList<>(channelIDs.size() + 1);
 
-        for (ChannelWithMeta channel : channelIDs) {
-            ChannelReaderInputView view =
-                    FileChannelUtil.createInputView(
-                            ioManager,
-                            channel,
-                            openChannels,
-                            compressionCodecFactory,
-                            compressionBlockSize);
-            iterators.add(channelReaderInputViewIterator(view));
+        List<FileIOChannel> readers = new ArrayList<>(channelIDs.size());
+        try {
+            for (ChannelWithMeta channel : channelIDs) {
+                ChannelReaderInputView view =
+                        FileChannelUtil.createInputView(
+                                ioManager,
+                                channel,
+                                readers,
+                                compressionCodecFactory,
+                                compressionBlockSize);
+                iterators.add(channelReaderInputViewIterator(view));
+            }
+            // The merge constructor reads the first record from every run.
+            BinaryMergeIterator<Entry> iterator =
+                    new BinaryMergeIterator<>(
+                            iterators, mergeReusedEntries(channelIDs.size()), mergeComparator());
+            openChannels.addAll(readers);
+            return iterator;
+        } catch (Throwable failure) {
+            readers.forEach(reader -> IOUtils.closeQuietly(reader::close));
+            throw failure;
         }
-
-        return new BinaryMergeIterator<>(
-                iterators, mergeReusedEntries(channelIDs.size()), mergeComparator());
     }
 
     /**
@@ -174,43 +184,37 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
     private ChannelWithMeta mergeChannels(List<ChannelWithMeta> channelIDs) throws IOException {
         // the list with the target iterators
         List<FileIOChannel> openChannels = new ArrayList<>(channelIDs.size());
+        final FileIOChannel.ID mergedChannelID = ioManager.createChannel();
         final BinaryMergeIterator<Entry> mergeIterator =
                 getMergingIterator(channelIDs, openChannels);
 
         // create a new channel writer
-        final FileIOChannel.ID mergedChannelID = ioManager.createChannel();
-        channelManager.addChannel(mergedChannelID);
         ChannelWriterOutputView output = null;
 
-        int numBlocksWritten;
         try {
             output =
-                    FileChannelUtil.createOutputView(
+                    channelManager.openWriter(
                             ioManager,
                             mergedChannelID,
                             compressionCodecFactory,
                             compressionBlockSize);
             writeMergingOutput(mergeIterator, output);
-            output.close();
-            numBlocksWritten = output.getBlockCount();
-        } catch (IOException e) {
+            return channelManager.finishWriter(mergedChannelID, output);
+        } catch (Throwable failure) {
             if (output != null) {
-                output.close();
-                output.getChannel().deleteChannel();
+                IOUtils.closeQuietly(output.getChannel()::closeAndDelete);
             }
-            throw e;
+            throw failure;
         } finally {
             // remove, close and delete channels
-            for (FileIOChannel channel : openChannels) {
-                channelManager.removeChannel(channel.getChannelID());
+            for (int i = 0; i < openChannels.size(); i++) {
                 try {
-                    channel.closeAndDelete();
+                    openChannels.get(i).closeAndDelete();
+                    channelManager.removeChannel(channelIDs.get(i));
                 } catch (Throwable ignored) {
                 }
             }
         }
-
-        return new ChannelWithMeta(mergedChannelID, numBlocksWritten, output.getWriteBytes());
     }
 
     // -------------------------------------------------------------------------------------------

@@ -44,6 +44,7 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
     private long numBytes;
     private long numCompressedBytes;
     private long writeBytes;
+    private long remainingFileBytes = Long.MAX_VALUE;
 
     public ChannelWriterOutputView(
             BufferFileWriter writer,
@@ -59,6 +60,11 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
 
     public FileIOChannel getChannel() {
         return writer;
+    }
+
+    /** Set this file's physical size limit before the first block is written. */
+    public void setMaxFileBytes(long maxFileBytes) {
+        this.remainingFileBytes = maxFileBytes;
     }
 
     @Override
@@ -92,6 +98,14 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
     private void writeCompressed(MemorySegment current, int size) throws IOException {
         int compressedLen =
                 compressor.compress(current.getArray(), 0, size, compressedBuffer.getArray(), 0);
+        if (remainingFileBytes != Long.MAX_VALUE) {
+            // Each compressed block has a four-byte length prefix in the spill file.
+            long blockBytes = Integer.BYTES + (long) compressedLen;
+            if (blockBytes > remainingFileBytes) {
+                throw new IOException("Sort spill exceeds 'write-buffer-spill.max-disk-size'.");
+            }
+            remainingFileBytes -= blockBytes;
+        }
         writer.writeBlock(Buffer.create(compressedBuffer, compressedLen));
         blockCount++;
         numBytes += size;

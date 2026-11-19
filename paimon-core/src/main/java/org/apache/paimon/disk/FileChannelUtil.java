@@ -19,6 +19,7 @@
 package org.apache.paimon.disk;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.util.List;
@@ -51,7 +52,12 @@ public class FileChannelUtil {
             int compressionBlockSize)
             throws IOException {
         BufferFileWriter bufferWriter = ioManager.createBufferFileWriter(channel);
-        return new ChannelWriterOutputView(
-                bufferWriter, compressionCodecFactory, compressionBlockSize);
+        try {
+            return new ChannelWriterOutputView(
+                    bufferWriter, compressionCodecFactory, compressionBlockSize);
+        } catch (Throwable failure) {
+            IOUtils.closeQuietly(bufferWriter::closeAndDelete);
+            throw failure;
+        }
     }
 }

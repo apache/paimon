@@ -24,7 +24,10 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.disk.BufferFileReader;
+import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
@@ -45,6 +48,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -368,6 +372,93 @@ public class BinaryExternalSortBufferTest {
         sorter.clear();
     }
 
+    @Test
+    public void testBoundedSortSpillsOnlyWithinBudget() throws Exception {
+        initMemorySegmentPool(128 * 1024);
+        BinaryExternalSortBuffer sorter =
+                createBuffer(2, new MemorySize(0)).enforceSpillDiskLimit();
+        try {
+            sorter.write(new MockBinaryRowReader(1));
+            assertThat(sorter.sortedIterator().next(serializer.createInstance()).getInt(0))
+                    .isZero();
+            sorter.clear();
+            assertThatThrownBy(() -> sorter.write(new MockBinaryRowReader(50_000)))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("write-buffer-spill.max-disk-size");
+        } finally {
+            sorter.clear();
+        }
+    }
+
+    @Test
+    public void testBoundedSortCountsFinalRunAndMergeOutput() throws Exception {
+        BinaryRow row = new MockBinaryRowReader(1).next();
+        long runBytes = singleRunBytes(row);
+        // One run fills the budget; the remaining row must still be charged at finalization.
+        BinaryExternalSortBuffer sorter =
+                createBuffer(2, new MemorySize(runBytes)).enforceSpillDiskLimit();
+        try {
+            sorter.write(row);
+            assertThat(sorter.flushMemory()).isTrue();
+            sorter.write(row);
+            assertThatThrownBy(sorter::sortedIterator)
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("write-buffer-spill.max-disk-size");
+        } finally {
+            sorter.clear();
+        }
+
+        // All three inputs fit, but merging two runs needs space while they are still live.
+        sorter = createBuffer(2, new MemorySize(3 * runBytes)).enforceSpillDiskLimit();
+        try {
+            for (int i = 0; i < 3; i++) {
+                sorter.write(row);
+                assertThat(sorter.flushMemory()).isTrue();
+            }
+            assertThatThrownBy(sorter::sortedIterator)
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("write-buffer-spill.max-disk-size");
+        } finally {
+            sorter.clear();
+        }
+    }
+
+    @Test
+    public void testBoundedSortReleasesMergedRuns() throws Exception {
+        BinaryRow row = new MockBinaryRowReader(1).next();
+        int runs = 32;
+        long budget = (runs + 4) * singleRunBytes(row);
+        BinaryExternalSortBuffer sorter =
+                createBuffer(2, new MemorySize(budget)).enforceSpillDiskLimit();
+        try {
+            for (int i = 0; i < runs; i++) {
+                sorter.write(row);
+                assertThat(sorter.flushMemory()).isTrue();
+            }
+            MutableObjectIterator<BinaryRow> rows = sorter.sortedIterator();
+            BinaryRow reuse = serializer.createInstance();
+            for (int i = 0; i < runs; i++) {
+                assertThat(rows.next(reuse).getInt(0)).isZero();
+            }
+            assertThat(rows.next(reuse)).isNull();
+        } finally {
+            sorter.clear();
+        }
+    }
+
+    private long singleRunBytes(BinaryRow row) throws IOException {
+        BinaryExternalSortBuffer probe = createBuffer();
+        try {
+            probe.write(row);
+            probe.flushMemory();
+            try (Stream<Path> files = Files.walk(tempDir)) {
+                return files.filter(Files::isRegularFile).findFirst().get().toFile().length();
+            }
+        } finally {
+            probe.clear();
+        }
+    }
+
     private BinaryExternalSortBuffer createBuffer() {
         return createBuffer(128, MemorySize.MAX_VALUE);
     }
@@ -436,5 +527,38 @@ public class BinaryExternalSortBufferTest {
         assertThatThrownBy(() -> createBuffer(1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("fan-in for external merge sort must be at least 2");
+    }
+
+    @Test
+    void testMergeClosesReadersWhenOpeningLaterRunFails() throws Exception {
+        IOException failure = new IOException("Cannot open second sorted run");
+        List<BufferFileReader> readers = new ArrayList<>();
+        ioManager =
+                new IOManagerImpl(tempDir.toString()) {
+                    @Override
+                    public BufferFileReader createBufferFileReader(FileIOChannel.ID id)
+                            throws IOException {
+                        if (!readers.isEmpty()) {
+                            throw failure;
+                        }
+                        BufferFileReader reader = super.createBufferFileReader(id);
+                        readers.add(reader);
+                        return reader;
+                    }
+                };
+        BinaryExternalSortBuffer sorter = createBuffer();
+        try {
+            BinaryRow row = new MockBinaryRowReader(1).next();
+            sorter.write(row);
+            sorter.flushMemory();
+            sorter.write(row);
+            assertThatThrownBy(sorter::sortedIterator).isSameAs(failure);
+            assertThat(readers).hasSize(1).allMatch(FileIOChannel::isClosed);
+        } finally {
+            for (BufferFileReader reader : readers) {
+                reader.close();
+            }
+            sorter.clear();
+        }
     }
 }

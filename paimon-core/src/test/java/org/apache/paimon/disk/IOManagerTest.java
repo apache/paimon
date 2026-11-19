@@ -18,6 +18,9 @@
 
 package org.apache.paimon.disk;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.BufferCompressionException;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,11 +28,38 @@ import java.io.File;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link IOManager}. */
 public class IOManagerTest {
 
     @TempDir Path tempDir;
+
+    @Test
+    public void testOutputViewClosesWriterWhenCodecInitializationFails() throws Exception {
+        try (IOManager io = IOManager.create(tempDir.toString())) {
+            FileIOChannel.ID id = io.createChannel();
+            BufferFileWriter writer = io.createBufferFileWriter(id);
+            IOManager tracked = spy(io);
+            doReturn(writer).when(tracked).createBufferFileWriter(id);
+            BlockCompressionFactory codec = mock(BlockCompressionFactory.class);
+            BufferCompressionException failure =
+                    new BufferCompressionException("Cannot load codec");
+            when(codec.getCompressor()).thenThrow(failure);
+            try {
+                assertThatThrownBy(() -> FileChannelUtil.createOutputView(tracked, id, codec, 1024))
+                        .isSameAs(failure);
+                assertThat(writer.isClosed()).isTrue();
+                assertThat(id.getPathFile()).doesNotExist();
+            } finally {
+                writer.closeAndDelete();
+            }
+        }
+    }
 
     @Test
     public void channelEnumerator() throws Exception {
