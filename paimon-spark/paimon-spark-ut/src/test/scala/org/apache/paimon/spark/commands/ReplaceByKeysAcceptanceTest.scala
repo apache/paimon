@@ -22,7 +22,7 @@ import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, Row}
 
 import scala.collection.JavaConverters._
 
@@ -70,16 +70,50 @@ class ReplaceByKeysAcceptanceTest extends PaimonSparkTestBase {
     finally tableCommit.close()
   }
 
-  private def assertRejectedWithoutChanges(body: => Unit): Unit = {
+  private def assertRejectedWithoutChanges(body: => Unit): Exception = {
     val targetRows = sql("SELECT *,_ROW_ID FROM target").collect().toSeq
     val sourceRows = sql("SELECT * FROM source").collect().toSeq
     val targetSnapshot = snapshotId()
     val sourceSnapshot = snapshotId("source")
-    intercept[Exception](body)
+    val failure = intercept[Exception](body)
     assert(snapshotId() == targetSnapshot)
     assert(snapshotId("source") == sourceSnapshot)
     checkAnswer(sql("SELECT *,_ROW_ID FROM target"), targetRows)
     checkAnswer(sql("SELECT * FROM source"), sourceRows)
+    failure
+  }
+
+  Seq("unwritten", "written-empty", "pruned", "populated").foreach {
+    state =>
+      test(s"membership types are validated before deletion shortcuts: $state") {
+        withSparkSQLConf(
+          "spark.sql.ansi.enabled" -> "false",
+          "spark.sql.storeAssignmentPolicy" -> "LEGACY") {
+          withTable("target", "source", "assignment") {
+            createTarget("id STRING, value STRING")
+            if (state != "unwritten") sql("INSERT INTO target VALUES ('old','keep')")
+            if (state == "written-empty") sql("DELETE FROM target WHERE id='old'")
+            sql("CREATE TABLE source (id ARRAY<STRING>, value STRING)")
+            sql("INSERT INTO source VALUES (array('new'),'payload')")
+            sql("CREATE TABLE assignment (id STRING, value STRING)")
+            // Assignment permits this cast; IN membership must reject the original key type.
+            sql("INSERT INTO assignment SELECT * FROM source")
+            assert(sql("SELECT * FROM assignment").count() == 1L)
+            val filter = if (state == "pruned") Some("id='absent'") else None
+            val restriction = filter.map(f => " AND (" + f + ")").getOrElse("")
+            intercept[AnalysisException] {
+              sql("DELETE FROM target WHERE id IN (SELECT id FROM source)" + restriction).collect()
+            }
+            val failure = assertRejectedWithoutChanges {
+              val argument = filter.map(f => ", target_filter => " + sourceQuote(f)).getOrElse("")
+              sql(s"""CALL sys.replace_by_keys(table => 'target',
+                     |source_query => 'SELECT * FROM source',
+                     |key_columns => ARRAY('id') $argument)""".stripMargin).collect()
+            }
+            assert(failure.isInstanceOf[AnalysisException])
+          }
+        }
+      }
   }
 
   test("target filter restricts deletion only and composite keys do not cross match") {

@@ -29,7 +29,7 @@ import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, InSubquery, ListQuery, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.Filter
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, LocalRelation}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, expr}
 
@@ -143,6 +143,13 @@ case class ReplaceByKeysCommand(
           resolved
       }
       .getOrElse(TrueLiteral)
+    // Analyze IN against the schema before either empty-target shortcut can bypass its checks.
+    val values = keys.map(key => relation.output.find(_.name == key).get)
+    val matches = InSubquery(values, ListQuery(sourceKeys.queryExecution.analyzed))
+    val membership =
+      createDataset(spark, Filter(matches, LocalRelation(relation.output))).queryExecution.analyzed
+        .asInstanceOf[Filter]
+        .condition
     // An empty baseline must not start reading a concurrent writer's first snapshot.
     if (snapshot == null) return Seq.empty
     val reader = table.newSnapshotReader().withSnapshot(snapshot)
@@ -159,10 +166,8 @@ case class ReplaceByKeysCommand(
       val scan = createNewScanPlan(splits, relation).copy(output = relation.output :+ rowId)
       val target = createDataset(spark, scan).filter(toColumn(predicate)).alias("target")
       val targetPlan = target.queryExecution.analyzed
-      val values = keys.map(key => targetPlan.output.find(_.name == key).get)
-      // Let Catalyst apply IN coercion before rewriting membership as a semi join.
-      val matches = InSubquery(values, ListQuery(sourceKeys.queryExecution.analyzed))
-      val rowIds = createDataset(spark, Filter(matches, targetPlan)).select(col("target._ROW_ID"))
+      val rowIds =
+        createDataset(spark, Filter(membership, targetPlan)).select(col("target._ROW_ID"))
       val vectors =
         collectDataEvolutionDeletionVectors(splits, candidateFileMap(splits), rowIds, spark)
       writer.persistDeletionVectors(vectors, snapshot)
