@@ -788,10 +788,12 @@ class FileScanner:
             # Defensive: any catalog/proxy table that fails the mode check
             # falls back to no pruning rather than crashing the scan.
             return None
-        # Only the default hash function (Math.abs(hash % numBuckets)) is
-        # supported for bucket pruning. Non-default functions (mod, hive)
-        # use different algorithms and would produce wrong bucket sets.
-        bucket_func = self.table.table_schema.options.get('bucket-function.type')
+        # A Java provider controls bucket assignment even when the built-in type is unset.
+        options = self.table.table_schema.options
+        if options.get('bucket-function.provider') is not None:
+            return None
+        # The Python selector implements only the default hash function.
+        bucket_func = options.get('bucket-function.type')
         if bucket_func is not None and bucket_func.lower() != 'default':
             return None
         try:

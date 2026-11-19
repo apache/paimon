@@ -764,6 +764,28 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          "even when AND'd with a non-bucket-key predicate")
 
     @pytest.mark.python_plan
+    def test_point_lookup_with_custom_bucket_provider(self):
+        data = pa.table({'id': pa.array([1, 2], type=pa.int32())})
+        schema = Schema.from_pyarrow_schema(data.schema, options={
+            'bucket': '4', 'bucket-key': 'id', 'bucket-function.provider': 'test-last-bucket',
+        })
+        self.catalog.create_table('default.custom_bucket_provider', schema, False)
+        table = self.catalog.get_table('default.custom_bucket_provider')
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            # Match the Java test provider, which routes every key to the last bucket.
+            writer.write_arrow(data, bucket=3)
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)
+        rows, _ = self._read_with(table, predicate)
+        self.assertEqual(rows, [{'id': 1}])
+
+    @pytest.mark.python_plan
     def test_manifest_bucket_pruning_skips_file_reads(self):
         # This test observes Python FileIO calls; Rust uses its own file I/O.
         table = self._create_pk_table('manifest_bucket_pruning')
