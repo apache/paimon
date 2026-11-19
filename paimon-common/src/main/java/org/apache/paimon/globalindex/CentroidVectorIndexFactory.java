@@ -18,16 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.Range;
-
-import java.util.List;
-
 /**
- * A centroid index groups all files for one field in a partition into a single generation. Its
- * reader accepts and returns absolute table row IDs. Scan planners can obtain its source coverage
- * through this factory without opening files or initializing the native runtime.
+ * A centroid index groups the router and shards for one contiguous source row-ID range. Its reader
+ * accepts and returns absolute table row IDs. The factory identifies the router entry without
+ * opening index files.
  */
 public interface CentroidVectorIndexFactory extends GlobalIndexerFactory {
-    /** Exact indexed row ranges for a model entry, or an empty list for a shard entry. */
-    List<Range> sourceRowRanges(byte[] indexMeta);
+    boolean isRoutingModel(byte[] indexMeta);
 }

@@ -20,10 +20,7 @@ package org.apache.paimon.vector.index;
 
 import org.apache.paimon.globalindex.CentroidVectorIndexFactory;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Range;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 /** Registered centroid index types share the router and select a local native algorithm. */
@@ -52,9 +49,8 @@ public abstract class NativeCentroidVectorGlobalIndexerFactory
     }
 
     @Override
-    public List<Range> sourceRowRanges(byte[] indexMeta) {
-        VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(indexMeta);
-        return meta.routingModel() ? meta.sourceRowRanges() : Collections.emptyList();
+    public boolean isRoutingModel(byte[] indexMeta) {
+        return VectorIndexShardMeta.deserialize(indexMeta).routingModel();
     }
 
     /** Centroid routing over IVF-FLAT shards. */

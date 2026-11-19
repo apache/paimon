@@ -46,6 +46,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -62,13 +63,17 @@ import org.apache.spark.util.TaskCompletionListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -77,7 +82,7 @@ import scala.Tuple2;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Single-partition full build: shared training, centroid shuffle, then one atomic index commit. */
+/** Build a router and its shards for each contiguous range, then commit all files together. */
 public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder {
     private static final Logger LOG = LoggerFactory.getLogger(CentroidGlobalIndexTopoBuilder.class);
 
@@ -107,50 +112,84 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                         .withPartitionFilter(partitionPredicate)
                         .plan()
                         .files();
-        List<BinaryRow> partitions =
-                entries.stream()
-                        .map(ManifestEntry::partition)
-                        .distinct()
-                        .collect(Collectors.toList());
-        checkArgument(
-                partitions.size() <= 1,
-                "Centroid sharding supports a full build of exactly one partition.");
-        if (partitions.isEmpty()) {
-            return Collections.emptyList();
-        }
-        BinaryRow partition = partitions.get(0);
         List<IndexedSplit> splits =
                 GlobalIndexBuilderUtils.createShardIndexedSplits(
                         table, entries, DefaultGlobalIndexTopoBuilder.rowsPerShard(options));
-        if (splits.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<Range> ranges = new ArrayList<>();
-        List<byte[]> serializedSplits = new ArrayList<>();
+        Map<BinaryRow, List<Pair<Range, IndexedSplit>>> partitionSplits = new HashMap<>();
         for (IndexedSplit split : splits) {
-            ranges.addAll(split.rowRanges());
+            // createShardIndexedSplits clips each task to a single physical row-ID range.
+            partitionSplits
+                    .computeIfAbsent(split.dataSplit().partition(), key -> new ArrayList<>())
+                    .add(Pair.of(split.rowRanges().get(0), split));
+        }
+        Map<BinaryRow, Map<Range, List<IndexedSplit>>> groups =
+                GlobalIndexBuilderUtils.groupSplitsByRange(partitionSplits);
+        JavaSparkContext sc = new JavaSparkContext(spark.sparkContext());
+        List<CommitMessage> messages = new ArrayList<>();
+        for (Map.Entry<BinaryRow, Map<Range, List<IndexedSplit>>> partition : groups.entrySet()) {
+            for (Map.Entry<Range, List<IndexedSplit>> group : partition.getValue().entrySet()) {
+                BuildContext context =
+                        new BuildContext(
+                                table,
+                                readType,
+                                indexField,
+                                options,
+                                partition.getKey(),
+                                snapshot.id(),
+                                group.getKey(),
+                                indexType);
+                messages.addAll(buildRange(sc, context, group.getValue(), indexer));
+            }
+        }
+        Map<BinaryRow, List<IndexFileMeta>> previous =
+                GlobalIndexBuilderUtils.currentIndexEntries(
+                                table,
+                                snapshot,
+                                indexType,
+                                Collections.singletonList(indexField),
+                                partitionPredicate)
+                        .stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        IndexManifestEntry::partition,
+                                        Collectors.mapping(
+                                                IndexManifestEntry::indexFile,
+                                                Collectors.toList())));
+        for (Map.Entry<BinaryRow, List<IndexFileMeta>> entry : previous.entrySet()) {
+            messages.add(
+                    new CommitMessageImpl(
+                                    entry.getKey(),
+                                    0,
+                                    null,
+                                    DataIncrement.deleteIndexIncrement(entry.getValue()),
+                                    CompactIncrement.emptyIncrement())
+                            .withCheckFromSnapshot(snapshot.id()));
+        }
+        return messages;
+    }
+
+    private static List<CommitMessage> buildRange(
+            JavaSparkContext sc,
+            BuildContext context,
+            List<IndexedSplit> splits,
+            CentroidVectorGlobalIndexer indexer)
+            throws IOException {
+        List<byte[]> serializedSplits = new ArrayList<>(splits.size());
+        for (IndexedSplit split : splits) {
             serializedSplits.add(InstantiationUtil.serializeObject(split));
         }
-        ranges = Range.sortAndMergeOverlap(ranges, true);
-        BuildContext context =
-                new BuildContext(
-                        table,
-                        readType,
-                        indexField,
-                        options,
-                        partition,
-                        snapshot.id(),
-                        new Range(ranges.get(0).from, ranges.get(ranges.size() - 1).to),
-                        indexType);
         byte[] contextBytes = InstantiationUtil.serializeObject(context);
-        JavaSparkContext sc = new JavaSparkContext(spark.sparkContext());
         JavaRDD<InternalRow> rows =
                 sc.parallelize(
                                 serializedSplits,
-                                DefaultGlobalIndexTopoBuilder.parallelism(splits.size(), options))
+                                DefaultGlobalIndexTopoBuilder.parallelism(
+                                        splits.size(), context.options))
                         .mapPartitions(
                                 input -> new VectorRows(BuildContext.restore(contextBytes), input));
         byte[] payload = train(sc, contextBytes, rows, indexer, context.getter());
+        if (payload == null) {
+            return Collections.emptyList();
+        }
         int nlist;
         try (VectorTrainingModel model = indexer.restoreTrainingModel(payload)) {
             nlist = model.nlist();
@@ -158,7 +197,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         String modelId = UUID.randomUUID().toString();
         Broadcast<byte[]> broadcast = sc.broadcast(payload);
         try {
-            int parallelism = DefaultGlobalIndexTopoBuilder.parallelism(nlist, options);
+            int parallelism = DefaultGlobalIndexTopoBuilder.parallelism(nlist, context.options);
             JavaPairRDD<Integer, RoutedVector> assigned =
                     rows.mapPartitionsToPair(
                             input ->
@@ -185,42 +224,25 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             List<CommitMessage> messages = CommitMessageSerializer.deserializeAll(results);
             GlobalIndexFileReadWrite io = context.io();
             String modelFile =
-                    "vector-" + indexType + "-global-index-training-model-" + modelId + ".index";
+                    "vector-"
+                            + context.indexType
+                            + "-global-index-training-model-"
+                            + modelId
+                            + ".index";
             IndexFileMeta modelMeta =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
-                                    table.fileIO(),
-                                    table.store().pathFactory().globalIndexFileFactory(),
-                                    table.coreOptions(),
-                                    context.envelope,
-                                    Collections.singletonList(indexField),
-                                    indexType,
+                                    context.table.fileIO(),
+                                    context.table.store().pathFactory().globalIndexFileFactory(),
+                                    context.table.coreOptions(),
+                                    context.rowRange,
+                                    Collections.singletonList(context.field),
+                                    context.indexType,
                                     Collections.singletonList(
                                             indexer.writeRoutingModel(
-                                                    io, modelFile, payload, modelId, nlist,
-                                                    ranges)),
+                                                    io, modelFile, payload, modelId, nlist)),
                                     context.sourceMeta())
                             .get(0);
             messages.add(context.message(Collections.singletonList(modelMeta)));
-            List<IndexFileMeta> old =
-                    GlobalIndexBuilderUtils.currentIndexEntries(
-                                    table,
-                                    snapshot,
-                                    indexType,
-                                    Collections.singletonList(indexField),
-                                    partitionPredicate)
-                            .stream()
-                            .map(IndexManifestEntry::indexFile)
-                            .collect(Collectors.toList());
-            if (!old.isEmpty()) {
-                messages.add(
-                        new CommitMessageImpl(
-                                        partition,
-                                        0,
-                                        null,
-                                        DataIncrement.deleteIndexIncrement(old),
-                                        CompactIncrement.emptyIncrement())
-                                .withCheckFromSnapshot(snapshot.id()));
-            }
             return messages;
         } finally {
             broadcast.destroy();
@@ -251,6 +273,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 options);
     }
 
+    @Nullable
     private static byte[] train(
             JavaSparkContext sc,
             byte[] contextBytes,
@@ -275,6 +298,9 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             offsets[i + 1] = Math.addExact(offsets[i], counts.get(i));
         }
         long total = offsets[counts.size()];
+        if (total == 0) {
+            return null;
+        }
         long[] positions = indexer.planGlobalTrainingSample(total);
         int sampleSize = positions.length;
         LOG.info(
@@ -418,7 +444,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         private final Options options;
         private final BinaryRow partition;
         private final long snapshotId;
-        private final Range envelope;
+        private final Range rowRange;
         private final String indexType;
 
         BuildContext(
@@ -428,7 +454,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 Options options,
                 BinaryRow partition,
                 long snapshotId,
-                Range envelope,
+                Range rowRange,
                 String indexType) {
             this.table = table;
             this.readType = readType;
@@ -436,7 +462,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             this.options = options;
             this.partition = partition;
             this.snapshotId = snapshotId;
-            this.envelope = envelope;
+            this.rowRange = rowRange;
             this.indexType = indexType;
         }
 
@@ -500,7 +526,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                             table.fileIO(),
                             table.store().pathFactory().globalIndexFileFactory(),
                             table.coreOptions(),
-                            envelope,
+                            rowRange,
                             Collections.singletonList(field),
                             indexType,
                             writer.finish(),

@@ -625,18 +625,17 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             checkState(globalIndex != null, "Global index meta must not be null.");
             RowRangeIndex rowRangeIndex =
                     rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
-            for (Range indexRange : CentroidVectorIndexUtils.coverage(indexEntry.indexFile())) {
-                if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
-                    return Optional.of(
-                            new RuntimeException(
-                                    String.format(
-                                            "Global index row ID existence conflict: index file '%s' "
-                                                    + "references row range %s, but this range "
-                                                    + "is not fully covered by current data "
-                                                    + "files. The referenced row IDs may have been "
-                                                    + "reassigned or removed by a concurrent commit.",
-                                            indexEntry.indexFile().fileName(), indexRange)));
-                }
+            Range indexRange = globalIndex.rowRange();
+            if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Global index row ID existence conflict: index file '%s' "
+                                                + "references row range %s, but this range "
+                                                + "is not fully covered by current data "
+                                                + "files. The referenced row IDs may have been "
+                                                + "reassigned or removed by a concurrent commit.",
+                                        indexEntry.indexFile().fileName(), indexRange)));
             }
         }
         return Optional.empty();
@@ -646,13 +645,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
         for (IndexManifestEntry index : indexEntries) {
             if (index.kind() != FileKind.ADD
-                    || !CentroidVectorIndexUtils.centroidBased(index.indexFile())) {
+                    || !CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
                 continue;
             }
-            List<Range> coverage = CentroidVectorIndexUtils.coverage(index.indexFile());
-            if (coverage.isEmpty()) {
-                continue;
-            }
+            Range source = index.indexFile().globalIndexMeta().rowRange();
             long baseline =
                     DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile()).scanSnapshotId();
             for (long id = baseline + 1; id <= latestSnapshot.id(); id++) {
@@ -664,14 +660,12 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                     if (change.file().firstRowId() == null) {
                         continue;
                     }
-                    for (Range source : coverage) {
-                        if (source.hasIntersection(change.file().nonNullRowIdRange())) {
-                            return Optional.of(
-                                    new RuntimeException(
-                                            "Centroid index source rows changed after training snapshot "
-                                                    + baseline
-                                                    + "; rebuild the index against the latest snapshot."));
-                        }
+                    if (source.hasIntersection(change.file().nonNullRowIdRange())) {
+                        return Optional.of(
+                                new RuntimeException(
+                                        "Centroid index source rows changed after training snapshot "
+                                                + baseline
+                                                + "; rebuild the index against the latest snapshot."));
                     }
                 }
             }

@@ -41,7 +41,6 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
@@ -267,12 +266,7 @@ class CentroidVectorGlobalIndexTest {
                                 modelPath,
                                 io.getFileSize(modelPath),
                                 0,
-                                VectorIndexShardMeta.routing(
-                                                id,
-                                                model.nlist(),
-                                                Collections.singletonList(
-                                                        new Range(BASE, BASE + 101L * 255)))
-                                        .serialize()));
+                                VectorIndexShardMeta.routing(id, model.nlist()).serialize()));
                 GlobalIndexSingleColumnWriter empty = model.createCentroidWriter(files, 0, id);
                 try {
                     ResultEntry result = empty.finish().get(0);

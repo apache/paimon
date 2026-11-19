@@ -75,9 +75,7 @@ public class DataEvolutionGlobalIndexCoverage {
             if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
                 continue;
             }
-            for (Range range : CentroidVectorIndexUtils.coverage(indexFile)) {
-                addCoverage(meta.indexFieldId(), range);
-            }
+            addCoverage(meta.indexFieldId(), meta.rowRange());
         }
     }
 

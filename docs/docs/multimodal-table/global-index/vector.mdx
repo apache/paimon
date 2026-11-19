@@ -467,8 +467,8 @@ Use full 768-dimensional query vectors when searching either of these indexes.
 ## Centroid-Based Sharding in Spark
 
 Spark can build `ivf-flat-centroid`, `ivf-pq-centroid`, `ivf-sq-centroid`, `ivf-rq-centroid`
-and `diskann-centroid` on Data Evolution append tables. Each build writes one routing model
-for the partition and one file per centroid. The table must enable row tracking and
+and `diskann-centroid` on Data Evolution append tables. Each contiguous source row-ID range in a
+partition gets one routing model and one shard file per centroid. The table must enable row tracking and
 Data Evolution, have no primary key, and use `bucket=-1`.
 
 ```sql
@@ -497,15 +497,13 @@ A centroid build pins one snapshot. Spark map tasks count non-null vectors in th
 splits. Using those counts and the configured training ratio, the driver plans
 the exact row ordinals that the outer IVF-FLAT trainer would retain. Each
 map task reads its own splits and shuffles selected vectors by reservoir slot.
-A single task trains the routing model on those vectors in the original training
-order. The driver broadcasts the model for the subsequent centroid shuffle.
-Sampling requires at least one
-non-null vector. Each call builds a complete partition. An unpartitioned table
-counts as one partition. Repeating the call atomically replaces the
-partition's existing model and shards of the requested type.
+Within each contiguous range, one task trains a router on those vectors in the original
+training order. Spark broadcasts that router and shuffles the range's vectors by centroid.
+Ranges containing only null vectors produce no index files. One call atomically replaces the
+selected partitions' previous routers and shards of the requested type.
 
-Queries load the routing model, select centroids with `centroid.nprobe`, and open
-only their shard files. Inside each selected shard, `ivf.nprobe` controls how many
+Queries load each selected range's routing model, select centroids with `centroid.nprobe`,
+and open their shard files. Inside each selected shard, `ivf.nprobe` controls how many
 local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
 Automatic probe sizing and filtered search remain available.
 The trained outer centers live in the routing model file. In the manifest, each
@@ -513,8 +511,8 @@ centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta
 For a shard, this descriptor identifies the model and centroid and wraps the local
 index writer’s metadata. The local reader receives those original bytes.
 
-Centroid shards store absolute row IDs. The model entry records the exact source row
-ranges so gaps belonging to other partitions remain eligible for raw search in
+Centroid shards store absolute row IDs. The router and all its shards share the same
+`GlobalIndexMeta.rowRange`, as with BTree. Gaps belonging to other partitions remain eligible for raw search in
 `vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
 only indexed rows.
 Persist the metric and dimension on the table when using raw fallback so indexed
@@ -524,14 +522,14 @@ Batch queries share each selected shard across the queries routed to it.
 For all four IVF types, Spark shuffles vectors by their assigned routing centroid.
 Each populated shard trains an independent IVF index on the vectors it receives.
 For IVF-PQ, this gives each shard its own inner centroids and PQ codebook. The outer
-`<index-type>.nlist` sets the number of shard slots. The optional
+`<index-type>.nlist` sets the number of shard slots per contiguous range. The optional
 `<index-type>.centroid.local-nlist` sets the number of IVF lists per shard and
 defaults to automatic sizing from that shard's vector count.
 
 For example, build with
 `ivf-pq-centroid.nlist=64,ivf-pq-centroid.centroid.local-nlist=32`.
-A query with `map('centroid.nprobe','4','ivf.nprobe','8')` selects four shard
-files and searches eight local lists in each populated shard. Both levels
+A query with `map('centroid.nprobe','4','ivf.nprobe','8')` selects four centroids per range
+and searches eight local lists in each populated shard. Both levels
 support automatic probe sizing. Empty local shards have a manifest row count
 of zero and queries skip them.
 
@@ -556,8 +554,8 @@ generation and requires a rebuild.
 This build mode and its reader currently require the Java/Spark implementation
 and a matching native library with centroid model APIs. Install the vector plugin on readers
 and on jobs that plan, commit or maintain these indexes. The plugin interprets manifest metadata without loading JNI.
-For indexes built with the pre-release `shard=centroid-based` option, drop the old index with
-that build before upgrading, then rebuild with the new type. Older readers and Python index
+For pre-release indexes built with a partition-wide router, drop the index using the previous
+build before upgrading, then rebuild with a router per contiguous range. Older readers and Python index
 builders do not support this layout; drop the centroid index before downgrading
 or rebuilding it through those clients. The model file and each populated shard carry
 training metadata, so measure model-loading cost and total index size alongside

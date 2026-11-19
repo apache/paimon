@@ -20,7 +20,6 @@ package org.apache.paimon.metastore;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -95,7 +94,7 @@ class GlobalIndexVisibilityChecker {
                 indexedRangesByPartition
                         .computeIfAbsent(entry.partition().copy(), k -> new HashMap<>())
                         .computeIfAbsent(identifier, k -> new ArrayList<>())
-                        .addAll(CentroidVectorIndexUtils.coverage(entry.indexFile()));
+                        .add(entry.indexFile().globalIndexMeta().rowRange());
             }
         }
 

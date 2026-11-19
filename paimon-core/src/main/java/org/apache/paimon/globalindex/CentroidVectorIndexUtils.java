@@ -19,12 +19,8 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.utils.Range;
 
-import java.util.Collections;
-import java.util.List;
-
-/** Source row coverage supplied by the registered vector index type. */
+/** Identifies routed vector index files through their registered index type. */
 public final class CentroidVectorIndexUtils {
     private CentroidVectorIndexUtils() {}
 
@@ -34,14 +30,11 @@ public final class CentroidVectorIndexUtils {
     }
 
     public static boolean isRoutingModel(IndexFileMeta file) {
-        return centroidBased(file) && !coverage(file).isEmpty();
-    }
-
-    public static List<Range> coverage(IndexFileMeta file) {
+        if (file.globalIndexMeta() == null) {
+            return false;
+        }
         CentroidVectorIndexFactory factory =
                 GlobalIndexerFactoryUtils.centroidFactory(file.indexType());
-        return factory == null
-                ? Collections.singletonList(file.globalIndexMeta().rowRange())
-                : factory.sourceRowRanges(file.globalIndexMeta().indexMeta());
+        return factory != null && factory.isRoutingModel(file.globalIndexMeta().indexMeta());
     }
 }

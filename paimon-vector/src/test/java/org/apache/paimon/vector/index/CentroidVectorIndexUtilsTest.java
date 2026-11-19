@@ -21,17 +21,15 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Source coverage belongs to complete model generations, never to sparse shard bounds. */
+/** Checks the private metadata of a router and its shards. */
 class CentroidVectorIndexUtilsTest {
     @Test
     void indexTypeSelectsTheMetadataCodec() {
@@ -41,9 +39,8 @@ class CentroidVectorIndexUtilsTest {
         byte[] wrapped = shard.wrap(opaque);
         IndexFileMeta ordinary = file("ivf-pq", wrapped, false);
         assertThat(CentroidVectorIndexUtils.centroidBased(ordinary)).isFalse();
-        assertThat(CentroidVectorIndexUtils.coverage(ordinary))
-                .containsExactly(new Range(10, 1009));
-        assertThatThrownBy(() -> CentroidVectorIndexUtils.coverage(file(opaque, false)))
+        assertThat(CentroidVectorIndexUtils.isRoutingModel(ordinary)).isFalse();
+        assertThatThrownBy(() -> CentroidVectorIndexUtils.isRoutingModel(file(opaque, false)))
                 .hasMessageContaining("Invalid centroid metadata header");
         VectorIndexShardMeta decoded = VectorIndexShardMeta.deserialize(wrapped);
         assertThat(decoded.payloadMeta()).containsExactly(opaque);
@@ -57,36 +54,22 @@ class CentroidVectorIndexUtilsTest {
                                 VectorIndexShardMeta.deserialize(
                                         Arrays.copyOf(wrapped, wrapped.length - 1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        wrapped[4]++;
+        wrapped[4] =
+                1; // The pre-release partition-wide router used a different row-range contract.
         assertThatThrownBy(() -> VectorIndexShardMeta.deserialize(wrapped))
                 .hasMessageContaining("version");
     }
 
     @Test
-    void testSparseShardsDoNotClaimEnvelopeCoverage() {
-        List<IndexFileMeta> files = model("a");
-        assertThat(CentroidVectorIndexUtils.coverage(files.get(0)))
-                .containsExactly(new Range(10, 19), new Range(1000, 1009));
-        assertThat(CentroidVectorIndexUtils.coverage(files.get(1))).isEmpty();
-        assertThat(CentroidVectorIndexUtils.coverage(files.get(2))).isEmpty();
-        assertThat(CentroidVectorIndexUtils.centroidBased(file("{}", false))).isFalse();
-    }
-
-    private static List<IndexFileMeta> model(String id) {
-        return Arrays.asList(
-                file(
-                        VectorIndexShardMeta.routing(
-                                        id,
-                                        2,
-                                        Arrays.asList(new Range(10, 19), new Range(1000, 1009)))
-                                .serialize(),
-                        true),
-                file(VectorIndexShardMeta.centroid(id, 0).serialize(), false),
-                file(VectorIndexShardMeta.centroid(id, 1).serialize(), false));
-    }
-
-    private static IndexFileMeta file(String json, boolean routing) {
-        return file("ivf-pq", json.getBytes(java.nio.charset.StandardCharsets.UTF_8), routing);
+    void identifiesTheRoutingModelFromPrivateMetadata() {
+        assertThat(
+                        CentroidVectorIndexUtils.isRoutingModel(
+                                file(VectorIndexShardMeta.routing("a", 2).serialize(), true)))
+                .isTrue();
+        assertThat(
+                        CentroidVectorIndexUtils.isRoutingModel(
+                                file(VectorIndexShardMeta.centroid("a", 0).serialize(), false)))
+                .isFalse();
     }
 
     private static IndexFileMeta file(byte[] meta, boolean routing) {

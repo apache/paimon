@@ -70,18 +70,12 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
 
     @Override
     public ResultEntry writeRoutingModel(
-            GlobalIndexFileWriter io,
-            String name,
-            byte[] payload,
-            String modelId,
-            int nlist,
-            List<Range> coverage)
+            GlobalIndexFileWriter io, String name, byte[] payload, String modelId, int nlist)
             throws IOException {
         try (OutputStream out = io.newOutputStream(name)) {
             VectorTrainingModelIO.write(out, payload, modelId);
         }
-        return new ResultEntry(
-                name, 0, VectorIndexShardMeta.routing(modelId, nlist, coverage).serialize());
+        return new ResultEntry(name, 0, VectorIndexShardMeta.routing(modelId, nlist).serialize());
     }
 
     @Override

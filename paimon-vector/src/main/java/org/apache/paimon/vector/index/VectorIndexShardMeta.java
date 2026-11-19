@@ -18,8 +18,6 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.utils.Range;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -27,18 +25,15 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Private wire format for the indexMeta of native centroid models and shards. */
 public final class VectorIndexShardMeta {
     private static final byte[] MAGIC = {'P', 'C', 'S', 'M'};
-    private static final byte VERSION = 1;
+    private static final byte VERSION = 2;
     private static final String ABSOLUTE_ROW_ID = "ABSOLUTE_ROW_ID";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, String>> TYPE =
@@ -88,17 +83,12 @@ public final class VectorIndexShardMeta {
         }
     }
 
-    public static VectorIndexShardMeta routing(String modelId, int nlist, List<Range> coverage) {
+    public static VectorIndexShardMeta routing(String modelId, int nlist) {
         checkArgument(
-                modelId != null && !modelId.isEmpty() && nlist > 0 && !coverage.isEmpty(),
+                modelId != null && !modelId.isEmpty() && nlist > 0,
                 "Invalid routing model metadata.");
         Map<String, String> values = base(modelId);
         values.put("nlist", Integer.toString(nlist));
-        values.put(
-                "sourceRowRanges",
-                Range.sortAndMergeOverlap(coverage, true).stream()
-                        .map(r -> r.from + ":" + r.to)
-                        .collect(Collectors.joining(",")));
         return new VectorIndexShardMeta(values, null);
     }
 
@@ -145,21 +135,6 @@ public final class VectorIndexShardMeta {
         int nlist = Integer.parseInt(values.get("nlist"));
         checkArgument(nlist > 0, "Invalid nlist.");
         return nlist;
-    }
-
-    public List<Range> sourceRowRanges() {
-        List<Range> ranges = new ArrayList<>();
-        String encoded = values.get("sourceRowRanges");
-        checkArgument(encoded != null && !encoded.isEmpty(), "Missing source row coverage.");
-        for (String range : encoded.split(",")) {
-            String[] endpoints = range.split(":");
-            checkArgument(endpoints.length == 2, "Invalid source row range.");
-            long from = Long.parseLong(endpoints[0]);
-            long to = Long.parseLong(endpoints[1]);
-            checkArgument(from >= 0 && to >= from, "Invalid source row range.");
-            ranges.add(new Range(from, to));
-        }
-        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     public byte[] serialize() {

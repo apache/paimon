@@ -51,6 +51,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.apache.spark.sql.SparkSession;
 
@@ -104,6 +105,8 @@ import java.util.concurrent.atomic.LongAdder;
  * existing source table; index generations are replaced but source rows are unchanged. {@code
  * benchmark.modes} selects one or both modes. With one mode, {@code benchmark.skip-build=true}
  * reads the current generation and records build time as -1 (unmeasured). {@code
+ * benchmark.source-ranges} splits the source partition into this many disjoint row-ID ranges by
+ * inserting a row in a different partition between commits. The default is one. {@code
  * benchmark.index-type} selects any native vector index family. {@code benchmark.read-snapshot}
  * selects a retained generation for query-only sweeps. DiskANN independently sweeps {@code
  * benchmark.<mode>.l-searches} and outer centroid probes; range mode has no outer probe. {@code
@@ -125,6 +128,8 @@ public final class VectorShardingBenchmark {
     private final int threads;
     private final List<Integer> probes;
     private final List<String> configuredModes;
+    private final int sourceRanges =
+            Integer.parseInt(System.getProperty("benchmark.source-ranges", "1"));
     private final int queryOffset =
             Integer.parseInt(System.getProperty("benchmark.query-offset", "0"));
     private final String sourceWarehouse = System.getProperty("benchmark.source-warehouse");
@@ -178,7 +183,13 @@ public final class VectorShardingBenchmark {
             }
             probes.add(probe);
         }
-        if (rows < TOP_K || queryCount < 1 || repetitions < 1 || threads < 1 || rangeRows < 1) {
+        if (sourceRanges < 1
+                || sourceRanges > rows
+                || rows < TOP_K
+                || queryCount < 1
+                || repetitions < 1
+                || threads < 1
+                || rangeRows < 1) {
             throw new IllegalArgumentException("Invalid workload size");
         }
         if (!String.valueOf(threads).equals(System.getenv("RAYON_NUM_THREADS"))) {
@@ -240,6 +251,7 @@ public final class VectorShardingBenchmark {
                         "metric=l2",
                         "train.sample-ratio=1.0",
                         "rangeRows=" + rangeRows,
+                        "sourceRanges=" + sourceRanges,
                         "threads=" + threads,
                         "nprobes=" + probes,
                         "rangeNprobes=" + probesForMode("range-based"),
@@ -299,7 +311,9 @@ public final class VectorShardingBenchmark {
                                     .toString());
             if (sourceWarehouse == null) {
                 spark.sql(
-                                "CREATE TABLE vectors (id INT, v ARRAY<FLOAT>) TBLPROPERTIES ("
+                                "CREATE TABLE vectors (id INT, v ARRAY<FLOAT>"
+                                        + (sourceRanges == 1 ? ")" : ", p INT) PARTITIONED BY (p)")
+                                        + " TBLPROPERTIES ("
                                         + "'bucket'='-1','row-tracking.enabled'='true','data-evolution.enabled'='true',"
                                         + "'fields.v.dimension'='"
                                         + dimension
@@ -355,7 +369,9 @@ public final class VectorShardingBenchmark {
                                         "CALL sys.create_global_index(table=>'bench.vectors',"
                                                 + "index_column=>'v',index_type=>'"
                                                 + typeForMode(mode)
-                                                + "',options=>'"
+                                                + "',"
+                                                + (sourceRanges == 1 ? "" : "partitions=>'p=0',")
+                                                + "options=>'"
                                                 + String.join(",", pairs)
                                                 + "')")
                                 .collect();
@@ -557,14 +573,26 @@ public final class VectorShardingBenchmark {
     }
 
     private void importSource() throws Exception {
-        BatchWriteBuilder builder = table().newBatchWriteBuilder();
-        try (BatchTableWrite writer = builder.newWrite();
-                BatchTableCommit commit = builder.newCommit();
-                DataInputStream in = input("base.fvecs")) {
-            for (int id = 0; id < rows; id++) {
-                writer.write(GenericRow.of(id, new GenericArray(vector(in))));
+        try (DataInputStream in = input("base.fvecs")) {
+            int start = 0;
+            for (int range = 0; range < sourceRanges; range++) {
+                int end = (int) ((long) (range + 1) * rows / sourceRanges);
+                BatchWriteBuilder builder = table().newBatchWriteBuilder();
+                try (BatchTableWrite writer = builder.newWrite();
+                        BatchTableCommit commit = builder.newCommit()) {
+                    for (int id = start; id < end; id++) {
+                        GenericArray v = new GenericArray(vector(in));
+                        writer.write(
+                                sourceRanges == 1 ? GenericRow.of(id, v) : GenericRow.of(id, v, 0));
+                    }
+                    commit.commit(writer.prepareCommit());
+                }
+                if (range + 1 < sourceRanges) {
+                    spark.sql("INSERT INTO vectors VALUES (-1, CAST(NULL AS ARRAY<FLOAT>), 1)")
+                            .collect();
+                }
+                start = end;
             }
-            commit.commit(writer.prepareCommit());
         }
         System.out.println("Imported source rows=" + rows);
     }
@@ -579,7 +607,7 @@ public final class VectorShardingBenchmark {
                                         Arrays.asList(
                                                 table.rowType().getField("id"),
                                                 SpecialFields.ROW_ID)));
-        logicalIds = new long[rows];
+        logicalIds = new long[Math.addExact(rows, sourceRanges - 1)];
         Arrays.fill(logicalIds, -1);
         Set<Integer> ids = new HashSet<>();
         try (RecordReader<InternalRow> reader =
@@ -587,9 +615,12 @@ public final class VectorShardingBenchmark {
             reader.forEachRemaining(
                     row -> {
                         int id = row.getInt(0);
+                        if (id == -1 && sourceRanges > 1) {
+                            return;
+                        }
                         long rowId = row.getLong(1);
                         if (rowId < 0
-                                || rowId >= rows
+                                || rowId >= logicalIds.length
                                 || logicalIds[(int) rowId] != -1
                                 || !ids.add(id)) {
                             throw new IllegalStateException("Non-bijective source ID mapping");
@@ -696,7 +727,22 @@ public final class VectorShardingBenchmark {
         List<GlobalIndexReader> readers = new ArrayList<>();
         try {
             if ("centroid-based".equals(mode)) {
-                readers.add(indexer.createReader(input, metas, rows, null, executor));
+                Map<Range, List<GlobalIndexIOMeta>> groups = new LinkedHashMap<>();
+                for (int i = 0; i < files.size(); i++) {
+                    groups.computeIfAbsent(
+                                    files.get(i).globalIndexMeta().rowRange(),
+                                    k -> new ArrayList<>())
+                            .add(metas.get(i));
+                }
+                for (Map.Entry<Range, List<GlobalIndexIOMeta>> group : groups.entrySet()) {
+                    readers.add(
+                            indexer.createReader(
+                                    input,
+                                    group.getValue(),
+                                    group.getKey().count(),
+                                    null,
+                                    executor));
+                }
             } else {
                 for (int i = 0; i < metas.size(); i++) {
                     IndexFileMeta file = files.get(i);

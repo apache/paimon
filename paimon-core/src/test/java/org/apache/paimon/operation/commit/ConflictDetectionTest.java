@@ -1739,11 +1739,10 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testCentroidIndexChecksSourceCoverageRatherThanSparseEnvelope() {
+    void testCentroidIndexChecksContiguousSourceRange() {
         byte[] meta = {1};
         CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);
-        when(factory.sourceRowRanges(meta))
-                .thenReturn(Arrays.asList(new Range(10, 19), new Range(100, 109)));
+        when(factory.isRoutingModel(meta)).thenReturn(true);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories
@@ -1759,7 +1758,7 @@ class ConflictDetectionTest {
                             null,
                             new GlobalIndexMeta(
                                     10,
-                                    109,
+                                    19,
                                     1,
                                     null,
                                     meta,
@@ -1784,7 +1783,7 @@ class ConflictDetectionTest {
                             createConflictDetection()
                                     .checkConflicts(
                                             snapshot(1),
-                                            data.subList(0, 1),
+                                            data.subList(1, 2),
                                             Collections.emptyList(),
                                             Collections.singletonList(index),
                                             null,

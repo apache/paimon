@@ -21,8 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
@@ -130,26 +128,16 @@ public class DataEvolutionVectorScan implements VectorScan {
                         .collect(Collectors.toList());
         // Only the primary field serves this vector search. Each split goes to its own index type.
         Map<Pair<Range, String>, List<IndexFileMeta>> rangeGroups = new HashMap<>();
-        Map<Pair<BinaryRow, String>, List<IndexFileMeta>> centroidGroups = new HashMap<>();
         List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : indexEntries) {
             IndexFileMeta file = entry.indexFile();
             GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
             if (isPrimaryColumn(meta, vectorColumn.id())) {
                 vectorIndexFiles.add(file);
-                if (CentroidVectorIndexUtils.centroidBased(file)) {
-                    centroidGroups
-                            .computeIfAbsent(
-                                    Pair.of(entry.partition(), file.indexType()),
-                                    k -> new ArrayList<>())
-                            .add(file);
-                } else {
-                    rangeGroups
-                            .computeIfAbsent(
-                                    Pair.of(meta.rowRange(), file.indexType()),
-                                    k -> new ArrayList<>())
-                            .add(file);
-                }
+                rangeGroups
+                        .computeIfAbsent(
+                                Pair.of(meta.rowRange(), file.indexType()), k -> new ArrayList<>())
+                        .add(file);
             }
         }
 
@@ -165,21 +153,6 @@ public class DataEvolutionVectorScan implements VectorScan {
                             entry.getValue(),
                             scalarIndexFiles(allIndexFiles, Collections.singletonList(range))));
         }
-        for (List<IndexFileMeta> files : centroidGroups.values()) {
-            Range envelope = files.get(0).globalIndexMeta().rowRange();
-            List<Range> coverage =
-                    files.stream()
-                            .flatMap(file -> CentroidVectorIndexUtils.coverage(file).stream())
-                            .collect(Collectors.toList());
-            indexedRanges.addAll(coverage);
-            splits.add(
-                    new IndexVectorSearchSplit(
-                            envelope.from,
-                            envelope.to,
-                            files,
-                            scalarIndexFiles(allIndexFiles, coverage)));
-        }
-
         CoreOptions effectiveOptions = effectiveCoreOptions();
         GlobalIndexSearchMode vectorSearchMode = effectiveOptions.vectorIndexSearchMode();
         List<Range> rawRowRanges =

@@ -81,26 +81,23 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           .toSeq
 
       val firstFiles = indexes.map(_.fileName()).toSet
-      assert(indexes.size == 5)
-      assert(indexes.count(f => CentroidVectorIndexUtils.isRoutingModel(f)) == 1)
+      val byRange = indexes.groupBy(
+        f => (f.globalIndexMeta().rowRangeStart(), f.globalIndexMeta().rowRangeEnd()))
+      assert(byRange.keySet == Set((64L, 191L), (320L, 447L)))
+      byRange.values.foreach {
+        group =>
+          assert(group.size == 5)
+          assert(group.count(CentroidVectorIndexUtils.isRoutingModel) == 1)
+      }
       assert(nearest(300) == 300)
       // Partition 1 lies inside the indexed partition's min/max envelope, but is unindexed.
       assert(nearest(200) == 200)
 
       build()
-      assert(indexes.size == 5)
+      assert(indexes.size == 10)
       assert(indexes.map(_.fileName()).toSet.intersect(firstFiles).isEmpty)
       assert(nearest(300) == 300)
       assert(nearest(200) == 200)
-
-      intercept[Exception] {
-        spark
-          .sql("""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
-                 |index_type => 'ivf-pq-centroid',
-                 |options => 'ivf-pq-centroid.nlist=4,ivf-pq-centroid.pq.m=1')""".stripMargin)
-          .collect()
-      }
-      assert(indexes.size == 5)
 
       def filteredIds(): Seq[Int] =
         spark
@@ -115,9 +112,33 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       spark
         .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
         .collect()
+      val btreeRanges = table
+        .store()
+        .newIndexFileHandler()
+        .scan(table.snapshotManager().latestSnapshot(), "btree")
+        .asScala
+        .filter(_.partition().getInt(0) == 0)
+        .map(_.indexFile().globalIndexMeta().rowRange())
+        .toSet
+      assert(btreeRanges == indexes.map(_.globalIndexMeta().rowRange()).toSet)
       assert(filteredIds() == Seq(300))
       spark.sql("DELETE FROM T WHERE p = 0 AND id = 300")
       assert(nearest(300) != 300)
+
+      spark.sql("INSERT INTO T VALUES (999, CAST(NULL AS ARRAY<FLOAT>), 3)")
+      spark
+        .sql("""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+               |index_type => 'ivf-pq-centroid',
+               |options => 'ivf-pq-centroid.nlist=4,ivf-pq-centroid.pq.m=1')""".stripMargin)
+        .collect()
+      val routers = indexes.filter(CentroidVectorIndexUtils.isRoutingModel)
+      assert(
+        routers
+          .map(f => (f.globalIndexMeta().rowRangeStart(), f.globalIndexMeta().rowRangeEnd()))
+          .toSet ==
+          Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L)))
+      assert(routers.size == 4)
+      assert(nearest(200) == 200)
     }
   }
   Seq(true, false).foreach {
