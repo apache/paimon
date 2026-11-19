@@ -42,6 +42,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Expire partitions. */
@@ -53,7 +54,7 @@ public class NormalPartitionExpire implements PartitionExpire {
 
     private final Duration expirationTime;
     private final Duration checkInterval;
-    private final FileStoreScan scan;
+    private final Function<LocalDateTime, List<PartitionEntry>> partitionSelector;
     private final FileStoreCommit commit;
     @Nullable private final PartitionModification partitionModification;
     private LocalDateTime lastCheck;
@@ -72,10 +73,32 @@ public class NormalPartitionExpire implements PartitionExpire {
             boolean endInputCheckPartitionExpire,
             int maxExpireNum,
             int expireBatchSize) {
+        this(
+                expirationTime,
+                checkInterval,
+                strategy,
+                time -> strategy.selectExpiredPartitions(scan, time),
+                commit,
+                partitionModification,
+                endInputCheckPartitionExpire,
+                maxExpireNum,
+                expireBatchSize);
+    }
+
+    public NormalPartitionExpire(
+            Duration expirationTime,
+            Duration checkInterval,
+            PartitionExpireStrategy strategy,
+            Function<LocalDateTime, List<PartitionEntry>> partitionSelector,
+            FileStoreCommit commit,
+            @Nullable PartitionModification partitionModification,
+            boolean endInputCheckPartitionExpire,
+            int maxExpireNum,
+            int expireBatchSize) {
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
         this.strategy = strategy;
-        this.scan = scan;
+        this.partitionSelector = partitionSelector;
         this.commit = commit;
         this.partitionModification = partitionModification;
         // Avoid the execution time of stream jobs from being too short and preventing partition
@@ -155,8 +178,7 @@ public class NormalPartitionExpire implements PartitionExpire {
 
     private List<Map<String, String>> doExpire(
             LocalDateTime expireDateTime, long commitIdentifier) {
-        List<PartitionEntry> partitionEntries =
-                strategy.selectExpiredPartitions(scan, expireDateTime);
+        List<PartitionEntry> partitionEntries = partitionSelector.apply(expireDateTime);
         List<List<String>> expiredPartValues = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry partition : partitionEntries) {
             Object[] array = strategy.convertPartition(partition.partition());
