@@ -180,7 +180,6 @@ class _LocalArrowFileIO(_RecordingFileIO):
 def _options(**overrides):
     values = {
         CatalogOptions.IO_CACHE_POLICY.key(): "meta,read,write",
-        CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): True,
         CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "origin-endpoint",
         CatalogOptions.IO_CACHE_WHITELIST.key(): "*",
         CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "*",
@@ -401,44 +400,32 @@ class CachePolicyFileIOTest(unittest.TestCase):
             with file_io.filesystem.open_input_file(relative_path) as input_file:
                 self.assertEqual(b"cache", input_file.read())
 
-    def test_vpc_validation_and_none_policy_disable_wrapper(self):
-        factory = _RecordingFactory()
-        file_io = CachePolicyFileIO.create(
-            TABLE_ROOT,
-            _options(**{CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): False}),
-            factory,
-        )
-        self.assertNotIsInstance(file_io, CachePolicyFileIO)
-        self.assertEqual(1, len(factory.calls))
-        self.assertEqual(
-            "origin-endpoint",
-            factory.calls[0][1].get(OssOptions.OSS_ENDPOINT),
-        )
+    def test_missing_or_none_policy_disables_wrapper(self):
+        for policy in (None, "none", "none,read"):
+            with self.subTest(policy=policy):
+                factory = _RecordingFactory()
+                file_io = CachePolicyFileIO.create(
+                    TABLE_ROOT,
+                    _options(**{CatalogOptions.IO_CACHE_POLICY.key(): policy}),
+                    factory,
+                )
+                self.assertNotIsInstance(file_io, CachePolicyFileIO)
+                self.assertEqual(1, len(factory.calls))
+                self.assertEqual(
+                    "origin-endpoint", factory.calls[0][1].get(OssOptions.OSS_ENDPOINT))
 
-        factory = _RecordingFactory()
-        options = _options()
-        options.to_map().pop(CatalogOptions.IO_CACHE_VPC_VALIDATED.key())
-        file_io = CachePolicyFileIO.create(TABLE_ROOT, options, factory)
-        self.assertNotIsInstance(file_io, CachePolicyFileIO)
-
-        factory = _RecordingFactory()
+    def test_policy_does_not_require_vpc_validation(self):
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), _RecordingFactory())
+        self.assertIsInstance(file_io, CachePolicyFileIO)
         file_io = CachePolicyFileIO.create(
             TABLE_ROOT,
             _options(**{
-                CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): False,
-                "io-cache.ignore-vpc-validate": True,
+                "io-cache.vpc-validated": False,
+                "io-cache.ignore-vpc-validate": False,
             }),
-            factory,
+            _RecordingFactory(),
         )
-        self.assertNotIsInstance(file_io, CachePolicyFileIO)
-
-        factory = _RecordingFactory()
-        file_io = CachePolicyFileIO.create(
-            TABLE_ROOT,
-            _options(**{CatalogOptions.IO_CACHE_POLICY.key(): "none"}),
-            factory,
-        )
-        self.assertNotIsInstance(file_io, CachePolicyFileIO)
+        self.assertIn("cache-endpoint", file_io.new_input_stream(DATA_PATH)[0])
 
     def test_serialization_restores_policy_filesystem(self):
         file_io = CachePolicyFileIO.create(

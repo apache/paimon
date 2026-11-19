@@ -718,7 +718,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
     def test_server_cache_settings_take_precedence(self):
         catalog_options = Options({
-            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): True,
             OssOptions.OSS_ENDPOINT.key(): "client-endpoint",
             CatalogOptions.DLF_OSS_ENDPOINT.key(): "client-dlf-endpoint",
             CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "client-origin",
@@ -726,20 +725,15 @@ class RESTTokenFileIOTest(unittest.TestCase):
         file_io = RESTTokenFileIO(
             self.identifier, self.warehouse_path, catalog_options)
         server_options = {
-            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): "false",
             OssOptions.OSS_ENDPOINT.key(): "server-cache",
             CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
         }
         merged_token = file_io._merge_token_with_catalog_options(server_options)
         self.assertEqual(server_options, merged_token)
         options = file_io._merged_options(RESTToken(merged_token, 0))
-        self.assertFalse(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
         self.assertEqual("server-cache", options.get(OssOptions.OSS_ENDPOINT))
         self.assertEqual(
             "server-origin", options.get(CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT))
-        server_options.pop(CatalogOptions.IO_CACHE_VPC_VALIDATED.key())
-        options = file_io._merged_options(RESTToken(server_options, 0))
-        self.assertFalse(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
 
     def test_token_file_io_uses_cache_policy_factory(self):
         file_io = RESTTokenFileIO(
@@ -750,7 +744,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
         file_io.token = RESTToken(
             {
                 CatalogOptions.IO_CACHE_POLICY.key(): "read",
-                CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): "true",
                 OssOptions.OSS_ENDPOINT.key(): "cache-endpoint",
             },
             int(time.time() * 1000) + 7_200_000,
@@ -772,7 +765,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual("oss://test-bucket/database/table", path)
             self.assertEqual("legacy", options.get(OssOptions.OSS_IMPL))
             self.assertEqual("read", options.get(CatalogOptions.IO_CACHE_POLICY))
-            self.assertTrue(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
+            self.assertEqual("cache-endpoint", options.get(OssOptions.OSS_ENDPOINT))
 
     def test_catalog_options_not_modified(self):
         from pypaimon.api.rest_util import RESTUtil

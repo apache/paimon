@@ -205,9 +205,6 @@ class RESTTokenFileIO(FileIO):
             self.catalog_options.to_map() if self.catalog_options else {},
             token.token
         )
-        # Connectivity validation can only come from the REST server.
-        merged_properties[CatalogOptions.IO_CACHE_VPC_VALIDATED.key()] = token.token.get(
-            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(), False)
         if self.catalog_options and OssOptions.OSS_ENDPOINT.key() not in token.token:
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():

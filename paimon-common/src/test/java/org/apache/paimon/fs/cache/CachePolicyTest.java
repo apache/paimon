@@ -25,7 +25,6 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,13 +62,11 @@ class CachePolicyTest {
     }
 
     @Test
-    void testServerVpcValidationIsRequired() {
+    void testPolicyDoesNotRequireVpcValidation() {
         Options options = options("read");
-        options.remove(IO_CACHE_VPC_VALIDATED);
-        assertThat(new CachePolicy(options).enabled()).isFalse();
-        options.set(IO_CACHE_VPC_VALIDATED, false);
-        assertThat(new CachePolicy(options).enabled()).isFalse();
-        options.set(IO_CACHE_VPC_VALIDATED, true);
+        assertThat(new CachePolicy(options).shouldCache(DATA, "read")).isTrue();
+        options.set("io-cache.vpc-validated", "false");
+        options.set("io-cache.ignore-vpc-validate", "false");
         assertThat(new CachePolicy(options).shouldCache(DATA, "read")).isTrue();
     }
 
@@ -166,7 +163,6 @@ class CachePolicyTest {
         if (tags != null) {
             options.set(IO_CACHE_POLICY, tags);
         }
-        options.set(IO_CACHE_VPC_VALIDATED, true);
         return options;
     }
 }

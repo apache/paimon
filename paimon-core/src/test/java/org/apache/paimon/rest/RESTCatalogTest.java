@@ -171,7 +171,6 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -2174,7 +2173,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testValidTokenPreservesServerCacheSettings() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(IO_CACHE_VPC_VALIDATED.key(), "true");
         options.put("fs.oss.endpoint", "client-endpoint");
         options.put(DLF_OSS_ENDPOINT.key(), "client-dlf-endpoint");
         this.catalog = newRestCatalogWithDataToken(options);
@@ -2187,8 +2185,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 "akId",
                                 "akSecret",
                                 UUID.randomUUID().toString(),
-                                IO_CACHE_VPC_VALIDATED.key(),
-                                "false",
+                                "io-cache.origin.endpoint",
+                                "server-origin",
                                 "fs.oss.endpoint",
                                 "server-cache"),
                         System.currentTimeMillis() + 3600_000L);
@@ -2198,7 +2196,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
 
-        assertEquals("false", fileDataToken.token().get(IO_CACHE_VPC_VALIDATED.key()));
+        assertEquals("server-origin", fileDataToken.token().get("io-cache.origin.endpoint"));
         assertEquals("server-cache", fileDataToken.token().get("fs.oss.endpoint"));
     }
 

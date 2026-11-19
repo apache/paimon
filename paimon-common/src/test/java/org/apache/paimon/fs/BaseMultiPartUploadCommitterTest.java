@@ -31,7 +31,6 @@ import java.util.Collections;
 
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -82,7 +81,6 @@ public class BaseMultiPartUploadCommitterTest {
     public void testCommitAndDiscardResolveRestPolicyAndResolverWrappers() throws IOException {
         Options options = new Options();
         options.set(IO_CACHE_POLICY, "write");
-        options.set(IO_CACHE_VPC_VALIDATED, true);
         options.set(RESOLVING_FILE_IO_ENABLED, true);
         FileIOLoader loader = mock(FileIOLoader.class);
         when(loader.load(any())).thenReturn(resolved);

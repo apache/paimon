@@ -53,7 +53,6 @@ import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -127,11 +126,12 @@ class CachePolicyFileIOTest {
 
     @Test
     void testDisabledPolicyStillAppliesOriginEndpoint() throws Exception {
-        for (boolean vpcValidated : new boolean[] {true, false}) {
+        for (String policy : new String[] {null, "none"}) {
             Options options = options();
-            options.set(IO_CACHE_VPC_VALIDATED, vpcValidated);
-            if (vpcValidated) {
-                options.set(IO_CACHE_POLICY, "none");
+            if (policy == null) {
+                options.remove(IO_CACHE_POLICY);
+            } else {
+                options.set(IO_CACHE_POLICY, policy);
             }
             RecordingLoader loader = new RecordingLoader();
             try (FileIO fileIO = create(options, loader)) {
@@ -317,7 +317,6 @@ class CachePolicyFileIOTest {
     private static Options options() {
         Options options = new Options();
         options.set(IO_CACHE_POLICY, "meta,read,write");
-        options.set(IO_CACHE_VPC_VALIDATED, true);
         options.set(IO_CACHE_ORIGIN_ENDPOINT, "origin");
         options.set("fs.oss.endpoint", "cache");
         options.set("fs.oss.securityToken", "test-token");

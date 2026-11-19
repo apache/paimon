@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 
@@ -47,7 +46,7 @@ public final class CachePolicy implements Serializable {
 
     public CachePolicy(Options options) {
         String policy = options.get(IO_CACHE_POLICY);
-        enabled = policy != null && !policy.contains("none") && options.get(IO_CACHE_VPC_VALIDATED);
+        enabled = policy != null && !policy.contains("none");
         metaEnabled = enabled && policy.contains("meta");
         readEnabled = enabled && policy.contains("read");
         writeEnabled = enabled && policy.contains("write");

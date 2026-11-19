@@ -149,15 +149,6 @@ class CatalogOptions:
         "'openapi-v4' (ACS4-HMAC-SHA256, for DlfNext/2026-01-18), "
         "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
         "If not set, will be automatically selected based on endpoint host.")
-    IO_CACHE_VPC_VALIDATED = (
-        ConfigOptions.key("io-cache.vpc-validated")
-        .boolean_type()
-        .default_value(False)
-        .with_description(
-            "Whether the REST server has validated connectivity from the source "
-            "VPC to the cache endpoint."
-        )
-    )
     IO_CACHE_ORIGIN_ENDPOINT = (
         ConfigOptions.key("io-cache.origin.endpoint")
         .string_type()

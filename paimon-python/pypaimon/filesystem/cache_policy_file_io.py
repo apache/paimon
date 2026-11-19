@@ -80,7 +80,6 @@ class CachePolicyFileIO(FileIO):
         return (
             policy is not None
             and cls.DISABLE_CACHE_TAG not in policy
-            and options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED)
         )
 
     def __init__(

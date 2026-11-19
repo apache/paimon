@@ -33,7 +33,6 @@ import org.junit.jupiter.api.Test;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -147,7 +146,6 @@ class CachePolicyJindoFileIOTest {
     private static Options options() {
         Options options = new Options();
         options.set(IO_CACHE_POLICY, "read");
-        options.set(IO_CACHE_VPC_VALIDATED, true);
         options.set(IO_CACHE_ORIGIN_ENDPOINT, "origin");
         options.set("fs.oss.endpoint", "cache");
         options.set("fs.oss.accessKeyId", "test-ak");
