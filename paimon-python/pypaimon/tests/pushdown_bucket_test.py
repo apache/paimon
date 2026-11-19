@@ -52,6 +52,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -765,12 +766,20 @@ class BucketPruningIntegrationTest(unittest.TestCase):
 
     @pytest.mark.python_plan
     def test_point_lookup_with_custom_bucket_provider(self):
+        self._check_custom_bucket_provider_lookup('default.custom_bucket_provider')
+
+    @pytest.mark.execution_defaults
+    @pytest.mark.skipif(not native_runtime_available(), reason='pypaimon-rust not installed')
+    def test_default_point_lookup_with_custom_bucket_provider(self):
+        self._check_custom_bucket_provider_lookup('default.custom_bucket_provider_native')
+
+    def _check_custom_bucket_provider_lookup(self, identifier):
         data = pa.table({'id': pa.array([1, 2], type=pa.int32())})
         schema = Schema.from_pyarrow_schema(data.schema, options={
             'bucket': '4', 'bucket-key': 'id', 'bucket-function.provider': 'test-last-bucket',
         })
-        self.catalog.create_table('default.custom_bucket_provider', schema, False)
-        table = self.catalog.get_table('default.custom_bucket_provider')
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
         builder = table.new_batch_write_builder()
         writer, commit = builder.new_write(), builder.new_commit()
         try:
@@ -781,9 +790,14 @@ class BucketPruningIntegrationTest(unittest.TestCase):
             writer.close()
             commit.close()
 
+        rows, splits = self._read_with(table)
+        self.assertEqual(self._split_buckets(splits), {3})
+        self.assertCountEqual(rows, data.to_pylist())
+
         predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)
-        rows, _ = self._read_with(table, predicate)
+        rows, splits = self._read_with(table, predicate)
         self.assertEqual(rows, [{'id': 1}])
+        self.assertEqual(self._split_buckets(splits), {3})
 
     @pytest.mark.python_plan
     def test_manifest_bucket_pruning_skips_file_reads(self):

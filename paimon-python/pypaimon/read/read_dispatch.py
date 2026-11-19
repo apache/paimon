@@ -410,7 +410,11 @@ def create_streaming_scan(scan, poll_interval_ms=1000, prefetch_enabled=True,
 def native_plan_requested(scan) -> bool:
     """Resolve Native planning preference without loading a disabled backend."""
     from pypaimon.common.options.core_options import CoreOptions
-    if scan.table.options.options.contains(CoreOptions.SCAN_NATIVE_PLAN_ENABLED):
+    options = scan.table.options.options
+    # Rust computes bucket filters with built-in functions and cannot use a Java provider.
+    if options.contains_key('bucket-function.provider'):
+        return False
+    if options.contains(CoreOptions.SCAN_NATIVE_PLAN_ENABLED):
         return scan.table.options.native_plan_enabled()
     if scan.table.options.native_plan_enabled():
         return True
