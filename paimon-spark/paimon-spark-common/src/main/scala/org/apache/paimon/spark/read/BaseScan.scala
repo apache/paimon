@@ -44,6 +44,8 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
 
   def table: Table
 
+  protected def readTable: Table = table
+
   // Column pruning
   def requiredSchema: StructType
 
@@ -132,7 +134,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   }
 
   lazy val readBuilder: ReadBuilder = {
-    val _readBuilder = table.newReadBuilder().withReadType(readRowTypeWithPartitions)
+    val _readBuilder = readTable.newReadBuilder().withReadType(readRowTypeWithPartitions)
     if (pushedPartitionFilters.nonEmpty) {
       _readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
