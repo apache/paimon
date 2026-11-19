@@ -391,14 +391,16 @@ class AbstractVectorSearchReadImpl:
         blocks = batches if score_candidates is None else _slice_batches(batches, _score_block_size(query_vector))
         for block in blocks:
             row_ids = block.column(SpecialFields.ROW_ID.name).to_pylist()
-            vectors = block.column(self._vector_column.name)
             if score_candidates is not None:
                 positions = [i for i, row_id in enumerate(row_ids)
                              if row_id in score_candidates]
                 if not positions:
+                    del block, row_ids
                     continue
-                vectors = vectors.take(positions)
+                vectors = block.column(self._vector_column.name).take(positions)
                 row_ids = [row_ids[i] for i in positions]
+            else:
+                vectors = block.column(self._vector_column.name)
             for row_id, score in zip(
                 row_ids, _iter_arrow_scores(vectors, query_vector, metric)
             ):
@@ -406,6 +408,7 @@ class AbstractVectorSearchReadImpl:
                     if reject_nan and math.isnan(score):
                         raise ValueError("Ray vector search cannot rank NaN scores.")
                     _offer_score(top_k_heap, self._limit, row_id, score)
+            del block, row_ids, vectors
         return _scored_result(top_k_heap)
 
     def _read_raw_vectors(self, candidates, include_filter=True, snapshot=None):
@@ -1137,6 +1140,7 @@ def _slice_batches(batches: "Iterable[pa.RecordBatch]", size: int) -> "Iterator[
     for batch in batches:
         for start in range(0, batch.num_rows, size):
             yield batch.slice(start, size)
+        del batch
 
 
 def _score_block_size(query):

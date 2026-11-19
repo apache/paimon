@@ -22,6 +22,7 @@ from contextlib import ExitStack
 from typing import Dict, Iterator, List, Optional, Tuple
 from unittest import mock
 
+import numpy as np
 import pyarrow as pa
 import pytest
 
@@ -86,6 +87,22 @@ def test_filters_candidates_in_bounded_blocks() -> None:
         result = read._read_raw_search([Range(0, 2050)], None, [1.0], score_candidates=set(ids) - {1024})
     assert max(len(args[0]) for args, _ in score.call_args_list) <= 1024
     assert result.results().to_list() == [2049, 2050]
+
+
+def test_scoring_releases_vector_buffer_before_next_read() -> None:
+    def source() -> Iterator[pa.RecordBatch]:
+        values = np.array([1.0], dtype=np.float32)
+        owner = weakref.ref(values)
+        record = pa.record_batch([pa.array([0]), pa.FixedSizeListArray.from_arrays(pa.array(values), 1)],
+                                 schema=SCHEMA)
+        del values
+        yield record
+        del record
+        assert owner() is None
+
+    read = planned_read()
+    for candidates in (None, {0}, set()):
+        read._score_raw_batches(source(), [1.0], "inner_product", candidates)
 
 
 def test_ready_split_makes_progress_with_bounded_lookahead() -> None:
