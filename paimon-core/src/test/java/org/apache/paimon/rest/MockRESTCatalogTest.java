@@ -381,16 +381,36 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         "+I[1, {\"text\":\"first\"}, null]", "+I[2, {\"text\":\"second\"}, null]");
     }
 
+    @Test
+    void testPredictionRejectsDerivedMergeKeyUsingReservedOutputName() throws Exception {
+        PredictionFixture fixture =
+                createPredictionFixture("prediction_reserved_derived_key", "response");
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.submitPrediction(
+                                        fixture.source,
+                                        fixture.specWithoutMergeKey(
+                                                "reserved-derived-key", "reserved-key-token")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("reserved output name");
+    }
+
     private PredictionFixture createPredictionFixture(String database) throws Exception {
+        return createPredictionFixture(database, "id");
+    }
+
+    private PredictionFixture createPredictionFixture(String database, String primaryKey)
+            throws Exception {
         Identifier source = Identifier.create(database, "clips");
         Identifier model = Identifier.create(database, "echo_model");
         catalog.createDatabase(database, false);
         catalog.createTable(
                 source,
                 Schema.newBuilder()
-                        .column("id", DataTypes.INT())
+                        .column(primaryKey, DataTypes.INT())
                         .column("content", DataTypes.STRING())
-                        .primaryKey("id")
+                        .primaryKey(primaryKey)
                         .option(CoreOptions.BUCKET.key(), "1")
                         .build(),
                 false);

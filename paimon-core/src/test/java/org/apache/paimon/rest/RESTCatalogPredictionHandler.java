@@ -296,7 +296,7 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                         404);
             }
         }
-        for (String key : spec.mergeKeyColumns()) {
+        for (String key : mergeKeyColumns(schema, spec)) {
             if (!fields.contains(key)) {
                 return error(
                         ErrorResponse.RESOURCE_TYPE_COLUMN,
