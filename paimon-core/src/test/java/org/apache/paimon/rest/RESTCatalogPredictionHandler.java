@@ -376,7 +376,8 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                         sourceIdentifier.getObjectName()
                                 + "__"
                                 + job.predictionId.replace('-', '_'));
-        Schema outputSchema = outputSchema(source.schema(), job.spec.mergeKeyColumns());
+        List<String> mergeKeyColumns = mergeKeyColumns(source.schema(), job.spec);
+        Schema outputSchema = outputSchema(source.schema(), mergeKeyColumns);
         catalog.createTable(outputIdentifier, outputSchema, false);
         job.setStagingOutput(outputIdentifier);
         FileStoreTable output = (FileStoreTable) catalog.getTable(outputIdentifier);
@@ -396,7 +397,13 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             while (rows.hasNext()) {
                 checkCanceled(job);
                 InternalRow sourceRow = rows.next();
-                write.write(toOutputRow(sourceRow, source.schema(), fieldIndexes, job.spec));
+                write.write(
+                        toOutputRow(
+                                sourceRow,
+                                source.schema(),
+                                fieldIndexes,
+                                mergeKeyColumns,
+                                job.spec));
             }
             checkCanceled(job);
             commit.commit(write.prepareCommit());
@@ -429,7 +436,6 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             return;
         }
         tableMetadataStore.remove(identifier.getFullName());
-        server.removeTableSnapshot(identifier);
         try {
             catalog.dropTable(identifier, true);
         } catch (Exception ignored) {
@@ -458,6 +464,10 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                 .build();
     }
 
+    private static List<String> mergeKeyColumns(TableSchema source, PredictionSpec spec) {
+        return spec.mergeKeyColumns().isEmpty() ? source.primaryKeys() : spec.mergeKeyColumns();
+    }
+
     private static Map<String, Integer> fieldIndexes(TableSchema schema) {
         Map<String, Integer> indexes = new HashMap<>();
         List<String> fields = schema.fieldNames();
@@ -471,11 +481,12 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             InternalRow sourceRow,
             TableSchema sourceSchema,
             Map<String, Integer> fieldIndexes,
+            List<String> mergeKeyColumns,
             PredictionSpec spec)
             throws JsonProcessingException {
-        Object[] values = new Object[spec.mergeKeyColumns().size() + 2];
+        Object[] values = new Object[mergeKeyColumns.size() + 2];
         int outputIndex = 0;
-        for (String key : spec.mergeKeyColumns()) {
+        for (String key : mergeKeyColumns) {
             int sourceIndex = fieldIndexes.get(key);
             DataType type = sourceSchema.fields().get(sourceIndex).type();
             values[outputIndex++] =

@@ -125,6 +125,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class MockRESTCatalogTest extends RESTCatalogTest {
 
     private RESTCatalogServer restCatalogServer;
+    private RESTCatalogPredictionTestControl predictionTestControl;
     private final String serverDefineHeaderName = "test-header";
     private final String serverDefineHeaderValue = "test-value";
     private String dataPath;
@@ -223,7 +224,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 new Model(modelIdentifier, "Deterministic reference model", definition),
                 false);
 
-        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
         Prediction submitted =
                 catalog.submitPrediction(
                         sourceIdentifier,
@@ -254,7 +255,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(batchRead(catalog.getTable(completed.output().table().toIdentifier())))
                 .containsExactly("+I[1, {\"text\":\"first\"}, null]");
 
-        resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        resumePredictionExecution = predictionTestControl.pauseExecution();
         Prediction toCancel =
                 catalog.submitPrediction(
                         sourceIdentifier,
@@ -281,8 +282,8 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     void testConcurrentIdempotentPredictionSubmissionsReturnSameJob() throws Exception {
         PredictionFixture fixture = createPredictionFixture("prediction_concurrent_same");
         PredictionSpec spec = fixture.spec("same-request", "same-token");
-        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
-        restCatalogServer.synchronizeNextPredictionSubmissions(2);
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
+        predictionTestControl.synchronizeNextSubmissions(2);
         ExecutorService submissions = Executors.newFixedThreadPool(2);
         try {
             Future<Prediction> first =
@@ -303,8 +304,8 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         PredictionFixture fixture = createPredictionFixture("prediction_concurrent_conflict");
         PredictionSpec firstSpec = fixture.spec("first-request", "conflict-token");
         PredictionSpec secondSpec = fixture.spec("second-request", "conflict-token");
-        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
-        restCatalogServer.synchronizeNextPredictionSubmissions(2);
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
+        predictionTestControl.synchronizeNextSubmissions(2);
         ExecutorService submissions = Executors.newFixedThreadPool(2);
         try {
             List<Future<Prediction>> results =
@@ -335,12 +336,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     @Test
     void testCancelAfterOutputTableCreationDoesNotPublishTable() throws Exception {
         PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_create");
-        Runnable resume = restCatalogServer.pausePredictionAfterOutputCreated();
+        Runnable resume = predictionTestControl.pauseAfterOutputCreated();
         Prediction submitted =
                 catalog.submitPrediction(
                         fixture.source, fixture.spec("cancel-after-create", "cancel-create-token"));
 
-        restCatalogServer.awaitPredictionOutputCreated();
+        predictionTestControl.awaitOutputCreated();
         assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
                 .isEqualTo(PredictionStatus.State.TERMINATING);
         resume.run();
@@ -351,17 +352,33 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     @Test
     void testCancelAfterOutputCommitDoesNotPublishTable() throws Exception {
         PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_commit");
-        Runnable resume = restCatalogServer.pausePredictionAfterOutputCommitted();
+        Runnable resume = predictionTestControl.pauseAfterOutputCommitted();
         Prediction submitted =
                 catalog.submitPrediction(
                         fixture.source, fixture.spec("cancel-after-commit", "cancel-commit-token"));
 
-        restCatalogServer.awaitPredictionOutputCommitted();
+        predictionTestControl.awaitOutputCommitted();
         assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
                 .isEqualTo(PredictionStatus.State.TERMINATING);
         resume.run();
 
         assertCanceledWithoutOutputTable(fixture, submitted.predictionId());
+    }
+
+    @Test
+    void testPredictionDerivesMergeKeyFromPrimaryKey() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_derived_merge_key");
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source,
+                        fixture.specWithoutMergeKey("derived-merge-key", "derived-key-token"));
+
+        Prediction completed = waitForPrediction(submitted.predictionId());
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        assertThat(batchRead(catalog.getTable(completed.output().table().toIdentifier())))
+                .containsExactlyInAnyOrder(
+                        "+I[1, {\"text\":\"first\"}, null]", "+I[2, {\"text\":\"second\"}, null]");
     }
 
     private PredictionFixture createPredictionFixture(String database) throws Exception {
@@ -373,11 +390,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column("content", DataTypes.STRING())
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "1")
                         .build(),
                 false);
         commitRows(
                 (FileStoreTable) catalog.getTable(source),
-                GenericRow.of(1, BinaryString.fromString("first")));
+                GenericRow.of(1, BinaryString.fromString("first")),
+                GenericRow.of(2, BinaryString.fromString("second")));
         ProviderModelDefinition definition =
                 new ProviderModelDefinition(
                         "reference",
@@ -411,11 +431,20 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         }
 
         private PredictionSpec spec(String name, String idempotencyToken) {
+            return spec(name, Collections.singletonList("id"), idempotencyToken);
+        }
+
+        private PredictionSpec specWithoutMergeKey(String name, String idempotencyToken) {
+            return spec(name, null, idempotencyToken);
+        }
+
+        private PredictionSpec spec(
+                String name, List<String> mergeKeyColumns, String idempotencyToken) {
             return new PredictionSpec(
                     name,
                     model,
                     Collections.singletonMap("text", "content"),
-                    Collections.singletonList("id"),
+                    mergeKeyColumns,
                     "Echo the input",
                     null,
                     Collections.emptyMap(),
@@ -2259,6 +2288,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         this.config = new ConfigResponse(defaultConf, ImmutableMap.of());
         restCatalogServer =
                 new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
+        predictionTestControl = restCatalogServer.predictionTestControl();
         restCatalogServer.start();
         for (Map.Entry<String, String> entry : this.authMap.entrySet()) {
             options.set(entry.getKey(), entry.getValue());
