@@ -179,7 +179,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         if (entries == null) {
             return new FileStatus[0];
         }
-        org.apache.hadoop.fs.Path directory = fs.makeQualified(hadoopPath);
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
         FileStatus[] statuses = new FileStatus[entries.length];
         for (int i = 0; i < entries.length; i++) {
             statuses[i] = new HadoopFileStatus(entries[i], directory);
@@ -191,7 +191,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         JindoHadoopSystem fs = getFileSystem(hadoopPath, false);
-        org.apache.hadoop.fs.Path directory = fs.makeQualified(hadoopPath);
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
         org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> entries =
                 fs.listStatusIterator(hadoopPath);
         return new RemoteIterator<FileStatus>() {
@@ -205,6 +205,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                 return new HadoopFileStatus(entries.next(), directory);
             }
         };
+    }
+
+    private static org.apache.hadoop.fs.Path listingDirectory(
+            JindoHadoopSystem fs, org.apache.hadoop.fs.Path path) {
+        // Jindo rebuilds even fully qualified paths with the Hadoop Path component constructor.
+        URI fsUri = fs.getUri();
+        String directory = fs.makeQualified(path).toUri().getPath();
+        return new org.apache.hadoop.fs.Path(fsUri.getScheme(), fsUri.getAuthority(), directory);
     }
 
     @Override

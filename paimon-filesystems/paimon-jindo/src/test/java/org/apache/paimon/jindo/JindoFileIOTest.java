@@ -36,6 +36,8 @@ import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.model.ObjectMetadata;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.URI;
@@ -50,8 +52,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -166,10 +170,19 @@ public class JindoFileIOTest {
         verify(fs).getMpuStore(hadoopPath);
     }
 
-    @Test
-    public void testDirectoryListingsWithStorageClass() throws IOException {
-        org.apache.hadoop.fs.Path dir = new org.apache.hadoop.fs.Path("oss://bucket/dir");
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "oss://bucket/dir",
+                "oss://bucket/dir/",
+                "oss://bucket/",
+                "oss://bucket/hour=12%253A00/"
+            })
+    public void testDirectoryListingsWithStorageClass(String uri) throws IOException {
+        Path path = new Path(URI.create(uri));
+        org.apache.hadoop.fs.Path dir = new org.apache.hadoop.fs.Path(path.toUri());
         JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.getUri()).thenReturn(URI.create("oss://bucket"));
         when(fs.makeQualified(dir)).thenReturn(dir);
         @SuppressWarnings("unchecked")
         org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> page =
@@ -186,8 +199,8 @@ public class JindoFileIOTest {
         IOException failure = new IOException("Failed to list next page");
         when(page.hasNext()).thenThrow(failure);
 
-        JindoFileIO fileIO = new TestingJindoFileIO(fs, dir);
-        Path path = new Path(dir.toUri());
+        JindoFileIO fileIO = spy(new JindoFileIO());
+        doReturn(fs).when(fileIO).getFileSystem(dir, false);
         assertThat(fileIO.listStatus(path))
                 .extracting(FileStatus::getStorageClass)
                 .containsExactly("Archive", null, null);
@@ -206,6 +219,7 @@ public class JindoFileIOTest {
     public void testListingFileDoesNotExposeDefaultStorageClass() throws IOException {
         org.apache.hadoop.fs.Path file = new org.apache.hadoop.fs.Path("oss://bucket/file");
         JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.getUri()).thenReturn(URI.create("oss://bucket"));
         when(fs.makeQualified(file)).thenReturn(file);
         @SuppressWarnings("unchecked")
         org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> entries =
