@@ -51,13 +51,22 @@ public class FieldListaggAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (inputField == null || StringUtils.isBlank(inputField.toString())) {
-            return accumulator;
+        boolean normalizeAccumulator = distinct && delimiterBinaryString.getSizeInBytes() > 0;
+        if (inputField == null || isBlank((BinaryString) inputField)) {
+            if (!normalizeAccumulator
+                    || accumulator == null
+                    || isBlank((BinaryString) accumulator)) {
+                return accumulator;
+            }
+            inputField = BinaryString.EMPTY_UTF8;
         }
         // ordered by type root definition
 
-        if (accumulator == null || StringUtils.isBlank(accumulator.toString())) {
-            return inputField;
+        if (accumulator == null || isBlank((BinaryString) accumulator)) {
+            if (!normalizeAccumulator) {
+                return inputField;
+            }
+            accumulator = BinaryString.EMPTY_UTF8;
         }
 
         BinaryString mergeFieldSD = (BinaryString) accumulator;
@@ -67,21 +76,46 @@ public class FieldListaggAgg extends FieldAggregator {
             BinaryString[] accumulatorTokens =
                     splitByWholeSeparatorPreserveAllTokens(mergeFieldSD, delimiterBinaryString);
             Set<BinaryString> existingTokens = new HashSet<>(accumulatorTokens.length);
-            for (BinaryString token : accumulatorTokens) {
-                existingTokens.add(token);
+            // Rebuilt only after finding a blank or duplicate token to drop.
+            List<BinaryString> result = null;
+            for (int i = 0; i < accumulatorTokens.length; i++) {
+                BinaryString token = accumulatorTokens[i];
+                if (!normalizeAccumulator) {
+                    existingTokens.add(token);
+                    continue;
+                }
+                boolean keep = !isBlank(token) && existingTokens.add(token);
+                if (result != null) {
+                    if (keep) {
+                        appendToken(result, token);
+                    }
+                } else if (!keep) {
+                    result = new ArrayList<>();
+                    for (int j = 0; j < i; j++) {
+                        appendToken(result, accumulatorTokens[j]);
+                    }
+                }
             }
 
-            List<BinaryString> result = new ArrayList<>();
-            result.add(mergeFieldSD);
+            boolean changed = result != null;
+            if (result == null) {
+                result = new ArrayList<>();
+                if (mergeFieldSD.getSizeInBytes() > 0) {
+                    result.add(mergeFieldSD);
+                }
+            }
             for (BinaryString str :
                     splitByWholeSeparatorPreserveAllTokens(inFieldSD, delimiterBinaryString)) {
-                if (StringUtils.isBlank(str.toString()) || existingTokens.contains(str)) {
+                if (isBlank(str) || !existingTokens.add(str)) {
                     continue;
                 }
 
-                existingTokens.add(str);
-                result.add(delimiterBinaryString);
-                result.add(str);
+                appendToken(result, str);
+                changed = true;
+            }
+
+            if (!changed) {
+                return mergeFieldSD;
             }
 
             if (result.size() == 1) {
@@ -92,5 +126,26 @@ public class FieldListaggAgg extends FieldAggregator {
         }
 
         return BinaryStringUtils.concat(mergeFieldSD, delimiterBinaryString, inFieldSD);
+    }
+
+    private void appendToken(List<BinaryString> result, BinaryString token) {
+        if (!result.isEmpty()) {
+            result.add(delimiterBinaryString);
+        }
+        result.add(token);
+    }
+
+    /** Same as {@link StringUtils#isBlank}, but avoids decoding ASCII input to a Java string. */
+    private static boolean isBlank(BinaryString str) {
+        for (int i = 0; i < str.getSizeInBytes(); i++) {
+            byte b = str.byteAt(i);
+            if (b < 0) {
+                return StringUtils.isBlank(str.toString());
+            }
+            if (!Character.isWhitespace(b)) {
+                return false;
+            }
+        }
+        return true;
     }
 }
