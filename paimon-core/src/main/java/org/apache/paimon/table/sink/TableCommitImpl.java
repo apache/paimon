@@ -331,6 +331,13 @@ public class TableCommitImpl implements InnerTableCommit {
         if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
             commitMultiple(retryCommittables, checkAppendFiles);
+        } else if (!sortedCommittables.isEmpty()
+                && sortedCommittables.get(sortedCommittables.size() - 1).identifier()
+                        == COMMIT_IDENTIFIER) {
+            // The terminal snapshot is already published, so a previous attempt may have failed in
+            // its maintenance, such as writing an automatic tag. Do not commit again, but run the
+            // maintenance and let its failure surface, since close() follows and nothing else will.
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, true);
         }
         return retryCommittables.size();
     }

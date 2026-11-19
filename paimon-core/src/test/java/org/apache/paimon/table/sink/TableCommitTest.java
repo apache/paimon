@@ -90,6 +90,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -1787,6 +1788,113 @@ public class TableCommitTest {
                 .containsExactly(1L, 2L, 3L);
     }
 
+    @Test
+    @Timeout(120)
+    public void testRetryEndInputFinishesMaintenanceAfterSnapshotPublished() throws Exception {
+        FailingTagFileIO fileIO = new FailingTagFileIO(1);
+        FileStoreTable table = createTable(fileIO, Collections.emptyList(), watermarkTagOptions());
+        String user = UUID.randomUUID().toString();
+        ManifestCommittable last = endInputCommittable(table, user);
+
+        // The first snapshot of a watermark tag period creates its tag at once, so the end-input
+        // maintenance writes the tag of snapshot 1. That write fails once, after snapshot 1 is
+        // published.
+        assertThatThrownBy(() -> filterAndCommit(table, user, last))
+                .hasStackTraceContaining(FailingTagFileIO.MESSAGE);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(table.tagManager().tags()).isEmpty();
+
+        // CommitterOperator reopens the committer with the same user and retries the exact
+        // terminal committable. The data is already committed, so the retry commits nothing, but
+        // it finishes the maintenance and creates the tag the failed attempt missed.
+        assertThat(filterAndCommit(table, user, last)).isEqualTo(0);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(table.tagManager().tags().keySet()).extracting(Snapshot::id).containsExactly(1L);
+        assertThat(fileIO.tagWrites.get()).isEqualTo(2);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRetryEndInputFailsWhileMaintenanceIsStillMissing() throws Exception {
+        FailingTagFileIO fileIO = new FailingTagFileIO(2);
+        FileStoreTable table = createTable(fileIO, Collections.emptyList(), watermarkTagOptions());
+        String user = UUID.randomUUID().toString();
+        ManifestCommittable last = endInputCommittable(table, user);
+
+        assertThatThrownBy(() -> filterAndCommit(table, user, last))
+                .hasStackTraceContaining(FailingTagFileIO.MESSAGE);
+
+        // The tag write fails again on the retry. The retry must fail too, and not report success
+        // while the tag of snapshot 1 is missing, since the committer closes right after it.
+        assertThatThrownBy(() -> filterAndCommit(table, user, last))
+                .hasStackTraceContaining(FailingTagFileIO.MESSAGE);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(table.tagManager().tags()).isEmpty();
+        // one failed tag write per attempt, as configured by FailingTagFileIO(2)
+        assertThat(fileIO.tagWrites.get()).isEqualTo(2);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRetryOfCommittedCheckpointDoesNotRunMaintenance() throws Exception {
+        FailingTagFileIO fileIO = new FailingTagFileIO(1);
+        FileStoreTable table = createTable(fileIO, Collections.emptyList(), watermarkTagOptions());
+        String user = UUID.randomUUID().toString();
+        long watermark = Instant.parse("2024-01-01T10:30:00Z").toEpochMilli();
+
+        ManifestCommittable checkpoint;
+        try (TableWriteImpl<?> write = table.newWrite(user)) {
+            write.write(GenericRow.of(1, 1L));
+            checkpoint = committable(1, watermark, write.prepareCommit(false, 1));
+        }
+        // The snapshot is published and its maintenance fails to write the tag. Maintenance of a
+        // checkpoint commit runs on the maintain executor and its failure does not fail the commit.
+        try (TableCommitImpl commit = table.newCommit(user)) {
+            commit.commit(checkpoint);
+            commit.getMaintainExecutor().submit(() -> {}).get();
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(table.tagManager().tags()).isEmpty();
+        assertThat(fileIO.tagWrites.get()).isEqualTo(1);
+
+        // The retry of a checkpoint that is already committed is not the end-input commit, so it
+        // must not run maintenance. With maintenance it would write the tag, which no longer
+        // fails, and the second write below would show up.
+        assertThat(filterAndCommit(table, user, checkpoint)).isEqualTo(0);
+        assertThat(table.tagManager().tags()).isEmpty();
+        assertThat(fileIO.tagWrites.get()).isEqualTo(1);
+    }
+
+    private static Options watermarkTagOptions() {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(
+                CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE, CoreOptions.ExpireExecutionMode.ASYNC);
+        options.set(CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.WATERMARK);
+        options.set(CoreOptions.TAG_CREATION_PERIOD, CoreOptions.TagCreationPeriod.HOURLY);
+        options.set(CoreOptions.SINK_WATERMARK_TIME_ZONE, "UTC");
+        return options;
+    }
+
+    private static ManifestCommittable endInputCommittable(FileStoreTable table, String user)
+            throws Exception {
+        try (TableWriteImpl<?> write = table.newWrite(user)) {
+            write.write(GenericRow.of(1, 1L));
+            return committable(
+                    COMMIT_IDENTIFIER,
+                    Instant.parse("2024-01-01T10:30:00Z").toEpochMilli(),
+                    write.prepareCommit(true, COMMIT_IDENTIFIER));
+        }
+    }
+
+    /** Opens a committer like a restarted CommitterOperator, retries the committable, closes it. */
+    private static int filterAndCommit(
+            FileStoreTable table, String user, ManifestCommittable committable) throws Exception {
+        try (TableCommitImpl commit = table.newCommit(user)) {
+            return commit.filterAndCommitMultiple(singletonList(committable));
+        }
+    }
+
     private static ManifestCommittable committable(
             long identifier, long watermark, List<CommitMessage> messages) {
         ManifestCommittable committable = new ManifestCommittable(identifier, watermark);
@@ -1795,7 +1903,7 @@ public class TableCommitTest {
     }
 
     private FileStoreTable createTable(
-            HoldingFileIO fileIO, List<String> primaryKeys, Options options) throws Exception {
+            LocalFileIO fileIO, List<String> primaryKeys, Options options) throws Exception {
         Path path = new Path(tempDir.toString());
         options.set(CoreOptions.PATH, path.toString());
         RowType rowType =
@@ -1812,6 +1920,28 @@ public class TableCommitTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(fileIO, path, tableSchema, CatalogEnvironment.empty());
+    }
+
+    /** A {@link LocalFileIO} that fails the first writes of tag files and counts all of them. */
+    private static class FailingTagFileIO extends LocalFileIO {
+
+        private static final String MESSAGE = "Injected tag write failure";
+
+        private final int failures;
+        private final AtomicInteger tagWrites = new AtomicInteger();
+
+        private FailingTagFileIO(int failures) {
+            this.failures = failures;
+        }
+
+        @Override
+        public void overwriteFileUtf8(Path path, String content) throws IOException {
+            if (path.getParent().getName().equals("tag")
+                    && tagWrites.incrementAndGet() <= failures) {
+                throw new IOException(MESSAGE);
+            }
+            super.overwriteFileUtf8(path, content);
+        }
     }
 
     /**
