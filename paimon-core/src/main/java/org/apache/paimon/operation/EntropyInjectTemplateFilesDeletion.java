@@ -65,10 +65,14 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
  * FileDeletionBase} contains only live files and would omit these pending deletions. Files absent
  * from all retained manifests are not discovered by this cleanup.
  *
- * <p>Deletion collects file paths one manifest at a time instead of keeping a table-wide file set.
- * Snapshot and manifest references are still collected for the branch. File paths are deduplicated
- * within each manifest; references in different manifests may cause repeated deletion attempts, and
- * missing files are ignored.
+ * <p>Collection and deletion are two separate steps: the paths of a branch are read from its
+ * manifests first, and {@link #deleteCollectedFiles()} runs only once the catalog has accepted the
+ * drop. A catalog can reject the drop with an authorization, transport or SQL error while leaving
+ * the table registered, and data of a table that still exists must stay in place. Holding the paths
+ * of a branch in memory is the price of that ordering.
+ *
+ * <p>File paths are deduplicated per branch; a file referenced by more than one branch may be
+ * deleted repeatedly, and missing files are ignored.
  */
 public class EntropyInjectTemplateFilesDeletion {
 
@@ -76,23 +80,15 @@ public class EntropyInjectTemplateFilesDeletion {
             LoggerFactory.getLogger(EntropyInjectTemplateFilesDeletion.class);
 
     private final FileStoreTable table;
-    private final ThreadPoolExecutor executor;
+    private final Set<Path> files;
 
-    private EntropyInjectTemplateFilesDeletion(FileStoreTable table) {
+    private EntropyInjectTemplateFilesDeletion(FileStoreTable table, Set<Path> files) {
         this.table = table;
-        this.executor =
-                createCachedThreadPool(
-                        table.coreOptions().fileOperationThreadNum(), "ENTROPY_TEMPLATE_DELETE");
+        this.files = files;
     }
 
-    /**
-     * Deletes the data files of the supplied branch. Call it only for a branch with template paths
-     * in its current schema, and only from a catalog that deletes the data of a dropped table.
-     *
-     * <p>Manifest read failures abort the drop and retain metadata for retry. File deletion is
-     * best-effort: failures are logged and do not prevent metadata deletion.
-     */
-    public static void delete(FileIO fileIO, Path tablePath, String branch, TableSchema schema) {
+    public static EntropyInjectTemplateFilesDeletion collect(
+            FileIO fileIO, Path tablePath, String branch, TableSchema schema) {
         FileStoreTable table =
                 FileStoreTableFactory.createWithoutFallbackBranch(
                         fileIO,
@@ -100,18 +96,45 @@ public class EntropyInjectTemplateFilesDeletion {
                         schema,
                         new Options().set(CoreOptions.BRANCH, branch),
                         CatalogEnvironment.empty());
-        EntropyInjectTemplateFilesDeletion deletion = new EntropyInjectTemplateFilesDeletion(table);
+        return collect(table);
+    }
+
+    /**
+     * Collects the data files of the supplied branch. Manifest read failures abort the drop and
+     * retain metadata for retry.
+     */
+    private static EntropyInjectTemplateFilesDeletion collect(FileStoreTable table) {
         try {
-            long deleted = deletion.deleteFiles();
-            LOG.info("Attempted to delete {} files of table branch {}.", deleted, table.fullName());
+            return new EntropyInjectTemplateFilesDeletion(table, collectFiles(table));
         } catch (IOException e) {
             throw new UncheckedIOException(
-                    "Failed to delete the external data files of table "
+                    "Failed to read the data files of table "
                             + table.fullName()
                             + ", the table is kept so that dropping it can be retried.",
                     e);
+        }
+    }
+
+    /**
+     * Deletes the collected files. Call it only after the catalog has deleted the table. Deletion
+     * is best-effort: failures are logged and do not undo the metadata deletion.
+     */
+    public void deleteCollectedFiles() {
+        if (files.isEmpty()) {
+            return;
+        }
+
+        ThreadPoolExecutor executor =
+                createCachedThreadPool(
+                        table.coreOptions().fileOperationThreadNum(), "ENTROPY_TEMPLATE_DELETE");
+        try {
+            randomlyOnlyExecute(executor, table.fileIO()::deleteQuietly, files);
+            LOG.info(
+                    "Attempted to delete {} files of table branch {}.",
+                    files.size(),
+                    table.fullName());
         } finally {
-            deletion.executor.shutdownNow();
+            executor.shutdownNow();
         }
     }
 
@@ -123,11 +146,11 @@ public class EntropyInjectTemplateFilesDeletion {
     }
 
     /** Reads each referenced manifest once; a file may occur in more than one manifest. */
-    private long deleteFiles() throws IOException {
+    private static Set<Path> collectFiles(FileStoreTable table) throws IOException {
         ManifestList manifestList = table.store().manifestListFactory().create();
         Set<String> dataManifests = new LinkedHashSet<>();
         Set<String> indexManifests = new LinkedHashSet<>();
-        for (Snapshot snapshot : allSnapshots()) {
+        for (Snapshot snapshot : allSnapshots(table)) {
             for (ManifestFileMeta meta : manifestList.readAllManifests(snapshot)) {
                 dataManifests.add(meta.fileName());
             }
@@ -136,10 +159,13 @@ public class EntropyInjectTemplateFilesDeletion {
             }
         }
 
-        return deleteDataFiles(dataManifests) + deleteIndexFiles(indexManifests);
+        Set<Path> files = new LinkedHashSet<>();
+        files.addAll(collectDataFiles(table, dataManifests));
+        files.addAll(collectIndexFiles(table, indexManifests));
+        return files;
     }
 
-    private Set<Snapshot> allSnapshots() throws IOException {
+    private static Set<Snapshot> allSnapshots(FileStoreTable table) throws IOException {
         Set<Snapshot> snapshots =
                 new LinkedHashSet<>(table.snapshotManager().safelyGetAllSnapshots());
         snapshots.addAll(table.tagManager().taggedSnapshots());
@@ -147,46 +173,36 @@ public class EntropyInjectTemplateFilesDeletion {
         return snapshots;
     }
 
-    private long deleteDataFiles(Set<String> manifestNames) throws IOException {
+    private static Set<Path> collectDataFiles(FileStoreTable table, Set<String> manifestNames)
+            throws IOException {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         DataFilePathFactories factories = new DataFilePathFactories(table.store().pathFactory());
 
-        long deleted = 0;
+        Set<Path> files = new LinkedHashSet<>();
         for (String manifestName : manifestNames) {
-            Set<Path> files = new LinkedHashSet<>();
             for (ManifestEntry entry : manifestFile.readWithIOException(manifestName)) {
                 files.addAll(
                         entry.file()
                                 .collectFiles(factories.get(entry.partition(), entry.bucket())));
             }
-            deleted += deleteAll(files);
         }
-        return deleted;
+        return files;
     }
 
-    private long deleteIndexFiles(Set<String> manifestNames) throws IOException {
+    private static Set<Path> collectIndexFiles(FileStoreTable table, Set<String> manifestNames)
+            throws IOException {
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
 
-        long deleted = 0;
+        Set<Path> files = new LinkedHashSet<>();
         for (String manifestName : manifestNames) {
             if (!indexFileHandler.existsManifest(manifestName)) {
                 continue;
             }
-            Set<Path> files = new LinkedHashSet<>();
             for (IndexManifestEntry entry :
                     indexFileHandler.readManifestWithIOException(manifestName)) {
                 files.add(indexFileHandler.filePath(entry));
             }
-            deleted += deleteAll(files);
         }
-        return deleted;
-    }
-
-    private long deleteAll(Set<Path> files) {
-        if (files.isEmpty()) {
-            return 0;
-        }
-        randomlyOnlyExecute(executor, table.fileIO()::deleteQuietly, files);
-        return files.size();
+        return files;
     }
 }

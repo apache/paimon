@@ -385,6 +385,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         Set<Path> externalPaths = new HashSet<>();
+        List<EntropyInjectTemplateFilesDeletion> templateDeletions = new ArrayList<>();
         Path tablePath = getTableLocation(identifier);
         if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
             TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
@@ -398,8 +399,12 @@ public abstract class AbstractCatalog implements Catalog {
                 if (!isExternal
                         && latestMainSchema.isPresent()
                         && EntropyInjectTemplateFilesDeletion.isTemplate(latestMainSchema.get())) {
-                    EntropyInjectTemplateFilesDeletion.delete(
-                            tableFileIO, tablePath, DEFAULT_MAIN_BRANCH, latestMainSchema.get());
+                    templateDeletions.add(
+                            EntropyInjectTemplateFilesDeletion.collect(
+                                    tableFileIO,
+                                    tablePath,
+                                    DEFAULT_MAIN_BRANCH,
+                                    latestMainSchema.get()));
                 }
                 for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
                     SchemaManager schemaBranch = schemaManager.copyWithBranch(branch);
@@ -409,14 +414,16 @@ public abstract class AbstractCatalog implements Catalog {
                             && latestBranchSchema.isPresent()
                             && EntropyInjectTemplateFilesDeletion.isTemplate(
                                     latestBranchSchema.get())) {
-                        EntropyInjectTemplateFilesDeletion.delete(
-                                tableFileIO, tablePath, branch, latestBranchSchema.get());
+                        templateDeletions.add(
+                                EntropyInjectTemplateFilesDeletion.collect(
+                                        tableFileIO, tablePath, branch, latestBranchSchema.get()));
                     }
                 }
             }
         }
 
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
+        templateDeletions.forEach(EntropyInjectTemplateFilesDeletion::deleteCollectedFiles);
     }
 
     protected boolean tableExists(Identifier identifier) {

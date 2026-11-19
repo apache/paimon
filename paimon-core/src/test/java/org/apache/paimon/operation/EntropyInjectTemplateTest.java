@@ -52,6 +52,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -224,6 +225,31 @@ public class EntropyInjectTemplateTest {
 
             external.dropTable(id, false);
 
+            assertThat(sharedTableFiles("kept")).isEqualTo(files);
+        }
+    }
+
+    @Test
+    public void testDropTableKeepsTheFilesWhenTheCatalogRefusesIt() throws Exception {
+        java.nio.file.Path warehouse = tempPath.resolve("refusing-warehouse");
+        try (Catalog refusing =
+                new FileSystemCatalog(LocalFileIO.create(), new Path("file://" + warehouse)) {
+                    @Override
+                    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
+                        throw new RuntimeException("the metastore refuses to drop the table");
+                    }
+                }) {
+            refusing.createDatabase(DATABASE, true);
+            Identifier id = Identifier.create(DATABASE, "kept");
+            refusing.createTable(id, sharedSchema("kept"), false);
+            write((FileStoreTable) refusing.getTable(id), 1, "a");
+            Set<String> files = sharedTableFiles("kept");
+            assertThat(files).hasSize(1);
+
+            assertThatThrownBy(() -> refusing.dropTable(id, false))
+                    .hasMessageContaining("refuses to drop the table");
+
+            assertThat(refusing.getTable(id)).isNotNull();
             assertThat(sharedTableFiles("kept")).isEqualTo(files);
         }
     }
