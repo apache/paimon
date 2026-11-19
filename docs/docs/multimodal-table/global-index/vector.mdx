@@ -516,11 +516,14 @@ probe additional shards. Set `centroid.nprobe` explicitly to use a fixed outer w
 
 For unfiltered L2 queries on `ivf-flat-centroid` and `ivf-pq-centroid`, Paimon can choose both
 widths together. With 64 outer centers, an automatic outer width of eight, and top-K from 10
-through 100, it checks the four nearest shard headers. If all four have 64 local lists and at
+through 100, it checks the four nearest shard descriptors in the manifest. If all four have 64 local lists and at
 least 16 × top-K vectors each, it searches those four shards with 16 local probes each.
 Other layouts use independent automatic widths. Setting either probe width explicitly, or
 setting `ivf.max_initial_filter_expansion_factor`, also selects independent sizing.
-The decision uses the stored indexes and applies to single and batched queries.
+Both single and batched searches open each selected shard once per probe round, including
+when queries in the same batch use different widths. For older descriptors without the local
+list count, the reader checks the native header and computes the candidate sets for the
+possible widths during the same open. This preserves the original search results.
 
 The trained outer centers live in the routing model file. In the manifest, each
 centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta`.

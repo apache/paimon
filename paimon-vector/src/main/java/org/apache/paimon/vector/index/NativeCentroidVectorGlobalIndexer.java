@@ -30,7 +30,6 @@ import org.apache.paimon.globalindex.VectorTrainingModel;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
-import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
 import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.types.DataType;
@@ -93,29 +92,24 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
     }
 
     static String storedMetric(GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
-        GlobalIndexIOMeta shard = null;
         for (GlobalIndexIOMeta file : files) {
             VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
-            if (meta.routingModel() && meta.metric() != null) {
-                return meta.metric();
+            if (meta.routingModel()) {
+                if (meta.metric() != null) {
+                    return meta.metric();
+                }
+                try (SeekableInputStream in = reader.getInputStream(file)) {
+                    return VectorTrainingModelIO.readLegacyMetric(
+                            in,
+                            file.fileSize(),
+                            meta.modelId(),
+                            CentroidRouter.maxSerializedBytes());
+                } catch (IOException e) {
+                    throw new UncheckedIOException("Cannot read centroid routing metric.", e);
+                }
             }
-            if (!meta.routingModel() && file.rowCount() > 0) {
-                shard = file;
-            }
         }
-        // Earlier routing descriptors omitted the metric. A populated shard has the native header.
-        if (shard == null) {
-            throw new IllegalArgumentException("Cannot resolve centroid index metric.");
-        }
-        try (SeekableInputStream in = reader.getInputStream(shard);
-                VectorIndexReader local =
-                        new VectorIndexReader(
-                                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
-                                        in))) {
-            return local.metadata().metric();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read centroid shard metric.", e);
-        }
+        throw new IllegalArgumentException("Missing centroid routing model.");
     }
 
     @Override

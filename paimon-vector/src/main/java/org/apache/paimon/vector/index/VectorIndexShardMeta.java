@@ -101,6 +101,19 @@ public final class VectorIndexShardMeta {
         return new VectorIndexShardMeta(values, null);
     }
 
+    VectorIndexShardMeta withLocalIvf(int nlist, String metric) {
+        Map<String, String> descriptor = new LinkedHashMap<>(values);
+        descriptor.put("localNlist", Integer.toString(nlist));
+        descriptor.put("metric", metric);
+        return new VectorIndexShardMeta(descriptor, payloadMeta);
+    }
+
+    @Nullable
+    Integer localNlist() {
+        String nlist = values.get("localNlist");
+        return nlist == null ? null : Integer.valueOf(nlist);
+    }
+
     private static Map<String, String> base(String modelId) {
         checkArgument(modelId != null && !modelId.isEmpty(), "Model id is required.");
         Map<String, String> values = new LinkedHashMap<>();

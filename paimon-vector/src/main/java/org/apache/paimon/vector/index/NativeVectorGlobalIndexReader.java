@@ -62,7 +62,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexReader {
 
-    private static final int JOINT_INNER_PROBES = 16;
+    static final int JOINT_INNER_PROBES = 16;
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
     private static final String MAX_INITIAL_FILTER_EXPANSION_FACTOR_PARAMETER =
@@ -105,17 +105,9 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         this.expectedIndexType = expectedIndexType;
     }
 
-    boolean supportsJointProbes(int topK) throws IOException {
-        // Check the header without loading the search structures. The shard may not be selected.
-        if (ioMeta.rowCount() < (long) JOINT_INNER_PROBES * topK) {
-            return false;
-        }
-        try (SeekableInputStream in = fileReader.getInputStream(ioMeta);
-                VectorIndexReader reader =
-                        new VectorIndexReader(new SeekableStreamVectorIndexInput(in))) {
-            VectorIndexMetadata header = reader.metadata();
-            return header.nlist() == 64 && "l2".equals(header.metric());
-        }
+    boolean hasJointLayout() throws IOException {
+        ensureLoaded();
+        return nativeMeta.nlist() == 64 && "l2".equals(nativeMeta.metric());
     }
 
     @Override

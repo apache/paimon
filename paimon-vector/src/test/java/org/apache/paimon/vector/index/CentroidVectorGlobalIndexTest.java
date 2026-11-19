@@ -63,7 +63,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -500,6 +499,21 @@ class CentroidVectorGlobalIndexTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"l2", "inner_product", "cosine"})
+    void legacyMetricMatchesTheNativeRouter(String metric) throws IOException {
+        Map<String, String> options = new HashMap<>();
+        options.put("dimension", "2");
+        options.put("index.type", "ivf_flat");
+        options.put("nlist", "1");
+        options.put("metric", metric);
+        try (VectorIndexTraining training =
+                        VectorIndexTrainer.train(options, new float[] {1f, 1f}, 1);
+                CentroidRouter router = CentroidRouter.fromTraining(training)) {
+            assertThat(VectorTrainingModelIO.legacyMetric(router.serialize())).isEqualTo(metric);
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({
         // nlist, indexed vectors in the range, top-K, eligible row IDs (-1 for no filter), probes
         "3, 25000, 100, -1, 3",
@@ -523,21 +537,72 @@ class CentroidVectorGlobalIndexTest {
                 .isEqualTo(probes);
     }
 
-    @Test
-    void joinProbesUsingTheNearestShardLayoutsForSingleAndBatchSearch() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+        "ivf-flat,current",
+        "ivf-pq,current",
+        "ivf-flat,legacy",
+        "ivf-pq,legacy",
+        "ivf-pq,mixed"
+    })
+    void joinProbesUsingTheNearestShardLayoutsForSingleAndBatchSearch(
+            String type, String descriptors) throws Exception {
         FileIO io = new LocalFileIO();
-        NativeCentroidVectorGlobalIndexer indexer = flatIndexer(64);
+        NativeCentroidVectorGlobalIndexer indexer = jointIndexer(type, 64);
         float[][] landmarks = new float[64][8];
-        List<GlobalIndexIOMeta> metas = buildMixedShards(io, indexer, landmarks);
-        Set<Path> opened = ConcurrentHashMap.newKeySet();
+        List<GlobalIndexIOMeta> metas = buildMixedShards(io, indexer, landmarks, type);
+        if (!"current".equals(descriptors)) {
+            for (int i = 0; i < metas.size(); i++) {
+                GlobalIndexIOMeta file = metas.get(i);
+                VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
+                if ("mixed".equals(descriptors) && i % 2 == 0) {
+                    continue;
+                }
+                metas.set(
+                        i,
+                        new GlobalIndexIOMeta(
+                                file.filePath(),
+                                file.fileSize(),
+                                file.rowCount(),
+                                meta.routingModel()
+                                        ? VectorIndexShardMeta.routing(
+                                                        meta.modelId(), meta.nlist(), null)
+                                                .serialize()
+                                        : VectorIndexShardMeta.centroid(
+                                                        meta.modelId(), meta.centroid())
+                                                .wrap(meta.payloadMeta())));
+            }
+        }
+        Map<Path, Integer> opened = new ConcurrentHashMap<>();
+        AtomicInteger active = new AtomicInteger();
         GlobalIndexFileReader input =
                 meta -> {
-                    opened.add(meta.filePath());
-                    return io.newInputStream(meta.filePath());
+                    opened.merge(meta.filePath(), 1, Integer::sum);
+                    assertThat(active.incrementAndGet())
+                            .as("open streams with one I/O permit")
+                            .isOne();
+                    return new SeekableInputStreamWrapper(io.newInputStream(meta.filePath())) {
+                        @Override
+                        public void close() throws IOException {
+                            try {
+                                super.close();
+                            } finally {
+                                active.decrementAndGet();
+                            }
+                        }
+                    };
                 };
+        indexer = indexer.forRead(input, metas);
+        if ("legacy".equals(descriptors)) {
+            assertThat(opened).containsOnlyKeys(metas.get(0).filePath());
+        } else {
+            assertThat(opened).isEmpty();
+        }
+        opened.clear();
         // No dependency on a spare executor thread to open a shard or complete a planned search.
-        java.util.concurrent.ThreadPoolExecutor executor =
+        java.util.concurrent.ThreadPoolExecutor worker =
                 (java.util.concurrent.ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+        ExecutorService executor = new SemaphoredDelegatingExecutor(worker, 1, false);
         try {
             int k = 10;
             Map<String, String> fixed = new HashMap<>();
@@ -549,7 +614,10 @@ class CentroidVectorGlobalIndexTest {
             try (GlobalIndexReader reader =
                     indexer.createReader(input, metas, 32768, null, executor)) {
                 joint = reader.visitVectorSearch(near).get(30, TimeUnit.SECONDS).get();
-                assertThat(opened).hasSize(5);
+                assertThat(opened)
+                        .hasSize(5)
+                        .allSatisfy((file, count) -> assertThat(count).isOne());
+                assertThat(active.get()).isZero();
                 assertSameScores(
                         joint,
                         reader.visitVectorSearch(new VectorSearch(landmarks[59], k, "v", fixed))
@@ -562,7 +630,21 @@ class CentroidVectorGlobalIndexTest {
                     indexer.createReader(input, metas, 32768, null, executor)) {
                 ScoredGlobalIndexResult independent =
                         reader.visitVectorSearch(far).get(30, TimeUnit.SECONDS).get();
-                assertThat(opened).hasSize(9);
+                assertThat(opened)
+                        .hasSize(9)
+                        .allSatisfy((file, count) -> assertThat(count).isOne());
+                assertSameScores(
+                        independent,
+                        reader.visitVectorSearch(
+                                        new VectorSearch(
+                                                landmarks[63],
+                                                k,
+                                                "v",
+                                                Collections.singletonMap("centroid.nprobe", "8")))
+                                .get()
+                                .get(),
+                        k);
+                opened.clear();
                 List<Optional<ScoredGlobalIndexResult>> batch =
                         reader.visitBatchVectorSearch(
                                         new BatchVectorSearch(
@@ -572,6 +654,10 @@ class CentroidVectorGlobalIndexTest {
                                                 k,
                                                 "v"))
                                 .get(30, TimeUnit.SECONDS);
+                assertThat(opened)
+                        .isNotEmpty()
+                        .allSatisfy((file, count) -> assertThat(count).isOne());
+                assertThat(active.get()).isZero();
                 assertSameScores(independent, batch.get(0).get(), k);
                 assertSameScores(joint, batch.get(1).get(), k);
                 assertSameScores(joint, batch.get(2).get(), k);
@@ -580,7 +666,7 @@ class CentroidVectorGlobalIndexTest {
             single.add(0);
             try (GlobalIndexReader reader =
                     indexer.createReader(input, metas, 32768, null, executor)) {
-                long before = executor.getTaskCount();
+                long before = worker.getTaskCount();
                 List<Optional<ScoredGlobalIndexResult>> hits =
                         reader.visitBatchVectorSearch(
                                         new BatchVectorSearch(
@@ -600,14 +686,14 @@ class CentroidVectorGlobalIndexTest {
                                         assertThat(hit.get().results().toArray(k))
                                                 .containsExactly(0L));
                 // One routing task plus a single batch task for each of the 64 shards.
-                assertThat(executor.getTaskCount() - before).isEqualTo(65);
+                assertThat(worker.getTaskCount() - before).isEqualTo(65);
             }
             // Qualifying row IDs can include null vectors. With this dense filter, automatic
             // routing starts at eight shards and widens until it finds the only indexed match.
             single.addRange(new Range(32768, 65535));
             try (GlobalIndexReader reader =
                     indexer.createReader(input, metas, 65536, null, executor)) {
-                long before = executor.getTaskCount();
+                long before = worker.getTaskCount();
                 List<Optional<ScoredGlobalIndexResult>> hits =
                         reader.visitBatchVectorSearch(
                                         new BatchVectorSearch(
@@ -623,7 +709,7 @@ class CentroidVectorGlobalIndexTest {
                                 hit ->
                                         assertThat(hit.get().results().toArray(1))
                                                 .containsExactly(0L));
-                assertThat(executor.getTaskCount() - before).isEqualTo(65);
+                assertThat(worker.getTaskCount() - before).isEqualTo(65);
             }
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
             include.addRange(new Range(0, 32767));
@@ -666,19 +752,22 @@ class CentroidVectorGlobalIndexTest {
         }
     }
 
-    private static NativeCentroidVectorGlobalIndexer flatIndexer(int localLists) {
+    private static NativeCentroidVectorGlobalIndexer jointIndexer(String type, int localLists) {
         Map<String, String> options = new HashMap<>();
         options.put("dimension", "8");
-        options.put("index.type", "ivf_flat");
+        options.put("index.type", type.replace('-', '_'));
+        if ("ivf-pq".equals(type)) {
+            options.put("pq.m", "2");
+        }
         options.put("metric", "l2");
         options.put("nlist", "64");
-        options.put("centroid.local-nlist", String.valueOf(localLists));
+        options.put("centroid.local-nlist", localLists == 0 ? "auto" : String.valueOf(localLists));
         return new NativeCentroidVectorGlobalIndexer(
-                new ArrayType(new FloatType()), options, "ivf-flat", 1.0);
+                new ArrayType(new FloatType()), options, type, 1.0);
     }
 
     private List<GlobalIndexIOMeta> buildMixedShards(
-            FileIO io, NativeCentroidVectorGlobalIndexer indexer, float[][] landmarks)
+            FileIO io, NativeCentroidVectorGlobalIndexer indexer, float[][] landmarks, String type)
             throws Exception {
         Path directory = new Path(temp.toString());
         GlobalIndexFileWriter files = fileWriter(io, directory);
@@ -696,7 +785,7 @@ class CentroidVectorGlobalIndexTest {
                     indexer.writeRoutingModel(
                             files, "router", model.serialize(), id, model.nlist());
             metas.add(toIOMeta(io, directory, routing));
-            NativeCentroidVectorGlobalIndexer smallIndexer = flatIndexer(4);
+            NativeCentroidVectorGlobalIndexer smallIndexer = jointIndexer(type, 0);
             Random random = new Random(42);
             for (int i = 0; i < landmarks.length; i++) {
                 int centroid = model.assignCentroid(landmarks[i]);
@@ -711,7 +800,11 @@ class CentroidVectorGlobalIndexTest {
                         }
                         writer.write(row, 512L * i + j);
                     }
-                    metas.add(toIOMeta(io, directory, writer.finish().get(0)));
+                    GlobalIndexIOMeta shard = toIOMeta(io, directory, writer.finish().get(0));
+                    VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(shard.metadata());
+                    assertThat(meta.localNlist()).isEqualTo(i == 63 ? 8 : 64);
+                    assertThat(meta.metric()).isEqualTo("l2");
+                    metas.add(shard);
                 } finally {
                     ((Closeable) writer).close();
                 }

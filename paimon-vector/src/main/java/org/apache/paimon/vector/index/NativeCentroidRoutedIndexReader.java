@@ -28,7 +28,6 @@ import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.IOFunction;
-import org.apache.paimon.utils.Pair;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -46,6 +45,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.function.BiConsumer;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -56,10 +56,11 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
 
     private final GlobalIndexFileReader files;
     private final GlobalIndexIOMeta routing;
-    private final List<GlobalIndexIOMeta> entries;
     private String metric;
     private final VectorIndexShardMeta metadata;
     private final Map<Integer, GlobalIndexIOMeta> shards = new HashMap<>();
+    // Populated for shard descriptors that record their native geometry.
+    private final Map<Integer, Boolean> jointLayout = new HashMap<>();
     private final DataType fieldType;
     private final ExecutorService executor;
     private final long vectorCount;
@@ -74,7 +75,6 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             ExecutorService executor,
             String indexType) {
         this.files = files;
-        this.entries = entries;
         this.fieldType = fieldType;
         this.executor = executor;
         this.indexType = indexType;
@@ -90,6 +90,11 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             } else {
                 checkArgument(
                         file.rowCount() >= 0, "Centroid shards must record their vector count.");
+                Integer localNlist = meta.localNlist();
+                if (localNlist != null) {
+                    jointLayout.put(
+                            meta.centroid(), localNlist == 64 && "l2".equals(meta.metric()));
+                }
                 shards.put(
                         meta.centroid(),
                         new GlobalIndexIOMeta(
@@ -111,13 +116,16 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         checkArgument(!closed, "Centroid reader is closed.");
         if (model == null) {
             try (SeekableInputStream in = files.getInputStream(routing)) {
-                CentroidRouter loaded =
-                        CentroidRouter.deserialize(
-                                VectorTrainingModelIO.read(
-                                        in,
-                                        routing.fileSize(),
-                                        metadata.modelId(),
-                                        CentroidRouter.maxSerializedBytes()));
+                byte[] payload =
+                        VectorTrainingModelIO.read(
+                                in,
+                                routing.fileSize(),
+                                metadata.modelId(),
+                                CentroidRouter.maxSerializedBytes());
+                if (metric == null) {
+                    metric = VectorTrainingModelIO.legacyMetric(payload);
+                }
+                CentroidRouter loaded = CentroidRouter.deserialize(payload);
                 if (loaded.nlist() != metadata.nlist()) {
                     loaded.close();
                     throw new IOException("Routing nlist differs from manifest metadata.");
@@ -155,7 +163,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
 
     private synchronized String metric() {
         if (metric == null) {
-            metric = NativeCentroidVectorGlobalIndexer.storedMetric(files, entries);
+            model();
         }
         return metric;
     }
@@ -215,77 +223,147 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         return 1 + (count - 1) / divisor;
     }
 
-    private CompletableFuture<List<Route>> routes(float[][] vectors, VectorSearch query) {
+    private CompletableFuture<List<int[]>> routes(BatchVectorSearch batch) {
+        VectorSearch query = batch.forIndex(0);
+        float[][] vectors = batch.vectors();
         // Submitting to the bounded I/O executor acquires a permit. Dispatch subsequent
         // stages asynchronously so they never submit child work while holding that permit.
         return CompletableFuture.supplyAsync(
-                        () -> {
-                            checkArgument(!closed, "Centroid reader is closed.");
-                            int width = initialWidth(query);
-                            if (automatic(query)
-                                    && width == metadata.nlist()
-                                    && "inner_product".equals(metric())) {
-                                int[] all = new int[width];
-                                for (int i = 0; i < width; i++) {
-                                    all[i] = i;
-                                }
-                                return Collections.nCopies(vectors.length, all);
-                            }
-                            List<int[]> centers = new ArrayList<>(vectors.length);
-                            for (float[] vector : vectors) {
-                                centers.add(model().findNearestCentroids(vector, width));
-                            }
-                            return centers;
-                        },
-                        executor)
-                .thenComposeAsync(centers -> planShardSearches(centers, query));
+                () -> {
+                    checkArgument(!closed, "Centroid reader is closed.");
+                    int width = initialWidth(query);
+                    if (automatic(query)
+                            && width == metadata.nlist()
+                            && "inner_product".equals(metric())) {
+                        int[] all = new int[width];
+                        for (int i = 0; i < width; i++) {
+                            all[i] = i;
+                        }
+                        return Collections.nCopies(vectors.length, all);
+                    }
+                    List<int[]> centers = new ArrayList<>(vectors.length);
+                    for (float[] vector : vectors) {
+                        centers.add(model().findNearestCentroids(vector, width));
+                    }
+                    return centers;
+                },
+                executor);
     }
 
-    private CompletableFuture<List<Route>> planShardSearches(
-            List<int[]> centers, VectorSearch query) {
-        // For unfiltered 64-by-64 L2 indexes, searching 16 lists in four nearby shards
-        // improved recall at comparable I/O on SIFT and GloVe for K=10..100. Verify the local
-        // geometry on files needed by either plan; queries in a batch share their header reads.
-        Map<Integer, CompletableFuture<Boolean>> compatible = new HashMap<>();
-        if (centers.get(0).length == 8
-                && metadata.nlist() == 64
-                && query.limit() >= 10
-                && query.limit() <= 100
-                && query.includeRowIds() == null
-                && automatic(query)
-                && !query.options().containsKey("ivf.nprobe")
-                && !query.options().containsKey("diskann.l_search")
-                && !query.options().containsKey("ivf.max_initial_filter_expansion_factor")
-                && ("ivf-flat".equals(indexType) || "ivf-pq".equals(indexType))) {
-            for (int[] nearest : centers) {
+    private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> search(
+            List<int[]> centers, BatchVectorSearch batch) {
+        VectorSearch query = batch.forIndex(0);
+        boolean considerJoint =
+                centers.get(0).length == 8
+                        && metadata.nlist() == 64
+                        && query.limit() >= 10
+                        && query.limit() <= 100
+                        && query.includeRowIds() == null
+                        && automatic(query)
+                        && "l2".equals(metric())
+                        && !query.options().containsKey("ivf.nprobe")
+                        && !query.options().containsKey("diskann.l_search")
+                        && !query.options().containsKey("ivf.max_initial_filter_expansion_factor")
+                        && ("ivf-flat".equals(indexType) || "ivf-pq".equals(indexType));
+        List<Route> plans = new ArrayList<>(centers.size());
+        Map<Integer, CompletableFuture<LegacyProbe>> legacy = new HashMap<>();
+        for (int[] nearest : centers) {
+            boolean joint = considerJoint;
+            for (int i = 0; joint && i < JOINT_OUTER_PROBES; i++) {
+                int centroid = nearest[i];
+                joint =
+                        shard(centroid).rowCount()
+                                        >= (long) NativeVectorGlobalIndexReader.JOINT_INNER_PROBES
+                                                * query.limit()
+                                && !Boolean.FALSE.equals(jointLayout.get(centroid));
+            }
+            plans.add(new Route(nearest, joint));
+            if (joint) {
                 for (int i = 0; i < JOINT_OUTER_PROBES; i++) {
-                    compatible.computeIfAbsent(
-                            nearest[i],
-                            c ->
-                                    readShard(
-                                            shard(c),
-                                            reader -> reader.supportsJointProbes(query.limit())));
+                    if (!jointLayout.containsKey(nearest[i])) {
+                        legacy.put(nearest[i], null);
+                    }
                 }
             }
         }
-        return CompletableFuture.allOf(compatible.values().toArray(new CompletableFuture[0]))
-                .thenApply(
-                        ignored -> {
-                            List<Route> plans = new ArrayList<>(centers.size());
-                            for (int[] nearest : centers) {
-                                boolean joint = !compatible.isEmpty();
-                                for (int i = 0; joint && i < JOINT_OUTER_PROBES; i++) {
-                                    joint = compatible.get(nearest[i]).join();
+        if (legacy.isEmpty()) {
+            for (Route plan : plans) {
+                if (plan.joint) {
+                    plan.centers = Arrays.copyOf(plan.centers, JOINT_OUTER_PROBES);
+                }
+            }
+            return searchRound(batch, plans);
+        }
+        legacy.replaceAll(
+                (centroid, ignored) ->
+                        readShard(
+                                shard(centroid),
+                                reader -> probeLegacyShard(reader, centroid, batch, plans)));
+        return CompletableFuture.allOf(legacy.values().toArray(new CompletableFuture[0]))
+                .thenComposeAsync(
+                        done -> {
+                            for (int i = 0; i < plans.size(); i++) {
+                                Route route = plans.get(i);
+                                for (int j = 0; route.joint && j < JOINT_OUTER_PROBES; j++) {
+                                    CompletableFuture<LegacyProbe> probe =
+                                            legacy.get(route.centers[j]);
+                                    route.joint = probe == null || probe.join().compatible;
                                 }
-                                plans.add(
-                                        new Route(
-                                                joint
-                                                        ? Arrays.copyOf(nearest, JOINT_OUTER_PROBES)
-                                                        : nearest,
-                                                joint));
+                                if (route.joint) {
+                                    route.centers =
+                                            Arrays.copyOf(route.centers, JOINT_OUTER_PROBES);
+                                }
+                                for (int c : route.centers) {
+                                    CompletableFuture<LegacyProbe> probe = legacy.get(c);
+                                    if (probe != null) {
+                                        route.visited.add(c);
+                                        (route.joint ? probe.join().joint : probe.join().ordinary)
+                                                .get(i)
+                                                .ifPresent(route.matches::add);
+                                    }
+                                }
                             }
-                            return plans;
+                            return searchRound(batch, plans);
                         });
+    }
+
+    // Old shard descriptors lack local layout information. The other three files determine
+    // which width this query needs. Keep candidate results for both possible plans while this
+    // shard is open, then release the reader before waiting for any other shard.
+    private static LegacyProbe probeLegacyShard(
+            NativeVectorGlobalIndexReader reader,
+            int centroid,
+            BatchVectorSearch batch,
+            List<Route> plans)
+            throws IOException {
+        LegacyProbe probe = new LegacyProbe(reader.hasJointLayout());
+        List<Integer> ordinary = new ArrayList<>();
+        List<Integer> joint = new ArrayList<>();
+        for (int i = 0; i < plans.size(); i++) {
+            Route route = plans.get(i);
+            for (int j = 0; j < route.centers.length; j++) {
+                if (route.centers[j] == centroid) {
+                    ordinary.add(i);
+                    if (probe.compatible && route.joint && j < JOINT_OUTER_PROBES) {
+                        joint.add(i);
+                    }
+                    break;
+                }
+            }
+        }
+        searchSubset(reader, batch, ordinary, false, probe.ordinary::put);
+        searchSubset(reader, batch, joint, true, probe.joint::put);
+        return probe;
+    }
+
+    private static final class LegacyProbe {
+        final boolean compatible;
+        final Map<Integer, Optional<ScoredGlobalIndexResult>> ordinary = new HashMap<>();
+        final Map<Integer, Optional<ScoredGlobalIndexResult>> joint = new HashMap<>();
+
+        LegacyProbe(boolean compatible) {
+            this.compatible = compatible;
+        }
     }
 
     private static final class Route {
@@ -326,20 +404,20 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                 || (batch.includeRowIds() != null && batch.includeRowIds().isEmpty())) {
             return CompletableFuture.completedFuture(Collections.nCopies(count, Optional.empty()));
         }
-        return routes(batch.vectors(), batch.forIndex(0))
-                .thenComposeAsync(plans -> searchRound(batch, plans));
+        return routes(batch).thenComposeAsync(centers -> search(centers, batch));
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> searchRound(
             BatchVectorSearch batch, List<Route> plans) {
-        Map<Pair<GlobalIndexIOMeta, Boolean>, List<Integer>> groups = new LinkedHashMap<>();
+        Map<GlobalIndexIOMeta, Map<Boolean, List<Integer>>> groups = new LinkedHashMap<>();
         for (int i = 0; i < plans.size(); i++) {
             Route route = plans.get(i);
             for (int centroid : route.centers) {
                 if (route.visited.add(centroid)) {
                     GlobalIndexIOMeta file = shard(centroid);
                     if (file.rowCount() > 0) {
-                        groups.computeIfAbsent(Pair.of(file, route.joint), c -> new ArrayList<>())
+                        groups.computeIfAbsent(file, ignored -> new LinkedHashMap<>())
+                                .computeIfAbsent(route.joint, ignored -> new ArrayList<>())
                                 .add(i);
                     }
                 }
@@ -347,36 +425,59 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         }
         List<CompletableFuture<Void>> pending = new ArrayList<>(groups.size());
         groups.forEach(
-                (key, indices) -> {
-                    float[][] queries = new float[indices.size()][];
-                    for (int i = 0; i < queries.length; i++) {
-                        queries[i] = batch.vectors()[indices.get(i)];
-                    }
-                    BatchVectorSearch subset =
-                            new BatchVectorSearch(
-                                            queries,
-                                            batch.limit(),
-                                            batch.fieldName(),
-                                            batch.options())
-                                    .withIncludeRowIds(batch.includeRowIds());
-                    pending.add(
-                            readShard(
-                                            key.getLeft(),
-                                            reader ->
-                                                    reader.searchShardBatch(subset, key.getRight()))
-                                    .thenAccept(
-                                            found -> {
-                                                for (int i = 0; i < found.size(); i++) {
-                                                    List<ScoredGlobalIndexResult> matches =
-                                                            plans.get(indices.get(i)).matches;
-                                                    synchronized (matches) {
-                                                        found.get(i).ifPresent(matches::add);
-                                                    }
-                                                }
-                                            }));
-                });
+                (file, policies) ->
+                        pending.add(
+                                readShard(
+                                        file,
+                                        reader -> {
+                                            // A mixed batch may select this shard with both probe
+                                            // policies.
+                                            for (Map.Entry<Boolean, List<Integer>> policy :
+                                                    policies.entrySet()) {
+                                                List<Integer> indices = policy.getValue();
+                                                searchSubset(
+                                                        reader,
+                                                        batch,
+                                                        indices,
+                                                        policy.getKey(),
+                                                        (index, result) -> {
+                                                            List<ScoredGlobalIndexResult> matches =
+                                                                    plans.get(index).matches;
+                                                            synchronized (matches) {
+                                                                result.ifPresent(matches::add);
+                                                            }
+                                                        });
+                                            }
+                                            return null;
+                                        })));
         return CompletableFuture.allOf(pending.toArray(new CompletableFuture[0]))
                 .thenComposeAsync(done -> finishRound(batch, plans));
+    }
+
+    private static void searchSubset(
+            NativeVectorGlobalIndexReader reader,
+            BatchVectorSearch batch,
+            List<Integer> indices,
+            boolean joint,
+            BiConsumer<Integer, Optional<ScoredGlobalIndexResult>> consumer) {
+        if (indices.isEmpty()) {
+            return;
+        }
+        BatchVectorSearch subset = batch;
+        if (indices.size() != batch.vectorCount()) {
+            float[][] queries = new float[indices.size()][];
+            for (int i = 0; i < queries.length; i++) {
+                queries[i] = batch.vectors()[indices.get(i)];
+            }
+            subset =
+                    new BatchVectorSearch(
+                                    queries, batch.limit(), batch.fieldName(), batch.options())
+                            .withIncludeRowIds(batch.includeRowIds());
+        }
+        List<Optional<ScoredGlobalIndexResult>> found = reader.searchShardBatch(subset, joint);
+        for (int i = 0; i < found.size(); i++) {
+            consumer.accept(indices.get(i), found.get(i));
+        }
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> finishRound(

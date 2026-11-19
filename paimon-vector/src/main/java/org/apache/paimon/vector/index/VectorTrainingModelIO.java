@@ -26,6 +26,9 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -55,6 +58,46 @@ public final class VectorTrainingModelIO {
     public static byte[] read(InputStream input, long fileSize, String modelId, int maxPayloadBytes)
             throws IOException {
         DataInputStream data = new DataInputStream(input);
+        int size = readEnvelope(data, fileSize, modelId, maxPayloadBytes);
+        byte[] payload = new byte[size];
+        data.readFully(payload);
+        return payload;
+    }
+
+    static String readLegacyMetric(
+            InputStream input, long fileSize, String modelId, int maxPayloadBytes)
+            throws IOException {
+        DataInputStream data = new DataInputStream(input);
+        int size = readEnvelope(data, fileSize, modelId, maxPayloadBytes);
+        if (size < 20) {
+            throw new IOException("Truncated PVROUT01 header.");
+        }
+        byte[] header = new byte[20];
+        data.readFully(header);
+        return legacyMetric(header);
+    }
+
+    // Only pre-metric manifests need this field of the frozen PVROUT01 payload.
+    static String legacyMetric(byte[] payload) throws IOException {
+        if (payload.length < 20
+                || !"PVROUT01".equals(new String(payload, 0, 8, StandardCharsets.US_ASCII))) {
+            throw new IOException("Expected a PVROUT01 routing header in a legacy index.");
+        }
+        switch (ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN).getInt(16)) {
+            case 0:
+                return "l2";
+            case 1:
+                return "inner_product";
+            case 2:
+                return "cosine";
+            default:
+                throw new IOException("Invalid legacy routing metric.");
+        }
+    }
+
+    private static int readEnvelope(
+            DataInputStream data, long fileSize, String modelId, int maxPayloadBytes)
+            throws IOException {
         int size = data.readInt();
         if (size <= 0 || size > 65536 || size > fileSize - 4) {
             throw new IOException("Invalid routing model metadata length.");
@@ -72,8 +115,6 @@ public final class VectorTrainingModelIO {
                 || !modelId.equals(metadata.get("modelId"))) {
             throw new IOException("Unsupported or mismatched routing model envelope.");
         }
-        byte[] payload = new byte[(int) payloadSize];
-        data.readFully(payload);
-        return payload;
+        return (int) payloadSize;
     }
 }

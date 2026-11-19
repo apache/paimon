@@ -20,12 +20,15 @@ package org.apache.paimon.vector.index;
 
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
+import org.apache.paimon.index.vector.VectorIndexMetadata;
+import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
 import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.index.vector.VectorIndexWriter;
@@ -309,6 +312,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             phaseStart = System.currentTimeMillis();
             LOG.info("{} write phase started", identifier);
             String fileName = fileWriter.newFileName(fileNamePrefix());
+            // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
+            // Capture it as it is written so automatic local nlist is resolved by native itself.
+            byte[] header =
+                    shardMeta != null
+                                    && ("ivf-flat".equals(identifier)
+                                            || "ivf-pq".equals(identifier))
+                            ? new byte[64]
+                            : null;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
@@ -317,6 +328,15 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                             @Override
                             public void write(byte[] b) throws IOException {
                                 super.write(b);
+                                if (header != null && bytesWritten < header.length) {
+                                    int offset = (int) bytesWritten;
+                                    System.arraycopy(
+                                            b,
+                                            0,
+                                            header,
+                                            offset,
+                                            Math.min(b.length, header.length - offset));
+                                }
                                 long previous = bytesWritten;
                                 bytesWritten += b.length;
                                 if (bytesWritten / WRITE_PROGRESS_INTERVAL_BYTES
@@ -340,11 +360,21 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
+            VectorIndexShardMeta descriptor = shardMeta;
+            if (header != null) {
+                try (VectorIndexReader reader =
+                        new VectorIndexReader(
+                                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
+                                        new ByteArraySeekableStream(header)))) {
+                    VectorIndexMetadata local = reader.metadata();
+                    descriptor = descriptor.withLocalIvf(local.nlist(), local.metric());
+                }
+            }
             byte[] payloadMeta = new VectorIndexMeta().serialize();
             return new ResultEntry(
                     fileName,
                     shardMeta == null ? rowCount : count,
-                    shardMeta == null ? payloadMeta : shardMeta.wrap(payloadMeta));
+                    descriptor == null ? payloadMeta : descriptor.wrap(payloadMeta));
         }
     }
 
