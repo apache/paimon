@@ -74,6 +74,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -573,8 +574,25 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
 
-                // deduplicate: remove entries common to both lists
-                deduplicate(beforeEntries, dataEntries);
+                Map<String, DeletionFile> beforeVectors =
+                        beforeDeletionFilesMap == null
+                                ? Collections.emptyMap()
+                                : beforeDeletionFilesMap.getOrDefault(
+                                        Pair.of(part, bucket), Collections.emptyMap());
+                Map<String, DeletionFile> afterVectors =
+                        afterDeletionFilesMap == null
+                                ? Collections.emptyMap()
+                                : afterDeletionFilesMap.getOrDefault(
+                                        Pair.of(part, bucket), Collections.emptyMap());
+                // A primary-key diff must read both versions of a shared file when its visible
+                // rows changed. Append diffs only read newly added files.
+                deduplicate(
+                        beforeEntries,
+                        dataEntries,
+                        file ->
+                                tableSchema.primaryKeys().isEmpty()
+                                        || Objects.equals(
+                                                beforeVectors.get(file), afterVectors.get(file)));
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -585,20 +603,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
                 List<DeletionFile> beforeDeletionFiles = null;
                 if (deletionVectors && beforeDeletionFilesMap != null) {
-                    beforeDeletionFiles =
-                            getDeletionFiles(
-                                    before,
-                                    beforeDeletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap()));
+                    beforeDeletionFiles = getDeletionFiles(before, beforeVectors);
                 }
 
                 List<DeletionFile> afterDeletionFiles = null;
                 if (deletionVectors && afterDeletionFilesMap != null) {
-                    afterDeletionFiles =
-                            getDeletionFiles(
-                                    after,
-                                    afterDeletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap()));
+                    afterDeletionFiles = getDeletionFiles(after, afterVectors);
                 }
 
                 IncrementalSplit split =
@@ -765,16 +775,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     /**
-     * Remove entries common to both lists using HashSet for O(n+m) complexity instead of O(n*m)
-     * with List.remove().
+     * Remove unchanged entries common to both lists using HashSet for O(n+m) complexity instead of
+     * O(n*m) with List.remove().
      */
     private static void deduplicate(
-            List<ManifestEntry> beforeEntries, List<ManifestEntry> dataEntries) {
+            List<ManifestEntry> beforeEntries,
+            List<ManifestEntry> dataEntries,
+            Filter<String> unchangedFile) {
         Set<ManifestEntry> afterSet = new HashSet<>(dataEntries);
         Set<ManifestEntry> commonEntries = new HashSet<>();
         beforeEntries.removeIf(
                 entry -> {
-                    if (afterSet.contains(entry)) {
+                    if (afterSet.contains(entry) && unchangedFile.test(entry.file().fileName())) {
                         commonEntries.add(entry);
                         return true;
                     }
