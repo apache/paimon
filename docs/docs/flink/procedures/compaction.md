@@ -323,6 +323,34 @@ CALL [catalog.]sys.rescale(
 CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08');
 ```
 
+## sort_data_evolution
+
+Sort a Data Evolution append table in batch mode. The input row-ID range is inclusive.
+The optional `where` expression selects partitions. Every live file that intersects
+the selection must fit entirely inside the range. A partial file group fails the job
+before writing.
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+
+CALL sys.sort_data_evolution(
+    `table` => 'default.samples',
+    start_row_id => 0,
+    end_row_id => 99999,
+    order_by => 'tenant_id,event_time',
+    `where` => 'dt = 20261119');
+```
+
+Each selected partition is sorted independently by the listed top-level fields
+in ascending order, with nulls first and the old row ID as a tie-breaker.
+The writer applies deletion vectors and rewrites all current column values together,
+including managed BLOBs and dedicated vectors. Surviving rows receive new row IDs.
+Update downstream references to the old row IDs and rebuild global indexes for the
+rewritten partitions. A selection with no matching rows or files to process is
+successful. With `table.dml-sync` enabled the call waits and returns `Success`.
+In asynchronous mode it returns the Flink job ID.
+
 ## materialize_deletion_vectors
 
 Applies deletion vectors to the latest state of an unaware-bucket Data Evolution table and assigns new row IDs to surviving rows. Affected global indexes are dropped. One invocation processes one bounded batch with a soft target of 100,000 deletion vectors; an overlapping row-ID component is not split and can exceed the target. Invoke the procedure repeatedly until an invocation makes no changes. Historical snapshots and tags can retain the replaced files until snapshot expiration. Arguments:

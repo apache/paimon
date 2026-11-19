@@ -934,7 +934,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
-        if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
+        // A range sort replaces row IDs even on tables without deletion vectors. Recheck indexes
+        // at every commit attempt, including indexes built after the rewrite was prepared.
+        if (!options.dataEvolutionEnabled()
+                || (!options.deletionVectorsEnabled() && !materializeDvRowIdCheck)) {
             return Collections.emptySet();
         }
 

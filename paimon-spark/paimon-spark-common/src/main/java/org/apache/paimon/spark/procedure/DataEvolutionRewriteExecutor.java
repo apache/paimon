@@ -25,6 +25,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPrepa
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -57,6 +58,22 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 final class DataEvolutionRewriteExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRewriteExecutor.class);
+
+    static final CommitConfigurer ROW_ID_REWRITE_COMMIT =
+            new CommitConfigurer() {
+                @Override
+                public void configure(TableCommitImpl commit) {
+                    commit.materializeDvRowIdCheck();
+                }
+
+                @Override
+                public void prepareMessages(Snapshot snapshot, List<CommitMessage> messages) {
+                    messages.replaceAll(
+                            message ->
+                                    ((CommitMessageImpl) message)
+                                            .withCheckFromSnapshot(snapshot.id()));
+                }
+            };
 
     private DataEvolutionRewriteExecutor() {}
 

@@ -73,6 +73,7 @@ import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToAsLatestProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
+import org.apache.paimon.spark.procedure.SortDataEvolutionProcedure;
 import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -123,6 +124,7 @@ public class SparkProcedures {
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put(
                 "materialize_deletion_vectors", MaterializeDeletionVectorsProcedure::builder);
+        procedureBuilders.put("sort_data_evolution", SortDataEvolutionProcedure::builder);
         procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
         procedureBuilders.put("compact_chain_table", CompactChainTableProcedure::builder);
         procedureBuilders.put("rescale", RescaleProcedure::builder);

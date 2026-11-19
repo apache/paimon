@@ -28,6 +28,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -1359,6 +1360,62 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .containsExactly(new Range(0, 4));
         assertThat(normalFileRowRanges(tasks.get(1).compactBefore()))
                 .containsExactly(new Range(10, 14));
+    }
+
+    @Test
+    public void testRangeSortFailsOnMissingInput() throws Exception {
+        createTableDefault();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        options.put(CoreOptions.BLOB_WRITE_NULL_ON_MISSING_FILE.key(), "true");
+        FileStoreTable table = getTableDefault().copy(options);
+        writeBaseRows(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        DataEvolutionCompactTask task =
+                DataEvolutionRangeSortTask.plan(
+                                table,
+                                snapshot,
+                                new Range(0, 4),
+                                null,
+                                Collections.singletonList("f0"))
+                        .get(0);
+        DataFileMeta blob =
+                task.compactBefore().stream()
+                        .filter(f -> BlobFileFormat.isBlobFile(f.fileName()))
+                        .findFirst()
+                        .get();
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0)
+                        .toPath(blob);
+        assertThat(table.fileIO().delete(path, false)).isTrue();
+        assertThatThrownBy(() -> task.doCompact(table, "range-sort"))
+                .hasStackTraceContaining(blob.fileName());
+    }
+
+    @Test
+    public void testRangeSortDropsLateIndexWithoutDeletionVectors() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(2), GenericRow.of(1));
+        Snapshot snapshot = table.latestSnapshot().get();
+        Range range = new Range(0, 1);
+        List<DataEvolutionCompactTask> tasks =
+                DataEvolutionRangeSortTask.plan(
+                        table, snapshot, range, null, Collections.singletonList("id"));
+        List<CommitMessage> messages = prepareCompactionMessages(table, snapshot, tasks);
+        commitGlobalIndex(table, BinaryRow.EMPTY_ROW, globalIndexFile("late-index", range));
+        commitMaterializeDeletionVectors(table, snapshot, messages, "range-sort");
+        assertThat(liveGlobalIndexFileNames(table)).isEmpty();
+        assertThat(normalFileRowRanges(table)).containsExactly(new Range(2, 3));
     }
 
     @Test

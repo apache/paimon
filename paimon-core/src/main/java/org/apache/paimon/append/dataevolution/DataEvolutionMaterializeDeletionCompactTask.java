@@ -45,10 +45,13 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -82,36 +85,20 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     @Override
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
-        table = table.copy(DYNAMIC_WRITE_OPTIONS);
+        table = configureTable(table);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
-        // build DataSplit with deletion vectors
-        DataSplit dataSplit =
-                DataSplit.builder()
-                        .withPartition(partition)
-                        .withBucket(0)
-                        .withDataFiles(compactBefore)
-                        .withDataDeletionFiles(deletionFiles)
-                        .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
-                        .rawConvertible(false)
-                        .build();
-        RecordReader<InternalRow> reader = createReader(store, table.rowType(), dataSplit);
+        RecordReader<InternalRow> reader =
+                createReader(
+                        store, readType(table), pathFactory.bucketPath(partition, 0).toString());
         @Nullable AppendFileStoreWrite storeWrite = null;
         @Nullable RecordWriter<InternalRow> writer = null;
         try {
             storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
             storeWrite.withWriteType(table.rowType());
             writer = storeWrite.createWriter(partition, 0);
-            RecordWriter<InternalRow> finalWriter = writer;
-            reader.forEachRemaining(
-                    row -> {
-                        try {
-                            finalWriter.write(row);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
+            writeRows(table, reader, writer);
 
             compactAfter.addAll(writer.prepareCommit(false).newFilesIncrement().newFiles());
         } finally {
@@ -133,17 +120,73 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
         return commitMessage(compactBefore, compactAfter);
     }
 
+    protected FileStoreTable configureTable(FileStoreTable table) {
+        return table.copy(DYNAMIC_WRITE_OPTIONS);
+    }
+
+    protected RowType readType(FileStoreTable table) {
+        return table.rowType();
+    }
+
+    protected void writeRows(
+            FileStoreTable table,
+            RecordReader<InternalRow> reader,
+            RecordWriter<InternalRow> writer)
+            throws Exception {
+        reader.forEachRemaining(
+                row -> {
+                    try {
+                        writer.write(row);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
     private RecordReader<InternalRow> createReader(
-            AppendOnlyFileStore store, RowType readType, DataSplit dataSplit) throws IOException {
+            AppendOnlyFileStore store, RowType readType, String bucketPath) throws IOException {
+        Map<String, DeletionFile> deletions = new HashMap<>();
+        for (int i = 0; i < compactBefore.size(); i++) {
+            if (deletionFiles.get(i) != null) {
+                deletions.put(compactBefore.get(i).fileName(), deletionFiles.get(i));
+            }
+        }
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+        // A sort may cover thousands of disjoint groups. Only search for spanning dedicated
+        // files within the connected component of each normal range.
+        for (List<DataFileMeta> component : rangeHelper.mergeOverlappingRanges(compactBefore)) {
+            DataSplit split =
+                    DataSplit.builder()
+                            .withPartition(partition)
+                            .withBucket(0)
+                            .withDataFiles(component)
+                            .withDataDeletionFiles(
+                                    component.stream()
+                                            .map(f -> deletions.get(f.fileName()))
+                                            .collect(Collectors.toList()))
+                            .withBucketPath(bucketPath)
+                            .rawConvertible(false)
+                            .build();
+            addReaders(store, readType, split, rangeHelper, readers);
+        }
+        checkArgument(!readers.isEmpty(), "Row range rewrite contains no normal files.");
+        return ConcatRecordReader.create(readers);
+    }
+
+    private void addReaders(
+            AppendOnlyFileStore store,
+            RowType readType,
+            DataSplit dataSplit,
+            RangeHelper<DataFileMeta> rangeHelper,
+            List<ReaderSupplier<InternalRow>> readers) {
         List<DataFileMeta> normalFiles = new ArrayList<>();
-        for (DataFileMeta file : compactBefore) {
+        for (DataFileMeta file : dataSplit.dataFiles()) {
             if (!isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())) {
                 normalFiles.add(file);
             }
         }
 
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (List<DataFileMeta> normalGroup : rangeHelper.mergeOverlappingRanges(normalFiles)) {
             checkArgument(
                     rangeHelper.areAllRangesSame(normalGroup),
@@ -173,8 +216,6 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
                                     .withReadType(readType)
                                     .createReader(indexedSplit));
         }
-        checkArgument(!readers.isEmpty(), "Materialize deletion task contains no normal files.");
-        return ConcatRecordReader.create(readers);
     }
 
     @Override

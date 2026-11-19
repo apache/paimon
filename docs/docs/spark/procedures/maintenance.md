@@ -78,6 +78,35 @@ CALL sys.compact(
 );
 ```
 
+## sort_data_evolution
+
+Sort a Data Evolution append table within an inclusive range of input row IDs. Both
+bounds are required. The optional `where` expression selects partitions. Every live
+file intersecting the selection must fit entirely inside the range. An endpoint that
+cuts a file causes the call to fail before writing. The result is the number of
+rewritten partitions, including zero for an empty selection.
+
+```sql
+CALL sys.sort_data_evolution(
+  table => 'default.samples',
+  start_row_id => 0L,
+  end_row_id => 99999L,
+  order_by => 'tenant_id,event_time',
+  where => 'dt = 20261119'
+);
+```
+
+Each selected partition uses one spillable sort task. List comparable top-level
+fields in ascending priority order. Nulls sort first, and the old row ID breaks ties.
+The writer applies deletion vectors, writes the latest values of all columns, and
+copies managed BLOB and dedicated vector data into new files in the same order.
+Output files follow the table's normal rolling settings.
+
+Surviving rows in the selection receive new row IDs. Coordinate persisted row-ID
+references, including BLOB views in downstream tables, before invoking the procedure.
+The commit invalidates global indexes in the rewritten partitions. Rebuild those
+indexes to restore search coverage.
+
 ## compact_database
 
 Compact all tables across one or more databases.

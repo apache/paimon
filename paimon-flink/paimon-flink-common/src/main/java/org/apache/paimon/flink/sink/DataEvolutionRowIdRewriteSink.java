@@ -20,7 +20,9 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 
@@ -30,32 +32,34 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Sink which commits physically materialized data-evolution deletion vectors. */
-public class DataEvolutionDeletionVectorMaterializeSink
-        extends FlinkSink<DataEvolutionCompactTask> {
+/** Runs partition rewrites and commits them with a conflict check against the planning snapshot. */
+public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompactTask> {
 
     private final Snapshot snapshot;
 
-    public DataEvolutionDeletionVectorMaterializeSink(FileStoreTable table, Snapshot snapshot) {
+    private DataEvolutionRowIdRewriteSink(FileStoreTable table, Snapshot snapshot) {
         super(table, true);
         this.snapshot = snapshot;
     }
 
     public static DataStreamSink<?> sink(
             FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
-        checkArgument(
-                !isStreaming(input),
-                "Deletion vector materialize sink only supports batch mode yet.");
-        return new DataEvolutionDeletionVectorMaterializeSink(table, snapshot).sinkFrom(input);
+        checkArgument(!isStreaming(input), "Data evolution row ID rewrites require batch mode.");
+        return new DataEvolutionRowIdRewriteSink(table, snapshot).sinkFrom(input);
     }
 
     @Override
     public DataStreamSink<?> sinkFrom(
             DataStream<DataEvolutionCompactTask> input, String initialCommitUser) {
-        DataStream<Committable> written = doWrite(input, initialCommitUser, null);
+        int parallelism =
+                Options.fromMap(table.options())
+                        .getOptional(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM)
+                        .orElse(input.getExecutionEnvironment().getParallelism());
+        DataStream<Committable> written =
+                doWrite(input.rebalance(), initialCommitUser, parallelism);
         written =
                 written.transform(
-                                "Data Evolution Deletion Vector Materialize Commit Preparation : "
+                                "Data Evolution Row ID Rewrite Commit Preparation : "
                                         + table.name(),
                                 new CommittableTypeInfo(),
                                 new DataEvolutionCommitPreparationOperator.Factory(
