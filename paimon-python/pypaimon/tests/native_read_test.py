@@ -565,8 +565,10 @@ def test_native_read_forwards_one_global_limit(method_name, limit):
 
 
 @pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
-@pytest.mark.parametrize('options, expected', [({}, 16), ({'blob_parallelism': 1}, 1),
-                                              ({'blob_parallelism': 8}, 8)])
+@pytest.mark.parametrize(
+    'options, expected',
+    [({}, 16), ({'blob_parallelism': 1}, 1), ({'blob_parallelism': 8}, 8)],
+)
 def test_native_read_transports_blob_parallelism_for_one_core_read(method_name, options, expected):
     read = _table_read()
     splits = [_Split() for _ in range(16)]
