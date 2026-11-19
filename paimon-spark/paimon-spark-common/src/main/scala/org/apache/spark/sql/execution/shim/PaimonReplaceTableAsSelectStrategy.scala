@@ -109,6 +109,7 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
           parts,
           tableSpec: TableSpec,
           orCreate) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
+      SparkShimLoader.shim.validateTableConstraints(tableSpec, catalog, ident)
       val columns =
         SparkShimLoader.shim.toReplaceTableColumns(
           replace.tableSchema,

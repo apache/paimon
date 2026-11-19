@@ -42,7 +42,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, Colum
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, STUtils}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, ResolveTableConstraints, STUtils}
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Transform}
 import org.apache.spark.sql.connector.read.Scan
@@ -199,6 +199,13 @@ class Spark4Shim extends SparkShim {
     GeneratedColumn.validateGeneratedColumns(tableSchema, catalog, ident, statementType)
     IdentityColumn.validateIdentityColumn(tableSchema, catalog, ident)
     columns.map(_.toV2Column(statementType)).toArray
+  }
+
+  override def validateTableConstraints(
+      tableSpec: TableSpec,
+      catalog: TableCatalog,
+      ident: Identifier): Unit = {
+    ResolveTableConstraints.validateCatalogForTableConstraint(tableSpec.constraints, catalog, ident)
   }
 
   override def copyTableSpec(
