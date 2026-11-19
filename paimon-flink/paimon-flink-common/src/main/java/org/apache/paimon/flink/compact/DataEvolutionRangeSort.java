@@ -37,6 +37,7 @@ import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.common.typeinfo.Types;
@@ -70,7 +71,8 @@ public class DataEvolutionRangeSort {
                         .getOptional(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM)
                         .orElse(Math.max(1, env.getParallelism()));
         if (parallelism == 1) {
-            DataEvolutionRowIdRewriteSink.sink(table, tasks, snapshot, true);
+            DataEvolutionRowIdRewriteSink.sink(
+                    table, tasks, snapshot, InnerTableCommit::dataEvolutionRangeSortCheck);
             return;
         }
         String commitUser = CoreOptions.createCommitUser(options.toConfiguration());

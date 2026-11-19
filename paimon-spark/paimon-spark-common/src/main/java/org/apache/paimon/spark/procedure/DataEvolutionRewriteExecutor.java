@@ -60,11 +60,16 @@ final class DataEvolutionRewriteExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRewriteExecutor.class);
 
-    static CommitConfigurer rowIdRewriteCommit(boolean rangeSort) {
+    static final CommitConfigurer RANGE_SORT_COMMIT =
+            rowIdRewriteCommit(TableCommitImpl::dataEvolutionRangeSortCheck);
+    static final CommitConfigurer MATERIALIZE_DV_COMMIT =
+            rowIdRewriteCommit(TableCommitImpl::materializeDvRowIdCheck);
+
+    private static CommitConfigurer rowIdRewriteCommit(Consumer<TableCommitImpl> check) {
         return new CommitConfigurer() {
             @Override
             public void configure(TableCommitImpl commit) {
-                commit.materializeDvRowIdCheck(rangeSort);
+                check.accept(commit);
             }
 
             @Override
@@ -240,7 +245,7 @@ final class DataEvolutionRewriteExecutor {
             String commitUser,
             SparkSession spark) {
         commitWithMergeConflictRetry(
-                table, snapshot, messages, commitUser, spark, rowIdRewriteCommit(true), null, null);
+                table, snapshot, messages, commitUser, spark, RANGE_SORT_COMMIT, null, null);
     }
 
     private static Snapshot commitWithMergeConflictRetry(

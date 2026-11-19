@@ -126,6 +126,23 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
     }
 
     @Test
+    public void testRangeSortRequiresPlanningSnapshot() throws Exception {
+        FileStoreTable table = createTable();
+        write(table, GenericRow.of(2), GenericRow.of(1));
+        Snapshot snapshot = table.latestSnapshot().get();
+        CommitMessage message = plan(table, snapshot).get(0).doCompact(table, commitUser);
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.dataEvolutionRangeSortCheck()
+                                            .commit(Collections.singletonList(message)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("range-sort commit is missing its check-from snapshot");
+        }
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshot.id());
+    }
+
+    @Test
     public void testSortUsesWorkerSpillDirectory() throws Exception {
         FileStoreTable table = createTable();
         int count = 2048;
@@ -166,7 +183,7 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
     private void commitSort(FileStoreTable table, Snapshot snapshot, CommitMessage message)
             throws Exception {
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.materializeDvRowIdCheck(true)
+            commit.dataEvolutionRangeSortCheck()
                     .commit(
                             Collections.singletonList(
                                     ((CommitMessageImpl) message)

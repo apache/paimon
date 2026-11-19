@@ -43,11 +43,12 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
     /** Use the materialize-DV row-id conflict strategy with snapshots from commit messages. */
-    default FileStoreCommit materializeDvRowIdCheck() {
-        return materializeDvRowIdCheck(false);
-    }
+    FileStoreCommit materializeDvRowIdCheck();
 
-    FileStoreCommit materializeDvRowIdCheck(boolean rangeSort);
+    /**
+     * Check a range sort against its planning snapshot and invalidate overlapping global indexes.
+     */
+    FileStoreCommit dataEvolutionRangeSortCheck();
 
     FileStoreCommit withOperation(Snapshot.Operation operation);
 

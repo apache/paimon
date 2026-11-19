@@ -159,6 +159,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private enum RowIdCheck {
+        DEFAULT,
+        MATERIALIZE_DV,
+        RANGE_SORT
+    }
+
     private final SnapshotCommit snapshotCommit;
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -186,8 +192,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
-    private boolean materializeDvRowIdCheck = false;
-    private boolean rangeSort;
+    private RowIdCheck rowIdCheck = RowIdCheck.DEFAULT;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -292,9 +297,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit materializeDvRowIdCheck(boolean rangeSort) {
-        this.rangeSort = rangeSort;
-        materializeDvRowIdCheck = true;
+    public FileStoreCommit materializeDvRowIdCheck() {
+        rowIdCheck = RowIdCheck.MATERIALIZE_DV;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit dataEvolutionRangeSortCheck() {
+        rowIdCheck = RowIdCheck.RANGE_SORT;
         return this;
     }
 
@@ -909,14 +919,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     snapshotId);
             checkFromSnapshot = snapshotId;
         }
+        String rewrite = rowIdCheck == RowIdCheck.RANGE_SORT ? "range-sort" : "materialize-DV";
         if (checkFromSnapshot != null) {
             for (CommitMessage message : commitMessages) {
                 if (message.checkFromSnapshot() != null) {
                     continue;
                 }
                 checkArgument(
-                        !materializeDvRowIdCheck,
-                        "A materialize-DV commit message is missing its check-from snapshot.");
+                        rowIdCheck == RowIdCheck.DEFAULT,
+                        "A %s commit message is missing its check-from snapshot.",
+                        rewrite);
                 CommitMessageImpl commitMessage = (CommitMessageImpl) message;
                 checkArgument(
                         commitMessage.newFilesIncrement().newFiles().stream()
@@ -926,10 +938,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "A row-id commit message is missing its check-from snapshot.");
             }
         }
-        if (materializeDvRowIdCheck) {
+        if (rowIdCheck != RowIdCheck.DEFAULT) {
             checkArgument(
                     checkFromSnapshot != null || commitMessages.isEmpty(),
-                    "A materialize-DV commit is missing its check-from snapshot.");
+                    "A %s commit is missing its check-from snapshot.",
+                    rewrite);
             conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
                     checkFromSnapshot);
         } else {
@@ -942,7 +955,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // A range sort replaces row IDs even on tables without deletion vectors. Recheck indexes
         // at every commit attempt, including indexes built after the rewrite was prepared.
         if (!options.dataEvolutionEnabled()
-                || (!options.deletionVectorsEnabled() && !materializeDvRowIdCheck)) {
+                || (!options.deletionVectorsEnabled() && rowIdCheck == RowIdCheck.DEFAULT)) {
             return Collections.emptySet();
         }
 
@@ -1036,6 +1049,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
+        boolean rangeSort = rowIdCheck == RowIdCheck.RANGE_SORT;
         Map<Pair<BinaryRow, Integer>, RowRangeIndex> sortedRanges =
                 rangeSort ? sortedInputRanges(changes.tableFiles) : Collections.emptyMap();
         return latestSnapshot -> {

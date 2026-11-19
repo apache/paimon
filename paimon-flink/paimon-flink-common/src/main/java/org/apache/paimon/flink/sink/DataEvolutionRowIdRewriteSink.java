@@ -24,7 +24,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.utils.SerializableConsumer;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -36,22 +37,24 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompactTask> {
 
     private final Snapshot snapshot;
-    private final boolean rangeSort;
+    private final SerializableConsumer<InnerTableCommit> configureCommit;
 
     private DataEvolutionRowIdRewriteSink(
-            FileStoreTable table, Snapshot snapshot, boolean rangeSort) {
+            FileStoreTable table,
+            Snapshot snapshot,
+            SerializableConsumer<InnerTableCommit> configureCommit) {
         super(table, true);
         this.snapshot = snapshot;
-        this.rangeSort = rangeSort;
+        this.configureCommit = configureCommit;
     }
 
     public static DataStreamSink<?> sink(
             FileStoreTable table,
             DataStream<DataEvolutionCompactTask> input,
             Snapshot snapshot,
-            boolean rangeSort) {
+            SerializableConsumer<InnerTableCommit> configureCommit) {
         checkArgument(!isStreaming(input), "Data evolution row ID rewrites require batch mode.");
-        return new DataEvolutionRowIdRewriteSink(table, snapshot, rangeSort).sinkFrom(input);
+        return new DataEvolutionRowIdRewriteSink(table, snapshot, configureCommit).sinkFrom(input);
     }
 
     @Override
@@ -71,7 +74,8 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
             Snapshot snapshot,
             DataStream<Committable> written,
             String commitUser) {
-        return new DataEvolutionRowIdRewriteSink(table, snapshot, true)
+        return new DataEvolutionRowIdRewriteSink(
+                        table, snapshot, InnerTableCommit::dataEvolutionRangeSortCheck)
                 .commitWritten(written, commitUser);
     }
 
@@ -97,8 +101,8 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         return context -> {
-            TableCommitImpl commit = table.newCommit(context.commitUser());
-            commit.materializeDvRowIdCheck(rangeSort);
+            InnerTableCommit commit = table.newCommit(context.commitUser());
+            configureCommit.accept(commit);
             return new StoreCommitter(table, commit, context);
         };
     }

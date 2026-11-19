@@ -1432,7 +1432,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         messages.replaceAll(
                 message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
         try (TableCommitImpl commit = table.newCommit("range-sort")) {
-            commit.materializeDvRowIdCheck(true).commit(messages);
+            commit.dataEvolutionRangeSortCheck().commit(messages);
         }
         assertThat(liveGlobalIndexFileNames(table))
                 .containsExactly("before", "in-gap", "late-after");

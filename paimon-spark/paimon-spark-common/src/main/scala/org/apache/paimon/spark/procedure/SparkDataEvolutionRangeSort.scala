@@ -58,7 +58,7 @@ object SparkDataEvolutionRangeSort {
         _ => new DataEvolutionRewriteExecutor.PlanResult(tasks, true),
         JavaSparkContext.fromSparkContext(spark.sparkContext),
         spark,
-        DataEvolutionRewriteExecutor.rowIdRewriteCommit(true)
+        DataEvolutionRewriteExecutor.RANGE_SORT_COMMIT
       )
       return
     }
