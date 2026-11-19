@@ -88,7 +88,12 @@ public class BucketEntry {
     }
 
     public static BucketEntry fromManifestEntry(ManifestEntry entry) {
-        PartitionEntry partitionEntry = PartitionEntry.fromManifestEntry(entry);
+        return fromManifestEntry(entry, true);
+    }
+
+    public static BucketEntry fromManifestEntry(ManifestEntry entry, boolean countColumnFileRows) {
+        PartitionEntry partitionEntry =
+                PartitionEntry.fromManifestEntry(entry, countColumnFileRows);
         return new BucketEntry(
                 partitionEntry.partition(),
                 entry.bucket(),

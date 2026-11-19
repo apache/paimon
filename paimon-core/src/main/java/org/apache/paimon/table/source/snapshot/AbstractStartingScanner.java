@@ -78,13 +78,17 @@ public abstract class AbstractStartingScanner implements StartingScanner {
             }
             DataSplit split = (DataSplit) s;
             BinaryRow partition = split.partition();
+            // column files of a primary key table only replace columns of their base file
+            boolean countColumnFileRows =
+                    split.dataFiles().stream().noneMatch(f -> f.minKey().getFieldCount() > 0);
             for (DataFileMeta file : split.dataFiles()) {
                 PartitionEntry partitionEntry =
                         PartitionEntry.fromDataFile(
                                 partition,
                                 ADD,
                                 file,
-                                Optional.ofNullable(split.totalBuckets()).orElse(0));
+                                Optional.ofNullable(split.totalBuckets()).orElse(0),
+                                countColumnFileRows);
                 partitions.compute(
                         partition,
                         (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));

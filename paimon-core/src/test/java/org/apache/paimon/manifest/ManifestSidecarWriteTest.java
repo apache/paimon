@@ -262,6 +262,7 @@ class ManifestSidecarWriteTest {
         Options options = new Options();
         options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, true);
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         return options;
     }
 

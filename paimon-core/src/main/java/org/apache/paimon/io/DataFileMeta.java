@@ -365,9 +365,24 @@ public interface DataFileMeta {
      * Columns physically stored in this file. A null value means all table fields, except that a
      * normal data-evolution file whose schema enables compact write-column metadata and has
      * dedicated BLOB or vector fields contains all non-dedicated fields.
+     *
+     * <p>A non-null value on a keyed file is not a partial column file. Copying a file onto another
+     * schema id materializes this list from the source schema, and the file still stores a full
+     * row. {@link #isPartialColumnFile()} is the check for an append file that stores only these
+     * columns.
      */
     @Nullable
     List<String> writeCols();
+
+    /**
+     * Whether this is an append file that stores only {@link #writeCols()}.
+     *
+     * <p>Key-value files keep a key range. A copied primary-key file can carry an explicit column
+     * list and still store every column, so a non-empty key excludes it.
+     */
+    default boolean isPartialColumnFile() {
+        return writeCols() != null && minKey().getFieldCount() == 0;
+    }
 
     /**
      * Maximum sequence number per physical table field after data-evolution compaction.

@@ -115,7 +115,7 @@ public class ManifestCompactDryRun {
                         options.manifestFullCompactionThresholdSize().getBytes());
         ManifestFileSorter.ManifestSortKey sortKey =
                 ManifestFileSorter.createSortKey(
-                        options.dataEvolutionEnabled(),
+                        options.dataEvolutionEnabled() && options.rowTrackingEnabled(),
                         manifests,
                         options.manifestSortPartitionField(),
                         partitionType,

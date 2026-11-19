@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
+import org.apache.paimon.mergetree.dataevolution.ColumnFileGroups;
 import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
@@ -67,6 +68,10 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
+        if (ColumnFileGroups.hasColumnFiles(files)) {
+            return splitAlignedGroups(files);
+        }
+
         boolean rawConvertible =
                 files.stream().allMatch(file -> file.level() != 0 && withoutDeleteRow(file));
         boolean oneLevel =
@@ -114,10 +119,47 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Sections are computed over base files only, every column file follows its base file into the
+     * same split. Such splits must be merged to stitch the columns, so none is raw convertible.
+     */
+    private List<SplitGroup> splitAlignedGroups(List<DataFileMeta> files) {
+        ColumnFileGroups groups;
+        try {
+            groups = ColumnFileGroups.group(files, true);
+        } catch (IllegalStateException e) {
+            // an incremental scan may see column files without their base, leave it to the reader
+            return Collections.singletonList(SplitGroup.nonRawConvertibleGroup(files));
+        }
+        List<List<DataFileMeta>> sections = new ArrayList<>();
+        for (List<SortedRun> section :
+                new IntervalPartition(groups.baseFiles(), keyComparator).partition()) {
+            List<DataFileMeta> sectionFiles = new ArrayList<>();
+            for (DataFileMeta base : flatRun(section)) {
+                sectionFiles.add(base);
+                sectionFiles.addAll(groups.columnFilesOf(base));
+            }
+            sections.add(sectionFiles);
+        }
+
+        return packSplits(sections).stream()
+                .map(
+                        f ->
+                                ColumnFileGroups.hasColumnFiles(f)
+                                        ? SplitGroup.nonRawConvertibleGroup(f)
+                                        : f.size() == 1 && withoutDeleteRow(f.get(0))
+                                                ? SplitGroup.rawConvertibleGroup(f)
+                                                : SplitGroup.nonRawConvertibleGroup(f))
+                .collect(Collectors.toList());
+    }
+
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // We don't split streaming scan files
-        return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));
+        return Collections.singletonList(
+                ColumnFileGroups.hasColumnFiles(files)
+                        ? SplitGroup.nonRawConvertibleGroup(files)
+                        : SplitGroup.rawConvertibleGroup(files));
     }
 
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {

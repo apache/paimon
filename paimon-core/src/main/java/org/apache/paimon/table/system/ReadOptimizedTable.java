@@ -125,6 +125,12 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     private SnapshotReader newSnapshotReader(FileStoreTable wrapped) {
         if (!wrapped.schema().primaryKeys().isEmpty()) {
+            // column files stay on level 0, reading the top level only would return the values
+            // before they were backfilled
+            if (wrapped.coreOptions().dataEvolutionEnabled()) {
+                throw new UnsupportedOperationException(
+                        "Unsupported read optimized table for primary key table with data evolution");
+            }
             return wrapped.newSnapshotReader()
                     .withLevel(wrapped.coreOptions().numLevels() - 1)
                     .enableValueFilter();

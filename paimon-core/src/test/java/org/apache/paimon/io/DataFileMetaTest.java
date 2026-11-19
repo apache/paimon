@@ -18,6 +18,8 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -304,5 +306,54 @@ public class DataFileMetaTest {
         Assertions.assertThat(selection.getCardinality()).isEqualTo(201);
         Assertions.assertThat(selection.contains(200)).isTrue();
         Assertions.assertThat(selection.contains(201)).isTrue();
+    }
+
+    @Test
+    public void testKeyedFileWithWriteColsIsNotAPartialColumnFile() {
+        BinaryRow key = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(key);
+        writer.writeInt(0, 1);
+        writer.complete();
+        DataFileMeta keyed =
+                DataFileMeta.create(
+                        "keyed.parquet",
+                        10L,
+                        1L,
+                        key,
+                        key,
+                        EMPTY_STATS,
+                        EMPTY_STATS,
+                        0L,
+                        0L,
+                        0L,
+                        0,
+                        Collections.emptyList(),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        Collections.singletonList("v"));
+        DataFileMeta columnFile =
+                DataFileMeta.forAppend(
+                        "column.parquet",
+                        10L,
+                        1L,
+                        EMPTY_STATS,
+                        0L,
+                        0L,
+                        0L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.singletonList("v"));
+
+        Assertions.assertThat(keyed.isPartialColumnFile()).isFalse();
+        Assertions.assertThat(columnFile.isPartialColumnFile()).isTrue();
+        Assertions.assertThat(createFileWithRowId(1, 0L).isPartialColumnFile()).isFalse();
     }
 }

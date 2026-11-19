@@ -747,7 +747,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                             path,
                             outputBytes,
                             Math.addExact(numAddedFiles, numDeletedFiles),
-                            options.dataEvolutionEnabled(),
+                            options.dataEvolutionEnabled() && options.rowTrackingEnabled(),
                             options.bucket() != -1);
             // Publish result() only after both immutable objects have closed. No rename.
             try (PositionOutputStream sidecarOut =

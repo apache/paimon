@@ -51,6 +51,15 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DataEvolutionUtils {
 
     /**
+     * Whether a table uses data evolution with alignment ranges on its primary-key layout, instead
+     * of row ids. Commit, conflict detection and row counting must agree on this.
+     */
+    public static boolean primaryKeyDataEvolution(
+            boolean primaryKeyTable, boolean dataEvolutionEnabled, boolean rowTrackingEnabled) {
+        return primaryKeyTable && dataEvolutionEnabled && !rowTrackingEnabled;
+    }
+
+    /**
      * Collect exact written field ids; an empty list is exact and an empty optional is unresolved.
      */
     public static Optional<List<Integer>> collectWrittenColumnIds(

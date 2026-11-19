@@ -52,6 +52,32 @@ public class RowTrackingCommitUtils {
     }
 
     /**
+     * Assigns alignment ranges for a primary-key table with data evolution. Every added full-row
+     * file without a range gets a new one, including compaction outputs, so files written before
+     * data evolution was enabled gain a range when they are rewritten. Column files must already
+     * carry the range of their base file.
+     */
+    public static RowTrackingAssigned assignPrimaryKeyAlignment(
+            long firstRowIdStart, List<ManifestEntry> deltaFiles) {
+        long start = Math.max(firstRowIdStart, rowIdEnd(deltaFiles));
+        List<ManifestEntry> assigned = new ArrayList<>(deltaFiles.size());
+        for (ManifestEntry entry : deltaFiles) {
+            if (entry.kind() != FileKind.ADD || entry.file().firstRowId() != null) {
+                assigned.add(entry);
+            } else if (entry.file().isPartialColumnFile()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column file %s must carry the alignment range of its base file.",
+                                entry.file().fileName()));
+            } else {
+                assigned.add(entry.assignFirstRowId(start));
+                start += entry.file().rowCount();
+            }
+        }
+        return new RowTrackingAssigned(start, assigned);
+    }
+
+    /**
      * The end of the row ids that files added with a first row id they already have occupy. The
      * next row id of the table does not cover them when they come from another table, for example
      * files copied by {@code sys.copy}: new files must be assigned row ids after them, and the next

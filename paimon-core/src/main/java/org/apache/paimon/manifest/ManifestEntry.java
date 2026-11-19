@@ -87,15 +87,29 @@ public interface ManifestEntry extends FileEntry {
     }
 
     static long recordCountAdd(List<ManifestEntry> manifestEntries) {
-        return manifestEntries.stream()
-                .filter(manifestEntry -> FileKind.ADD.equals(manifestEntry.kind()))
-                .mapToLong(manifest -> manifest.file().rowCount())
-                .sum();
+        return recordCountAdd(manifestEntries, true);
+    }
+
+    static long recordCountAdd(List<ManifestEntry> manifestEntries, boolean countColumnFileRows) {
+        return recordCount(manifestEntries, FileKind.ADD, countColumnFileRows);
     }
 
     static long recordCountDelete(List<ManifestEntry> manifestEntries) {
+        return recordCountDelete(manifestEntries, true);
+    }
+
+    static long recordCountDelete(
+            List<ManifestEntry> manifestEntries, boolean countColumnFileRows) {
+        return recordCount(manifestEntries, FileKind.DELETE, countColumnFileRows);
+    }
+
+    static long recordCount(
+            List<ManifestEntry> manifestEntries, FileKind kind, boolean countColumnFileRows) {
         return manifestEntries.stream()
-                .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
+                .filter(manifestEntry -> kind.equals(manifestEntry.kind()))
+                .filter(
+                        manifestEntry ->
+                                countColumnFileRows || !manifestEntry.file().isPartialColumnFile())
                 .mapToLong(manifest -> manifest.file().rowCount())
                 .sum();
     }

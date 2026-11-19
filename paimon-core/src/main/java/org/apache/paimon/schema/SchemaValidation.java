@@ -1551,9 +1551,13 @@ public class SchemaValidation {
         }
 
         if (options.dataEvolutionEnabled()) {
-            checkArgument(
-                    rowTrackingEnabled,
-                    "Data evolution config must enabled with row-tracking.enabled");
+            if (schema.primaryKeys().isEmpty()) {
+                checkArgument(
+                        rowTrackingEnabled,
+                        "Data evolution config must enabled with row-tracking.enabled");
+            } else {
+                validatePrimaryKeyDataEvolution(schema, options);
+            }
             checkArgument(
                     !options.clusteringIncrementalEnabled(),
                     "Data evolution config must disabled with clustering.incremental");
@@ -1604,6 +1608,57 @@ public class SchemaValidation {
             List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
             vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
         }
+    }
+
+    private static void validatePrimaryKeyDataEvolution(TableSchema schema, CoreOptions options) {
+        String prefix = "Data evolution on a primary key table ";
+        checkArgument(
+                !options.rowTrackingEnabled(),
+                prefix + "does not support %s.",
+                CoreOptions.ROW_TRACKING_ENABLED.key());
+        // Postpone files are appended outside the LSM and read without stitching column files.
+        // Fixed and dynamic buckets keep column files in the bucket LSM, so both are allowed.
+        checkArgument(
+                options.bucket() != BucketMode.POSTPONE_BUCKET,
+                prefix + "does not support postpone bucket (%s = %s).",
+                CoreOptions.BUCKET.key(),
+                options.bucket());
+        ChangelogProducer changelogProducer = options.changelogProducer();
+        checkArgument(
+                changelogProducer == ChangelogProducer.NONE
+                        || changelogProducer == ChangelogProducer.INPUT,
+                prefix + "only supports %s = %s or %s, but is %s.",
+                CHANGELOG_PRODUCER.key(),
+                ChangelogProducer.NONE,
+                ChangelogProducer.INPUT,
+                changelogProducer);
+        // Lookup wraps the merge function and reads files without assembling column files.
+        checkArgument(
+                !options.needLookup(),
+                prefix + "does not support lookup, which is required by %s, %s, %s or %s.",
+                CoreOptions.MERGE_ENGINE.key() + " = " + MergeEngine.FIRST_ROW,
+                CoreOptions.DELETION_VECTORS_ENABLED.key(),
+                CoreOptions.FORCE_LOOKUP.key(),
+                CHANGELOG_PRODUCER.key() + " = " + ChangelogProducer.LOOKUP);
+        // Alignment ids may repeat across buckets, so they are not Iceberg row lineage ids.
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                        == IcebergOptions.StorageType.DISABLED,
+                prefix + "does not support %s.",
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                prefix + "does not support %s.",
+                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
+        checkArgument(
+                !options.dataEvolutionNestedFieldEnabled(),
+                prefix + "does not support %s.",
+                CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
+        RowType rowType = schema.logicalRowType();
+        checkArgument(
+                rowType.getFields().stream().noneMatch(field -> isBlobFileField(field.type()))
+                        && fieldNamesInVectorFile(rowType, options.withVectorFormat()).isEmpty(),
+                prefix + "does not support BLOB or vector-store columns.");
     }
 
     private static void validateBlobFields(RowType rowType, CoreOptions options) {

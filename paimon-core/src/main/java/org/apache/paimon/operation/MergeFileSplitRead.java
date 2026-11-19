@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
 import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
@@ -41,6 +42,9 @@ import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.mergetree.dataevolution.AlignedKeyValueFileReaderFactory;
+import org.apache.paimon.mergetree.dataevolution.ColumnFileGroups;
+import org.apache.paimon.mergetree.dataevolution.ColumnFileReaderFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
@@ -315,10 +319,25 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
-        KeyValueFileReaderFactory overlappedSectionFactory =
+        FileReaderFactory<KeyValue> overlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
-        KeyValueFileReaderFactory nonOverlappedSectionFactory =
+        FileReaderFactory<KeyValue> nonOverlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
+        if (options.dataEvolutionEnabled() && ColumnFileGroups.hasColumnFiles(files)) {
+            ColumnFileGroups groups = ColumnFileGroups.group(files);
+            // filters would skip rows of a base file and break its alignment with column files
+            KeyValueFileReaderFactory alignedBaseFactory =
+                    readerFactoryBuilder.build(partition, bucket, dvFactory, false, null);
+            ColumnFileReaderFactory columnFactory =
+                    readerFactoryBuilder.buildColumnFileReaderFactory(partition, bucket);
+            overlappedSectionFactory =
+                    new AlignedKeyValueFileReaderFactory(
+                            overlappedSectionFactory, alignedBaseFactory, columnFactory, groups);
+            nonOverlappedSectionFactory =
+                    new AlignedKeyValueFileReaderFactory(
+                            nonOverlappedSectionFactory, alignedBaseFactory, columnFactory, groups);
+            files = groups.baseFiles();
+        }
         return createMergeReader(
                 files,
                 overlappedSectionFactory,
@@ -329,11 +348,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     public RecordReader<KeyValue> createMergeReader(
             List<DataFileMeta> files,
-            KeyValueFileReaderFactory overlappedSectionFactory,
-            KeyValueFileReaderFactory nonOverlappedSectionFactory,
+            FileReaderFactory<KeyValue> overlappedSectionFactory,
+            FileReaderFactory<KeyValue> nonOverlappedSectionFactory,
             boolean keepDelete,
             MergeFunctionWrapper<KeyValue> mergeFuncWrapper)
             throws IOException {
+        checkNoColumnFiles(files);
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
@@ -497,6 +517,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             @Nullable List<DeletionFile> deletionFiles,
             boolean onlyFilterKey)
             throws IOException {
+        checkNoColumnFiles(files);
         KeyValueFileReaderFactory readerFactory =
                 readerFactoryBuilder.build(
                         partition,
@@ -510,6 +531,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         }
 
         return projectOuter(ConcatRecordReader.create(suppliers));
+    }
+
+    private static void checkNoColumnFiles(List<DataFileMeta> files) {
+        for (DataFileMeta file : files) {
+            if (ColumnFileGroups.isColumnFile(file)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Column file %s of a data evolution table can only be read by a "
+                                        + "batch merge read of its bucket.",
+                                file.fileName()));
+            }
+        }
     }
 
     /**
