@@ -184,7 +184,7 @@ final class ManifestFileLegacyMerger {
         } else if (partitionType.getFieldCount() > 0) {
             predicate =
                     PartitionPredicate.fromMultiple(
-                            partitionType, computeDeletePartitions(deleteEntries));
+                            partitionType, computeDeletePartitions(deleteEntries), true);
         } else {
             predicate = PartitionPredicate.ALWAYS_TRUE;
         }

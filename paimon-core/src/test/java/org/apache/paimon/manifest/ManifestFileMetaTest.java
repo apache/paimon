@@ -718,6 +718,49 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .collect(Collectors.toList()));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFullCompactionWithSparseOverwritePartitions(boolean optimizeMerge) {
+        CountingReadFileIO io = new CountingReadFileIO();
+        RowType type = RowType.of(new IntType(), new IntType(), new IntType());
+        manifestFile = createManifestFileForPartitionType(type, io);
+        List<ManifestFileMeta> base = new ArrayList<>();
+        List<ManifestEntry> delta = new ArrayList<>();
+        List<String> expected = new ArrayList<>();
+        for (int day = 1; day <= 19; day++) {
+            for (int event = 0; event < 2; event++) {
+                String name = day + "-" + event;
+                // Every base manifest spans two hours, including the ones left unchanged.
+                base.add(
+                        makeManifest(
+                                makeMultiPartEntry(true, name, day, 13, event),
+                                makeMultiPartEntry(true, name + "-other-hour", day, 14, event)));
+                expected.add(name + "-other-hour");
+                if ((day == 1 && event == 0) || (day == 19 && event == 1)) {
+                    delta.add(makeMultiPartEntry(false, name, day, 13, event));
+                    delta.add(makeMultiPartEntry(true, name + "-new", day, 13, event));
+                    expected.add(name + "-new");
+                } else {
+                    expected.add(name);
+                }
+            }
+        }
+
+        List<ManifestFileMeta> input = new ArrayList<>(base);
+        input.add(makeManifest(delta.toArray(new ManifestEntry[0])));
+        Options options = new Options();
+        options.set("manifest.full-compaction-threshold-size", "1 b");
+        options.set("manifest.target-file-size", "1 b");
+        options.set("manifest.merge-optimize.enabled", Boolean.toString(optimizeMerge));
+        io.resetReadCounts();
+        List<ManifestFileMeta> output =
+                ManifestFileMerger.merge(input, manifestFile, type, new CoreOptions(options));
+        long opened = base.stream().filter(m -> io.readCount(m.fileName()) > 0).count();
+        assertThat(readFileNames(manifestFile, output))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(opened).as("base manifests opened during full compaction").isEqualTo(2);
+    }
+
     @Test
     public void testFullCompactionReadsSelectedManifestsOnce() throws Exception {
         CountingReadFileIO fileIO = new CountingReadFileIO();
@@ -3182,7 +3225,11 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     private ManifestFile createManifestFileForPartitionType(RowType partitionType) {
         Path path = new Path(tempDir.toString());
-        FileIO fileIO = FileIOFinder.find(path);
+        return createManifestFileForPartitionType(partitionType, FileIOFinder.find(path));
+    }
+
+    private ManifestFile createManifestFileForPartitionType(RowType partitionType, FileIO fileIO) {
+        Path path = new Path(tempDir.toString());
         return new ManifestFile.Factory(
                         fileIO,
                         new FileSystemSchemaManager(fileIO, path),

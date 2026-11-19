@@ -27,14 +27,17 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -121,6 +124,91 @@ public class PartitionPredicateTest {
                                     new SimpleColStats(1, 2, 0L), new SimpleColStats(2, 3, 0L)
                                 }))
                 .isFalse();
+    }
+
+    @Test
+    public void testTupleStatisticsOnRangesAndNulls() throws Exception {
+        RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
+        BinaryRow nullPartition = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(nullPartition);
+        writer.setNullAt(0);
+        writer.writeInt(1, 100);
+        writer.complete();
+        PartitionPredicate predicate =
+                InstantiationUtil.clone(
+                        PartitionPredicate.fromMultiple(
+                                type,
+                                new HashSet<>(
+                                        Arrays.asList(
+                                                createPart(1, 100),
+                                                createPart(19, 5),
+                                                nullPartition)),
+                                true));
+        GenericRow lower = GenericRow.of(1, 5);
+        GenericRow upper = GenericRow.of(4, 8);
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
+        // Day 1 no longer matches, but the null partition could match event 100.
+        lower = GenericRow.of(3, 98);
+        upper = GenericRow.of(4, 100);
+        assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        for (Long count : Arrays.asList(1L, null)) {
+            assertThat(
+                            predicate.test(
+                                    10,
+                                    lower,
+                                    upper,
+                                    BinaryArray.fromLongArray(new Long[] {count, 0L})))
+                    .isTrue();
+        }
+        assertThat(predicate.test(10, lower, upper, BinaryArray.fromLongArray(new Long[0])))
+                .isTrue();
+        // Without date bounds, the second tuple could match. With all-null dates only
+        // the null tuple can match, and its event lies outside [5, 8].
+        lower = GenericRow.of(null, 5);
+        upper = GenericRow.of(null, 8);
+        assertThat(
+                        predicate.test(
+                                10, lower, upper, BinaryArray.fromLongArray(new Long[] {null, 0L})))
+                .isTrue();
+        assertThat(
+                        predicate.test(
+                                10, lower, upper, BinaryArray.fromLongArray(new Long[] {10L, 0L})))
+                .isFalse();
+    }
+
+    @Test
+    public void testTupleRangesAgainstPartitionSet() {
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (int day = 0; day < 40; day++) {
+            partitions.add(createPart(day, day % 7));
+        }
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMultiple(
+                        DataTypes.ROW(DataTypes.INT(), DataTypes.INT()), partitions, true);
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        for (int day = 0; day < 40; day++) {
+            for (int event = 0; event < 7; event++) {
+                int firstDay = day;
+                int firstEvent = event;
+                boolean expected =
+                        partitions.stream()
+                                .anyMatch(
+                                        p ->
+                                                p.getInt(0) >= firstDay
+                                                        && p.getInt(0) <= firstDay + 2
+                                                        && p.getInt(1) >= firstEvent
+                                                        && p.getInt(1) <= firstEvent + 1);
+                assertThat(
+                                predicate.test(
+                                        5,
+                                        createPart(day, event),
+                                        createPart(day + 2, event + 1),
+                                        noNulls))
+                        .isEqualTo(expected);
+            }
+        }
     }
 
     @Test
