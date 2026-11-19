@@ -938,3 +938,88 @@ def test_native_read_supports_precision_zero_timestamps(data_type, values):
     assert actual[0].schema == pa.schema([('ts', data_type)])
     assert actual[0].column('ts').to_pylist() == pa.array(
         values, type=data_type).to_pylist()
+
+
+@pytest.mark.parametrize('method_name, ordered', [
+    ('to_arrow', True), ('to_arrow_batch_reader', False),
+    ('_to_managed_arrow_batch_reader', False),
+])
+@pytest.mark.parametrize('cpu', [2, 16])
+@pytest.mark.parametrize('num_splits, option, runtime, expected', [
+    (64, None, None, 32), (3, None, None, 3),
+    (64, 8, None, 8), (64, 8, 1, 1), (64, None, 16, 16),
+])
+def test_filtered_native_blob_auto_parallelism(
+        method_name, ordered, cpu, num_splits, option, runtime, expected):
+    read = _blob_table_read()
+    read.table.options.data_evolution_enabled.return_value = True
+    read.predicate = Mock()
+    read._read_parallelism = option
+    splits = [_Split('data.blob') for _ in range(num_splits)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+    batch = pa.record_batch([pa.array([b'a', None, b''], type=pa.large_binary())], names=['payload'])
+    with patch('pypaimon.read.read_support.os.cpu_count', return_value=cpu), \
+            patch('pypaimon.execution.native.read.table_read.native_read', return_value=[batch]) as native:
+        result = getattr(read, method_name)(splits, parallelism=runtime)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.to_pydict() == {'payload': [b'a', None, b'']}
+    assert native.call_args.kwargs['parallelism'] == expected
+    assert native.call_args.kwargs['ordered'] == ordered
+    assert native.call_args.args[1] == list(range(num_splits))
+
+
+@pytest.mark.parametrize('case', ['unfiltered', 'limit', 'descriptor', 'ordinary', 'projection'])
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+def test_native_blob_auto_parallelism_keeps_other_reads_cpu_bounded(case, method_name):
+    read = _blob_table_read()
+    read.table.options.data_evolution_enabled.return_value = True
+    read.predicate = Mock()
+    read._read_parallelism = None
+    if case == 'unfiltered':
+        read.predicate = None
+    elif case == 'limit':
+        read.limit = 1
+    elif case == 'descriptor':
+        read.table.options.blob_as_descriptor.return_value = True
+    elif case == 'ordinary':
+        read.table.options.data_evolution_enabled.return_value = False
+    else:
+        read = _table_read()
+        read.table.options.data_evolution_enabled.return_value = True
+        read.predicate = Mock()
+        read._read_parallelism = None
+    splits = [_Split() for _ in range(64)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+    with patch('pypaimon.read.read_support.os.cpu_count', return_value=2), \
+            patch('pypaimon.execution.native.read.table_read.native_read', return_value=[]) as native:
+        result = getattr(read, method_name)(splits)
+        if method_name != 'to_arrow':
+            result.read_all()
+    assert native.call_args.kwargs['parallelism'] == 2
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+def test_filtered_blob_fallback_does_not_inherit_native_auto_parallelism(method_name):
+    read = _blob_table_read()
+    read.table.options.data_evolution_enabled.return_value = True
+    read.predicate = Mock()
+    read._read_parallelism = None
+    splits = [_Split() for _ in range(64)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+    batch = pa.record_batch([pa.array([b'a'], type=pa.large_binary())], names=['payload'])
+    target = ('_materialize' if method_name == 'to_arrow' else 'read_batches')
+    value = pa.Table.from_batches([batch]) if method_name == 'to_arrow' else iter([batch])
+    with patch('pypaimon.read.read_support.os.cpu_count', return_value=2), \
+            patch('pypaimon.execution.native.read.table_read.native_read', side_effect=RuntimeError('unavailable')), \
+            patch('pypaimon.execution.python.read.table_read.PythonTableRead.' + target,
+                  return_value=value) as fallback:
+        result = getattr(read, method_name)(splits)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.to_pydict() == {'payload': [b'a']}
+    # Pass the original override to Python, which retains its own CPU-based policy.
+    assert fallback.call_args.args[2] is None

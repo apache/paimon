@@ -194,7 +194,9 @@ class TableRead:
             parallelism: optional runtime override of the
                 ``read.parallelism`` table option. ``None`` (default) falls
                 back to the table option; when that is also unset the read
-                auto-scales to ``min(number of splits, CPU count)``. ``1``
+                auto-scales to ``min(number of splits, CPU count)``. Native filtered
+                Data Evolution BLOB payload reads without a limit instead use
+                ``min(number of splits, 32)``. ``1``
                 keeps reads serial; ``>= 2`` caps the thread pool that reads
                 byte-balanced contiguous split groups concurrently and
                 assembles the final table in input order. An unfiltered row
@@ -309,17 +311,19 @@ class TableRead:
     def _apply_output_projection_to_schema(schema, projection):
         return output_schema(schema, projection)
 
-    def _resolve_parallelism(self, runtime: Optional[int], num_splits: int) -> int:
+    def _resolve_parallelism(
+            self, runtime: Optional[int], num_splits: int, native: bool = False) -> int:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
         table option > auto. When neither the argument nor the option is set
-        the read auto-scales to ``min(num_splits, CPU count)``. A value >= 1
-        caps the thread pool; ``1`` forces serial reads. The validation
+        the read auto-scales to ``min(num_splits, CPU count)``. Native filtered
+        Data Evolution BLOB payload reads without LIMIT use up to 32 workers.
+        A value >= 1 caps the thread pool; ``1`` forces serial reads. The validation
         message names whichever source produced the offending value.
         """
         from pypaimon.read.read_support import _resolve_parallelism
-        return _resolve_parallelism(self, runtime, num_splits)
+        return _resolve_parallelism(self, runtime, num_splits, native=native)
 
     def _effective_parallelism(
             self, runtime: Optional[int], num_splits: int) -> int:

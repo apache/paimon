@@ -92,8 +92,9 @@ def to_arrow_batch_reader(
 
     ``parallelism`` follows :meth:`to_arrow`: an explicit value overrides
     ``read.parallelism``, otherwise the reader auto-scales to the available
-    splits and CPUs. Native workers buffer at most one batch each; batches
-    from different split groups are emitted as they become ready because
+    splits and CPUs. Native filtered Data Evolution BLOB payload reads without
+    LIMIT instead use up to 32 workers. Native workers buffer at most one batch
+    each; batches from different split groups are emitted as they become ready because
     table reads do not guarantee row order. Python fallback reads remain
     serial.
     """
@@ -208,12 +209,15 @@ def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
         close_read_source(batches, failure)
 
 
-def _resolve_parallelism(self, runtime: Optional[int], num_splits: int) -> int:
+def _resolve_parallelism(
+        self, runtime: Optional[int], num_splits: int, native: bool = False) -> int:
     """Pick the effective parallelism and reject illegal values.
 
     Priority: explicit ``parallelism`` argument > ``read.parallelism``
     table option > auto. When neither the argument nor the option is set
-    the read auto-scales to ``min(num_splits, CPU count)``. A value >= 1
+    the read auto-scales to ``min(num_splits, CPU count)``. Native filtered
+    Data Evolution BLOB payload reads without LIMIT use up to 32 workers
+    instead, to overlap remote I/O. A value >= 1
     caps the thread pool; ``1`` forces serial reads. The validation
     message names whichever source produced the offending value.
     """
@@ -222,6 +226,13 @@ def _resolve_parallelism(self, runtime: Optional[int], num_splits: int) -> int:
     elif self._read_parallelism is not None:
         value, source = self._read_parallelism, "read.parallelism"
     else:
+        # Remote payload reads benefit from more in-flight split readers than
+        # CPU count alone allows. Core still owns the total BLOB read budget.
+        if (native and self.predicate is not None and self.limit is None
+                and self.table.options.data_evolution_enabled()
+                and not self.table.options.blob_as_descriptor()
+                and any(is_blob_file_field(field) for field in self.read_type)):
+            return max(1, min(num_splits, 32))
         # os.cpu_count() may return None on exotic platforms; fall back
         # to 1. min() with num_splits avoids more workers than work.
         return max(1, min(num_splits, os.cpu_count() or 1))
