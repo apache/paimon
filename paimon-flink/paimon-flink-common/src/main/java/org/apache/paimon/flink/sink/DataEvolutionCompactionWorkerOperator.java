@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.DataEvolutionTableCompactSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -58,14 +57,7 @@ public class DataEvolutionCompactionWorkerOperator
     public void processElement(StreamRecord<DataEvolutionCompactTask> element) throws Exception {
         DataEvolutionCompactTask task = element.getValue();
         committables.add(
-                new Committable(
-                        Long.MAX_VALUE,
-                        task.doCompact(fileStoreTable, commitUser, this::createIOManager)));
-    }
-
-    private IOManager createIOManager() {
-        return IOManager.create(
-                getContainingTask().getEnvironment().getIOManager().getSpillingDirectoriesPaths());
+                new Committable(Long.MAX_VALUE, task.doCompact(fileStoreTable, commitUser)));
     }
 
     @Override

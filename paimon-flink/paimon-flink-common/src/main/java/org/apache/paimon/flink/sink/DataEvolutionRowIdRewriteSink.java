@@ -49,12 +49,11 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
     }
 
     public static DataStreamSink<?> sink(
-            FileStoreTable table,
-            DataStream<DataEvolutionCompactTask> input,
-            Snapshot snapshot,
-            SerializableConsumer<InnerTableCommit> configureCommit) {
+            FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
         checkArgument(!isStreaming(input), "Data evolution row ID rewrites require batch mode.");
-        return new DataEvolutionRowIdRewriteSink(table, snapshot, configureCommit).sinkFrom(input);
+        return new DataEvolutionRowIdRewriteSink(
+                        table, snapshot, InnerTableCommit::materializeDvRowIdCheck)
+                .sinkFrom(input);
     }
 
     @Override

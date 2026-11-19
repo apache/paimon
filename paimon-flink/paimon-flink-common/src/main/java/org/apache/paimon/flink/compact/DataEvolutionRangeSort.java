@@ -20,9 +20,8 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionRangeShuffle;
-import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
@@ -37,7 +36,6 @@ import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.common.typeinfo.Types;
@@ -61,28 +59,20 @@ public class DataEvolutionRangeSort {
 
     public static void build(
             FileStoreTable table,
-            DataStream<DataEvolutionCompactTask> tasks,
+            DataStream<DataEvolutionRangeSortPlan> plans,
             List<String> fields,
             Snapshot snapshot) {
-        StreamExecutionEnvironment env = tasks.getExecutionEnvironment();
+        StreamExecutionEnvironment env = plans.getExecutionEnvironment();
         CoreOptions options = table.coreOptions();
         int parallelism =
                 options.toConfiguration()
                         .getOptional(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM)
                         .orElse(Math.max(1, env.getParallelism()));
-        if (parallelism == 1) {
-            DataEvolutionRowIdRewriteSink.sink(
-                    table, tasks, snapshot, InnerTableCommit::dataEvolutionRangeSortCheck);
-            return;
-        }
         String commitUser = CoreOptions.createCommitUser(options.toConfiguration());
         DataEvolutionRangeShuffle exchange = new DataEvolutionRangeShuffle(table, fields);
         DataStream<IndexedSplit> splits =
-                tasks.flatMap(
-                                (task, out) ->
-                                        ((DataEvolutionRangeSortTask) task)
-                                                .readSplits(table)
-                                                .forEach(out::collect),
+                plans.flatMap(
+                                (plan, out) -> plan.readSplits().forEach(out::collect),
                                 new JavaTypeInfo<>(IndexedSplit.class))
                         .setParallelism(1);
         DataStream<RowData> rows =
@@ -121,13 +111,7 @@ public class DataEvolutionRangeSort {
                                 new WriteOperator(exchange, commitUser))
                         .setParallelism(parallelism);
         DataStream<Tuple2<Integer, CommitMessage>> inputs =
-                tasks.map(
-                                task ->
-                                        Tuple2.of(
-                                                -1,
-                                                ((DataEvolutionRangeSortTask) task).inputFiles()),
-                                metadataType)
-                        .setParallelism(1);
+                plans.map(plan -> Tuple2.of(-1, plan.inputFiles()), metadataType).setParallelism(1);
         DataStream<Committable> replacements =
                 inputs.union(outputs)
                         .transform(

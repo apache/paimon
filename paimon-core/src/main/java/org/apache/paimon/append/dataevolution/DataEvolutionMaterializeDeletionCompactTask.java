@@ -21,7 +21,6 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -51,7 +50,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -86,21 +84,23 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     @Override
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
-        return doCompact(
-                table, commitUser, () -> IOManager.create(System.getProperty("java.io.tmpdir")));
-    }
-
-    @Override
-    public CommitMessage doCompact(
-            FileStoreTable table, String commitUser, Supplier<IOManager> ioManagerFactory)
-            throws Exception {
-        table = configureTable(table);
+        table = table.copy(DYNAMIC_WRITE_OPTIONS);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
+        // build DataSplit with deletion vectors
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(partition)
+                        .withBucket(0)
+                        .withDataFiles(compactBefore)
+                        .withDataDeletionFiles(deletionFiles)
+                        .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
+                        .rawConvertible(false)
+                        .build();
+        RowType readType = table.rowType();
         List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        RowType readType = readType(table);
-        for (IndexedSplit split : readSplits(pathFactory.bucketPath(partition, 0).toString())) {
+        for (IndexedSplit split : readSplits(dataSplit)) {
             readers.add(
                     () -> store.newDataEvolutionRead().withReadType(readType).createReader(split));
         }
@@ -111,7 +111,15 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
             storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
             storeWrite.withWriteType(table.rowType());
             writer = storeWrite.createWriter(partition, 0);
-            writeRows(table, reader, writer, ioManagerFactory);
+            RecordWriter<InternalRow> finalWriter = writer;
+            reader.forEachRemaining(
+                    row -> {
+                        try {
+                            finalWriter.write(row);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
 
             compactAfter.addAll(writer.prepareCommit(false).newFilesIncrement().newFiles());
         } finally {
@@ -133,44 +141,24 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
         return commitMessage(compactBefore, compactAfter);
     }
 
-    protected FileStoreTable configureTable(FileStoreTable table) {
-        return table.copy(DYNAMIC_WRITE_OPTIONS);
-    }
-
-    protected RowType readType(FileStoreTable table) {
-        return table.rowType();
-    }
-
-    protected void writeRows(
-            FileStoreTable table,
-            RecordReader<InternalRow> reader,
-            RecordWriter<InternalRow> writer,
-            Supplier<IOManager> ioManagerFactory)
-            throws Exception {
-        reader.forEachRemaining(
-                row -> {
-                    try {
-                        writer.write(row);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-    }
-
-    List<IndexedSplit> readSplits(String bucketPath) {
+    static List<IndexedSplit> readSplits(DataSplit input) {
         List<IndexedSplit> splits = new ArrayList<>();
-        for (Map.Entry<Range, List<Integer>> group : filesByNormalRange().entrySet()) {
+        List<DataFileMeta> inputFiles = input.dataFiles();
+        List<DeletionFile> inputDeletions =
+                input.deletionFiles().orElseGet(() -> Collections.nCopies(inputFiles.size(), null));
+        for (Map.Entry<Range, List<Integer>> group : filesByNormalRange(inputFiles).entrySet()) {
             List<DataFileMeta> files = new ArrayList<>();
             List<DeletionFile> deletions = new ArrayList<>();
             for (int position : group.getValue()) {
-                files.add(compactBefore.get(position));
-                deletions.add(deletionFiles.get(position));
+                files.add(inputFiles.get(position));
+                deletions.add(inputDeletions.get(position));
             }
             DataSplit split =
                     DataSplit.builder()
-                            .withPartition(partition)
-                            .withBucket(0)
-                            .withBucketPath(bucketPath)
+                            .withSnapshot(input.snapshotId())
+                            .withPartition(input.partition())
+                            .withBucket(input.bucket())
+                            .withBucketPath(input.bucketPath())
                             .withDataFiles(files)
                             .withDataDeletionFiles(deletions)
                             .rawConvertible(false)
@@ -180,9 +168,10 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
         return splits;
     }
 
-    private NavigableMap<Range, List<Integer>> filesByNormalRange() {
+    private static NavigableMap<Range, List<Integer>> filesByNormalRange(
+            List<DataFileMeta> inputFiles) {
         List<DataFileMeta> normalFiles =
-                compactBefore.stream()
+                inputFiles.stream()
                         .filter(
                                 file ->
                                         !isBlobFile(file.fileName())
@@ -202,8 +191,8 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
         // Normal ranges are disjoint. Seek the first one whose end reaches the file's start,
         // then visit only ranges it spans. Keep manifest order and the matching DV position.
-        for (int i = 0; i < compactBefore.size(); i++) {
-            Range file = compactBefore.get(i).nonNullRowIdRange();
+        for (int i = 0; i < inputFiles.size(); i++) {
+            Range file = inputFiles.get(i).nonNullRowIdRange();
             Range firstEnd = new Range(file.from, file.from);
             for (Map.Entry<Range, List<Integer>> group :
                     groups.tailMap(firstEnd, true).entrySet()) {

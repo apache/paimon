@@ -84,16 +84,9 @@ public class DataEvolutionCompactTaskSerializer
                 view.writeLong(range.to);
             }
             view.writeBoolean(((DataEvolutionNormalCompactTask) task).partialRewrite());
-        } else if (task instanceof DataEvolutionMaterializeDeletionCompactTask) {
+        } else if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
             DeletionFile.serializeList(
                     view, ((DataEvolutionMaterializeDeletionCompactTask) task).deletionFiles());
-            if (task instanceof DataEvolutionRangeSortTask) {
-                List<String> fields = ((DataEvolutionRangeSortTask) task).sortFields();
-                view.writeInt(fields.size());
-                for (String field : fields) {
-                    view.writeUTF(field);
-                }
-            }
         }
     }
 
@@ -151,15 +144,6 @@ public class DataEvolutionCompactTaskSerializer
                         partition,
                         files,
                         DeletionFile.deserializeList(view, DeletionFile::deserialize));
-            case RANGE_SORT:
-                List<DeletionFile> deletions =
-                        DeletionFile.deserializeList(view, DeletionFile::deserialize);
-                int count = readCount(view, "sort fields");
-                List<String> fields = new ArrayList<>(presizedCapacity(count));
-                for (int i = 0; i < count; i++) {
-                    fields.add(view.readUTF());
-                }
-                return new DataEvolutionRangeSortTask(partition, files, deletions, fields);
             default:
                 throw new UnsupportedOperationException("Unsupported compact task type: " + type);
         }

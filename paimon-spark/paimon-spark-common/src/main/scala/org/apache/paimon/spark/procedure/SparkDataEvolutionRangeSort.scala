@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionRangeShuffle, DataEvolutionRangeSortTask}
+import org.apache.paimon.append.dataevolution.{DataEvolutionRangeShuffle, DataEvolutionRangeSortPlan}
 import org.apache.paimon.data.{BinaryString, Decimal, InternalRow, Timestamp}
 import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.io.{DataInputDeserializer, DataOutputSerializer}
@@ -35,7 +35,6 @@ import org.apache.paimon.types.DataTypeRoot._
 import org.apache.paimon.utils.SortUtil
 
 import org.apache.spark.TaskContext
-import org.apache.spark.api.java.JavaSparkContext
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types.{BinaryType, IntegerType, StructField, StructType}
 import org.apache.spark.storage.StorageLevel
@@ -50,23 +49,11 @@ object SparkDataEvolutionRangeSort {
       table: FileStoreTable,
       snapshot: Snapshot,
       fields: util.List[String],
-      tasks: util.List[DataEvolutionCompactTask],
+      plans: util.List[DataEvolutionRangeSortPlan],
       spark: SparkSession): Unit = {
     val parallelism = spark.sessionState.conf.numShufflePartitions
-    if (parallelism == 1) {
-      DataEvolutionRewriteExecutor.execute(
-        table,
-        snapshot,
-        _ => new DataEvolutionRewriteExecutor.PlanResult(tasks, true),
-        JavaSparkContext.fromSparkContext(spark.sparkContext),
-        spark,
-        DataEvolutionRewriteExecutor.RANGE_SORT_COMMIT
-      )
-      return
-    }
-    val planned = tasks.asScala.map(_.asInstanceOf[DataEvolutionRangeSortTask])
-    val splits = planned
-      .flatMap(_.readSplits(table).asScala)
+    val splits = plans.asScala
+      .flatMap(_.readSplits().asScala)
       .map {
         split =>
           val out = new DataOutputSerializer(256)
@@ -130,7 +117,7 @@ object SparkDataEvolutionRangeSort {
         .collect()
         .toList
         .asJava
-      val inputs = planned.map(_.inputFiles()).toList.asJava
+      val inputs = plans.asScala.map(_.inputFiles()).toList.asJava
       DataEvolutionRewriteExecutor.commitSorted(
         table,
         snapshot,

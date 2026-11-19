@@ -23,7 +23,6 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
-import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -60,7 +59,7 @@ final class DataEvolutionRewriteExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRewriteExecutor.class);
 
-    static final CommitConfigurer RANGE_SORT_COMMIT =
+    private static final CommitConfigurer RANGE_SORT_COMMIT =
             rowIdRewriteCommit(TableCommitImpl::dataEvolutionRangeSortCheck);
     static final CommitConfigurer MATERIALIZE_DV_COMMIT =
             rowIdRewriteCommit(TableCommitImpl::materializeDvRowIdCheck);
@@ -197,9 +196,7 @@ final class DataEvolutionRewriteExecutor {
                                                                 messageSer.serialize(
                                                                         task.doCompact(
                                                                                 table,
-                                                                                commitUser,
-                                                                                SparkUtils
-                                                                                        ::createIOManager)));
+                                                                                commitUser)));
                                                     }
                                                     return messagesBytes.iterator();
                                                 });

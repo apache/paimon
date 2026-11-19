@@ -19,12 +19,11 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.flink.action.ActionPartitionPredicate;
 import org.apache.paimon.flink.compact.DataEvolutionRangeSort;
-import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
 import org.apache.paimon.flink.sink.FlinkSink;
+import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -66,13 +65,13 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
             throws Exception {
         StreamExecutionEnvironment env = context.getExecutionEnvironment();
         checkArgument(!FlinkSink.isStreaming(env), "Sorting data evolution requires batch mode.");
-        Range range = DataEvolutionRangeSortTask.parseRange(rowIdRange);
+        Range range = DataEvolutionRangeSortPlan.parseRange(rowIdRange);
         checkArgument(orderBy != null, "The order_by argument is required.");
         Table target = table(tableId);
         checkArgument(target instanceof FileStoreTable, "Expected a file store table.");
         FileStoreTable table = (FileStoreTable) target;
-        List<String> fields = DataEvolutionRangeSortTask.parseSortFields(orderBy);
-        DataEvolutionRangeSortTask.validate(table, range, fields);
+        List<String> fields = DataEvolutionRangeSortPlan.parseSortFields(orderBy);
+        DataEvolutionRangeSortPlan.validate(table, range, fields);
         // Flink 1.18 infers optional positional arguments from Java varargs.
         checkArgument(where.length <= 1, "Specify at most one partition filter.");
         PartitionPredicate filter =
@@ -84,16 +83,16 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
         if (snapshot == null) {
             trigger.sinkTo(new DiscardingSink<>());
         } else {
-            DataStream<DataEvolutionCompactTask> tasks =
+            DataStream<DataEvolutionRangeSortPlan> plans =
                     trigger.flatMap(
                                     (ignored, out) ->
-                                            DataEvolutionRangeSortTask.plan(
+                                            DataEvolutionRangeSortPlan.plan(
                                                             table, snapshot, range, filter, fields)
                                                     .forEach(out::collect),
-                                    new DataEvolutionCompactionTaskTypeInfo())
+                                    new JavaTypeInfo<>(DataEvolutionRangeSortPlan.class))
                             .name("Plan Data Evolution Sort : " + tableId)
                             .setParallelism(1);
-            DataEvolutionRangeSort.build(table, tasks, fields, snapshot);
+            DataEvolutionRangeSort.build(table, plans, fields, snapshot);
         }
         return execute(env, "Sort Data Evolution : " + tableId);
     }

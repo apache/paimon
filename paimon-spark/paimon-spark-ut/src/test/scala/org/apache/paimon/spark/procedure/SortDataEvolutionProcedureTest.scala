@@ -95,7 +95,17 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
     }
   }
 
-  test("one range shuffle replaces multiple partitions including a fully deleted input") {
+  Seq(1, 2).foreach {
+    workers =>
+      test(s"rewrite multiple partitions including a fully deleted input with $workers writers") {
+        checkPartitionReplacements(workers)
+      }
+      test(s"sort complete groups and rewrite aligned payloads with $workers shuffle partitions") {
+        checkAlignedRewrite(workers)
+      }
+  }
+
+  private def checkPartitionReplacements(workers: Int): Unit = {
     withTable("T") {
       sql("""CREATE TABLE T (id INT, p INT) PARTITIONED BY (p) TBLPROPERTIES (
             |'data-evolution.enabled'='true', 'row-tracking.enabled'='true',
@@ -105,7 +115,7 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       sql("DELETE FROM T WHERE id >= 100")
       assert(sql("SELECT * FROM `T$row_ranges` WHERE partition = '{2}'").collect().nonEmpty)
       val snapshot = loadTable("T").latestSnapshot().get().id()
-      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+      withSQLConf("spark.sql.shuffle.partitions" -> workers.toString) {
         checkAnswer(sql("CALL sys.sort_data_evolution('T', '[0,5]', 'id')"), Row(3) :: Nil)
       }
       assert(loadTable("T").latestSnapshot().get().id() == snapshot + 1)
@@ -119,16 +129,17 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
     }
   }
 
-  test("sort complete groups within a partition and rewrite the aligned payloads") {
+  private def checkAlignedRewrite(workers: Int): Unit = {
     withTable("T") {
-      sql("""
-            |CREATE TABLE T (id INT, k INT, priority INT, payload BINARY, embedding ARRAY<FLOAT>, p INT)
-            |PARTITIONED BY (p) TBLPROPERTIES (
-            | 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
-            | 'deletion-vectors.enabled'='true', 'blob-field'='payload',
-            | 'vector-field'='embedding', 'field.embedding.vector-dim'='2',
-            | 'vector.file.format'='parquet', 'write-only'='true')
-            |""".stripMargin)
+      sql(
+        """
+          |CREATE TABLE T (id INT, k INT, priority INT, payload BINARY, embedding ARRAY<FLOAT>, p INT)
+          |PARTITIONED BY (p) TBLPROPERTIES (
+          | 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+          | 'deletion-vectors.enabled'='true', 'blob-field'='payload',
+          | 'vector-field'='embedding', 'field.embedding.vector-dim'='2',
+          | 'vector.file.format'='parquet', 'write-only'='true')
+          |""".stripMargin)
       def insert(start: Int, end: Int, p: Int): Unit = {
         sql(s"""INSERT INTO T SELECT /*+ COALESCE(1) */
                | CAST(id AS INT), IF(id = 2, NULL, CAST(id % 2 AS INT)), IF(id = 9, 0, 1),
@@ -179,13 +190,16 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(ranges == Seq(Row(0L, 3L), Row(7L, 9L)))
       val start = ranges.head.getLong(0)
       val end = ranges.last.getLong(1)
-      withSQLConf("spark.sql.shuffle.partitions" -> "2", "spark.sql.adaptive.enabled" -> "true") {
+      withSQLConf(
+        "spark.sql.shuffle.partitions" -> workers.toString,
+        "spark.sql.adaptive.enabled" -> "true") {
         checkAnswer(
           sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
           Row(1) :: Nil)
       }
-      // Six tiny rows would fit in one writer file. The two output groups come from distinct reducers.
-      assert(rows("SELECT start_row_id FROM `T$row_ranges` WHERE start_row_id >= 12").size == 2)
+      // Six tiny rows fit in a single file per reducer.
+      assert(
+        rows("SELECT start_row_id FROM `T$row_ranges` WHERE start_row_id >= 12").size == workers)
       assert(rows(s"SELECT $columns FROM T WHERE _ROW_ID >= 12 ORDER BY _ROW_ID") == expected)
       assert(
         rows(s"SELECT _ROW_ID, $columns FROM T WHERE _ROW_ID < 12 ORDER BY _ROW_ID") == untouched)

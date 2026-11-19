@@ -363,10 +363,10 @@ In asynchronous mode it returns the Flink job ID.
 Flink range-partitions the selected rows by table partition, sort fields and old row ID.
 Multiple subtasks can sort and write parts of one table partition. Set
 `unaware-bucket.compaction.parallelism` to control the number of subtasks. The default
-uses the execution environment's parallelism, or 1 if it is unspecified. A parallelism
-of 1 uses the local sorter for each table partition. Each subtask sorts its received rows and
-spills to TaskManager temporary directories as needed. Managed BLOBs travel through
-the shuffle as descriptors. New row IDs follow shuffle-range order.
+uses the execution environment's parallelism, or 1 if it is unspecified. At parallelism 1, one
+subtask sorts and writes all selected partitions. Each subtask spills to TaskManager temporary
+directories as needed. Managed BLOBs travel through the shuffle as descriptors.
+New row IDs follow shuffle-range order.
 
 ## materialize_deletion_vectors
 

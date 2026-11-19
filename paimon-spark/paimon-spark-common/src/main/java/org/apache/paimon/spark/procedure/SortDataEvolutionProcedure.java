@@ -19,8 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
@@ -64,9 +63,9 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier ident = toIdentifier(args.getString(0), "table");
         Range range =
-                DataEvolutionRangeSortTask.parseRange(args.isNullAt(1) ? null : args.getString(1));
+                DataEvolutionRangeSortPlan.parseRange(args.isNullAt(1) ? null : args.getString(1));
         checkArgument(!args.isNullAt(2), "The order_by argument is required.");
-        List<String> fields = DataEvolutionRangeSortTask.parseSortFields(args.getString(2));
+        List<String> fields = DataEvolutionRangeSortPlan.parseSortFields(args.getString(2));
         String where = args.isNullAt(3) ? null : args.getString(3);
         return modifySparkTable(
                 ident,
@@ -75,7 +74,7 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                             sparkTable.getTable() instanceof FileStoreTable,
                             "Expected a file store table.");
                     FileStoreTable table = (FileStoreTable) sparkTable.getTable();
-                    DataEvolutionRangeSortTask.validate(table, range, fields);
+                    DataEvolutionRangeSortPlan.validate(table, range, fields);
                     PartitionPredicate filter =
                             SparkProcedureUtils.convertToPartitionPredicate(
                                     where,
@@ -86,13 +85,13 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                     if (snapshot == null) {
                         return new InternalRow[] {newInternalRow(0)};
                     }
-                    List<DataEvolutionCompactTask> tasks =
-                            DataEvolutionRangeSortTask.plan(table, snapshot, range, filter, fields);
-                    if (!tasks.isEmpty()) {
+                    List<DataEvolutionRangeSortPlan> plans =
+                            DataEvolutionRangeSortPlan.plan(table, snapshot, range, filter, fields);
+                    if (!plans.isEmpty()) {
                         SparkDataEvolutionRangeSort.execute(
-                                table, snapshot, fields, tasks, spark());
+                                table, snapshot, fields, plans, spark());
                     }
-                    return new InternalRow[] {newInternalRow(tasks.size())};
+                    return new InternalRow[] {newInternalRow(plans.size())};
                 });
     }
 

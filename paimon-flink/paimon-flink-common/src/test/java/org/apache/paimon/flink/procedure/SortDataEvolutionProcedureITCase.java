@@ -203,6 +203,26 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSingleWriterWithFullyDeletedInput() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T (id INT) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', "
+                        + "'deletion-vectors.enabled'='true', 'sink.parallelism'='1', 'unaware-bucket.compaction.parallelism'='1')");
+        sql("INSERT INTO T VALUES (2), (1)");
+        sql("DELETE FROM T WHERE id IN (1, 2)");
+        assertThat(sql("SELECT start_row_id, end_row_id FROM T$row_ranges"))
+                .containsExactly(Row.of(0L, 1L));
+        long snapshot = paimonTable("T").latestSnapshot().get().id();
+        String sort = "CALL sys.sort_data_evolution('default.T', '[0,1]', 'id')";
+        sql(sort);
+        assertThat(sql("SELECT * FROM T$row_ranges")).isEmpty();
+        assertThat(sql("SELECT * FROM T")).isEmpty();
+        assertThat(paimonTable("T").latestSnapshot().get().id()).isEqualTo(snapshot + 1);
+        sql(sort);
+        assertThat(paimonTable("T").latestSnapshot().get().id()).isEqualTo(snapshot + 1);
+    }
+
+    @Test
     public void testValidateEmptyTable() throws Exception {
         createTable();
         assertThat(sql("CALL sys.sort_data_evolution('default.T', '[0,5]', 'k')"))
@@ -234,7 +254,7 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
                 "CREATE TABLE T (id INT, k INT, payload BYTES, v ARRAY<FLOAT>, p INT) "
                         + "PARTITIONED BY (p) WITH ('row-tracking.enabled'='true', "
                         + "'data-evolution.enabled'='true', 'write-only'='true', 'sink.parallelism'='1', "
-                        + "'blob-field'='payload', 'vector-field'='v', 'field.v.vector-dim'='2', "
+                        + "'unaware-bucket.compaction.parallelism'='1', 'blob-field'='payload', 'vector-field'='v', 'field.v.vector-dim'='2', "
                         + "'vector.file.format'='parquet')");
     }
 

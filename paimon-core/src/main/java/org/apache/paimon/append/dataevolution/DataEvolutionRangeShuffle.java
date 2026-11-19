@@ -19,6 +19,7 @@
 package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -46,6 +47,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,7 +66,7 @@ public class DataEvolutionRangeShuffle implements Serializable {
     private final int[] fields;
 
     public DataEvolutionRangeShuffle(FileStoreTable table, List<String> sortFields) {
-        this.table = DataEvolutionRangeSortTask.rewriteTable(table);
+        this.table = rewriteTable(table);
         this.readType = SpecialFields.rowTypeWithRowId(table.rowType());
         fields = Arrays.copyOf(readType.getFieldIndices(sortFields), sortFields.size() + 1);
         fields[sortFields.size()] = readType.getFieldIndex(SpecialFields.ROW_ID.name());
@@ -73,6 +75,19 @@ public class DataEvolutionRangeShuffle implements Serializable {
             builder.field("key" + i, readType.getTypeAt(fields[i]));
         }
         exchangeType = builder.field("payload", DataTypes.BYTES()).build();
+    }
+
+    private static FileStoreTable rewriteTable(FileStoreTable table) {
+        Map<String, String> options =
+                new HashMap<>(DataEvolutionCompactTask.BLOB_COMPACT_READ_OPTIONS);
+        // A replacement must fail if the source cannot be read in full.
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "false");
+        options.put(CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "false");
+        options.put(CoreOptions.BLOB_WRITE_NULL_ON_MISSING_FILE.key(), "false");
+        options.put(CoreOptions.BLOB_WRITE_NULL_ON_FETCH_FAILURE.key(), "false");
+        options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        return table.copyWithoutTimeTravel(options);
     }
 
     public RowType exchangeType() {
@@ -204,7 +219,7 @@ public class DataEvolutionRangeShuffle implements Serializable {
         return messages;
     }
 
-    private static CommitMessage replacement(
+    static CommitMessage replacement(
             BinaryRow partition, List<DataFileMeta> before, List<DataFileMeta> after) {
         return new CommitMessageImpl(
                 partition,

@@ -24,7 +24,6 @@ import org.apache.paimon.flink.sink.DataEvolutionRowIdRewriteSink;
 import org.apache.paimon.flink.source.DataEvolutionDeletionVectorMaterializeSource;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.InnerTableCommit;
 
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -66,7 +65,6 @@ public class DataEvolutionDeletionVectorMaterialize {
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionDeletionVectorMaterializeSource.buildSource(
                         env, source, tableIdentifier);
-        DataEvolutionRowIdRewriteSink.sink(
-                table, sourceStream, snapshot, InnerTableCommit::materializeDvRowIdCheck);
+        DataEvolutionRowIdRewriteSink.sink(table, sourceStream, snapshot);
     }
 }

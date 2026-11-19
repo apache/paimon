@@ -20,11 +20,11 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeShuffle;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -38,30 +38,20 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 
 /** Tests for sorting and rewriting complete Data Evolution file groups. */
 public class DataEvolutionRangeSortTest extends TableTestBase {
 
     @Test
     public void testParseInclusiveRange() {
-        assertThat(DataEvolutionRangeSortTask.parseRange("[ 0, 0 ]")).isEqualTo(new Range(0, 0));
-        assertThat(DataEvolutionRangeSortTask.parseRange("[1,9223372036854775807]"))
+        assertThat(DataEvolutionRangeSortPlan.parseRange("[ 0, 0 ]")).isEqualTo(new Range(0, 0));
+        assertThat(DataEvolutionRangeSortPlan.parseRange("[1,9223372036854775807]"))
                 .isEqualTo(new Range(1, Long.MAX_VALUE));
         for (String invalid :
                 Arrays.asList(
@@ -72,7 +62,7 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
                         "[-1,2]",
                         "[3,2]",
                         "[0,9223372036854775808]")) {
-            assertThatThrownBy(() -> DataEvolutionRangeSortTask.parseRange(invalid))
+            assertThatThrownBy(() -> DataEvolutionRangeSortPlan.parseRange(invalid))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -102,12 +92,12 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
     @Test
     public void testSortUsesSchemaCoveringPlanningSnapshot() throws Exception {
         FileStoreTable original = createTable();
-        write(original, GenericRow.of(2));
+        write(original, GenericRow.of(1));
         Snapshot first = original.latestSnapshot().get();
         catalog.alterTable(identifier(), SchemaChange.addColumn("label", DataTypes.INT()), false);
         FileStoreTable evolved = (FileStoreTable) catalog.getTable(identifier());
         assertThat(plan(evolved, first)).hasSize(1);
-        write(evolved, GenericRow.of(1, 42));
+        write(evolved, GenericRow.of(2, 42));
         Snapshot latest = evolved.latestSnapshot().get();
 
         assertThatThrownBy(() -> plan(original, latest))
@@ -118,19 +108,20 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
                 evolved.copyWithoutTimeTravel(
                         Collections.singletonMap(
                                 CoreOptions.SCAN_SNAPSHOT_ID.key(), Long.toString(first.id())));
-        DataEvolutionCompactTask task = plan(table, latest).get(0);
-        commitSort(table, latest, task.doCompact(table, commitUser));
+        DataEvolutionRangeSortPlan plan = plan(table, latest).get(0);
+        commitSort(table, latest, writePlannedRows(table, plan, "id", commitUser));
         assertThat(read(evolved))
                 .extracting(row -> row.isNullAt(1) ? null : row.getInt(1))
-                .containsExactly(42, null);
+                .containsExactly(null, 42);
     }
 
     @Test
     public void testRangeSortRequiresPlanningSnapshot() throws Exception {
         FileStoreTable table = createTable();
-        write(table, GenericRow.of(2), GenericRow.of(1));
+        write(table, GenericRow.of(1), GenericRow.of(2));
         Snapshot snapshot = table.latestSnapshot().get();
-        CommitMessage message = plan(table, snapshot).get(0).doCompact(table, commitUser);
+        CommitMessage message =
+                writePlannedRows(table, plan(table, snapshot).get(0), "id", commitUser);
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             assertThatThrownBy(
                             () ->
@@ -142,30 +133,28 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
         assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshot.id());
     }
 
-    @Test
-    public void testSortUsesWorkerSpillDirectory() throws Exception {
-        FileStoreTable table = createTable();
-        int count = 2048;
-        write(
-                table,
-                IntStream.rangeClosed(1, count)
-                        .mapToObj(i -> GenericRow.of(count - i))
-                        .toArray(InternalRow[]::new));
-        Snapshot snapshot = table.latestSnapshot().get();
-        DataEvolutionCompactTask task = plan(table, snapshot).get(0);
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "16 kb");
-        options.put(CoreOptions.PAGE_SIZE.key(), "4 kb");
-        Path scratch = Files.createDirectory(tempPath.resolve("sort-spill"));
-        IOManager io = spy(IOManager.create(scratch.toString()));
-        CommitMessage message = task.doCompact(table.copy(options), commitUser, () -> io);
-        verify(io, atLeastOnce()).createBufferFileWriter(any());
-        assertThat(scratch.toFile().list()).isEmpty();
-        commitSort(table, snapshot, message);
-        assertThat(read(table))
-                .extracting(row -> row.getInt(0))
-                .containsExactlyElementsOf(
-                        IntStream.range(0, count).boxed().collect(Collectors.toList()));
+    static CommitMessage writePlannedRows(
+            FileStoreTable table,
+            DataEvolutionRangeSortPlan plan,
+            String sortField,
+            String commitUser)
+            throws Exception {
+        DataEvolutionRangeShuffle exchange =
+                new DataEvolutionRangeShuffle(table, Collections.singletonList(sortField));
+        try (DataEvolutionRangeShuffle.ShardWriter writer = exchange.createWriter(commitUser)) {
+            for (IndexedSplit split : plan.readSplits()) {
+                try (CloseableIterator<InternalRow> rows =
+                        exchange.read(split).toCloseableIterator()) {
+                    while (rows.hasNext()) {
+                        InternalRow row = rows.next();
+                        writer.write(row.getBinary(0), row.getBinary(exchange.payloadIndex()));
+                    }
+                }
+            }
+            return DataEvolutionRangeShuffle.replacements(
+                            Collections.singletonList(plan.inputFiles()), writer.finish())
+                    .get(0);
+        }
     }
 
     private FileStoreTable createTable() throws Exception {
@@ -191,8 +180,8 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
         }
     }
 
-    private static List<DataEvolutionCompactTask> plan(FileStoreTable table, Snapshot snapshot) {
-        return DataEvolutionRangeSortTask.plan(
+    private static List<DataEvolutionRangeSortPlan> plan(FileStoreTable table, Snapshot snapshot) {
+        return DataEvolutionRangeSortPlan.plan(
                 table,
                 snapshot,
                 new Range(0, Long.MAX_VALUE),
