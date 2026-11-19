@@ -18,15 +18,9 @@
 
 package org.apache.paimon.sort;
 
-import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.disk.ChannelWithMeta;
-import org.apache.paimon.disk.ChannelWriterOutputView;
-import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
-import org.apache.paimon.disk.IOManager;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -36,43 +30,15 @@ public class SpillChannelManager {
 
     private final HashSet<FileIOChannel.ID> channels;
     private final HashSet<FileIOChannel> openChannels;
-    private long maxDiskBytes = Long.MAX_VALUE;
-    private long spillBytes;
 
     public SpillChannelManager() {
         this.channels = new HashSet<>(64);
         this.openChannels = new HashSet<>(64);
     }
 
-    void setMaxDiskBytes(long maxDiskBytes) {
-        this.maxDiskBytes = maxDiskBytes;
-    }
-
-    synchronized long spillBytes() {
-        return spillBytes;
-    }
-
-    synchronized ChannelWriterOutputView openWriter(
-            IOManager ioManager,
-            FileIOChannel.ID id,
-            BlockCompressionFactory compression,
-            int blockSize)
-            throws IOException {
+    /** Add a new File channel. */
+    public synchronized void addChannel(FileIOChannel.ID id) {
         channels.add(id);
-        ChannelWriterOutputView output =
-                FileChannelUtil.createOutputView(ioManager, id, compression, blockSize);
-        if (maxDiskBytes != Long.MAX_VALUE) {
-            output.setMaxFileBytes(maxDiskBytes - spillBytes);
-        }
-        return output;
-    }
-
-    synchronized ChannelWithMeta finishWriter(FileIOChannel.ID id, ChannelWriterOutputView output)
-            throws IOException {
-        output.close();
-        long bytes = output.getWriteBytes();
-        spillBytes += bytes;
-        return new ChannelWithMeta(id, output.getBlockCount(), bytes);
     }
 
     /** Open File channels. */
@@ -83,17 +49,11 @@ public class SpillChannelManager {
         }
     }
 
-    synchronized void removeChannel(ChannelWithMeta channel) {
-        // FileIOChannel deletion is best effort. Retain the charge and retry at reset if needed.
-        if (maxDiskBytes != Long.MAX_VALUE && channel.getChannel().getPathFile().exists()) {
-            return;
-        }
-        channels.remove(channel.getChannel());
-        spillBytes -= channel.getNumBytes();
+    public synchronized void removeChannel(FileIOChannel.ID id) {
+        channels.remove(id);
     }
 
     public synchronized void reset() {
-        spillBytes = 0;
         for (Iterator<FileIOChannel> channels = this.openChannels.iterator();
                 channels.hasNext(); ) {
             final FileIOChannel channel = channels.next();

@@ -356,9 +356,7 @@ successful. With `table.dml-sync` enabled the call waits and returns `Success`.
 In asynchronous mode it returns the Flink job ID.
 
 When a partition outgrows `write-buffer-size`, the task spills to the TaskManager's
-temporary directories. `write-buffer-spill.max-disk-size` limits the combined size
-of spill files for that task, including intermediate merge output. Exceeding it
-fails the rewrite before commit.
+temporary directories.
 
 ## materialize_deletion_vectors
 

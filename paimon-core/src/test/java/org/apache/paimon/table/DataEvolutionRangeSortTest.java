@@ -95,21 +95,8 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
         options.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "16 kb");
         options.put(CoreOptions.PAGE_SIZE.key(), "4 kb");
         Path scratch = Files.createDirectory(tempPath.resolve("sort-spill"));
-        FileStoreTable smallBuffer = table.copy(options);
-        FileStoreTable noSpillSpace =
-                smallBuffer.copy(
-                        Collections.singletonMap(
-                                CoreOptions.WRITE_BUFFER_MAX_DISK_SIZE.key(), "0 b"));
-        assertThatThrownBy(
-                        () ->
-                                task.doCompact(
-                                        noSpillSpace,
-                                        commitUser,
-                                        () -> IOManager.create(scratch.toString())))
-                .hasMessageContaining("write-buffer-spill.max-disk-size");
-        assertThat(scratch.toFile().list()).isEmpty();
         IOManager io = spy(IOManager.create(scratch.toString()));
-        CommitMessage message = task.doCompact(smallBuffer, commitUser, () -> io);
+        CommitMessage message = task.doCompact(table.copy(options), commitUser, () -> io);
         verify(io, atLeastOnce()).createBufferFileWriter(any());
         assertThat(scratch.toFile().list()).isEmpty();
         commitSort(table, snapshot, message);

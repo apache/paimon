@@ -58,6 +58,7 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
             int numBlocks)
             throws IOException {
         this.numBlocksRemaining = numBlocks;
+        this.reader = ioManager.createBufferFileReader(id);
         uncompressedBuffer = MemorySegment.wrap(new byte[compressionBlockSize]);
         decompressor = compressionCodecFactory.getDecompressor();
         compressedBuffer =
@@ -66,7 +67,6 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
                                 [compressionCodecFactory
                                         .getCompressor()
                                         .getMaxCompressedSize(compressionBlockSize)]);
-        this.reader = ioManager.createBufferFileReader(id);
     }
 
     @Override

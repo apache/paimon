@@ -192,7 +192,6 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
                             options.localSortMaxNumFileHandles(),
                             options.spillCompressOptions(),
                             options.writeBufferSpillDiskSize());
-            sorter.enforceSpillDiskLimit();
             try {
                 try (CloseableIterator<InternalRow> rows = reader.toCloseableIterator()) {
                     while (rows.hasNext()) {
