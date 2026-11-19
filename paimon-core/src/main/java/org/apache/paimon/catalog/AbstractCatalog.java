@@ -393,13 +393,13 @@ public abstract class AbstractCatalog implements Catalog {
                 FileIO tableFileIO = fileIO(tablePath);
                 SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
                 externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
-                FileStoreTable table = (FileStoreTable) getTable(identifier);
                 boolean isExternal = loadTableMetadata(identifier).isExternal();
                 Optional<TableSchema> latestMainSchema = schemaManager.latest();
                 if (!isExternal
                         && latestMainSchema.isPresent()
                         && EntropyInjectTemplateFilesDeletion.isTemplate(latestMainSchema.get())) {
-                    EntropyInjectTemplateFilesDeletion.delete(table);
+                    EntropyInjectTemplateFilesDeletion.delete(
+                            tableFileIO, tablePath, DEFAULT_MAIN_BRANCH, latestMainSchema.get());
                 }
                 for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
                     SchemaManager schemaBranch = schemaManager.copyWithBranch(branch);
@@ -409,7 +409,8 @@ public abstract class AbstractCatalog implements Catalog {
                             && latestBranchSchema.isPresent()
                             && EntropyInjectTemplateFilesDeletion.isTemplate(
                                     latestBranchSchema.get())) {
-                        EntropyInjectTemplateFilesDeletion.delete(table.switchToBranch(branch));
+                        EntropyInjectTemplateFilesDeletion.delete(
+                                tableFileIO, tablePath, branch, latestBranchSchema.get());
                     }
                 }
             }
