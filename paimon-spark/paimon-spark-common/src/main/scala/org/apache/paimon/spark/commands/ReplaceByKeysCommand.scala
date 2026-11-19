@@ -27,8 +27,9 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{Attribute, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, InSubquery, ListQuery, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
+import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, expr}
 
@@ -85,7 +86,7 @@ case class ReplaceByKeysCommand(
     require(
       sourceFields.keySet() == fields.keySet(),
       "Source query must supply all target columns by name")
-    // Reuse INSERT's assignment policy, nested/nullability checks and CHAR/VARCHAR handling.
+    // Reuse INSERT's casts, nested/nullability checks and CHAR/VARCHAR handling.
     val aligned = PaimonOutputResolver.resolveOutputColumns(
       table.name(),
       relation.output,
@@ -157,11 +158,11 @@ case class ReplaceByKeysCommand(
       val rowId = (relation.output ++ relation.metadataOutput).find(_.name == "_ROW_ID").get
       val scan = createNewScanPlan(splits, relation).copy(output = relation.output :+ rowId)
       val target = createDataset(spark, scan).filter(toColumn(predicate)).alias("target")
-      val matches = keys
-        .map(key => col("target." + quoted(key)) === col("source_keys." + quoted(key)))
-        .reduce(_ && _)
-      // Semi join has the same TRUE-only membership semantics as DELETE WHERE key IN source.
-      val rowIds = target.join(sourceKeys, matches, "left_semi").select(col("target._ROW_ID"))
+      val targetPlan = target.queryExecution.analyzed
+      val values = keys.map(key => targetPlan.output.find(_.name == key).get)
+      // Let Catalyst apply IN coercion before rewriting membership as a semi join.
+      val matches = InSubquery(values, ListQuery(sourceKeys.queryExecution.analyzed))
+      val rowIds = createDataset(spark, Filter(matches, targetPlan)).select(col("target._ROW_ID"))
       val vectors =
         collectDataEvolutionDeletionVectors(splits, candidateFileMap(splits), rowIds, spark)
       writer.persistDeletionVectors(vectors, snapshot)

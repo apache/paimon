@@ -157,6 +157,101 @@ class ReplaceByKeysProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  for (ansi <- Seq(false, true); policy <- Seq("LEGACY", "ANSI", "STRICT")) {
+    test(s"replacement follows IN coercion and assignment policy: ansi=$ansi policy=$policy") {
+      withSQLConf(
+        "spark.sql.ansi.enabled" -> ansi.toString,
+        "spark.sql.storeAssignmentPolicy" -> policy) {
+        for (composite <- Seq(false, true)) {
+          withTable("target", "expected", "assignment", "source") {
+            Seq("target", "expected", "assignment").foreach {
+              name =>
+                sql(s"""CREATE TABLE $name (id INT, tag STRING, value STRING)
+                       |TBLPROPERTIES ('data-evolution.enabled'='true',
+                       |'row-tracking.enabled'='true','deletion-vectors.enabled'='true',
+                       |'write-only'='true')""".stripMargin)
+                if (name != "assignment") {
+                  sql(
+                    s"INSERT INTO $name VALUES (1,'a','old-1'),(2,'a','old-2')," +
+                      "(3,'a','old-3'),(NULL,'a','old-null')")
+                }
+            }
+            sql("CREATE TABLE source (id STRING, tag STRING, value STRING)")
+            sql("""INSERT INTO source VALUES ('01','a','new-1'),('2','a','new-2'),
+                  |('2','a','new-duplicate'),('003',NULL,'new-3'),(NULL,'a','new-null')
+                  |""".stripMargin)
+            val before = sql("SELECT *,_ROW_ID FROM target").collect().toSeq
+            val snapshot = loadTable("target").snapshotManager().latestSnapshot().id()
+            val key = if (composite) "(id,tag)" else "id"
+            val sourceKey = if (composite) "id,tag" else "id"
+            val callKeys = if (composite) "ARRAY('id','tag')" else "ARRAY('id')"
+            val call = s"""CALL sys.replace_by_keys(table => 'target',
+                          |source_query => 'SELECT * FROM source',
+                          |key_columns => $callKeys)""".stripMargin
+            // Use this Paimon version's real INSERT behavior, not generic Spark assumptions.
+            val assignment = scala.util.Try(sql("INSERT INTO assignment SELECT * FROM source"))
+            if (assignment.isSuccess) {
+              sql(s"DELETE FROM expected WHERE $key IN (SELECT $sourceKey FROM source)")
+              sql("INSERT INTO expected SELECT * FROM source")
+              val retained = sql("SELECT * FROM expected WHERE value LIKE 'old%'")
+                .collect()
+                .toSet
+              sql(call)
+              checkAnswer(sql("SELECT * FROM target"), sql("SELECT * FROM expected"))
+              checkAnswer(
+                sql("SELECT *,_ROW_ID FROM target WHERE value LIKE 'old%'"),
+                before.filter(row => retained.contains(Row.fromSeq(row.toSeq.take(3)))))
+              assert(loadTable("target").snapshotManager().latestSnapshot().id() == snapshot + 1)
+            } else {
+              intercept[Exception](sql(call))
+              checkAnswer(sql("SELECT *,_ROW_ID FROM target"), before)
+              assert(loadTable("target").snapshotManager().latestSnapshot().id() == snapshot)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (
+    (mode, options) <- Seq(
+      "append" -> "'bucket'='-1'",
+      "data-evolution" -> "'bucket'='-1','data-evolution.enabled'='true','row-tracking.enabled'='true'",
+      "postpone-merge-on-read" ->
+        "'bucket'='-2','primary-key'='id','postpone.merge-on-read'='true'"
+    )
+  ) {
+    test(s"unwritten $mode source is empty and remains bound before its first commit") {
+      withTable("target", "source") {
+        sql("""CREATE TABLE target (id INT, value STRING) TBLPROPERTIES (
+              |'bucket'='-1','data-evolution.enabled'='true','row-tracking.enabled'='true',
+              |'deletion-vectors.enabled'='true','write-only'='true')""".stripMargin)
+        sql("INSERT INTO target VALUES (1,'old')")
+        sql(s"CREATE TABLE source (id INT, value STRING) TBLPROPERTIES ($options)")
+        checkAnswer(sql("SELECT * FROM source"), Nil)
+        assert(loadTable("source").snapshotManager().latestSnapshot() == null)
+        val original = sql("SELECT *,_ROW_ID FROM target").collect().toSeq
+        sql("""CALL sys.replace_by_keys(table => 'target',
+              |source_query => 'SELECT * FROM source', key_columns => ARRAY('id'))
+              |""".stripMargin)
+        checkAnswer(sql("SELECT *,_ROW_ID FROM target"), original)
+        assert(loadTable("source").snapshotManager().latestSnapshot() == null)
+        val target = loadTable("target")
+        val bound = ReplaceByKeysSource.bind(
+          spark,
+          target,
+          "SELECT * FROM source",
+          target.snapshotManager().latestSnapshot())
+        // Planning and both projections must stay empty after the source's first commit.
+        sql("INSERT INTO source VALUES (1,'later')")
+        checkAnswer(sql("SELECT * FROM source"), Seq(Row(1, "later")))
+        checkAnswer(createDataset(spark, bound), Nil)
+        checkAnswer(createDataset(spark, bound).select("id"), Nil)
+        checkAnswer(sql("SELECT *,_ROW_ID FROM target"), original)
+      }
+    }
+  }
+
   test("case insensitive column matching follows the Spark resolver") {
     withTable("target") {
       withSQLConf("spark.sql.caseSensitive" -> "false") {

@@ -125,8 +125,13 @@ private[spark] object ReplaceByKeysSource {
               "Historical source mode requires an explicit matching snapshot selector"
             )
             val selected = bindTable(effective, selectors, snapshots)
-            val scanTable = new PinnedSourceTable(selected.table)
-            SparkShimLoader.shim.copyDataSourceV2Relation(r, scanTable, r.output)
+            if (selected.empty) {
+              // An immutable empty leaf also prevents custom MOR readers from selecting latest.
+              LocalRelation(r.output)
+            } else {
+              val scanTable = new PinnedSourceTable(selected.table)
+              SparkShimLoader.shim.copyDataSourceV2Relation(r, scanTable, r.output)
+            }
           case _ =>
             throw new IllegalArgumentException("Source tables must support Paimon snapshots")
         }
@@ -155,7 +160,7 @@ private[spark] object ReplaceByKeysSource {
 
   private type SnapshotKey = (String, String, Seq[Option[String]], CoreOptions.StartupMode)
 
-  private case class BoundRead(table: FileStoreTable)
+  private case class BoundRead(table: FileStoreTable, empty: Boolean = false)
 
   // Share only Snapshot selections: each alias keeps its own analyzed schema and read options.
   private def bindTable(
@@ -186,7 +191,9 @@ private[spark] object ReplaceByKeysSource {
                   override def apply(component: FileStoreTable): DataTableScan =
                     components.find(_._1 eq component).get._2.table.newScan()
                 })
-          ))
+          ),
+          empty = components.forall(_._2.empty)
+        )
       case _ =>
         require(
           table.coreOptions().toConfiguration.get(CoreOptions.BATCH_SCAN_MODE) ==
@@ -237,7 +244,10 @@ private[spark] object ReplaceByKeysSource {
       CoreOptions.SCAN_VERSION
     )
       .foreach(k => options.put(k.key(), null))
-    options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
+    options.put(
+      CoreOptions.SCAN_MODE.key(),
+      (if (snapshot.isDefined) CoreOptions.StartupMode.FROM_SNAPSHOT
+       else CoreOptions.StartupMode.LATEST_FULL).toString)
     // Copy only options: snapshot selection must not replace the analyzed schema.
     val pinned = table.copyWithoutTimeTravel(options)
     snapshot match {
@@ -251,7 +261,7 @@ private[spark] object ReplaceByKeysSource {
           Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), selected.id().toString))
         BoundRead(configured)
       case None =>
-        BoundRead(new PinnedReadTable(pinned, () => new EmptyScan))
+        BoundRead(new PinnedReadTable(pinned, () => new EmptyScan), empty = true)
     }
   }
 
