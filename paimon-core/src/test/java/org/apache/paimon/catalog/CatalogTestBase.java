@@ -986,6 +986,16 @@ public abstract class CatalogTestBase {
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
 
+        for (String branch : Arrays.asList("", " ")) {
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(
+                            () ->
+                                    catalog.getTable(
+                                            Identifier.create(
+                                                    "test_db", "test_table$branch_" + branch)))
+                    .withMessageContaining("Branch name cannot be blank");
+        }
+
         // Get manifests system table and read it
         Table table = catalog.getTable(Identifier.create("test_db", "test_table"));
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();

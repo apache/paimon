@@ -18,6 +18,7 @@
 from datetime import date, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from pypaimon.management.java_string import is_null_or_whitespace_only
 from pypaimon.utils.numeric_utils import java_floating_string
 from pypaimon.utils.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.utils.path import resolve_path, to_file_io_path
@@ -30,13 +31,7 @@ if TYPE_CHECKING:
 
 
 def _is_null_or_whitespace_only(value) -> bool:
-    if value is None:
-        return True
-    s = str(value)
-    # Character.isWhitespace, as used by Java StringUtils. Python isspace also
-    # folds NBSP, NEL and other characters Java keeps in a partition name.
-    return all(char in '\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006'
-               '\u2008\u2009\u200a\u2028\u2029\u205f\u3000' for char in s)
+    return value is None or is_null_or_whitespace_only(str(value))
 
 
 def _decode_java_utf8(value: bytes) -> str:

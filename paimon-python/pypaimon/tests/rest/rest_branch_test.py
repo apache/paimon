@@ -75,6 +75,21 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
             identifier.get_database_name(), identifier.get_table_name(), branch="b1"))
         self.assertEqual(self._read(branch).num_rows, 0)
 
+    def test_no_break_space_branch_is_not_main(self):
+        # Java takes a no-break space as a branch name, so the request must
+        # name the branch rather than main.
+        identifier = self._identifier()
+        self.rest_catalog.create_branch(identifier, "\u00a0")
+        self.assertEqual(self.rest_catalog.list_branches(identifier), ["\u00a0"])
+        table = self.rest_catalog.get_table(Identifier(
+            identifier.get_database_name(), identifier.get_table_name(), branch="\u00a0"))
+        self.assertEqual(table.current_branch(), "\u00a0")
+        self.assertEqual(
+            json.loads(table.catalog_environment.rest_table_response)['name'],
+            identifier.get_object_name() + '$branch_\u00a0')
+        self.assertEqual(self._read(table).num_rows, 0)
+        self.assertGreater(self._read(self.rest_catalog.get_table(identifier)).num_rows, 0)
+
     def test_create_branch_from_missing_tag_raises(self):
         with self.assertRaises(TagNotExistException):
             self.rest_catalog.create_branch(

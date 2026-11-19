@@ -62,6 +62,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.java_string import is_null_or_whitespace_only
 from pypaimon.management.list_permissions_request import \
     ListPermissionsRequest
 from pypaimon.management.list_policies_request import ListPoliciesRequest
@@ -569,7 +570,7 @@ class RESTApi:
 
     @staticmethod
     def _validate_resource_path_component(value, label):
-        if not value or not value.strip() or value in ('.', '..'):
+        if is_null_or_whitespace_only(value) or value in ('.', '..'):
             raise ValueError('{} must be a non-empty resource path component'.format(label))
 
     def create_branch(
@@ -579,7 +580,7 @@ class RESTApi:
             tag_name: Optional[str] = None,
     ) -> None:
         database_name, table_name = self._validate_resource_path(identifier)
-        if not branch_name or not branch_name.strip():
+        if is_null_or_whitespace_only(branch_name):
             raise ValueError("Branch name cannot be empty")
         request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
         self.client.post(
@@ -884,6 +885,8 @@ class RESTApi:
         table_name = identifier.get_object_name()
         if not table_name or not table_name.strip():
             raise ValueError("Table name cannot be None")
+        # Parsing rejects an invalid object name, such as t$branch_.
+        identifier.get_table_name()
 
         # Validation must not rename a resource, including a branch suffix.
         return database_name, table_name
