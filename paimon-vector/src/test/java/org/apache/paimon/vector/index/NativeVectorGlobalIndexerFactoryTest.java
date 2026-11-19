@@ -18,15 +18,21 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,6 +40,33 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for vector global indexer factory SPI registration. */
 public class NativeVectorGlobalIndexerFactoryTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann"})
+    void centroidTypeSelectsItsOwnOptionsAndLocalAlgorithm(String algorithm) {
+        String type = algorithm + "-centroid";
+        Options options = new Options();
+        options.setString(algorithm + ".dimension", "12");
+        options.setString(type + ".dimension", "17");
+        options.setString(type + ".metric", "cosine");
+        List<DataField> fields =
+                Collections.singletonList(new DataField(0, "v", new ArrayType(new FloatType())));
+        NativeCentroidVectorGlobalIndexer indexer =
+                (NativeCentroidVectorGlobalIndexer) GlobalIndexer.create(type, fields, options);
+        assertThat(indexer.options)
+                .containsEntry("index.type", algorithm.replace('-', '_'))
+                .containsEntry("dimension", "17");
+        assertThat(indexer.metric()).isEqualTo("cosine");
+        assertThat(GlobalIndexerFactoryUtils.centroidFactory(type)).isNotNull();
+        assertThat(GlobalIndexerFactoryUtils.centroidFactory(algorithm)).isNull();
+        assertThat(GlobalIndexer.create(algorithm, fields, options))
+                .isExactlyInstanceOf(NativeVectorGlobalIndexer.class);
+        assertThatThrownBy(() -> indexer.createWriter(null))
+                .isInstanceOf(UnsupportedOperationException.class);
+        options.setString(algorithm + ".shard", "centroid-based");
+        assertThatThrownBy(() -> GlobalIndexer.create(algorithm, fields, options))
+                .hasMessageContaining("index type");
+    }
 
     @Test
     public void testIdentifier() {

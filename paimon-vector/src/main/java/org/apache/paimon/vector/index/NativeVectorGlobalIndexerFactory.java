@@ -44,21 +44,51 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         }
         DataField field = indexFields.get(0);
         String identifier = identifier();
-        return new NativeVectorGlobalIndexer(
-                field.type(),
-                nativeOptions(field.type(), options, identifier, field.name()),
-                identifier,
-                trainSampleRatio(options, identifier, field.name()));
+        if (resolveFieldOverriddenKey(options.dynamicOptions(), identifier, field.name(), "shard")
+                        != null
+                || resolveFieldOverriddenKey(options.toMap(), identifier, field.name(), "shard")
+                        != null) {
+            throw new IllegalArgumentException(
+                    "Use the index type to select the layout (for example, ivf-pq or ivf-pq-centroid). Remove the shard option.");
+        }
+        String algorithm = nativeAlgorithm();
+        Map<String, String> nativeOptions =
+                nativeOptions(field.type(), options, identifier, algorithm, field.name());
+        double ratio = trainSampleRatio(options, identifier, field.name());
+        return createIndexer(field.type(), nativeOptions, algorithm, ratio);
+    }
+
+    String nativeAlgorithm() {
+        return identifier();
+    }
+
+    NativeVectorGlobalIndexer createIndexer(
+            DataType fieldType, Map<String, String> options, String algorithm, double ratio) {
+        return new NativeVectorGlobalIndexer(fieldType, options, algorithm, ratio);
     }
 
     static Map<String, String> nativeOptions(
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
-        Map<String, String> nativeOptions = new LinkedHashMap<>();
-        collectNativeOptions(nativeOptions, tableOptions.toMap(), identifier, fieldName, false);
-        collectNativeOptions(
-                nativeOptions, tableOptions.dynamicOptions(), identifier, fieldName, true);
+        return nativeOptions(fieldType, tableOptions, identifier, identifier, fieldName);
+    }
 
-        nativeOptions.put("index.type", identifier.replace('-', '_'));
+    private static Map<String, String> nativeOptions(
+            DataType fieldType,
+            Options tableOptions,
+            String identifier,
+            String algorithm,
+            String fieldName) {
+        Map<String, String> nativeOptions = new LinkedHashMap<>();
+        collectNativeOptions(
+                nativeOptions, tableOptions.toMap(), identifier, algorithm, fieldName, false);
+        collectNativeOptions(
+                nativeOptions,
+                tableOptions.dynamicOptions(),
+                identifier,
+                algorithm,
+                fieldName,
+                true);
+        nativeOptions.put("index.type", algorithm.replace('-', '_'));
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
         nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
@@ -130,6 +160,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             Map<String, String> nativeOptions,
             Map<String, String> options,
             String identifier,
+            String algorithm,
             String fieldName,
             boolean validate) {
         String optionPrefix = identifier + ".";
@@ -144,7 +175,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         entry.getKey(),
                         entry.getKey(),
                         entry.getValue(),
-                        identifier,
+                        algorithm,
                         validate);
             }
         }
@@ -156,7 +187,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey,
                         optionKey.substring(optionPrefix.length()),
                         entry.getValue(),
-                        identifier,
+                        algorithm,
                         validate);
             }
         }
@@ -168,7 +199,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey,
                         optionKey.substring(fieldPrefix.length()),
                         entry.getValue(),
-                        identifier,
+                        algorithm,
                         validate);
             }
         }

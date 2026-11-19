@@ -27,9 +27,10 @@ import org.apache.paimon.index.vector.CentroidRouter;
 final class NativeVectorTrainingModel implements VectorTrainingModel {
     private final CentroidRouter training;
 
-    private final NativeVectorGlobalIndexer localIndexer;
+    private final NativeCentroidVectorGlobalIndexer localIndexer;
 
-    NativeVectorTrainingModel(CentroidRouter training, NativeVectorGlobalIndexer localIndexer) {
+    NativeVectorTrainingModel(
+            CentroidRouter training, NativeCentroidVectorGlobalIndexer localIndexer) {
         this.localIndexer = localIndexer;
         this.training = training;
     }

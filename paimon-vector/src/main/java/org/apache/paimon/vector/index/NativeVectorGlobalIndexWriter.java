@@ -24,7 +24,6 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
@@ -425,7 +424,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
     }
 
-    CentroidRouter finishRoutingModel(NativeVectorGlobalIndexer indexer) throws IOException {
+    CentroidRouter finishRoutingModel(NativeCentroidVectorGlobalIndexer indexer)
+            throws IOException {
         if (count == 0) {
             throw new IllegalArgumentException(
                     "Cannot train a centroid model without non-null vectors.");

@@ -18,51 +18,19 @@
 
 package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
-
-import java.util.Map;
 
 /** Utility class for creating {@link GlobalIndexTopologyBuilder} implementations. */
 public class GlobalIndexTopologyBuilderUtils {
 
     public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
+        if (GlobalIndexerFactoryUtils.centroidFactory(indexType) != null) {
+            return new CentroidGlobalIndexTopoBuilder();
+        }
         if (SortedIndexTopoBuilder.supports(indexType)) {
             return new SortedIndexTopoBuilder();
         }
         return new DefaultGlobalIndexTopoBuilder();
-    }
-
-    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType, Options options) {
-        return createTopoBuilder(indexType, options, null);
-    }
-
-    public static GlobalIndexTopologyBuilder createTopoBuilder(
-            String indexType, Options options, String fieldName) {
-        String key = indexType + ".shard";
-        String fieldKey = "fields." + fieldName + ".shard";
-        Map<String, String> dynamic = options.dynamicOptions();
-        Map<String, String> stored = options.toMap();
-        String shard =
-                dynamic.containsKey(fieldKey)
-                        ? dynamic.get(fieldKey)
-                        : dynamic.containsKey(key)
-                                ? dynamic.get(key)
-                                : stored.getOrDefault(
-                                        fieldKey, stored.getOrDefault(key, "range-based"));
-        if (CoreOptions.isVectorIndexType(indexType)) {
-            if ("centroid-based".equals(shard)) {
-                return new CentroidGlobalIndexTopoBuilder();
-            }
-            if (!"range-based".equals(shard)) {
-                throw new IllegalArgumentException("Unknown vector shard mode: " + shard);
-            }
-        }
-        if ("centroid-based".equals(shard)) {
-            throw new IllegalArgumentException(
-                    "Centroid sharding requires a supported vector index.");
-        }
-        return createTopoBuilder(indexType);
     }
 }

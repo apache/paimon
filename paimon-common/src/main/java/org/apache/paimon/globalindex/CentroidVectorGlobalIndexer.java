@@ -18,11 +18,26 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.utils.Range;
+
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Iterator;
+import java.util.List;
 
 /** A vector indexer that can train and restore a router for independently built shards. */
 public interface CentroidVectorGlobalIndexer extends VectorGlobalIndexer {
+
+    /** Persist the trained router and return the model entry with implementation-owned metadata. */
+    ResultEntry writeRoutingModel(
+            GlobalIndexFileWriter io,
+            String name,
+            byte[] payload,
+            String modelId,
+            int nlist,
+            List<Range> coverage)
+            throws IOException;
 
     /** Return non-null input ordinals in the order required for training. */
     long[] planGlobalTrainingSample(long vectorCount);

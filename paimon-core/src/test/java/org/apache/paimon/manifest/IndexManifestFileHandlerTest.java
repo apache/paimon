@@ -33,7 +33,6 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,7 +41,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -197,57 +195,6 @@ public class IndexManifestFileHandlerTest {
                 .hasMessageContaining("prev-index")
                 .hasMessageContaining("new-index")
                 .hasMessageContaining("overlapping row range");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann"})
-    void testCentroidModelsMustBeCompleteAndReplacedTogether(String type) {
-        List<IndexManifestEntry> first = centroidModel("first", type);
-        IndexManifestFileHandler.GlobalIndexCombiner combiner =
-                new IndexManifestFileHandler.GlobalIndexCombiner();
-        assertThat(combiner.combine(Collections.emptyList(), first))
-                .containsExactlyInAnyOrderElementsOf(first);
-        assertThatThrownBy(() -> combiner.combine(Collections.emptyList(), first.subList(0, 2)))
-                .hasMessageContaining("Incomplete");
-        assertThatThrownBy(
-                        () ->
-                                combiner.combine(
-                                        first,
-                                        Collections.singletonList(first.get(1).toDeleteEntry())))
-                .hasMessageContaining("Incomplete");
-        List<IndexManifestEntry> replacement = centroidModel("second", type);
-        assertThatThrownBy(() -> combiner.combine(first, replacement))
-                .hasMessageContaining("previous file");
-        List<IndexManifestEntry> changes = new ArrayList<>();
-        first.forEach(entry -> changes.add(entry.toDeleteEntry()));
-        changes.addAll(replacement);
-        assertThat(combiner.combine(first, changes))
-                .containsExactlyInAnyOrderElementsOf(replacement);
-    }
-
-    private static List<IndexManifestEntry> centroidModel(String id, String type) {
-        List<IndexManifestEntry> entries = new ArrayList<>();
-        for (int centroid = -1; centroid < 2; centroid++) {
-            byte[] metadata =
-                    centroid == -1
-                            ? org.apache.paimon.globalindex.VectorIndexShardMeta.routing(
-                                            id, 2, Collections.singletonList(new Range(10, 100)))
-                                    .serialize()
-                            : org.apache.paimon.globalindex.VectorIndexShardMeta.centroid(
-                                            id, centroid)
-                                    .serialize();
-            IndexFileMeta file =
-                    new IndexFileMeta(
-                            type,
-                            id + "-" + centroid,
-                            100,
-                            centroid == -1 ? 0 : 10,
-                            null,
-                            null,
-                            new GlobalIndexMeta(10, 100, 1, null, metadata));
-            entries.add(new IndexManifestEntry(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, file));
-        }
-        return entries;
     }
 
     @Test

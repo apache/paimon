@@ -30,9 +30,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
-import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.VectorTrainingModel;
-import org.apache.paimon.globalindex.VectorTrainingModelIO;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
@@ -80,8 +78,8 @@ class CentroidVectorGlobalIndexTest {
         options.put("index.type", "ivf_flat");
         options.put("metric", "l2");
         options.put("dimension", "2");
-        NativeVectorGlobalIndexer indexer =
-                new NativeVectorGlobalIndexer(
+        NativeCentroidVectorGlobalIndexer indexer =
+                new NativeCentroidVectorGlobalIndexer(
                         new ArrayType(new FloatType()), options, "ivf-flat", 0.25);
         assertThat(indexer.planGlobalTrainingSample(5)).containsExactly(0L, 2L);
         assertThat(indexer.planGlobalTrainingSample(1000000)).hasSize(65536);
@@ -118,8 +116,8 @@ class CentroidVectorGlobalIndexTest {
             for (int seed : new int[] {42, 93}) {
                 disk.put("diskann.seed", Integer.toString(seed));
                 disk.put("diskann.memory-budget-bytes", seed == 42 ? "8388608" : "4194304");
-                NativeVectorGlobalIndexer indexer =
-                        new NativeVectorGlobalIndexer(
+                NativeCentroidVectorGlobalIndexer indexer =
+                        new NativeCentroidVectorGlobalIndexer(
                                 new ArrayType(new FloatType()), disk, "diskann", 1.0);
                 assertThat(indexer.planGlobalTrainingSample(100000)).isEqualTo(expected);
                 try (VectorTrainingModel model =
@@ -148,8 +146,9 @@ class CentroidVectorGlobalIndexTest {
         if (type.equals("diskann")) {
             options.put("diskann.seed", "93");
         }
-        NativeVectorGlobalIndexer indexer =
-                new NativeVectorGlobalIndexer(new ArrayType(new FloatType()), options, type, 0.5);
+        NativeCentroidVectorGlobalIndexer indexer =
+                new NativeCentroidVectorGlobalIndexer(
+                        new ArrayType(new FloatType()), options, type, 0.5);
         long[] positions = indexer.planGlobalTrainingSample(rows);
         assertThat(positions.length).isLessThan((rows + 1) / 2);
         float[] selected = new float[2 * positions.length];
@@ -185,8 +184,8 @@ class CentroidVectorGlobalIndexTest {
         options.put("index.type", "ivf_flat");
         options.put("metric", "l2");
         options.put("dimension", "2");
-        NativeVectorGlobalIndexer indexer =
-                new NativeVectorGlobalIndexer(
+        NativeCentroidVectorGlobalIndexer indexer =
+                new NativeCentroidVectorGlobalIndexer(
                         new ArrayType(new FloatType()), options, "ivf-flat", 0.0625);
         float[] samples = new float[128];
         for (int i = 0; i < samples.length; i++) {
@@ -223,8 +222,9 @@ class CentroidVectorGlobalIndexTest {
         if ("ivf-pq".equals(type) || diskann) {
             options.put("pq.m", "1");
         }
-        NativeVectorGlobalIndexer indexer =
-                new NativeVectorGlobalIndexer(new ArrayType(new FloatType()), options, type);
+        NativeCentroidVectorGlobalIndexer indexer =
+                new NativeCentroidVectorGlobalIndexer(
+                        new ArrayType(new FloatType()), options, type, 1.0);
         GlobalIndexFileWriter files =
                 new GlobalIndexFileWriter() {
                     @Override

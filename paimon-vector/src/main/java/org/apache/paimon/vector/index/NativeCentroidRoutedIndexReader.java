@@ -22,8 +22,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-import org.apache.paimon.globalindex.VectorIndexShardMeta;
-import org.apache.paimon.globalindex.VectorTrainingModelIO;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.predicate.BatchVectorSearch;
@@ -72,9 +70,6 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         String modelId = null;
         long count = 0;
         for (GlobalIndexIOMeta file : entries) {
-            checkArgument(
-                    VectorIndexShardMeta.isWrapped(file.metadata()),
-                    "Cannot mix centroid-based and range-based shards.");
             VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
             String id = meta.modelId();
             checkArgument(modelId == null || modelId.equals(id), "Mismatched centroid model.");

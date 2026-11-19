@@ -646,12 +646,15 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
         for (IndexManifestEntry index : indexEntries) {
             if (index.kind() != FileKind.ADD
-                    || !CentroidVectorIndexUtils.isRoutingModel(index.indexFile())) {
+                    || !CentroidVectorIndexUtils.centroidBased(index.indexFile())) {
+                continue;
+            }
+            List<Range> coverage = CentroidVectorIndexUtils.coverage(index.indexFile());
+            if (coverage.isEmpty()) {
                 continue;
             }
             long baseline =
                     DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile()).scanSnapshotId();
-            List<Range> coverage = CentroidVectorIndexUtils.coverage(index.indexFile());
             for (long id = baseline + 1; id <= latestSnapshot.id(); id++) {
                 Snapshot snapshot = snapshotManager.snapshot(id);
                 for (ManifestEntry change :

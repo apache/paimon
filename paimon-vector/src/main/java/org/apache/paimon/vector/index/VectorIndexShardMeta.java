@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
 import org.apache.paimon.utils.Range;
 
@@ -27,7 +27,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,13 +35,10 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Manifest metadata shared by vector implementations and engine-independent planning. */
+/** Private wire format for the indexMeta of native centroid models and shards. */
 public final class VectorIndexShardMeta {
     private static final byte[] MAGIC = {'P', 'C', 'S', 'M'};
     private static final byte VERSION = 1;
-    // The preview writer emitted this key first in a LinkedHashMap.
-    private static final byte[] PREVIEW_PREFIX =
-            "{\"shardMode\":\"centroid-based\",".getBytes(StandardCharsets.UTF_8);
     private static final String ABSOLUTE_ROW_ID = "ABSOLUTE_ROW_ID";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, String>> TYPE =
@@ -55,51 +51,31 @@ public final class VectorIndexShardMeta {
         this.payloadMeta = payloadMeta;
     }
 
-    /** Ordinary index metadata is opaque and can use any encoding. */
-    public static boolean isWrapped(@Nullable byte[] bytes) {
-        return startsWith(bytes, MAGIC) || startsWith(bytes, PREVIEW_PREFIX);
-    }
-
-    private static boolean startsWith(@Nullable byte[] bytes, byte[] prefix) {
-        if (bytes == null || bytes.length < prefix.length) {
-            return false;
-        }
-        for (int i = 0; i < prefix.length; i++) {
-            if (bytes[i] != prefix[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     public static VectorIndexShardMeta deserialize(byte[] bytes) {
         try {
             Map<String, String> descriptor;
             byte[] payload = null;
-            if (startsWith(bytes, PREVIEW_PREFIX)) {
-                descriptor = MAPPER.readValue(bytes, TYPE);
-            } else {
-                checkArgument(
-                        startsWith(bytes, MAGIC)
-                                && bytes.length >= MAGIC.length + 1 + 2 * Integer.BYTES,
-                        "Invalid centroid metadata header.");
-                ByteBuffer input = ByteBuffer.wrap(bytes);
-                input.position(MAGIC.length);
-                checkArgument(input.get() == VERSION, "Unsupported centroid metadata version.");
-                int descriptorSize = input.getInt();
-                int payloadSize = input.getInt();
-                checkArgument(
-                        descriptorSize > 0
-                                && descriptorSize <= input.remaining()
-                                && payloadSize >= -1
-                                && input.remaining() - descriptorSize == Math.max(0, payloadSize),
-                        "Invalid centroid metadata lengths.");
-                descriptor = MAPPER.readValue(bytes, input.position(), descriptorSize, TYPE);
-                if (payloadSize >= 0) {
-                    input.position(input.position() + descriptorSize);
-                    payload = new byte[payloadSize];
-                    input.get(payload);
-                }
+            checkArgument(
+                    bytes != null && bytes.length >= MAGIC.length + 1 + 2 * Integer.BYTES,
+                    "Invalid centroid metadata header.");
+            ByteBuffer input = ByteBuffer.wrap(bytes);
+            for (byte expected : MAGIC) {
+                checkArgument(input.get() == expected, "Invalid centroid metadata header.");
+            }
+            checkArgument(input.get() == VERSION, "Unsupported centroid metadata version.");
+            int descriptorSize = input.getInt();
+            int payloadSize = input.getInt();
+            checkArgument(
+                    descriptorSize > 0
+                            && descriptorSize <= input.remaining()
+                            && payloadSize >= -1
+                            && input.remaining() - descriptorSize == Math.max(0, payloadSize),
+                    "Invalid centroid metadata lengths.");
+            descriptor = MAPPER.readValue(bytes, input.position(), descriptorSize, TYPE);
+            if (payloadSize >= 0) {
+                input.position(input.position() + descriptorSize);
+                payload = new byte[payloadSize];
+                input.get(payload);
             }
             checkArgument(
                     descriptor != null

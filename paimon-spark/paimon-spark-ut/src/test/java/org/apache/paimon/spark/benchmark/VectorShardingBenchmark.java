@@ -29,11 +29,13 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.spark.SparkCatalog;
@@ -46,9 +48,9 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.vector.index.NativeVectorGlobalIndexer;
 
 import org.apache.spark.sql.SparkSession;
 
@@ -299,13 +301,9 @@ public final class VectorShardingBenchmark {
                 spark.sql(
                                 "CREATE TABLE vectors (id INT, v ARRAY<FLOAT>) TBLPROPERTIES ("
                                         + "'bucket'='-1','row-tracking.enabled'='true','data-evolution.enabled'='true',"
-                                        + "'"
-                                        + indexType
-                                        + ".dimension'='"
+                                        + "'fields.v.dimension'='"
                                         + dimension
-                                        + "','"
-                                        + indexType
-                                        + ".metric'='l2',"
+                                        + "','fields.v.metric'='l2',"
                                         + "'global-index.row-count-per-shard'='"
                                         + rangeRows
                                         + "',"
@@ -324,13 +322,9 @@ public final class VectorShardingBenchmark {
                 for (String mode : modes) {
                     // Every family can reuse the immutable source table.
                     spark.sql(
-                                    "ALTER TABLE vectors SET TBLPROPERTIES ('"
-                                            + indexType
-                                            + ".dimension'='"
+                                    "ALTER TABLE vectors SET TBLPROPERTIES ('fields.v.dimension'='"
                                             + dimension
-                                            + "','"
-                                            + indexType
-                                            + ".metric'='l2')")
+                                            + "','fields.v.metric'='l2')")
                             .collect();
                     long elapsed = -1;
                     if (!skipBuild) {
@@ -339,7 +333,16 @@ public final class VectorShardingBenchmark {
                         options.forEach((key, value) -> pairs.add(key + "=" + value));
                         for (String type :
                                 Arrays.asList(
-                                        "ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann")) {
+                                        "ivf-flat",
+                                        "ivf-pq",
+                                        "ivf-sq",
+                                        "ivf-rq",
+                                        "diskann",
+                                        "ivf-flat-centroid",
+                                        "ivf-pq-centroid",
+                                        "ivf-sq-centroid",
+                                        "ivf-rq-centroid",
+                                        "diskann-centroid")) {
                             spark.sql(
                                             "CALL sys.drop_global_index(table=>'bench.vectors',"
                                                     + "index_column=>'v',index_type=>'"
@@ -351,7 +354,7 @@ public final class VectorShardingBenchmark {
                         spark.sql(
                                         "CALL sys.create_global_index(table=>'bench.vectors',"
                                                 + "index_column=>'v',index_type=>'"
-                                                + indexType
+                                                + typeForMode(mode)
                                                 + "',options=>'"
                                                 + String.join(",", pairs)
                                                 + "')")
@@ -366,7 +369,7 @@ public final class VectorShardingBenchmark {
                                             .snapshot(Long.parseLong(readSnapshot));
                     List<IndexFileMeta> files = new ArrayList<>();
                     for (IndexManifestEntry entry :
-                            table.store().newIndexFileHandler().scan(snapshot, indexType)) {
+                            table.store().newIndexFileHandler().scan(snapshot, typeForMode(mode))) {
                         files.add(entry.indexFile());
                     }
                     if (files.isEmpty()) {
@@ -388,7 +391,7 @@ public final class VectorShardingBenchmark {
                             files.size(),
                             bytes,
                             snapshot.id(),
-                            indexType);
+                            typeForMode(mode));
                     builds.flush();
                     System.out.printf(
                             "BUILD repeat=%d mode=%s seconds=%.3f files=%d MiB=%.2f%n",
@@ -476,7 +479,7 @@ public final class VectorShardingBenchmark {
                                                 reuseReaders ? -1 : stats.bytes.sum(),
                                                 reuseReaders ? -1 : stats.routingBytes.sum(),
                                                 lSearch,
-                                                indexType);
+                                                typeForMode(mode));
                                     }
                                 }
                                 measurements.flush();
@@ -506,28 +509,31 @@ public final class VectorShardingBenchmark {
 
     private Map<String, String> buildOptions(String mode) {
         Map<String, String> options = new LinkedHashMap<>();
-        options.put(indexType + ".shard", mode);
+        String type = typeForMode(mode);
         if (!"diskann".equals(indexType) || "centroid-based".equals(mode)) {
-            options.put(indexType + ".nlist", String.valueOf(nlist));
+            options.put(type + ".nlist", String.valueOf(nlist));
         }
         if ("ivf-pq".equals(indexType) || "diskann".equals(indexType)) {
-            options.put(indexType + ".pq.m", String.valueOf(dimension / 4));
+            options.put(type + ".pq.m", String.valueOf(dimension / 4));
         }
-        options.put(indexType + ".train.sample-ratio", "1.0");
+        options.put(type + ".train.sample-ratio", "1.0");
         String extra = System.getProperty("benchmark." + mode + ".options", "");
         if (!extra.isEmpty()) {
             for (String pair : extra.split(",")) {
                 String[] entry = pair.split("=", 2);
                 if (entry.length != 2
                         || !entry[0].startsWith(indexType + ".")
-                        || entry[1].isEmpty()
-                        || (indexType + ".shard").equals(entry[0])) {
+                        || entry[1].isEmpty()) {
                     throw new IllegalArgumentException("Invalid benchmark option: " + pair);
                 }
-                options.put(entry[0], entry[1]);
+                options.put(type + entry[0].substring(indexType.length()), entry[1]);
             }
         }
         return options;
+    }
+
+    private String typeForMode(String mode) {
+        return "centroid-based".equals(mode) ? indexType + "-centroid" : indexType;
     }
 
     private List<Integer> probesForMode(String mode) {
@@ -539,7 +545,7 @@ public final class VectorShardingBenchmark {
             return new ArrayList<>(probes);
         }
         List<Integer> widths = new ArrayList<>();
-        int modeNlist = Integer.parseInt(buildOptions(mode).get(indexType + ".nlist"));
+        int modeNlist = Integer.parseInt(buildOptions(mode).get(typeForMode(mode) + ".nlist"));
         for (String value : override.split(",")) {
             int width = Integer.parseInt(value);
             if (width < 1 || width > modeNlist || widths.contains(width)) {
@@ -681,9 +687,12 @@ public final class VectorShardingBenchmark {
             List<GlobalIndexIOMeta> metas,
             GlobalIndexFileReader input)
             throws IOException {
-        NativeVectorGlobalIndexer indexer =
-                new NativeVectorGlobalIndexer(
-                        new ArrayType(new FloatType()), Collections.emptyMap(), indexType);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(
+                        typeForMode(mode),
+                        Collections.singletonList(
+                                new DataField(0, "v", new ArrayType(new FloatType()))),
+                        new Options());
         List<GlobalIndexReader> readers = new ArrayList<>();
         try {
             if ("centroid-based".equals(mode)) {

@@ -466,28 +466,30 @@ Use full 768-dimensional query vectors when searching either of these indexes.
 
 ## Centroid-Based Sharding in Spark
 
-For a Data Evolution append table, Spark supports centroid-based sharding for
-`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`. It trains a partition-level
-routing model and writes one file per centroid. The table must enable row tracking and
+Spark can build `ivf-flat-centroid`, `ivf-pq-centroid`, `ivf-sq-centroid`, `ivf-rq-centroid`
+and `diskann-centroid` on Data Evolution append tables. Each build writes one routing model
+for the partition and one file per centroid. The table must enable row tracking and
 Data Evolution, have no primary key, and use `bucket=-1`.
 
 ```sql
 ALTER TABLE db.model_embeddings SET TBLPROPERTIES (
-    'ivf-pq.dimension' = '768',
-    'ivf-pq.distance.metric' = 'cosine'
+    'ivf-pq-centroid.dimension' = '768',
+    'ivf-pq-centroid.distance.metric' = 'cosine'
 );
 
 CALL sys.create_global_index(
     table => 'db.model_embeddings',
     index_column => 'embedding',
-    index_type => 'ivf-pq',
+    index_type => 'ivf-pq-centroid',
     partitions => 'dt="2026-11-17"',
-    options => 'ivf-pq.shard=centroid-based,ivf-pq.nlist=256'
+    options => 'ivf-pq-centroid.nlist=256'
 );
 ```
 
-Set `<index-type>.shard=centroid-based` and `<index-type>.nlist` for any of these
-types. The default `<index-type>.shard=range-based` uses the existing build path. A centroid
+Use the registered index type in both `index_type` and the option prefix.
+The ordinary names (`ivf-pq`, for example) select range-based sharding.
+Drop the previous index on the vector column before switching types, including
+when different partitions are built in separate calls. A centroid
 build pins one snapshot. Spark map tasks count non-null vectors in their input
 splits. Using those counts and the configured training ratio, the driver plans
 the exact row ordinals that the outer IVF-FLAT trainer would retain. Each
@@ -495,9 +497,8 @@ map task reads its own splits and shuffles selected vectors by reservoir slot.
 A single task trains the routing model on those vectors in the original training
 order. The driver broadcasts the model for the subsequent centroid shuffle.
 Sampling requires at least one
-non-null vector. Build one partition per call; a non-partitioned table counts
-as one partition. Partial builds and mixing range and centroid shards in the
-same partition are unsupported. Repeating the call atomically replaces the
+non-null vector. Each call builds a complete partition. An unpartitioned table
+counts as one partition. Repeating the call atomically replaces the
 partition's existing model and shards of the requested type.
 
 Queries load the routing model, select centroids with `centroid.nprobe`, and open
@@ -525,7 +526,7 @@ For IVF-PQ, this gives each shard its own inner centroids and PQ codebook. The o
 defaults to automatic sizing from that shard's vector count.
 
 For example, build with
-`ivf-pq.shard=centroid-based,ivf-pq.nlist=64,ivf-pq.centroid.local-nlist=32`.
+`ivf-pq-centroid.nlist=64,ivf-pq-centroid.centroid.local-nlist=32`.
 A query with `map('centroid.nprobe','4','ivf.nprobe','8')` selects four shard
 files and searches eight local lists in each populated shard. Both levels
 support automatic probe sizing. Empty local shards have a manifest row count
@@ -539,10 +540,10 @@ IVF-FLAT training options as the IVF shard types. An empty shard uses an
 eight-byte `PCEMPTY1` marker with manifest row count zero. Queries skip that file. Empty slots remain in the complete
 generation so centroid identifiers stay stable.
 
-For example, use `index_type => 'diskann'` and
-`options => 'diskann.shard=centroid-based,diskann.nlist=64'`, then query with
+For example, use `index_type => 'diskann-centroid'` and
+`options => 'diskann-centroid.nlist=64'`, then query with
 `map('centroid.nprobe','8','diskann.l_search','64')`. Persist
-`diskann.dimension` and `diskann.metric` on the table for raw fallback.
+`diskann-centroid.dimension` and `diskann-centroid.metric` on the table for raw fallback.
 
 If source rows change while the build is running, including through compaction,
 the commit fails and the build must be retried. Appends outside its source ranges
@@ -550,8 +551,10 @@ can proceed. Maintenance that reassigns row IDs invalidates the complete index
 generation and requires a rebuild.
 
 This build mode and its reader currently require the Java/Spark implementation
-and a matching native library with centroid model APIs. Upgrade every component
-that reads these indexes before enabling it. Older readers and Python index
+and a matching native library with centroid model APIs. Install the vector plugin on readers
+and on jobs that plan, commit or maintain these indexes. The plugin interprets manifest metadata without loading JNI.
+For indexes built with the pre-release `shard=centroid-based` option, drop the old index with
+that build before upgrading, then rebuild with the new type. Older readers and Python index
 builders do not support this layout; drop the centroid index before downgrading
 or rebuilding it through those clients. The model file and each populated shard carry
 training metadata, so measure model-loading cost and total index size alongside
@@ -565,7 +568,7 @@ increasing `centroid.nprobe` alone cannot remove quantization error. For IVF-RQ,
 calibrate `rq.bits`; for DiskANN, calibrate both outer probes and local graph
 search width. A shared routing model does not guarantee equal recall.
 
-Calibrate `ivf-pq.nlist` and `ivf-pq.pq.m` together with the query probe width.
+Calibrate `ivf-pq-centroid.nlist` and `ivf-pq-centroid.pq.m` together with the query probe width.
 Increasing `nlist` creates more centroid files, each populated file carrying its own
 local model. Increasing `pq.m` uses more encoded bytes per vector;
 for the current 8-bit PQ codes, `pq.m=64` uses twice the code bytes of

@@ -18,10 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.globalindex.{VectorIndexShardMeta, VectorTrainingModelIO}
 import org.apache.paimon.globalindex.CentroidVectorIndexUtils
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.vector.index.{VectorIndexShardMeta, VectorTrainingModelIO}
 
 import scala.collection.JavaConverters._
 
@@ -31,9 +31,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
   private def build(): Unit = {
     spark
       .sql("""CALL sys.create_global_index(
-             |table => 'test.T', index_column => 'v', index_type => 'ivf-pq',
+             |table => 'test.T', index_column => 'v', index_type => 'ivf-pq-centroid',
              |partitions => 'p=0',
-             |options => 'ivf-pq.shard=centroid-based,ivf-pq.nlist=4,ivf-pq.pq.m=1')""".stripMargin)
+             |options => 'ivf-pq-centroid.nlist=4,ivf-pq-centroid.pq.m=1')""".stripMargin)
       .collect()
   }
 
@@ -56,8 +56,8 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
                   |'data-evolution.enabled' = 'true',
                   |'deletion-vectors.enabled' = 'true',
                   |'vector-index.search-mode' = 'detail',
-                  |'ivf-pq.dimension' = '2',
-                  |'ivf-pq.metric' = 'l2',
+                  |'ivf-pq-centroid.dimension' = '2',
+                  |'ivf-pq-centroid.metric' = 'l2',
                   |'global-index.row-count-per-shard' = '64',
                   |'global-index.build.max-parallelism' = '2')""".stripMargin)
       def insert(from: Int, to: Int, partition: Int): Unit = {
@@ -75,7 +75,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
         table
           .store()
           .newIndexFileHandler()
-          .scan(table.snapshotManager().latestSnapshot(), "ivf-pq")
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-pq-centroid")
           .asScala
           .map(_.indexFile())
           .toSeq
@@ -95,10 +95,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
 
       intercept[Exception] {
         spark
-          .sql(
-            """CALL sys.create_global_index(table => 'test.T', index_column => 'v',
-              |index_type => 'ivf-pq',
-              |options => 'ivf-pq.shard=centroid-based,ivf-pq.nlist=4,ivf-pq.pq.m=1')""".stripMargin)
+          .sql("""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+                 |index_type => 'ivf-pq-centroid',
+                 |options => 'ivf-pq-centroid.nlist=4,ivf-pq-centroid.pq.m=1')""".stripMargin)
           .collect()
       }
       assert(indexes.size == 5)
@@ -126,7 +125,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (
                   |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
                   |'deletion-vectors.enabled'='true', 'vector-index.search-mode'='fast',
-                  |'ivf-flat.dimension'='2', 'ivf-flat.metric'='l2',
+                  |'ivf-flat-centroid.dimension'='2', 'ivf-flat-centroid.metric'='l2',
                   |'global-index.row-count-per-shard'='32',
                   |'global-index.build.max-parallelism'='4')""".stripMargin)
       spark.sql("""INSERT INTO T SELECT cast(id AS INT),
@@ -136,13 +135,13 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       def buildModel(): Array[Byte] = {
         spark.sql(
           """CALL sys.create_global_index(table => 'test.T', index_column => 'v',
-            |index_type => 'ivf-flat',
-            |options => 'ivf-flat.shard=centroid-based,ivf-flat.nlist=2,ivf-flat.train.sample-ratio=0.125')""".stripMargin)
+            |index_type => 'ivf-flat-centroid',
+            |options => 'ivf-flat-centroid.nlist=2,ivf-flat-centroid.train.sample-ratio=0.125')""".stripMargin)
         val table = loadTable("T")
         val model = table
           .store()
           .newIndexFileHandler()
-          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat-centroid")
           .asScala
           .map(_.indexFile())
           .find(f => CentroidVectorIndexUtils.isRoutingModel(f))
@@ -176,20 +175,22 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           spark.sql(s"""CREATE TABLE T (id INT, v ARRAY<FLOAT>)
                        |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
                        |'data-evolution.enabled'='true', 'deletion-vectors.enabled'='true',
-                       |'vector-index.search-mode'='fast', '$kind.dimension'='4',
-                       |'$kind.metric'='l2', 'global-index.row-count-per-shard'='64',
+                       |'vector-index.search-mode'='fast', 'fields.v.dimension'='4',
+                       |'fields.v.metric'='l2', 'global-index.row-count-per-shard'='64',
                        |'global-index.build.max-parallelism'='2')""".stripMargin)
           spark.sql(
             """INSERT INTO T SELECT cast(id AS INT),
               |array(cast(id AS FLOAT), cast(id % 17 AS FLOAT),
               |cast(id % 23 AS FLOAT), cast(id % 31 AS FLOAT)) FROM range(0, 256)""".stripMargin)
-          val pq = if (kind == "ivf-pq" || kind == "diskann") s",$kind.pq.m=1" else ""
-          def create(mode: String): Unit =
+          val centroidType = s"$kind-centroid"
+          def create(indexType: String): Unit = {
+            val pq = if (kind == "ivf-pq" || kind == "diskann") s",$indexType.pq.m=1" else ""
             spark
-              .sql(s"""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
-                      |index_type => '$kind',
-                      |options => '$kind.shard=$mode,$kind.nlist=4$pq')""".stripMargin)
+              .sql(
+                s"""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+                   |index_type => '$indexType', options => '$indexType.nlist=4$pq')""".stripMargin)
               .collect()
+          }
           def nearest(mode: String): Array[Int] = {
             val opts =
               if (kind == "diskann" && mode == "centroid-based")
@@ -203,12 +204,12 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
               .collect()
               .map(_.getInt(0))
           }
-          create("centroid-based")
+          create(centroidType)
           val table = loadTable("T")
           val files = table
             .store()
             .newIndexFileHandler()
-            .scan(table.snapshotManager().latestSnapshot(), kind)
+            .scan(table.snapshotManager().latestSnapshot(), centroidType)
             .asScala
             .map(_.indexFile())
           assert(
@@ -220,9 +221,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           assert(centroids.toSet == Set(0, 1, 2, 3))
           spark
             .sql(s"""CALL sys.drop_global_index(table => 'test.T', index_column => 'v',
-                    |index_type => '$kind')""".stripMargin)
+                    |index_type => '$centroidType')""".stripMargin)
             .collect()
-          create("range-based")
+          create(kind)
           assert(nearest("range-based").toSeq == Seq(200))
         }
       }

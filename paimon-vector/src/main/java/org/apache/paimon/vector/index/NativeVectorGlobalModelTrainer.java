@@ -28,7 +28,7 @@ import java.util.Map;
 /** Reuses bounded heap ingestion and deterministic disk-backed sampling from the range writer. */
 final class NativeVectorGlobalModelTrainer implements VectorGlobalModelTrainer {
     private final NativeVectorGlobalIndexWriter samples;
-    private final NativeVectorGlobalIndexer indexer;
+    private final NativeCentroidVectorGlobalIndexer indexer;
     private boolean finished;
 
     NativeVectorGlobalModelTrainer(
@@ -36,7 +36,7 @@ final class NativeVectorGlobalModelTrainer implements VectorGlobalModelTrainer {
             Map<String, String> options,
             double ratio,
             String identifier,
-            NativeVectorGlobalIndexer indexer) {
+            NativeCentroidVectorGlobalIndexer indexer) {
         this.indexer = indexer;
         this.samples =
                 new NativeVectorGlobalIndexWriter(null, fieldType, options, identifier, ratio);

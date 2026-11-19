@@ -19,15 +19,11 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
-import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
-import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Random;
 
@@ -37,14 +33,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
 
     @Test
-    void testRoutingModelKindRoundTrip() throws Exception {
-        byte[] descriptor =
-                VectorIndexShardMeta.routing(
-                                "model", 1, Collections.singletonList(new Range(10, 1000)))
-                        .serialize();
+    void testOpaqueIndexMetadataRoundTrip() throws Exception {
+        byte[] descriptor = {3, 7, 1};
         IndexFileMeta routing =
                 new IndexFileMeta(
-                        "ivf-pq",
+                        "ivf-pq-centroid",
                         "model.index",
                         100,
                         0,
@@ -52,11 +45,6 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                         null);
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         assertThat(serializer.fromRow(serializer.toRow(routing))).isEqualTo(routing);
-        assertThat(
-                        CentroidVectorIndexUtils.isRoutingModel(
-                                serializer.fromRow(serializer.toRow(routing))))
-                .isTrue();
-
         org.apache.paimon.manifest.IndexManifestEntry entry =
                 new org.apache.paimon.manifest.IndexManifestEntry(
                         org.apache.paimon.manifest.FileKind.ADD,

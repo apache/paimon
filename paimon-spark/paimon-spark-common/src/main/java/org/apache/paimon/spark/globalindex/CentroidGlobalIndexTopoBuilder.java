@@ -21,18 +21,14 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.VectorIndexShardMeta;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorTrainingModel;
-import org.apache.paimon.globalindex.VectorTrainingModelIO;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -190,9 +186,6 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             GlobalIndexFileReadWrite io = context.io();
             String modelFile =
                     "vector-" + indexType + "-global-index-training-model-" + modelId + ".index";
-            try (PositionOutputStream out = io.newOutputStream(modelFile)) {
-                VectorTrainingModelIO.write(out, payload, modelId);
-            }
             IndexFileMeta modelMeta =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                                     table.fileIO(),
@@ -202,12 +195,9 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                     Collections.singletonList(indexField),
                                     indexType,
                                     Collections.singletonList(
-                                            new ResultEntry(
-                                                    modelFile,
-                                                    0,
-                                                    VectorIndexShardMeta.routing(
-                                                                    modelId, nlist, ranges)
-                                                            .serialize())),
+                                            indexer.writeRoutingModel(
+                                                    io, modelFile, payload, modelId, nlist,
+                                                    ranges)),
                                     context.sourceMeta())
                             .get(0);
             messages.add(context.message(Collections.singletonList(modelMeta)));

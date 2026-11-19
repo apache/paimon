@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.Range;
@@ -34,11 +35,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Source coverage belongs to complete model generations, never to sparse shard bounds. */
 class CentroidVectorIndexUtilsTest {
     @Test
-    void onlyWrappedMetadataAffectsPlanning() {
+    void indexTypeSelectsTheMetadataCodec() {
         byte[] opaque = {(byte) 0xff, 0, 7, 42};
-        assertThat(CentroidVectorIndexUtils.centroidBased(file(opaque, false))).isFalse();
+        assertThat(CentroidVectorIndexUtils.centroidBased(file("ivf-pq", opaque, false))).isFalse();
         VectorIndexShardMeta shard = VectorIndexShardMeta.centroid("g", 7);
         byte[] wrapped = shard.wrap(opaque);
+        IndexFileMeta ordinary = file("ivf-pq", wrapped, false);
+        assertThat(CentroidVectorIndexUtils.centroidBased(ordinary)).isFalse();
+        assertThat(CentroidVectorIndexUtils.coverage(ordinary))
+                .containsExactly(new Range(10, 1009));
+        assertThatThrownBy(() -> CentroidVectorIndexUtils.coverage(file(opaque, false)))
+                .hasMessageContaining("Invalid centroid metadata header");
         VectorIndexShardMeta decoded = VectorIndexShardMeta.deserialize(wrapped);
         assertThat(decoded.payloadMeta()).containsExactly(opaque);
         assertThat(decoded.centroid()).isEqualTo(7);
@@ -59,7 +66,8 @@ class CentroidVectorIndexUtilsTest {
     @Test
     void testSparseShardsDoNotClaimEnvelopeCoverage() {
         List<IndexFileMeta> files = model("a");
-        assertThat(CentroidVectorIndexUtils.validateModel(files)).isEqualTo(files.get(0));
+        assertThat(CentroidVectorIndexUtils.validateModel(files))
+                .containsExactly(new Range(10, 19), new Range(1000, 1009));
         assertThat(CentroidVectorIndexUtils.coverage(files.get(0)))
                 .containsExactly(new Range(10, 19), new Range(1000, 1009));
         assertThat(CentroidVectorIndexUtils.coverage(files.get(1))).isEmpty();
@@ -75,7 +83,7 @@ class CentroidVectorIndexUtilsTest {
         List<IndexFileMeta> mixed = new ArrayList<>(complete);
         mixed.add(file("{}", false));
         assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(mixed))
-                .hasMessageContaining("mix");
+                .hasMessageContaining("different centroid index types");
         List<IndexFileMeta> mismatch = new ArrayList<>(complete);
         mismatch.set(2, model("b").get(2));
         assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(mismatch))
@@ -100,12 +108,16 @@ class CentroidVectorIndexUtilsTest {
     }
 
     private static IndexFileMeta file(String json, boolean routing) {
-        return file(json.getBytes(java.nio.charset.StandardCharsets.UTF_8), routing);
+        return file("ivf-pq", json.getBytes(java.nio.charset.StandardCharsets.UTF_8), routing);
     }
 
     private static IndexFileMeta file(byte[] meta, boolean routing) {
+        return file("ivf-pq-centroid", meta, routing);
+    }
+
+    private static IndexFileMeta file(String type, byte[] meta, boolean routing) {
         return new IndexFileMeta(
-                "ivf-pq",
+                type,
                 Arrays.toString(meta),
                 100,
                 routing ? 0 : 10,

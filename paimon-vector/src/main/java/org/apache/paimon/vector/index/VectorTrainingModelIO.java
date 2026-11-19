@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;

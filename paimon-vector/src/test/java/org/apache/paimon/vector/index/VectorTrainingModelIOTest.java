@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
 import org.junit.jupiter.api.Test;
 

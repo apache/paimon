@@ -24,6 +24,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CentroidVectorIndexFactory;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -51,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 
 import javax.annotation.Nullable;
 
@@ -76,6 +79,7 @@ import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntr
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1736,89 +1740,91 @@ class ConflictDetectionTest {
 
     @Test
     void testCentroidIndexChecksSourceCoverageRatherThanSparseEnvelope() {
-        byte[] meta =
-                org.apache.paimon.globalindex.VectorIndexShardMeta.routing(
-                                "model",
-                                2,
-                                Arrays.asList(
-                                        new org.apache.paimon.utils.Range(10, 19),
-                                        new org.apache.paimon.utils.Range(100, 109)))
-                        .serialize();
-        IndexFileMeta file =
-                new IndexFileMeta(
-                        "ivf-pq",
-                        "routing",
-                        100,
-                        0,
-                        null,
-                        null,
-                        new GlobalIndexMeta(
-                                10,
-                                109,
-                                1,
-                                null,
-                                meta,
-                                new org.apache.paimon.index.DataEvolutionIndexSourceMeta(1)
-                                        .serialize()));
-        IndexManifestEntry index = new IndexManifestEntry(ADD, BinaryRow.EMPTY_ROW, 0, file);
-        List<SimpleFileEntry> data =
-                Arrays.asList(
-                        createFileEntryWithRowId("a", ADD, 10L, 10L),
-                        createFileEntryWithRowId("b", ADD, 100L, 10L));
-        assertThat(
-                        createConflictDetection()
-                                .checkConflicts(
-                                        snapshot(1),
-                                        data,
-                                        Collections.emptyList(),
-                                        Collections.singletonList(index),
-                                        null,
-                                        Snapshot.CommitKind.APPEND))
-                .isNotPresent();
-        assertThat(
-                        createConflictDetection()
-                                .checkConflicts(
-                                        snapshot(1),
-                                        data.subList(0, 1),
-                                        Collections.emptyList(),
-                                        Collections.singletonList(index),
-                                        null,
-                                        Snapshot.CommitKind.APPEND))
-                .isPresent();
+        byte[] meta = {1};
+        CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);
+        when(factory.sourceRowRanges(meta))
+                .thenReturn(Arrays.asList(new Range(10, 19), new Range(100, 109)));
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class)) {
+            factories
+                    .when(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"))
+                    .thenReturn(factory);
+            IndexFileMeta file =
+                    new IndexFileMeta(
+                            "test-centroid",
+                            "routing",
+                            100,
+                            0,
+                            null,
+                            null,
+                            new GlobalIndexMeta(
+                                    10,
+                                    109,
+                                    1,
+                                    null,
+                                    meta,
+                                    new org.apache.paimon.index.DataEvolutionIndexSourceMeta(1)
+                                            .serialize()));
+            IndexManifestEntry index = new IndexManifestEntry(ADD, BinaryRow.EMPTY_ROW, 0, file);
+            List<SimpleFileEntry> data =
+                    Arrays.asList(
+                            createFileEntryWithRowId("a", ADD, 10L, 10L),
+                            createFileEntryWithRowId("b", ADD, 100L, 10L));
+            assertThat(
+                            createConflictDetection()
+                                    .checkConflicts(
+                                            snapshot(1),
+                                            data,
+                                            Collections.emptyList(),
+                                            Collections.singletonList(index),
+                                            null,
+                                            Snapshot.CommitKind.APPEND))
+                    .isNotPresent();
+            assertThat(
+                            createConflictDetection()
+                                    .checkConflicts(
+                                            snapshot(1),
+                                            data.subList(0, 1),
+                                            Collections.emptyList(),
+                                            Collections.singletonList(index),
+                                            null,
+                                            Snapshot.CommitKind.APPEND))
+                    .isPresent();
 
-        Snapshot concurrent = snapshot(2);
-        SnapshotManager snapshots = mock(SnapshotManager.class);
-        when(snapshots.snapshot(2)).thenReturn(concurrent);
-        CommitScanner scanner = mock(CommitScanner.class);
-        ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
-        when(scanner.readIncrementalEntries(
-                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
-                .thenReturn(Collections.singletonList(updated));
-        ConflictDetection detection =
-                createConflictDetection(scanner, true, false, false, snapshots);
-        assertThat(
-                        detection.checkConflicts(
-                                concurrent,
-                                data,
-                                Collections.emptyList(),
-                                Collections.singletonList(index),
-                                null,
-                                Snapshot.CommitKind.APPEND))
-                .hasValueSatisfying(
-                        error -> assertThat(error).hasMessageContaining("source rows changed"));
-        ManifestEntry appended = manifestEntry(ADD, "appended", 200L, new Range(200, 209));
-        when(scanner.readIncrementalEntries(
-                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
-                .thenReturn(Collections.singletonList(appended));
-        assertThat(
-                        detection.checkConflicts(
-                                concurrent,
-                                data,
-                                Collections.emptyList(),
-                                Collections.singletonList(index),
-                                null,
-                                Snapshot.CommitKind.APPEND))
-                .isNotPresent();
+            Snapshot concurrent = snapshot(2);
+            SnapshotManager snapshots = mock(SnapshotManager.class);
+            when(snapshots.snapshot(2)).thenReturn(concurrent);
+            CommitScanner scanner = mock(CommitScanner.class);
+            ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
+            when(scanner.readIncrementalEntries(
+                            concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                    .thenReturn(Collections.singletonList(updated));
+            ConflictDetection detection =
+                    createConflictDetection(scanner, true, false, false, snapshots);
+            assertThat(
+                            detection.checkConflicts(
+                                    concurrent,
+                                    data,
+                                    Collections.emptyList(),
+                                    Collections.singletonList(index),
+                                    null,
+                                    Snapshot.CommitKind.APPEND))
+                    .hasValueSatisfying(
+                            error -> assertThat(error).hasMessageContaining("source rows changed"));
+            ManifestEntry appended = manifestEntry(ADD, "appended", 200L, new Range(200, 209));
+            when(scanner.readIncrementalEntries(
+                            concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                    .thenReturn(Collections.singletonList(appended));
+            assertThat(
+                            detection.checkConflicts(
+                                    concurrent,
+                                    data,
+                                    Collections.emptyList(),
+                                    Collections.singletonList(index),
+                                    null,
+                                    Snapshot.CommitKind.APPEND))
+                    .isNotPresent();
+        }
     }
 
     @Test

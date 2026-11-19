@@ -186,8 +186,7 @@ public class DataEvolutionVectorScan implements VectorScan {
             if (files.stream().noneMatch(CentroidVectorIndexUtils::centroidBased)) {
                 continue;
             }
-            IndexFileMeta routing = CentroidVectorIndexUtils.validateModel(files);
-            List<Range> coverage = CentroidVectorIndexUtils.metadata(routing).sourceRowRanges();
+            List<Range> coverage = CentroidVectorIndexUtils.validateModel(files);
             long from = coverage.get(0).from;
             long to = coverage.get(coverage.size() - 1).to;
             List<IndexFileMeta> scalarFiles = scalarIndexFiles(allIndexFiles, coverage);

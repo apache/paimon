@@ -24,6 +24,8 @@ import org.apache.paimon.types.DataField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +73,18 @@ public class GlobalIndexerFactoryUtils {
             }
         }
         return null;
+    }
+
+    /** Look up the layout without constructing an indexer or interpreting its metadata. */
+    @Nullable
+    public static CentroidVectorIndexFactory centroidFactory(String type) {
+        GlobalIndexerFactory factory = find(type);
+        if (factory == null && type.endsWith("-centroid")) {
+            throw new IllegalStateException("Missing centroid index plugin for type: " + type);
+        }
+        return factory instanceof CentroidVectorIndexFactory
+                ? (CentroidVectorIndexFactory) factory
+                : null;
     }
 
     public static GlobalIndexerFactory load(String type) {
