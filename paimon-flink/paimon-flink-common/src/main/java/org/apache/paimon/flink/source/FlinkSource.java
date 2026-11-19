@@ -79,7 +79,12 @@ public abstract class FlinkSource
                 limit,
                 NestedProjectedRowData.copy(rowData),
                 readBuilder.readType(),
-                blobAsDescriptor);
+                blobAsDescriptor,
+                maxRecordsPerPoll());
+    }
+
+    protected int maxRecordsPerPoll() {
+        return 0;
     }
 
     @Override

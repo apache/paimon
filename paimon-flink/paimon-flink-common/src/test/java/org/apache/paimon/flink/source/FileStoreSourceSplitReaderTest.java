@@ -53,6 +53,8 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -120,24 +122,29 @@ public class FileStoreSourceSplitReaderTest {
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 0));
-        reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> heldBatch = reader.fetch();
 
-        Thread thread =
-                new Thread(
-                        () -> {
-                            try {
-                                // block on object pool
-                                reader.fetch();
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-        thread.start();
-        thread.join(20000);
-        assertThat(thread.isAlive()).isTrue();
-        reader.wakeUp();
-        thread.join(15000);
-        assertThat(thread.isAlive()).isFalse();
+        try {
+            Thread thread =
+                    new Thread(
+                            () -> {
+                                try {
+                                    // block on object pool
+                                    reader.fetch();
+                                } catch (Exception e) {
+                                    throw new RuntimeException(e);
+                                }
+                            });
+            thread.start();
+            thread.join(20000);
+            assertThat(thread.isAlive()).isTrue();
+            reader.wakeUp();
+            thread.join(15000);
+            assertThat(thread.isAlive()).isFalse();
+        } finally {
+            heldBatch.recycle();
+            reader.close();
+        }
     }
 
     @Test
@@ -431,6 +438,62 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
+    public void testCloseReleasesPartlyEmittedBudgetedBatch() throws Exception {
+        TrackingRecordIterator iterator = new TrackingRecordIterator(2);
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(
+                        new TestingTableRead(new SingleBatchRecordReader(iterator)),
+                        null,
+                        new FileStoreSourceReaderMetrics(
+                                new FileStoreSourceReaderTest.DummyMetricGroup()),
+                        null,
+                        false,
+                        1);
+        assignSplit(reader, new FileStoreSourceSplit("s", new TestingSplit()));
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
+        records.nextSplit();
+        assertThat(records.nextRecordFromSplit().next()).isNotNull();
+        assertThat(iterator.released()).isFalse();
+        reader.close();
+        assertThat(iterator.released()).isTrue();
+        records.recycle();
+        assertThat(iterator.releaseCount).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 8})
+    public void testLimitWithEmissionBudget(int budget) throws Exception {
+        TrackingRecordIterator iterator = new TrackingRecordIterator(3);
+        try (FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(
+                        new TestingTableRead(new SingleBatchRecordReader(iterator)),
+                        RecordLimiter.create(2L),
+                        new FileStoreSourceReaderMetrics(
+                                new FileStoreSourceReaderTest.DummyMetricGroup()),
+                        null,
+                        false,
+                        budget)) {
+            assignSplit(reader, new FileStoreSourceSplit("s", new TestingSplit()));
+            RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
+            records.nextSplit();
+            int emitted = 0;
+            RecordIterator<RowData> view;
+            while ((view = records.nextRecordFromSplit()) != null) {
+                RecordAndPosition<RowData> record;
+                while ((record = view.next()) != null) {
+                    emitted++;
+                    assertThat(record.getRecordSkipCount()).isEqualTo(emitted);
+                }
+            }
+            assertThat(emitted).isEqualTo(2);
+            assertThat(iterator.remaining).isEqualTo(1);
+            records.recycle();
+            assertThat(reader.fetch().finishedSplits()).containsExactly("s");
+        }
+        assertThat(iterator.releaseCount).isEqualTo(1);
+    }
+
+    @Test
     public void testLimit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), 2L);
@@ -671,23 +734,33 @@ public class FileStoreSourceSplitReaderTest {
     private static class TrackingRecordIterator
             implements RecordReader.RecordIterator<InternalRow> {
 
-        private boolean returned;
+        private int remaining;
         private boolean released;
+        private int releaseCount;
+
+        private TrackingRecordIterator() {
+            this(1);
+        }
+
+        private TrackingRecordIterator(int rows) {
+            remaining = rows;
+        }
 
         @Nullable
         @Override
         public InternalRow next() {
-            if (returned) {
+            if (remaining == 0) {
                 return null;
             }
 
-            returned = true;
+            remaining--;
             return GenericRow.of(1L);
         }
 
         @Override
         public void releaseBatch() {
             released = true;
+            releaseCount++;
         }
 
         private boolean released() {
