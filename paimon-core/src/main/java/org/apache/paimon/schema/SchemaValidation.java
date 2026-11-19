@@ -452,6 +452,15 @@ public class SchemaValidation {
         validateExternalPathTemplate(options);
     }
 
+    public static void validateExternalPathStrategyChange(
+            @Nullable String previous, @Nullable String next) {
+        String template = ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString();
+        if (template.equalsIgnoreCase(previous) != template.equalsIgnoreCase(next)) {
+            throw new UnsupportedOperationException(
+                    "Switching to or from " + template + " is not supported.");
+        }
+    }
+
     private static void validateExternalPathTemplate(CoreOptions options) {
         if (options.externalPathStrategy() != ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE) {
             return;

@@ -74,6 +74,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
@@ -468,6 +469,9 @@ final class SchemaManagerUtils {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        String strategy = DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        SchemaValidation.validateExternalPathStrategyChange(
+                oldOptions.get(strategy), newTableSchema.options().get(strategy));
         SchemaValidation.validateGeneratedColumnEvolution(oldTableSchema, newTableSchema);
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
@@ -1063,6 +1067,10 @@ final class SchemaManagerUtils {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(key)) {
+            SchemaValidation.validateExternalPathStrategyChange(oldValue, newValue);
         }
 
         if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(key)) {

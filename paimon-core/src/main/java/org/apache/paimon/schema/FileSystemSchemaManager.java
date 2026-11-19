@@ -277,6 +277,9 @@ public class FileSystemSchemaManager implements SchemaManager {
     public boolean commit(TableSchema newSchema) throws Exception {
         Optional<TableSchema> previous = latest();
         if (previous.isPresent()) {
+            String strategy = CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+            SchemaValidation.validateExternalPathStrategyChange(
+                    previous.get().options().get(strategy), newSchema.options().get(strategy));
             SchemaValidation.validateGeneratedColumnEvolution(previous.get(), newSchema);
         }
         SchemaValidation.validateTableSchema(newSchema);
