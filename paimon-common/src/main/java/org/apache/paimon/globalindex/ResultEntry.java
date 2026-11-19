@@ -26,7 +26,7 @@ public class ResultEntry {
     /** Full file path returned by the writer. */
     private final String filePath;
 
-    /** Total logical rows processed by the writer, including null/skipped rows. */
+    /** Number of source rows covered by this index file, including null or skipped rows. */
     private final long rowCount;
 
     @Nullable private final byte[] meta;

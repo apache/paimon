@@ -25,12 +25,14 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFi
 import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
+import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
@@ -136,7 +138,7 @@ class GlobalIndexQuery {
             Map<Integer, List<IndexGroup>> groups,
             Options options) {
         if (predicate instanceof LeafPredicate) {
-            LeafPredicate leaf = (LeafPredicate) predicate;
+            LeafPredicate leaf = GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate);
             Optional<FieldRef> field = leaf.fieldRefOptional();
             if (!field.isPresent()) {
                 return null;
@@ -336,7 +338,9 @@ class GlobalIndexQuery {
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
             // Scalar lookups use independent single-field index definitions.
-            if (group.extraFields.isEmpty()) {
+            if (group.extraFields.isEmpty()
+                    && (!RTreeGlobalIndexerFactory.IDENTIFIER.equals(group.type)
+                            || RTreeGlobalIndexerFactory.canEvaluate(predicate))) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }
@@ -463,6 +467,15 @@ class GlobalIndexQuery {
                                         : result.and(candidates.get());
             }
             return Optional.ofNullable(result);
+        }
+        if (predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).function() instanceof BBoxIntersects
+                && new CoreOptions(options).scalarIndexSearchMode()
+                        == CoreOptions.GlobalIndexSearchMode.FAST) {
+            return Optional.of(
+                    evaluateWithCoverage(fileIO, options, ranges)
+                            .map(Evaluation::result)
+                            .orElseGet(GlobalIndexResult::createEmpty));
         }
         if (groups.isEmpty()) {
             return Optional.empty();

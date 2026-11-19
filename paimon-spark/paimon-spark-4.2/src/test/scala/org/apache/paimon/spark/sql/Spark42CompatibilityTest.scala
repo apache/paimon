@@ -195,4 +195,18 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       )
     }
   }
+
+  test("spatial SQL passes a constant geometry to the Paimon scan") {
+    val point =
+      "ST_SetSrid(ST_GeomFromWKB(unhex('01010000000000000000000000000000000000F03F')), 4326)"
+    withTable("locations") {
+      sql("""CREATE TABLE locations (geom GEOMETRY(4326)) TBLPROPERTIES (
+            | 'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            | 'data-evolution.enabled' = 'true')""".stripMargin)
+      sql(s"INSERT INTO locations VALUES ($point), (NULL)")
+      val query = sql(s"SELECT ST_Srid(geom) FROM locations WHERE ST_Intersects(geom, $point)")
+      assert(query.queryExecution.executedPlan.toString().contains("BBoxIntersects"))
+      checkAnswer(query, Seq(Row(4326)))
+    }
+  }
 }

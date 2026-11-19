@@ -19,6 +19,7 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** DeletePushDownVisitorTest tests the DeletePushDownVisitor. */
 public class DeletePushDownVisitorTest {
+
+    @Test
+    public void testBoundingBoxCannotDropPartition() {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.GEOMETRY()));
+        Predicate bbox = builder.bboxIntersects(1, 0, 0, 1, 1);
+        List<String> partitionKeys = Collections.singletonList("f0");
+
+        assertThat(bbox.visit(new OnlyPartitionKeyEqualVisitor(partitionKeys))).isFalse();
+        assertThat(
+                        PredicateBuilder.and(builder.equal(0, 7), bbox)
+                                .visit(new OnlyPartitionKeyEqualVisitor(partitionKeys)))
+                .isFalse();
+        assertThat(
+                        PredicateBuilder.or(builder.equal(0, 7), bbox)
+                                .visit(new OnlyPartitionKeyEqualVisitor(partitionKeys)))
+                .isFalse();
+    }
 
     @Test
     public void testPartitionKeyNotPushDown() {

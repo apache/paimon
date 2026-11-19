@@ -208,6 +208,26 @@ class GlobalIndexBuilderUtilsTest {
     }
 
     @Test
+    void testRowCountPerIndexFile() throws IOException {
+        List<ResultEntry> entries =
+                Arrays.asList(
+                        new ResultEntry(
+                                indexPathFactory.newPathFromName("first").toString(), 2, null),
+                        new ResultEntry(
+                                indexPathFactory.newPathFromName("second").toString(), 1, null));
+        for (ResultEntry entry : entries) {
+            fileIO.newOutputStream(new Path(entry.filePath()), false).close();
+        }
+        List<IndexFileMeta> metas =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        fileIO, coreOptions, new Range(100, 102), 1, "test-type", entries);
+        assertThat(metas).extracting(IndexFileMeta::rowCount).containsExactly(2L, 1L);
+        assertThat(metas)
+                .extracting(file -> file.globalIndexMeta().rowRange())
+                .containsOnly(new Range(100, 102));
+    }
+
+    @Test
     void testToIndexFileMetasWithSourceMeta() throws IOException {
         DataField field = new DataField(1, "vec", new ArrayType(new FloatType()));
         byte[] sourceMeta = new DataEvolutionIndexSourceMeta(7L).serialize();
