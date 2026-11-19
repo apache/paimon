@@ -26,7 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.beans.ConstructorProperties;
 
-/** Request to acquire or renew a table commit lease owned by a writer. */
+/** Request to acquire, renew or release a table commit lease owned by a writer. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitLockRequest implements RESTRequest {
 

@@ -1029,15 +1029,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable the REST catalog's server-side table commit lease capability. "
-                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+                                    + "Writers acquire a lease only when rest.commit.retry-acquire-lock is enabled.");
 
-    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
-            key("rest.commit.acquire-lock")
+    public static final ConfigOption<Boolean> REST_COMMIT_RETRY_ACQUIRE_LOCK =
+            key("rest.commit.retry-acquire-lock")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether this writer acquires a REST commit lease for each publication "
-                                    + "attempt. Can be set dynamically for a writer and requires "
+                            "Whether this writer acquires a REST commit lease when retrying a conflicting publication. "
+                                    + "The first attempt is optimistic for retryable operations. Rollback as latest and "
+                                    + "manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires "
                                     + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
@@ -2766,6 +2767,21 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED =
+            key("data-evolution.data-file-dv-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to prune a contiguous deletion span from data file reads. "
+                                    + "When the deletions of a Parquet data file form one "
+                                    + "contiguous span of physical rows covering at least half "
+                                    + "of the file, the scan skips that span and reads the "
+                                    + "remaining rows as ranges. This applies only when the "
+                                    + "scan has no other row-range or file-index selection; "
+                                    + "scattered deletions also keep the regular read path. "
+                                    + "The deletion vector is still applied on top, so results "
+                                    + "never change.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED =
             key("data-evolution.merged-read.stats-pushdown.enabled")
                     .booleanType()
@@ -2795,6 +2811,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE =
+            key("data-evolution.merge-into.join-reuse")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to reuse a disk-persisted match result between deterministic "
+                                    + "UPDATE and INSERT actions on data evolution tables without "
+                                    + "DELETE actions or dedicated BLOB/VECTOR columns. This replaces "
+                                    + "the two action joins with a full outer join and trades repeated "
+                                    + "target scans for shuffle and executor-local disk storage. "
+                                    + "Requires Spark adaptive query execution and adaptive partition "
+                                    + "coalescing; otherwise the original join path is used.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
@@ -3177,6 +3206,18 @@ public class CoreOptions implements Serializable {
                     .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
+
+    public static final ConfigOption<Integer> VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR =
+            key("vector-index.post-filter.candidates-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Positive multiplier of the original Top-K for a single ANN query "
+                                    + "when scalar indexes cannot evaluate a DE vector search filter. "
+                                    + "The candidate count is at least the reranking limit and capped by "
+                                    + "the shard size and integer limit. Candidates are checked against "
+                                    + "the pinned data; fewer than Top-K matches are returned without retry "
+                                    + "or raw scoring of indexed ranges.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
             key("global-index.filter.refine-from-data")
@@ -4074,8 +4115,8 @@ public class CoreOptions implements Serializable {
         return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
-    public boolean restCommitAcquireLock() {
-        return options.get(REST_COMMIT_ACQUIRE_LOCK);
+    public boolean restCommitRetryAcquireLock() {
+        return options.get(REST_COMMIT_RETRY_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {
@@ -4503,6 +4544,7 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(String::trim)
                 .map(
                         x ->
                                 PartitionMarkDoneAction.valueOf(
@@ -4822,12 +4864,20 @@ public class CoreOptions implements Serializable {
         return maxSelectionRatio;
     }
 
+    public boolean dataEvolutionDataFileDvPushdownEnabled() {
+        return options.get(DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED);
+    }
+
     public boolean dataEvolutionMergeIntoFilePruning() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
     }
 
     public boolean dataEvolutionMergeIntoSourcePersist() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean dataEvolutionMergeIntoJoinReuse() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE);
     }
 
     public boolean blobCompactionEnabled() {
@@ -5154,6 +5204,19 @@ public class CoreOptions implements Serializable {
         return !fmIndexColumns().isEmpty();
     }
 
+    /**
+     * Whether any source-backed primary-key index (vector, full-text, FM, BTree, bitmap,
+     * multivalue) is configured.
+     */
+    public boolean primaryKeyIndexEnabled() {
+        return !VectorIndexOptions.columns(options).isEmpty()
+                || fullTextIndexEnabled()
+                || fmIndexEnabled()
+                || !btreeIndexColumns().isEmpty()
+                || !bitmapIndexColumns().isEmpty()
+                || !multiValueIndexColumns().isEmpty();
+    }
+
     public List<String> btreeIndexColumns() {
         return globalIndexColumns("btree");
     }
@@ -5195,7 +5258,8 @@ public class CoreOptions implements Serializable {
     }
 
     public static boolean isVectorIndexType(String type) {
-        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm", "rtree")
+                .contains(type);
     }
 
     public List<String> globalIndexColumns(String type) {

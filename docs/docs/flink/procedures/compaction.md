@@ -45,6 +45,8 @@ To compact a table. Arguments:
 - `where` (optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.
 
 - `partition_idle_time` (optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.
+  For Data Evolution tables, batch compaction selects partitions whose latest data file in the planning snapshot is at least this old.
+  The filter applies together with `partitions` or `where`. File selection follows the table's Data Evolution compaction options.
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 

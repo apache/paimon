@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.Snapshot
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask
 import org.apache.paimon.data.BinaryRow
@@ -488,6 +488,34 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") :: Nil)
         }
       })
+  }
+
+  test("Paimon Procedure: compact options_map preserves commas and overrides options") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, value STRING)
+                  |TBLPROPERTIES ('primary-key'='id', 'bucket'='1',
+                  |  'write-only'='true', 'num-levels'='2')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, 'a')")
+      spark.sql("INSERT INTO T VALUES (2, 'b')")
+      val table = loadTable("T")
+      val schemaManager = table.schemaManager()
+      val storedOptions = schemaManager.latest().get().options().asScala.toMap
+      val formatKey = CoreOptions.FILE_FORMAT_PER_LEVEL.key()
+
+      checkAnswer(
+        spark.sql(
+          s"CALL sys.compact(table => 'T', options => '$formatKey=0:orc', " +
+            s"options_map => map('$formatKey', '0:avro,1:avro'))"),
+        Seq(Row(true)))
+
+      val files = table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala)
+      assert(files.nonEmpty)
+      assert(files.forall(file => file.level() == 1 && file.fileName().endsWith(".avro")))
+      checkAnswer(spark.sql("SELECT * FROM T"), Seq(Row(1, "a"), Row(2, "b")))
+      assert(schemaManager.latest().get().options().asScala.toMap == storedOptions)
+    }
   }
 
   test("Paimon Procedure: compact specified bucket ranges") {

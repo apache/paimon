@@ -44,6 +44,7 @@ This guide covers Data Evolution append tables. Primary-key tables have a separa
 | [Bitmap](./global-index/bitmap) | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
 | [Multivalue](./global-index/multivalue) | Membership tests on arrays of supported scalar elements | Best for `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL`. |
 | [FM](./global-index/fm) | Exact substring filters on character columns | Supports needles of any byte length and partitions the indexed text for bounded-memory construction and demand-loaded reads. |
+| [R-tree](./global-index/rtree) | Java XY bounding-box filters on GEOMETRY columns | Uses immutable, paged spatial trees; exact geometry relations require refinement. |
 | [Vector](./global-index/vector) | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
 | [Full-Text](./global-index/full-text) | Keyword search over text columns | Uses full-text scoring and tokenizer configuration stored with each index file. |
 | [Hybrid Search](./global-index/hybrid-search) | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |

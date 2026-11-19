@@ -152,6 +152,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        return fileIO().listStatusIterative(path);
+    }
+
+    @Override
     public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
         // the interface default would hide the inner FileIO's iterative listing override

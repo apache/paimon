@@ -43,12 +43,16 @@ def source(rest_catalog, golden_catalog):
     catalog, server = rest_catalog
     golden = golden_catalog.get_table('default.test_pk_full_text_golden')
     schema = golden.table_schema
+    options = {key: value for key, value in schema.options.items() if key != 'path'}
     catalog.create_table('default.pk_text', Schema(
-        schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+        schema.fields, schema.partition_keys, schema.primary_keys, options), False)
     destination = Path(server.data_path) / server.warehouse / 'default' / 'pk_text'
     for directory in ('bucket-0', 'index', 'manifest', 'snapshot'):
         shutil.copytree(str(Path(golden.table_path) / directory), str(destination / directory))
-    return catalog.get_table('default.pk_text'), server
+    table = catalog.get_table('default.pk_text')
+    assert table.table_path == destination.as_uri()
+    assert table.catalog_environment.catalog_loader is not None
+    return table, server
 
 
 def _builder(table, text='Paimon', limit=10):

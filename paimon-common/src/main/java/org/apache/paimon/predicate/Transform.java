@@ -33,6 +33,9 @@ import java.util.List;
         include = JsonTypeInfo.As.PROPERTY,
         property = Transform.FIELD_NAME)
 @JsonSubTypes({
+    @JsonSubTypes.Type(
+            value = GeometryIntersectsTransform.class,
+            name = GeometryIntersectsTransform.NAME),
     @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
     @JsonSubTypes.Type(value = NestedFieldTransform.class, name = NestedFieldTransform.NAME),
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),

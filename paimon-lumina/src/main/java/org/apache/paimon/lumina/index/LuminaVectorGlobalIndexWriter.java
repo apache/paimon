@@ -39,14 +39,12 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Vector global index writer using Lumina. Builds a single index file per shard.
@@ -66,14 +64,6 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private static final String FILE_NAME_PREFIX = "lumina";
 
     private static final Logger LOG = LoggerFactory.getLogger(LuminaVectorGlobalIndexWriter.class);
-
-    /**
-     * Tracks which environment variables have already been set in this JVM. Used to avoid
-     * concurrent reflection-based modification of {@code System.getenv()} when multiple shard tasks
-     * run in parallel on the same TaskManager.
-     */
-    private static final ConcurrentHashMap<String, String> CONFIGURED_ENV_VARS =
-            new ConcurrentHashMap<>();
 
     /** I/O buffer size for reading/writing the temp vector file (~8 MB). */
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
@@ -257,7 +247,6 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     private ResultEntry buildIndex() throws IOException {
-        configureExecutorThreadCount();
         LOG.info(
                 "Lumina index build started: {} vectors, dim={}, type={}, metric={}",
                 count,
@@ -304,58 +293,6 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             LuminaIndexMeta meta = new LuminaIndexMeta(luminaOptions);
             // rowCount = logical rows including nulls (not just indexed vectors)
             return new ResultEntry(fileName, rowCount, meta.serialize());
-        }
-    }
-
-    /**
-     * Sets the {@code LUMINA_EXECUTOR_THREAD_COUNT} environment variable from the {@link
-     * LuminaVectorIndexOptions#DISKANN_BUILD_THREAD_COUNT} option so the native Lumina executor
-     * thread pool is sized correctly before the builder is created.
-     */
-    private void configureExecutorThreadCount() {
-        Map<String, String> luminaOpts = luminaOptions;
-        String threadCountKey =
-                LuminaVectorIndexOptions.toLuminaKey(
-                        LuminaVectorIndexOptions.DISKANN_BUILD_THREAD_COUNT);
-        String threadCount = luminaOpts.get(threadCountKey);
-        if (threadCount != null && !threadCount.isEmpty()) {
-            setEnv("LUMINA_EXECUTOR_THREAD_COUNT", threadCount);
-        }
-    }
-
-    /**
-     * Best-effort, thread-safe, idempotent attempt to set an environment variable in the current
-     * process. Uses reflection to modify the JVM's process environment map. This is necessary
-     * because Lumina's native executor thread pool reads {@code LUMINA_EXECUTOR_THREAD_COUNT} from
-     * the OS environment.
-     *
-     * <p>When multiple shard tasks run in parallel on the same TaskManager JVM, this method ensures
-     * the reflection-based map modification happens at most once per key-value pair.
-     */
-    @SuppressWarnings("unchecked")
-    private static void setEnv(String key, String value) {
-        // Skip if already set to the same value in this JVM
-        if (value.equals(CONFIGURED_ENV_VARS.get(key))) {
-            return;
-        }
-        synchronized (CONFIGURED_ENV_VARS) {
-            // Double-check after acquiring lock
-            if (value.equals(CONFIGURED_ENV_VARS.get(key))) {
-                return;
-            }
-            try {
-                Map<String, String> env = System.getenv();
-                Field field = env.getClass().getDeclaredField("m");
-                field.setAccessible(true);
-                ((Map<String, String>) field.get(env)).put(key, value);
-                CONFIGURED_ENV_VARS.put(key, value);
-            } catch (Exception e) {
-                LOG.warn(
-                        "Failed to set environment variable '{}' for Lumina executor. "
-                                + "Thread-count tuning may not take effect.",
-                        key,
-                        e);
-            }
         }
     }
 

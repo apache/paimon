@@ -25,7 +25,7 @@ import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
 import org.apache.spark.sql.test.SharedSparkSession
 
 import java.nio.file.Files
@@ -86,6 +86,20 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("replace table rejects table constraints and keeps the old table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (7)")
+      val e = intercept[AnalysisException] {
+        sql(
+          "CREATE OR REPLACE TABLE t (id INT, CONSTRAINT positive CHECK (id > 0)) " +
+            "TBLPROPERTIES ('file.format'='avro')")
+      }
+      assert(e.getCondition === "UNSUPPORTED_FEATURE.TABLE_OPERATION")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(7)))
+    }
+  }
+
   test("ordinary views, table description and partition description") {
     withTable("t") {
       sql(
@@ -118,6 +132,15 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       sql("DROP FUNCTION IF EXISTS add_one")
       sql("DROP FUNCTION IF EXISTS rows_plus")
     }
+  }
+
+  test("unaliased v1 function call keeps the database-qualified column name") {
+    try {
+      sql("CREATE FUNCTION abs_udf AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFAbs'")
+      val df = sql("SELECT abs_udf(-3)")
+      checkAnswer(df, Seq(Row(3)))
+      assert(df.columns.toSeq === Seq("test.abs_udf(-3)"))
+    } finally { sql("DROP FUNCTION IF EXISTS abs_udf") }
   }
 
   private val modes: Seq[(String, String)] = Seq(
@@ -181,9 +204,23 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       checkAnswer(
         sql(
           "SELECT variant_get(v, '$.id', 'int'), hex(ST_AsBinary(g)), " +
-            "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)) FROM typed"),
-        Seq(Row(1, point, point, point))
+            "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)), ST_Srid(g), ST_Srid(a[0]) FROM typed"),
+        Seq(Row(1, point, point, point, 3857, 3857))
       )
+    }
+  }
+
+  test("spatial SQL passes a constant geometry to the Paimon scan") {
+    val point =
+      "ST_SetSrid(ST_GeomFromWKB(unhex('01010000000000000000000000000000000000F03F')), 4326)"
+    withTable("locations") {
+      sql("""CREATE TABLE locations (geom GEOMETRY(4326)) TBLPROPERTIES (
+            | 'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            | 'data-evolution.enabled' = 'true')""".stripMargin)
+      sql(s"INSERT INTO locations VALUES ($point), (NULL)")
+      val query = sql(s"SELECT ST_Srid(geom) FROM locations WHERE ST_Intersects(geom, $point)")
+      assert(query.queryExecution.executedPlan.toString().contains("BBoxIntersects"))
+      checkAnswer(query, Seq(Row(4326)))
     }
   }
 }

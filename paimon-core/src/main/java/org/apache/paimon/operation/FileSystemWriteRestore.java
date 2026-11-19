@@ -91,6 +91,23 @@ public class FileSystemWriteRestore implements WriteRestore {
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
             boolean scanSourceIndexPayloads) {
+        return restoreFiles(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanSourceIndexPayloads,
+                true);
+    }
+
+    @Override
+    public RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads,
+            boolean scanDataFileMetas) {
         // NOTE: don't use snapshotManager.latestSnapshot() here,
         // because we don't want to flood the catalog with high concurrency
         Snapshot snapshot =
@@ -102,9 +119,15 @@ public class FileSystemWriteRestore implements WriteRestore {
         }
 
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        List<ManifestEntry> entries =
-                scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        Integer totalBuckets = null;
+        if (scanDataFileMetas) {
+            List<ManifestEntry> entries =
+                    scan.withSnapshot(snapshot)
+                            .withPartitionBucket(partition, bucket)
+                            .plan()
+                            .files();
+            totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        }
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {

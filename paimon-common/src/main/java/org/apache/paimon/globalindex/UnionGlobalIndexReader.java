@@ -62,6 +62,12 @@ public class UnionGlobalIndexReader implements ContainsRefiningGlobalIndexReader
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return unionAsync(reader -> reader.visitBBoxIntersects(fieldRef, minX, minY, maxX, maxY));
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
             FieldRef fieldRef, Object literal) {
         return unionAsync(reader -> reader.visitStartsWith(fieldRef, literal));

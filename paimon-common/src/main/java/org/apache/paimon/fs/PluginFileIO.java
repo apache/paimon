@@ -74,6 +74,22 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        RemoteIterator<FileStatus> entries = wrap(() -> fileIO(path).listStatusIterative(path));
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return wrap(entries::hasNext);
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                return wrap(entries::next);
+            }
+        };
+    }
+
+    @Override
     public boolean exists(Path path) throws IOException {
         return wrap(() -> fileIO(path).exists(path));
     }

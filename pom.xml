@@ -467,11 +467,11 @@ under the License.
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>2.13.18</scala.version>
-                <paimon-spark-common.spark.version>4.2.0</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.2.1</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.2</test.spark.main.version>
-                <test.spark.version>4.2.0</test.spark.version>
+                <test.spark.version>4.2.1</test.spark.version>
             </properties>
         </profile>
 
@@ -697,6 +697,7 @@ under the License.
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <!-- Binary compatibility fixtures -->
                         <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
+                        <exclude>paimon-common/src/test/resources/rtree/*.b64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-python/pypaimon/tests/resources/calendar_extract_java.jsonl</exclude>
                         <exclude>**/*.proto</exclude>

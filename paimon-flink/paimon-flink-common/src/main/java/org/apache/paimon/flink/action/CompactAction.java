@@ -246,6 +246,7 @@ public class CompactAction extends TableActionBase {
         DataEvolutionTableCompact builder =
                 new DataEvolutionTableCompact(env, identifier.getFullName(), table);
         builder.withPartitionPredicate(getPartitionPredicate());
+        builder.withPartitionIdleTime(partitionIdleTime);
         builder.build();
     }
 

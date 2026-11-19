@@ -38,4 +38,17 @@ class SparkInternalRowVariantTest extends SparkFunSuite {
     assert(actual.getValue.sameElements(variant.value()))
     assert(actual.getMetadata.sameElements(variant.metadata()))
   }
+
+  test("get variant with typed access") {
+    val variant = GenericVariant.fromJson("""{"id":1}""")
+    val rowType = RowType.of(new VariantType())
+    val row = SparkInternalRow.create(rowType).replace(GenericRow.of(variant))
+
+    // `getVariant` is implemented by `Spark4InternalRow`, while the generic `get` above goes
+    // through `Spark4Shim.toSparkVariant`.
+    val actual = row.getVariant(0)
+
+    assert(actual.getValue.sameElements(variant.value()))
+    assert(actual.getMetadata.sameElements(variant.metadata()))
+  }
 }

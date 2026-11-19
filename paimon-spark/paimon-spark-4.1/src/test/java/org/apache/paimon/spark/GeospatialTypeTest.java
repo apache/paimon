@@ -39,8 +39,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests Spark 4.1 geometry and geography interoperability. */
 class GeospatialTypeTest {
 
+    /** Little-endian WKB for POINT(1 2): byte order, type, then two 8-byte doubles. */
     private static final byte[] POINT_WKB =
-            new byte[] {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0x40};
+            new byte[] {
+                1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40
+            };
 
     @Test
     void testTypeRoundTrip() {
@@ -72,16 +75,18 @@ class GeospatialTypeTest {
 
     @Test
     void testWkbReadWriteRoundTrip() {
+        // The geometry column uses EPSG:3857 instead of the default CRS, so the geometry SRID
+        // check fails if `getGeometry` does not read its own field's CRS.
         RowType paimonType =
                 DataTypes.ROW(
-                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY()),
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY("EPSG:3857")),
                         DataTypes.FIELD(1, "geog", DataTypes.GEOGRAPHY()));
         StructType sparkType = SparkTypeUtils.fromPaimonRowType(paimonType);
 
         SparkInternalRow sparkRow =
                 SparkInternalRow.create(paimonType).replace(GenericRow.of(POINT_WKB, POINT_WKB));
         assertThat(STUtils.stAsBinary(sparkRow.getGeometry(0))).isEqualTo(POINT_WKB);
-        assertThat(STUtils.stSrid(sparkRow.getGeometry(0))).isEqualTo(4326);
+        assertThat(STUtils.stSrid(sparkRow.getGeometry(0))).isEqualTo(3857);
         assertThat(STUtils.stAsBinary(sparkRow.getGeography(1))).isEqualTo(POINT_WKB);
         assertThat(STUtils.stSrid(sparkRow.getGeography(1))).isEqualTo(4326);
 
@@ -94,7 +99,7 @@ class GeospatialTypeTest {
                 new SparkRow(
                         paimonType,
                         RowFactory.create(
-                                Geometry.fromWKB(POINT_WKB, 4326),
+                                Geometry.fromWKB(POINT_WKB, 3857),
                                 Geography.fromWKB(POINT_WKB, 4326)));
         assertThat(externalWrapper.getBinary(0)).isEqualTo(POINT_WKB);
         assertThat(externalWrapper.getBinary(1)).isEqualTo(POINT_WKB);

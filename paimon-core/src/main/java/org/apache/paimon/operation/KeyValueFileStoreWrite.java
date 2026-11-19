@@ -157,14 +157,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema,
                         recordLevelExpire,
                         cacheManager);
-        if (options.writeOnly()
-                && options.writeSequenceNumberInitMode()
-                        == CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
-            super.withIgnorePreviousFiles(true);
-            LOG.info(
-                    "Enable ignoring previous files for write-only snapshot sequence number initialization of table {}.",
-                    tableName);
-        }
     }
 
     @Override
@@ -173,13 +165,16 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             int bucket,
             @Nullable Snapshot latestSnapshot,
             boolean ignorePreviousFiles) {
+        if (ignorePreviousFiles) {
+            return true;
+        }
         if (options.writeOnly()
                 && options.writeSequenceNumberInitMode()
                         == CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
             return latestSnapshot == null
                     || SequenceSnapshotProperties.maxSequenceNumber(latestSnapshot).isPresent();
         }
-        return ignorePreviousFiles;
+        return false;
     }
 
     @Override

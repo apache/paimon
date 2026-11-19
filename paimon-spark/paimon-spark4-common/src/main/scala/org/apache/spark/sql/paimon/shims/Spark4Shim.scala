@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
@@ -31,19 +32,19 @@ import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal, MetadataAttribute}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, STUtils}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, ResolveTableConstraints, STUtils}
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
-import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Transform}
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
@@ -61,6 +62,15 @@ import java.util.{Map => JMap}
 
 class Spark4Shim extends SparkShim {
 
+  override def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit =
+    SpatialIntersects.register(extensions)
+
+  override def spatialCandidate(
+      predicate: V2Expression,
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] =
+    SpatialIntersects.candidate(predicate, rowType, ranked)
+
   override def classicApi: ClassicApi = new Classic4Api
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
@@ -69,6 +79,16 @@ class Spark4Shim extends SparkShim {
 
   override def createCustomResolution(spark: SparkSession): Rule[LogicalPlan] = {
     Spark4ResolutionRules(spark)
+  }
+
+  override def resolveUpdateMetadata(assignments: Seq[Assignment]): Seq[Assignment] = {
+    assignments.map {
+      case a @ Assignment(attr: Attribute, _)
+          if MetadataAttribute.isValid(attr.metadata) &&
+            !MetadataAttribute.isPreservedOnUpdate(attr) =>
+        a.copy(value = Literal(null, attr.dataType))
+      case a => a
+    }
   }
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
@@ -181,6 +201,13 @@ class Spark4Shim extends SparkShim {
     columns.map(_.toV2Column(statementType)).toArray
   }
 
+  override def validateTableConstraints(
+      tableSpec: TableSpec,
+      catalog: TableCatalog,
+      ident: Identifier): Unit = {
+    ResolveTableConstraints.validateCatalogForTableConstraint(tableSpec.constraints, catalog, ident)
+  }
+
   override def copyTableSpec(
       tableSpec: TableSpec,
       additionalProperties: Map[String, String],
@@ -284,6 +311,13 @@ class Spark4Shim extends SparkShim {
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation = {
     relation.copy(table = table, output = output)
+  }
+
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      catalog: CatalogPlugin,
+      identifier: Identifier): DataSourceV2Relation = {
+    relation.copy(catalog = Some(catalog), identifier = Some(identifier))
   }
 
   override def createDataSourceV2Relation(

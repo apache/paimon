@@ -25,7 +25,12 @@ import org.apache.paimon.table.sink.CommitMessage;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Prepares extra commit messages for data-evolution compaction before committing. */
+/**
+ * Prepares deletion-vector commit messages for data-evolution compaction.
+ *
+ * <p>Global indexes invalidated by materialization are removed by the core commit using the latest
+ * snapshot on each attempt.
+ */
 public class DataEvolutionCompactionCommitPreparation {
 
     private final FileStoreTable table;
@@ -41,9 +46,6 @@ public class DataEvolutionCompactionCommitPreparation {
         result.addAll(
                 new DataEvolutionCompactDeletionVectorRewriter(table, snapshot)
                         .rewriteDeletionVectors(messages));
-        result.addAll(
-                new DataEvolutionCompactGlobalIndexDropper(table, snapshot)
-                        .dropGlobalIndexes(messages));
         return result;
     }
 }
