@@ -40,6 +40,7 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -91,6 +92,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -104,6 +106,9 @@ import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -1037,6 +1042,86 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
         assertThat(liveDeletionVectorDataFileNames(table))
                 .doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"before", "after", "retry", "fully-deleted"})
+    public void testMaterializeInvalidatesGlobalIndexesAtCommit(String indexTiming)
+            throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("materialize_global_indexes", false);
+        writePartitionRows(table, "a", 0, 1, 2);
+        writePartitionRows(table, "b", 3, 4, 5);
+        BinaryRow partitionA = partition(table, "a");
+        boolean fullyDeleted = "fully-deleted".equals(indexTiming);
+        commitDeletionVectors(
+                table,
+                partitionA,
+                Collections.singletonList(
+                        new DvSpec(
+                                new Range(0, 2),
+                                fullyDeleted ? new long[] {0, 1, 2} : new long[] {1})));
+        commitGlobalIndex(
+                table, partition(table, "b"), globalIndexFile("untouched-index", new Range(3, 5)));
+        IndexFileMeta oldIndex = globalIndexFile("old-index", new Range(0, 2));
+        if (!"after".equals(indexTiming)) {
+            commitGlobalIndex(table, partitionA, oldIndex);
+        }
+        List<String> rowsBefore = readPartitionedRows(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMaterializeDeletionVectors(table, snapshot, null);
+        assertThat(
+                        messages.stream()
+                                .flatMap(
+                                        message ->
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement().deletedIndexFiles()
+                                                                .stream())
+                                .filter(file -> file.globalIndexMeta() != null))
+                .isEmpty();
+        if ("after".equals(indexTiming)) {
+            commitGlobalIndex(table, partitionA, globalIndexFile("late-index", new Range(0, 2)));
+        }
+
+        AtomicInteger publicationAttempts = new AtomicInteger();
+        FileStoreTable commitTable = table;
+        if ("retry".equals(indexTiming)) {
+            FileIO fileIO = spy(table.fileIO());
+            doAnswer(
+                            invocation -> {
+                                Path path = invocation.getArgument(0);
+                                if (path.getName().startsWith("snapshot-")
+                                        && publicationAttempts.getAndIncrement() == 0) {
+                                    // Replace old-index after this attempt generated its deletions.
+                                    // The retry must regenerate DELETE concurrent-index.
+                                    commit(
+                                            table,
+                                            Collections.singletonList(
+                                                    indexCompactMessage(
+                                                            partitionA,
+                                                            oldIndex,
+                                                            globalIndexFile(
+                                                                    "concurrent-index",
+                                                                    new Range(0, 2)))));
+                                }
+                                return invocation.callRealMethod();
+                            })
+                    .when(fileIO)
+                    .tryToWriteAtomic(any(Path.class), anyString());
+            commitTable =
+                    new AppendOnlyFileStoreTable(
+                            fileIO, table.location(), table.schema(), table.catalogEnvironment());
+        }
+        commitMaterializeDeletionVectors(
+                commitTable, snapshot, messages, "test-materialize-global-index");
+
+        assertThat(liveGlobalIndexFileNames(table)).containsExactly("untouched-index");
+        assertThat(readPartitionedRows(table)).containsExactlyInAnyOrderElementsOf(rowsBefore);
+        if ("retry".equals(indexTiming)) {
+            assertThat(publicationAttempts.get()).isEqualTo(2);
+        }
+        if (fullyDeleted) {
+            assertThat(currentDataFiles(table, partitionA)).isEmpty();
+        }
     }
 
     @Test
