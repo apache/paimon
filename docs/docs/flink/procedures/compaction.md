@@ -329,6 +329,8 @@ Sort a Data Evolution append table in batch mode. The input row-ID range is incl
 The optional `where` expression selects partitions. Every live file that intersects
 the selection must fit entirely inside the range. A partial file group fails the job
 before writing.
+Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
+to find complete ranges for a partition.
 
 ```sql
 SET 'execution.runtime-mode' = 'batch';

@@ -80,8 +80,14 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
           .exists(e => Option(e.getMessage).exists(_.contains("complete file groups"))))
       assert(loadTable("T").latestSnapshot().get().id() == before)
 
+      val ranges = rows(
+        "SELECT start_row_id, end_row_id FROM `T$row_ranges` " +
+          "WHERE partition = '{0}' AND end_row_id < 10 ORDER BY start_row_id")
+      assert(ranges == Seq(Row(0L, 3L), Row(7L, 9L)))
+      val start = ranges.head.getLong(0)
+      val end = ranges.last.getLong(1)
       checkAnswer(
-        sql("CALL sys.sort_data_evolution('T', 0L, 9L, 'k,priority', 'p = 0')"),
+        sql(s"CALL sys.sort_data_evolution('T', ${start}L, ${end}L, 'k,priority', 'p = 0')"),
         Row(1) :: Nil)
       assert(rows(s"SELECT $columns FROM T WHERE _ROW_ID >= 12 ORDER BY _ROW_ID") == expected)
       assert(

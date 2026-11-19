@@ -40,12 +40,12 @@ System tables expose table state and catalog metadata through SQL. Use a table s
 | Index coverage and key ranges | [File indexes](#file-indexes-table), [Table indexes](#table-indexes-table), [File key ranges](#file-key-ranges-table) |
 | Changes and read views | [Audit log](#audit-log-table), [Binlog](#binlog-table), [Read-optimized](#read-optimized-table) |
 | Retained versions and streaming progress | [Tags](#tags-table), [Branches](#branches-table), [Consumers](#consumers-table) |
-| Additional table metadata | [Aggregation fields](#aggregation-fields-table), [Statistics](#statistic-table), [Row tracking](#row-tracking-table) |
+| Additional table metadata | [Aggregation fields](#aggregation-fields-table), [Statistics](#statistic-table), [Row tracking](#row-tracking-table), [Row ranges](#row-ranges-table) |
 | Catalog inventory | [All tables](#all-tables-table), [All partitions](#all-partitions-table) |
 
 The sections below describe syntax and availability. Some system tables require particular table
 features or options to be enabled. On tables with `query-auth.enabled = true`, the `files`,
-`file_key_ranges`, `binlog`, and `statistics` system tables are unavailable because their raw
+`file_key_ranges`, `row_ranges`, `binlog`, and `statistics` system tables are unavailable because their raw
 metadata cannot be covered by column masking.
 
 ## Data System Table
@@ -313,6 +313,25 @@ FROM my_table$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 
 Optional fields can be `NULL` for older files or when the corresponding feature is not enabled.
 See [Data File Metadata](./spec/manifest#data-file-metadata) for the underlying metadata structure.
+
+### Row Ranges Table
+
+For a Data Evolution table, `row_ranges` lists the smallest inclusive row-ID ranges that
+can be rewritten independently within each partition. It groups all live files whose ranges
+overlap, including overlaps connected through a chain of ordinary, BLOB, or vector files.
+Adjacent groups with no shared row ID appear as separate rows.
+
+```sql
+SELECT `partition`, start_row_id, end_row_id, file_count, file_size_in_bytes, snapshot_id
+FROM `samples$row_ranges`
+WHERE `partition` = '{20261119}'
+ORDER BY start_row_id;
+```
+
+`file_count` counts the physical data files in the group, and `file_size_in_bytes` sums their
+sizes. Pass the returned bounds and the corresponding partition filter to
+`sort_data_evolution`. The ranges describe the displayed `snapshot_id`. If another commit
+changes the file layout, the procedure validates the bounds against its own planning snapshot.
 
 ### File Indexes Table
 

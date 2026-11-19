@@ -30,13 +30,17 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +57,28 @@ import static org.mockito.Mockito.verify;
 
 /** Tests for sorting and rewriting complete Data Evolution file groups. */
 public class DataEvolutionRangeSortTest extends TableTestBase {
+
+    @Test
+    public void testRowRangesStayOnPlannedSnapshot() throws Exception {
+        FileStoreTable table = createTable();
+        write(table, GenericRow.of(2), GenericRow.of(1));
+        long snapshot = table.latestSnapshot().get().id();
+        Table ranges = catalog.getTable(identifier(DEFAULT_TABLE_NAME + "$row_ranges"));
+        List<String> fields = Arrays.asList("snapshot_id", "start_row_id", "end_row_id");
+        ReadBuilder builder =
+                ranges.newReadBuilder().withReadType(ranges.rowType().project(fields));
+        TableScan.Plan plan = builder.newScan().plan();
+        write(table, GenericRow.of(3));
+
+        try (CloseableIterator<InternalRow> rows =
+                builder.newRead().createReader(plan).toCloseableIterator()) {
+            InternalRow row = rows.next();
+            assertThat(row.getLong(0)).isEqualTo(snapshot);
+            assertThat(row.getLong(1)).isZero();
+            assertThat(row.getLong(2)).isOne();
+            assertThat(rows.hasNext()).isFalse();
+        }
+    }
 
     @Test
     public void testSortUsesSchemaCoveringPlanningSnapshot() throws Exception {
