@@ -34,8 +34,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -281,6 +283,68 @@ public class EntropyInjectTemplateTest {
 
         assertThat(table.newReadBuilder().newScan().plan().splits()).isNotEmpty();
         assertThat(Files.isDirectory(sharedRoot.resolve("{hash}").resolve("literal"))).isTrue();
+    }
+
+    @Test
+    public void testRejectsChainTableWithTemplateStrategy() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE, "chain_template");
+        String chainEnabled = CoreOptions.CHAIN_TABLE_ENABLED.key();
+        Schema schema =
+                schemaBuilder()
+                        .partitionKeys("name")
+                        .primaryKey("name", "id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.SEQUENCE_FIELD.key(), "id")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$name")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                "file://"
+                                        + sharedRoot
+                                        + "/{hash}/"
+                                        + DATABASE
+                                        + ".db/chain_template")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString())
+                        .option(chainEnabled, "true")
+                        .build();
+        String message = "Chain tables do not support the 'entropy-inject-template'";
+        assertThatThrownBy(() -> catalog.createTable(identifier, schema, false))
+                .rootCause()
+                .hasMessageContaining(message);
+
+        schema.options().remove(chainEnabled);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        write(table, 1, "2026-11-19");
+        assertThat(sharedTableFiles("chain_template")).hasSize(1);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Collections.singletonList(
+                                                SchemaChange.setOption(chainEnabled, "true")),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(message);
+
+        // Simulate an existing table whose schema was persisted before validation.
+        schema.options().put(chainEnabled, "true");
+        long legacySchemaId = table.schema().id() + 1;
+        FileSystemSchemaManager schemaManager =
+                new FileSystemSchemaManager(table.fileIO(), table.location());
+        assertThat(
+                        table.fileIO()
+                                .tryToWriteAtomic(
+                                        schemaManager.toSchemaPath(legacySchemaId),
+                                        TableSchema.create(legacySchemaId, schema).toString()))
+                .isTrue();
+
+        assertThatThrownBy(() -> catalog.dropTable(identifier, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(message);
+        assertThat(sharedTableFiles("chain_template")).hasSize(1);
     }
 
     @Test

@@ -457,6 +457,10 @@ public class SchemaValidation {
             return;
         }
 
+        checkArgument(
+                !options.isChainTable(),
+                "Chain tables do not support the '%s' external path strategy.",
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE);
         String externalPaths = options.dataFileExternalPaths();
         checkArgument(
                 externalPaths != null && !externalPaths.trim().isEmpty(),

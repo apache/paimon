@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -28,8 +29,11 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.DataFilePathFactories;
 
 import org.slf4j.Logger;
@@ -88,7 +92,14 @@ public class EntropyInjectTemplateFilesDeletion {
      * <p>Manifest read failures abort the drop and retain metadata for retry. File deletion is
      * best-effort: failures are logged and do not prevent metadata deletion.
      */
-    public static void delete(FileStoreTable table) {
+    public static void delete(FileIO fileIO, Path tablePath, String branch, TableSchema schema) {
+        FileStoreTable table =
+                FileStoreTableFactory.createWithoutFallbackBranch(
+                        fileIO,
+                        tablePath,
+                        schema,
+                        new Options().set(CoreOptions.BRANCH, branch),
+                        CatalogEnvironment.empty());
         EntropyInjectTemplateFilesDeletion deletion = new EntropyInjectTemplateFilesDeletion(table);
         try {
             long deleted = deletion.deleteFiles();
