@@ -18,7 +18,9 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
@@ -26,17 +28,18 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.vector.index.VectorIndexShardMeta;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** Atomic manifest replacement for each registered centroid index type. */
 class CentroidIndexManifestTest {
@@ -67,7 +70,8 @@ class CentroidIndexManifestTest {
     }
 
     @Test
-    void rejectsMixedIndexTypesAcrossPartitionsAtManifestWrite() {
+    void rejectsMixedIndexTypesAcrossPartitionsAtManifestWrite(@TempDir Path directory)
+            throws Exception {
         IndexFileMeta range =
                 new IndexFileMeta(
                         "ivf-pq",
@@ -79,14 +83,23 @@ class CentroidIndexManifestTest {
         IndexManifestEntry entry =
                 new IndexManifestEntry(FileKind.ADD, BinaryRow.singleColumn(1), 0, range);
         List<IndexManifestEntry> centroid = centroidModel("model", "ivf-pq");
-        IndexManifestFile manifest = mock(IndexManifestFile.class);
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(directory, new HashMap<>(), "file");
+        IndexManifestFile manifest =
+                new IndexManifestFile.Factory(
+                                store.fileIO(),
+                                FileFormat.manifestFormat(store.options()),
+                                "zstd",
+                                store.pathFactory(),
+                                null)
+                        .create();
         IndexManifestFileHandler handler =
                 new IndexManifestFileHandler(manifest, BucketMode.BUCKET_UNAWARE);
-        when(manifest.read("prior-range")).thenReturn(Collections.singletonList(entry));
-        when(manifest.read("prior-centroid")).thenReturn(centroid);
-        assertThatThrownBy(() -> handler.write("prior-range", centroid))
+        String priorRange = handler.write(null, Collections.singletonList(entry));
+        String priorCentroid = handler.write(null, centroid);
+        assertThatThrownBy(() -> handler.write(priorRange, centroid))
                 .hasMessageContaining("Drop the previous index");
-        assertThatThrownBy(() -> handler.write("prior-centroid", Collections.singletonList(entry)))
+        assertThatThrownBy(() -> handler.write(priorCentroid, Collections.singletonList(entry)))
                 .hasMessageContaining("Drop the previous index");
     }
 
@@ -108,7 +121,7 @@ class CentroidIndexManifestTest {
                             null,
                             null,
                             new GlobalIndexMeta(10, 100, 1, null, metadata));
-            entries.add(new IndexManifestEntry(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, file));
+            entries.add(new IndexManifestEntry(FileKind.ADD, BinaryRow.singleColumn(0), 0, file));
         }
         return entries;
     }
