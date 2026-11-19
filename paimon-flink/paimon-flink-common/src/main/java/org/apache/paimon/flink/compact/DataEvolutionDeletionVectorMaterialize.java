@@ -65,6 +65,6 @@ public class DataEvolutionDeletionVectorMaterialize {
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionDeletionVectorMaterializeSource.buildSource(
                         env, source, tableIdentifier);
-        DataEvolutionRowIdRewriteSink.sink(table, sourceStream, snapshot);
+        DataEvolutionRowIdRewriteSink.sink(table, sourceStream, snapshot, false);
     }
 }

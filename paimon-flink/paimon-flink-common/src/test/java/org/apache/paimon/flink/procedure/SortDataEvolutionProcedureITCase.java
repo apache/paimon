@@ -60,13 +60,13 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
                 .anyMatch(f -> f.endsWith(".blob"))
                 .anyMatch(f -> f.contains(".vector."));
         long snapshot = table.latestSnapshot().get().id();
-        assertThatThrownBy(() -> sql("CALL sys.sort_data_evolution('default.T', 1, 5, 'k,id')"))
+        assertThatThrownBy(() -> sql("CALL sys.sort_data_evolution('default.T', '[1,5]', 'k,id')"))
                 .hasStackTraceContaining("Select complete file groups");
         assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshot);
 
         String sort =
-                "CALL sys.sort_data_evolution(`table` => 'default.T', start_row_id => 0, "
-                        + "end_row_id => 5, order_by => 'k, id', `where` => 'p = 0')";
+                "CALL sys.sort_data_evolution(`table` => 'default.T', `range` => '[0,5]', "
+                        + "order_by => 'k, id', `where` => 'p = 0')";
         assertThat(sql(sort)).containsExactly(Row.of("Success"));
         assertThat(
                         sql(
@@ -139,7 +139,7 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
         Row selected = ranges.get(0);
         assertThat(
                         sql(
-                                "CALL sys.sort_data_evolution('default.T', %d, %d, 'id')",
+                                "CALL sys.sort_data_evolution('default.T', '[%d,%d]', 'id')",
                                 selected.getField(0), selected.getField(1)))
                 .containsExactly(Row.of("Success"));
         assertThat(
@@ -181,12 +181,14 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
     @Test
     public void testValidateEmptyTable() throws Exception {
         createTable();
-        assertThat(sql("CALL sys.sort_data_evolution('default.T', 0, 5, 'k')"))
+        assertThat(sql("CALL sys.sort_data_evolution('default.T', '[0,5]', 'k')"))
                 .containsExactly(Row.of("Success"));
-        assertThatThrownBy(() -> sql("CALL sys.sort_data_evolution('default.T', 5, 0, 'k')"))
+        assertThatThrownBy(() -> sql("CALL sys.sort_data_evolution('default.T', '[5,0]', 'k')"))
                 .hasRootCauseMessage("Invalid inclusive row ID range [5, 0].");
         assertThatThrownBy(
-                        () -> sql("CALL sys.sort_data_evolution('default.T', 0, 5, 'k', 'id = 1')"))
+                        () ->
+                                sql(
+                                        "CALL sys.sort_data_evolution('default.T', '[0,5]', 'k', 'id = 1')"))
                 .hasRootCauseMessage(
                         "Only partition key can be specialized in sort_data_evolution action.");
         assertThat(paimonTable("T").latestSnapshot()).isEmpty();

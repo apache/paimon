@@ -325,7 +325,8 @@ CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=
 
 ## sort_data_evolution
 
-Sort a Data Evolution append table in batch mode. The input row-ID range is inclusive.
+Sort a Data Evolution append table in batch mode. Pass `range` as a string of the form
+`'[start, end]'` with two inclusive, nonnegative BIGINT bounds.
 The optional `where` expression selects partitions. Every live file that intersects
 the selection must fit entirely inside the range. A partial file group fails the job
 before writing.
@@ -338,23 +339,24 @@ SET 'table.dml-sync' = 'true';
 
 CALL sys.sort_data_evolution(
     `table` => 'default.samples',
-    start_row_id => 0,
-    end_row_id => 99999,
+    `range` => '[0,99999]',
     order_by => 'tenant_id,event_time',
     `where` => 'dt = 20261119');
 
 -- Flink 1.18 positional calls
-CALL sys.sort_data_evolution('default.samples', 0, 99999, 'tenant_id,event_time');
-CALL sys.sort_data_evolution('default.samples', 0, 99999, 'tenant_id,event_time', 'dt = 20261119');
+CALL sys.sort_data_evolution('default.samples', '[0,99999]', 'tenant_id,event_time');
+CALL sys.sort_data_evolution('default.samples', '[0,99999]', 'tenant_id,event_time', 'dt = 20261119');
 ```
 
 Each selected partition is sorted independently by the listed top-level fields
 in ascending order, with nulls first and the old row ID as a tie-breaker.
 The writer applies deletion vectors and rewrites all current column values together,
 including managed BLOBs and dedicated vectors. Surviving rows receive new row IDs.
-Update downstream references to the old row IDs and rebuild global indexes for the
-rewritten partitions. A selection with no matching rows or files to process is
-successful. With `table.dml-sync` enabled the call waits and returns `Success`.
+Update downstream references to the old row IDs. The commit removes each global index file
+whose row-ID range overlaps a rewritten input file group in the same partition. Disjoint
+index files remain usable. Rebuild missing index coverage for the new row IDs and any
+unchanged rows covered by a removed index file. A selection with no matching rows or files
+to process is successful. With `table.dml-sync` enabled the call waits and returns `Success`.
 In asynchronous mode it returns the Flink job ID.
 
 When a partition outgrows `write-buffer-size`, the task spills to the TaskManager's

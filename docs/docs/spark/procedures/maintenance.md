@@ -80,9 +80,10 @@ CALL sys.compact(
 
 ## sort_data_evolution
 
-Sort a Data Evolution append table within an inclusive range of input row IDs. Both
-bounds are required. The optional `where` expression selects partitions. Every live
-file intersecting the selection must fit entirely inside the range. An endpoint that
+Sort a Data Evolution append table within an inclusive range of input row IDs. Pass `range` as a
+string of the form `'[start, end]'` with two nonnegative BIGINT bounds. The optional `where`
+expression selects partitions. Every live file intersecting the selection must fit entirely
+inside the range. An endpoint that
 cuts a file causes the call to fail before writing. The result is the number of
 rewritten partitions, including zero for an empty selection.
 Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
@@ -91,8 +92,7 @@ to find complete ranges for a partition.
 ```sql
 CALL sys.sort_data_evolution(
   table => 'default.samples',
-  start_row_id => 0L,
-  end_row_id => 99999L,
+  `range` => '[0,99999]',
   order_by => 'tenant_id,event_time',
   where => 'dt = 20261119'
 );
@@ -109,8 +109,9 @@ local directories.
 
 Surviving rows in the selection receive new row IDs. Coordinate persisted row-ID
 references, including BLOB views in downstream tables, before invoking the procedure.
-The commit invalidates global indexes in the rewritten partitions. Rebuild those
-indexes to restore search coverage.
+The commit removes each global index file whose row-ID range overlaps a rewritten input
+file group in the same partition. Disjoint index files remain usable. Rebuild missing index
+coverage for the new row IDs and any unchanged rows covered by a removed index file.
 
 ## compact_database
 

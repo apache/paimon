@@ -1395,7 +1395,8 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testRangeSortDropsLateIndexWithoutDeletionVectors() throws Exception {
+    public void testRangeSortDropsOnlyOverlappingGlobalIndexesWithoutDeletionVectors()
+            throws Exception {
         catalog.createTable(
                 identifier(),
                 Schema.newBuilder()
@@ -1405,17 +1406,43 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         .build(),
                 false);
         FileStoreTable table = getTableDefault();
-        write(table, GenericRow.of(2), GenericRow.of(1));
+        write(table, GenericRow.of(0), GenericRow.of(1));
+        write(table, GenericRow.of(3), GenericRow.of(2));
+        write(table, GenericRow.of(4), GenericRow.of(5));
+        write(table, GenericRow.of(7), GenericRow.of(6));
+        write(table, GenericRow.of(8), GenericRow.of(9));
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        commitGlobalIndex(table, partition, globalIndexFile("before", new Range(0, 0)));
+        commitGlobalIndex(table, partition, globalIndexFile("left-endpoint", new Range(1, 2)));
+        commitGlobalIndex(table, partition, globalIndexFile("in-gap", new Range(4, 5)));
+        commitGlobalIndex(table, partition, globalIndexFile("inside", new Range(3, 3)));
+
         Snapshot snapshot = table.latestSnapshot().get();
-        Range range = new Range(0, 1);
-        List<DataEvolutionCompactTask> tasks =
-                DataEvolutionRangeSortTask.plan(
-                        table, snapshot, range, null, Collections.singletonList("id"));
+        List<DataEvolutionCompactTask> tasks = new ArrayList<>();
+        // Leave a live same-partition index inside the gap between the two input groups.
+        for (Range range : Arrays.asList(new Range(2, 3), new Range(6, 7))) {
+            tasks.addAll(
+                    DataEvolutionRangeSortTask.plan(
+                            table, snapshot, range, null, Collections.singletonList("id")));
+        }
         List<CommitMessage> messages = prepareCompactionMessages(table, snapshot, tasks);
-        commitGlobalIndex(table, BinaryRow.EMPTY_ROW, globalIndexFile("late-index", range));
-        commitMaterializeDeletionVectors(table, snapshot, messages, "range-sort");
-        assertThat(liveGlobalIndexFileNames(table)).isEmpty();
-        assertThat(normalFileRowRanges(table)).containsExactly(new Range(2, 3));
+        commitGlobalIndex(
+                table, partition, globalIndexFile("late-right-endpoint", new Range(7, 8)));
+        commitGlobalIndex(table, partition, globalIndexFile("late-after", new Range(9, 9)));
+        messages.replaceAll(
+                message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
+        try (TableCommitImpl commit = table.newCommit("range-sort")) {
+            commit.materializeDvRowIdCheck(true).commit(messages);
+        }
+        assertThat(liveGlobalIndexFileNames(table))
+                .containsExactly("before", "in-gap", "late-after");
+        assertThat(normalFileRowRanges(table))
+                .containsExactly(
+                        new Range(0, 1),
+                        new Range(4, 5),
+                        new Range(8, 9),
+                        new Range(10, 11),
+                        new Range(12, 13));
     }
 
     @Test

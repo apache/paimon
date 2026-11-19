@@ -59,6 +59,25 @@ import static org.mockito.Mockito.verify;
 public class DataEvolutionRangeSortTest extends TableTestBase {
 
     @Test
+    public void testParseInclusiveRange() {
+        assertThat(DataEvolutionRangeSortTask.parseRange("[ 0, 0 ]")).isEqualTo(new Range(0, 0));
+        assertThat(DataEvolutionRangeSortTask.parseRange("[1,9223372036854775807]"))
+                .isEqualTo(new Range(1, Long.MAX_VALUE));
+        for (String invalid :
+                Arrays.asList(
+                        null,
+                        "[1]",
+                        "[1,2,3]",
+                        "(1,2]",
+                        "[-1,2]",
+                        "[3,2]",
+                        "[0,9223372036854775808]")) {
+            assertThatThrownBy(() -> DataEvolutionRangeSortTask.parseRange(invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     public void testRowRangesStayOnPlannedSnapshot() throws Exception {
         FileStoreTable table = createTable();
         write(table, GenericRow.of(2), GenericRow.of(1));
@@ -147,7 +166,7 @@ public class DataEvolutionRangeSortTest extends TableTestBase {
     private void commitSort(FileStoreTable table, Snapshot snapshot, CommitMessage message)
             throws Exception {
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.materializeDvRowIdCheck()
+            commit.materializeDvRowIdCheck(true)
                     .commit(
                             Collections.singletonList(
                                     ((CommitMessageImpl) message)

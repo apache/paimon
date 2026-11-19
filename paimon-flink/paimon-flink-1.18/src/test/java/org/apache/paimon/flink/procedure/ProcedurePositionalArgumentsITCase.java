@@ -46,14 +46,14 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                 "CREATE TABLE T (id INT, p INT) PARTITIONED BY (p) WITH ("
                         + "'data-evolution.enabled'='true', 'row-tracking.enabled'='true', "
                         + "'file.format'='avro')");
-        assertThat(sql("CALL sys.sort_data_evolution('default.T', 0, 1, 'id')"))
+        assertThat(sql("CALL sys.sort_data_evolution('default.T', '[0,1]', 'id')"))
                 .containsExactly(Row.of("Success"));
-        assertThat(sql("CALL sys.sort_data_evolution('default.T', 0, 1, 'id', 'p = 2')"))
+        assertThat(sql("CALL sys.sort_data_evolution('default.T', '[0,1]', 'id', 'p = 2')"))
                 .containsExactly(Row.of("Success"));
         assertThatThrownBy(
                         () ->
                                 sql(
-                                        "CALL sys.sort_data_evolution('default.T', 0, 1, 'id', 'p = 1', 'p = 2')"))
+                                        "CALL sys.sort_data_evolution('default.T', '[0,1]', 'id', 'p = 1', 'p = 2')"))
                 .hasRootCauseMessage("Specify at most one partition filter.");
         assertThat(paimonTable("T").latestSnapshot()).isEmpty();
     }

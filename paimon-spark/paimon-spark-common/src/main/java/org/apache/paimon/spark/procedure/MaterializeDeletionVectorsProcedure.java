@@ -168,7 +168,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                 taskPlanner,
                 javaSparkContext,
                 sparkSession,
-                DataEvolutionRewriteExecutor.ROW_ID_REWRITE_COMMIT);
+                DataEvolutionRewriteExecutor.rowIdRewriteCommit(false));
     }
 
     private boolean blank(InternalRow args, int index) {

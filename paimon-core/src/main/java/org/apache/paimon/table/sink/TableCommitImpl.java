@@ -179,7 +179,11 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public TableCommitImpl materializeDvRowIdCheck() {
-        commit.materializeDvRowIdCheck();
+        return materializeDvRowIdCheck(false);
+    }
+
+    public TableCommitImpl materializeDvRowIdCheck(boolean rangeSort) {
+        commit.materializeDvRowIdCheck(rangeSort);
         return this;
     }
 

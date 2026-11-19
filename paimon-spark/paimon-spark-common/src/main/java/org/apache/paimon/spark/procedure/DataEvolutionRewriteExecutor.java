@@ -60,21 +60,21 @@ final class DataEvolutionRewriteExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRewriteExecutor.class);
 
-    static final CommitConfigurer ROW_ID_REWRITE_COMMIT =
-            new CommitConfigurer() {
-                @Override
-                public void configure(TableCommitImpl commit) {
-                    commit.materializeDvRowIdCheck();
-                }
+    static CommitConfigurer rowIdRewriteCommit(boolean rangeSort) {
+        return new CommitConfigurer() {
+            @Override
+            public void configure(TableCommitImpl commit) {
+                commit.materializeDvRowIdCheck(rangeSort);
+            }
 
-                @Override
-                public void prepareMessages(Snapshot snapshot, List<CommitMessage> messages) {
-                    messages.replaceAll(
-                            message ->
-                                    ((CommitMessageImpl) message)
-                                            .withCheckFromSnapshot(snapshot.id()));
-                }
-            };
+            @Override
+            public void prepareMessages(Snapshot snapshot, List<CommitMessage> messages) {
+                messages.replaceAll(
+                        message ->
+                                ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
+            }
+        };
+    }
 
     private DataEvolutionRewriteExecutor() {}
 

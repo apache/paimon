@@ -61,7 +61,7 @@ class SortDataEvolutionBenchmark extends PaimonSparkTestBase {
       val ordinarySeconds = rewriteSeconds(s"CALL sys.compact('test.$baseline')")
       assert(loadTable("T").switchToBranch("baseline").latestSnapshot().get().id() > input)
       sql("ALTER TABLE T SET TBLPROPERTIES ('target-file-row-num'='4096')")
-      val sortedSeconds = rewriteSeconds("CALL sys.sort_data_evolution('test.T', 0L, 32767L, 'k')")
+      val sortedSeconds = rewriteSeconds("CALL sys.sort_data_evolution('test.T', '[0,32767]', 'k')")
       info(
         f"Maintenance elapsed time: ordinary=$ordinarySeconds%.2f s, sorted=$sortedSeconds%.2f s")
 

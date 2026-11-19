@@ -53,12 +53,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rewrites all visible rows of complete file groups in one partition in sort-key order. */
 public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletionCompactTask {
+
+    private static final Pattern ROW_ID_RANGE =
+            Pattern.compile("\\s*\\[\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*\\]\\s*");
 
     private final List<String> sortFields;
 
@@ -71,16 +76,38 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
         this.sortFields = Collections.unmodifiableList(new ArrayList<>(sortFields));
     }
 
+    public static Range parseRange(String value) {
+        checkArgument(value != null, "The range argument is required.");
+        Matcher matcher = ROW_ID_RANGE.matcher(value);
+        checkArgument(
+                matcher.matches(),
+                "Expected an inclusive row ID range '[start, end]', got '%s'.",
+                value);
+        long start;
+        long end;
+        try {
+            start = Long.parseLong(matcher.group(1));
+            end = Long.parseLong(matcher.group(2));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Row ID range bounds must fit in a BIGINT: " + value, e);
+        }
+        checkArgument(start <= end, "Invalid inclusive row ID range [%s, %s].", start, end);
+        return new Range(start, end);
+    }
+
     public static List<String> parseSortFields(String orderBy) {
         return Arrays.stream(orderBy.split(",", -1)).map(String::trim).collect(Collectors.toList());
     }
 
-    public static void validate(FileStoreTable table, long start, long end, List<String> fields) {
+    public static void validate(FileStoreTable table, Range range, List<String> fields) {
         checkArgument(
                 table.coreOptions().dataEvolutionEnabled(),
                 "Range sorting requires a data evolution table.");
         checkArgument(
-                start >= 0 && end >= start, "Invalid inclusive row ID range [%s, %s].", start, end);
+                range.from >= 0 && range.from <= range.to,
+                "Invalid inclusive row ID range %s.",
+                range);
         checkArgument(
                 !fields.isEmpty() && new HashSet<>(fields).size() == fields.size(),
                 "Specify distinct sort fields.");
@@ -100,7 +127,7 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
             Range range,
             @Nullable PartitionPredicate partitionFilter,
             List<String> sortFields) {
-        validate(table, range.from, range.to, sortFields);
+        validate(table, range, sortFields);
         checkArgument(
                 table.schema().id() >= snapshot.schemaId(),
                 "Table schema %s is older than the schema of planning snapshot %s (%s). Reload the table before sorting.",

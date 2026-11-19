@@ -329,9 +329,10 @@ ORDER BY start_row_id;
 ```
 
 `file_count` counts the physical data files in the group, and `file_size_in_bytes` sums their
-sizes. Pass the returned bounds and the corresponding partition filter to
-`sort_data_evolution`. The ranges describe the displayed `snapshot_id`. If another commit
-changes the file layout, the procedure validates the bounds against its own planning snapshot.
+sizes. Pass the bounds as a single `range` string, for example `'[10, 19]'`, along with the
+corresponding partition filter to `sort_data_evolution`. The ranges describe the displayed
+`snapshot_id`. If another commit changes the file layout, the procedure validates the bounds
+against its own planning snapshot.
 
 ### File Indexes Table
 

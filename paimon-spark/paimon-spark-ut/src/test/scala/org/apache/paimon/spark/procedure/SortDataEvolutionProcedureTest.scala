@@ -26,6 +26,32 @@ import scala.collection.JavaConverters._
 
 class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
 
+  test("sort preserves disjoint global index files in the same partition") {
+    withTable("T") {
+      sql("""CREATE TABLE T (id INT) TBLPROPERTIES (
+            |'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'write-only'='true')
+            |""".stripMargin)
+      def buildIndex(): Unit = {
+        sql(
+          "CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'bitmap')")
+          .collect()
+      }
+      def indexes: Seq[Row] = sql(
+        "SELECT file_name, row_range_start, row_range_end FROM `T$table_indexes` " +
+          "WHERE index_type = 'bitmap' ORDER BY row_range_start").collect().toSeq
+      sql("INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES (2), (1) AS r(id)")
+      buildIndex()
+      sql("INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES (4), (3) AS r(id)")
+      buildIndex()
+      val before = indexes
+      assert(before.map(r => (r.getLong(1), r.getLong(2))) == Seq((0L, 1L), (2L, 3L)))
+      checkAnswer(
+        sql("CALL sys.sort_data_evolution(table => 'T', `range` => '[0, 1]', order_by => 'id')"),
+        Row(1) :: Nil)
+      assert(indexes == before.tail)
+    }
+  }
+
   test("sort complete groups within a partition and rewrite the aligned payloads") {
     withTable("T") {
       sql("""
@@ -71,7 +97,7 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(oldNames.exists(_.endsWith(".blob")) && oldNames.exists(_.contains(".vector.")))
       val before = loadTable("T").latestSnapshot().get().id()
       val error = intercept[Exception] {
-        sql("CALL sys.sort_data_evolution('T', 1L, 9L, 'k', 'p = 0')").collect()
+        sql("CALL sys.sort_data_evolution('T', '[1,9]', 'k', 'p = 0')").collect()
       }
       assert(
         Iterator
@@ -87,7 +113,7 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       val start = ranges.head.getLong(0)
       val end = ranges.last.getLong(1)
       checkAnswer(
-        sql(s"CALL sys.sort_data_evolution('T', ${start}L, ${end}L, 'k,priority', 'p = 0')"),
+        sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
         Row(1) :: Nil)
       assert(rows(s"SELECT $columns FROM T WHERE _ROW_ID >= 12 ORDER BY _ROW_ID") == expected)
       assert(
@@ -97,7 +123,7 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(outside.forall(f => now.contains(f._2.fileName())))
       assert(now.diff(outside.map(_._2.fileName()).toSet).exists(_.endsWith(".blob")))
       assert(now.diff(outside.map(_._2.fileName()).toSet).exists(_.contains(".vector.")))
-      checkAnswer(sql("CALL sys.sort_data_evolution('T', 0L, 9L, 'k', 'p = 0')"), Row(0) :: Nil)
+      checkAnswer(sql("CALL sys.sort_data_evolution('T', '[0,9]', 'k', 'p = 0')"), Row(0) :: Nil)
       assert(loadTable("T").latestSnapshot().get().id() == before + 1)
     }
   }

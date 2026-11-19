@@ -36,15 +36,13 @@ import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
-import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Sorts a complete row-ID range per partition and assigns new row IDs to its surviving rows. */
 public class SortDataEvolutionProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS = {
         ProcedureParameter.required("table", StringType),
-        ProcedureParameter.required("start_row_id", LongType),
-        ProcedureParameter.required("end_row_id", LongType),
+        ProcedureParameter.required("range", StringType),
         ProcedureParameter.required("order_by", StringType),
         ProcedureParameter.optional("where", StringType)
     };
@@ -66,13 +64,11 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier ident = toIdentifier(args.getString(0), "table");
-        checkArgument(
-                !args.isNullAt(1) && !args.isNullAt(2) && !args.isNullAt(3),
-                "Both row ID bounds and order_by are required.");
-        long start = args.getLong(1);
-        long end = args.getLong(2);
-        List<String> fields = DataEvolutionRangeSortTask.parseSortFields(args.getString(3));
-        String where = args.isNullAt(4) ? null : args.getString(4);
+        Range range =
+                DataEvolutionRangeSortTask.parseRange(args.isNullAt(1) ? null : args.getString(1));
+        checkArgument(!args.isNullAt(2), "The order_by argument is required.");
+        List<String> fields = DataEvolutionRangeSortTask.parseSortFields(args.getString(2));
+        String where = args.isNullAt(3) ? null : args.getString(3);
         return modifySparkTable(
                 ident,
                 sparkTable -> {
@@ -80,7 +76,7 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                             sparkTable.getTable() instanceof FileStoreTable,
                             "Expected a file store table.");
                     FileStoreTable table = (FileStoreTable) sparkTable.getTable();
-                    DataEvolutionRangeSortTask.validate(table, start, end, fields);
+                    DataEvolutionRangeSortTask.validate(table, range, fields);
                     PartitionPredicate filter =
                             SparkProcedureUtils.convertToPartitionPredicate(
                                     where,
@@ -92,15 +88,14 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                         return new InternalRow[] {newInternalRow(0)};
                     }
                     List<DataEvolutionCompactTask> tasks =
-                            DataEvolutionRangeSortTask.plan(
-                                    table, snapshot, new Range(start, end), filter, fields);
+                            DataEvolutionRangeSortTask.plan(table, snapshot, range, filter, fields);
                     DataEvolutionRewriteExecutor.execute(
                             table,
                             snapshot,
                             ignored -> new DataEvolutionRewriteExecutor.PlanResult(tasks, true),
                             new JavaSparkContext(spark().sparkContext()),
                             spark(),
-                            DataEvolutionRewriteExecutor.ROW_ID_REWRITE_COMMIT);
+                            DataEvolutionRewriteExecutor.rowIdRewriteCommit(true));
                     return new InternalRow[] {newInternalRow(tasks.size())};
                 });
     }

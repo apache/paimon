@@ -53,29 +53,26 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "start_row_id", type = @DataTypeHint("BIGINT")),
-                @ArgumentHint(name = "end_row_id", type = @DataTypeHint("BIGINT")),
+                @ArgumentHint(name = "range", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "order_by", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext context,
             String tableId,
-            Long startRowId,
-            Long endRowId,
+            String rowIdRange,
             String orderBy,
             String... where)
             throws Exception {
         StreamExecutionEnvironment env = context.getExecutionEnvironment();
         checkArgument(!FlinkSink.isStreaming(env), "Sorting data evolution requires batch mode.");
-        checkArgument(
-                startRowId != null && endRowId != null && orderBy != null,
-                "Both row ID bounds and order_by are required.");
+        Range range = DataEvolutionRangeSortTask.parseRange(rowIdRange);
+        checkArgument(orderBy != null, "The order_by argument is required.");
         Table target = table(tableId);
         checkArgument(target instanceof FileStoreTable, "Expected a file store table.");
         FileStoreTable table = (FileStoreTable) target;
         List<String> fields = DataEvolutionRangeSortTask.parseSortFields(orderBy);
-        DataEvolutionRangeSortTask.validate(table, startRowId, endRowId, fields);
+        DataEvolutionRangeSortTask.validate(table, range, fields);
         // Flink 1.18 infers optional positional arguments from Java varargs.
         checkArgument(where.length <= 1, "Specify at most one partition filter.");
         PartitionPredicate filter =
@@ -87,7 +84,6 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
         if (snapshot == null) {
             trigger.sinkTo(new DiscardingSink<>());
         } else {
-            Range range = new Range(startRowId, endRowId);
             DataStream<DataEvolutionCompactTask> tasks =
                     trigger.flatMap(
                                     (ignored, out) ->
@@ -97,7 +93,7 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
                                     new DataEvolutionCompactionTaskTypeInfo())
                             .name("Plan Data Evolution Sort : " + tableId)
                             .setParallelism(1);
-            DataEvolutionRowIdRewriteSink.sink(table, tasks, snapshot);
+            DataEvolutionRowIdRewriteSink.sink(table, tasks, snapshot, true);
         }
         return execute(env, "Sort Data Evolution : " + tableId);
     }

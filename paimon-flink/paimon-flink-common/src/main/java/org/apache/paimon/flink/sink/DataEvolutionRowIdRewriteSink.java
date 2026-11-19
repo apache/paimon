@@ -36,16 +36,22 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompactTask> {
 
     private final Snapshot snapshot;
+    private final boolean rangeSort;
 
-    private DataEvolutionRowIdRewriteSink(FileStoreTable table, Snapshot snapshot) {
+    private DataEvolutionRowIdRewriteSink(
+            FileStoreTable table, Snapshot snapshot, boolean rangeSort) {
         super(table, true);
         this.snapshot = snapshot;
+        this.rangeSort = rangeSort;
     }
 
     public static DataStreamSink<?> sink(
-            FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
+            FileStoreTable table,
+            DataStream<DataEvolutionCompactTask> input,
+            Snapshot snapshot,
+            boolean rangeSort) {
         checkArgument(!isStreaming(input), "Data evolution row ID rewrites require batch mode.");
-        return new DataEvolutionRowIdRewriteSink(table, snapshot).sinkFrom(input);
+        return new DataEvolutionRowIdRewriteSink(table, snapshot, rangeSort).sinkFrom(input);
     }
 
     @Override
@@ -78,7 +84,7 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         return context -> {
             TableCommitImpl commit = table.newCommit(context.commitUser());
-            commit.materializeDvRowIdCheck();
+            commit.materializeDvRowIdCheck(rangeSort);
             return new StoreCommitter(table, commit, context);
         };
     }

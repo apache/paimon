@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -89,7 +90,9 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -184,6 +187,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
     private boolean materializeDvRowIdCheck = false;
+    private boolean rangeSort;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -288,7 +292,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit materializeDvRowIdCheck() {
+    public FileStoreCommit materializeDvRowIdCheck(boolean rangeSort) {
+        this.rangeSort = rangeSort;
         materializeDvRowIdCheck = true;
         return this;
     }
@@ -1031,6 +1036,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> sortedRanges =
+                rangeSort ? sortedInputRanges(changes.tableFiles) : Collections.emptyMap();
         return latestSnapshot -> {
             List<IndexManifestEntry> indexFiles = new ArrayList<>(changes.indexFiles);
 
@@ -1040,9 +1047,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
                 for (IndexManifestEntry entry :
                         indexManifestFile.read(latestSnapshot.indexManifest())) {
-                    if (entry.indexFile().globalIndexMeta() != null
-                            && materializedBuckets.contains(
-                                    Pair.of(entry.partition(), entry.bucket()))) {
+                    GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                    if (meta == null) {
+                        continue;
+                    }
+                    Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+                    if (!materializedBuckets.contains(bucket)) {
+                        continue;
+                    }
+                    RowRangeIndex ranges = sortedRanges.get(bucket);
+                    if (!rangeSort
+                            || (ranges != null
+                                    && ranges.intersects(
+                                            meta.rowRangeStart(), meta.rowRangeEnd()))) {
                         indexFiles.add(entry.toDeleteEntry());
                     }
                 }
@@ -1050,6 +1067,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
         };
+    }
+
+    private static Map<Pair<BinaryRow, Integer>, RowRangeIndex> sortedInputRanges(
+            List<ManifestEntry> changes) {
+        Map<Pair<BinaryRow, Integer>, List<Range>> ranges = new HashMap<>();
+        for (ManifestEntry entry : changes) {
+            DataFileMeta file = entry.file();
+            if (entry.kind() == FileKind.DELETE
+                    && !isBlobFile(file.fileName())
+                    && !isVectorStoreFile(file.fileName())) {
+                ranges.computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()),
+                                ignored -> new ArrayList<>())
+                        .add(file.nonNullRowIdRange());
+            }
+        }
+        return ranges.entrySet().stream()
+                .collect(
+                        Collectors.toMap(
+                                Map.Entry::getKey,
+                                entry -> RowRangeIndex.create(entry.getValue())));
     }
 
     private int tryCommit(
