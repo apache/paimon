@@ -205,23 +205,22 @@ class RESTTokenFileIO(FileIO):
             self.catalog_options.to_map() if self.catalog_options else {},
             token.token
         )
-        if self.catalog_options:
+        # Connectivity validation can only come from the REST server.
+        merged_properties[CatalogOptions.IO_CACHE_VPC_VALIDATED.key()] = token.token.get(
+            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(), False)
+        if self.catalog_options and OssOptions.OSS_ENDPOINT.key() not in token.token:
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return Options(merged_properties)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
-        """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
+        """Keep the server endpoint, falling back to the client endpoint when absent."""
         merged_token = dict(token)
-        if self.catalog_options:
+        if self.catalog_options and OssOptions.OSS_ENDPOINT.key() not in merged_token:
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-            if self.catalog_options.contains(CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE):
-                merged_token[CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key()] = str(
-                    self.catalog_options.get(
-                        CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE)).lower()
         return merged_token
 
     def new_input_stream(self, path: str):

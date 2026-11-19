@@ -667,8 +667,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
             with open(expected_path, 'rb') as f:
                 self.assertEqual(f.read(), test_content)
 
-    def test_dlf_oss_endpoint_overrides_token_endpoint(self):
-        """Test that DLF OSS endpoint overrides the standard OSS endpoint in token."""
+    def test_server_endpoint_takes_precedence_over_dlf_endpoint(self):
+        """Use the DLF endpoint only when the server omits the standard endpoint."""
         dlf_oss_endpoint = "https://dlf-custom-endpoint.oss-cn-hangzhou.aliyuncs.com"
         catalog_options = {
             CatalogOptions.DLF_OSS_ENDPOINT.key(): dlf_oss_endpoint
@@ -691,11 +691,14 @@ class RESTTokenFileIOTest(unittest.TestCase):
             # Merge token with catalog options
             merged_token = file_io._merge_token_with_catalog_options(token)
 
-            # Verify DLF OSS endpoint overrides the standard endpoint
+            # Preserve the server endpoint even when a client DLF endpoint is configured.
             self.assertEqual(
                 merged_token[OssOptions.OSS_ENDPOINT.key()],
-                dlf_oss_endpoint,
-                "DLF OSS endpoint should override the standard OSS endpoint in token"
+                token[OssOptions.OSS_ENDPOINT.key()],
+            )
+            self.assertEqual(
+                token[OssOptions.OSS_ENDPOINT.key()],
+                file_io._merged_options(RESTToken(merged_token, 0)).get(OssOptions.OSS_ENDPOINT),
             )
             # Verify other token properties are preserved
             self.assertEqual(
@@ -703,27 +706,40 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 "test-access-key",
                 "Other token properties should be preserved"
             )
+
+            token.pop(OssOptions.OSS_ENDPOINT.key())
+            merged_token = file_io._merge_token_with_catalog_options(token)
+            self.assertEqual(dlf_oss_endpoint, merged_token[OssOptions.OSS_ENDPOINT.key()])
             self.assertEqual(
                 merged_token["fs.oss.accessKeySecret"],
                 "test-secret-key",
                 "Other token properties should be preserved"
             )
 
-    def test_ignore_vpc_validation_is_merged_into_token(self):
+    def test_server_cache_settings_take_precedence(self):
         catalog_options = Options({
-            CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key(): True,
+            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): True,
+            OssOptions.OSS_ENDPOINT.key(): "client-endpoint",
+            CatalogOptions.DLF_OSS_ENDPOINT.key(): "client-dlf-endpoint",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "client-origin",
         })
         file_io = RESTTokenFileIO(
             self.identifier, self.warehouse_path, catalog_options)
-
-        merged_token = file_io._merge_token_with_catalog_options({
-            CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key(): "false",
-        })
-
+        server_options = {
+            CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): "false",
+            OssOptions.OSS_ENDPOINT.key(): "server-cache",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
+        }
+        merged_token = file_io._merge_token_with_catalog_options(server_options)
+        self.assertEqual(server_options, merged_token)
+        options = file_io._merged_options(RESTToken(merged_token, 0))
+        self.assertFalse(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
+        self.assertEqual("server-cache", options.get(OssOptions.OSS_ENDPOINT))
         self.assertEqual(
-            "true",
-            merged_token[CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key()],
-        )
+            "server-origin", options.get(CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT))
+        server_options.pop(CatalogOptions.IO_CACHE_VPC_VALIDATED.key())
+        options = file_io._merged_options(RESTToken(server_options, 0))
+        self.assertFalse(options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED))
 
     def test_token_file_io_uses_cache_policy_factory(self):
         file_io = RESTTokenFileIO(
@@ -735,7 +751,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             {
                 CatalogOptions.IO_CACHE_POLICY.key(): "read",
                 CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): "true",
-                CatalogOptions.IO_CACHE_ENDPOINT.key(): "cache-endpoint",
+                OssOptions.OSS_ENDPOINT.key(): "cache-endpoint",
             },
             int(time.time() * 1000) + 7_200_000,
         )

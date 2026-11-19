@@ -37,6 +37,8 @@ class CachePolicyFileIO(FileIO):
 
     The routing layer sits above ``PyArrowFileIO``. Both the pyjindo and native
     Arrow OSS implementations therefore use the same policy behavior.
+    Cache uses ``fs.oss.endpoint``; bypassed operations fall back to
+    ``io-cache.origin.endpoint`` when provided.
     """
 
     META_CACHE_ENABLED_TAG = "meta"
@@ -50,14 +52,12 @@ class CachePolicyFileIO(FileIO):
         if file_io_factory is None:
             file_io_factory = FileIO.get
 
-        origin_options = cls._options_with_endpoint(
-            catalog_options, CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT)
+        origin_options = cls._origin_options(catalog_options)
         origin_file_io = file_io_factory(path, origin_options)
         if not cls._cache_enabled(catalog_options):
             return origin_file_io
 
-        cache_options = cls._options_with_endpoint(
-            catalog_options, CatalogOptions.IO_CACHE_ENDPOINT)
+        cache_options = catalog_options.copy()
         return cls(
             path,
             catalog_options,
@@ -67,9 +67,9 @@ class CachePolicyFileIO(FileIO):
         )
 
     @staticmethod
-    def _options_with_endpoint(options: Options, endpoint_option) -> Options:
+    def _origin_options(options: Options) -> Options:
         result = options.copy()
-        endpoint = options.get(endpoint_option)
+        endpoint = options.get(CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT)
         if endpoint is not None and endpoint.strip():
             result.set(OssOptions.OSS_ENDPOINT, endpoint)
         return result
@@ -80,10 +80,7 @@ class CachePolicyFileIO(FileIO):
         return (
             policy is not None
             and cls.DISABLE_CACHE_TAG not in policy
-            and (
-                options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED)
-                or options.get(CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE)
-            )
+            and options.get(CatalogOptions.IO_CACHE_VPC_VALIDATED)
         )
 
     def __init__(

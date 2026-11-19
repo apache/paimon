@@ -171,7 +171,7 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -2172,24 +2172,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testValidTokenWithIOCacheIgnoreVpcValidate() throws Exception {
+    void testValidTokenPreservesServerCacheSettings() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(IO_CACHE_IGNORE_VPC_VALIDATE.key(), "true");
+        options.put(IO_CACHE_VPC_VALIDATED.key(), "true");
+        options.put("fs.oss.endpoint", "client-endpoint");
+        options.put(DLF_OSS_ENDPOINT.key(), "client-dlf-endpoint");
         this.catalog = newRestCatalogWithDataToken(options);
         Identifier identifier =
-                Identifier.create(
-                        "test_data_token", "table_for_testing_io_cache_ignore_vpc_validate");
-        RESTToken expiredDataToken =
+                Identifier.create("test_data_token", "table_for_testing_server_cache_settings");
+        RESTToken serverDataToken =
                 new RESTToken(
-                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        ImmutableMap.of(
+                                "akId",
+                                "akId",
+                                "akSecret",
+                                UUID.randomUUID().toString(),
+                                IO_CACHE_VPC_VALIDATED.key(),
+                                "false",
+                                "fs.oss.endpoint",
+                                "server-cache"),
                         System.currentTimeMillis() + 3600_000L);
-        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        setDataTokenToRestServerForMock(identifier, serverDataToken);
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
 
-        assertEquals("true", fileDataToken.token().get(IO_CACHE_IGNORE_VPC_VALIDATE.key()));
+        assertEquals("false", fileDataToken.token().get(IO_CACHE_VPC_VALIDATED.key()));
+        assertEquals("server-cache", fileDataToken.token().get("fs.oss.endpoint"));
     }
 
     @Test

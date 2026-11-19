@@ -129,25 +129,12 @@ public class RESTCatalogOptions {
                             "Deprecated: enables only the legacy JindoCache integration in JindoFileIO. "
                                     + "This option does not control REST cache endpoint routing.");
 
-    public static final ConfigOption<Boolean> IO_CACHE_IGNORE_VPC_VALIDATE =
-            ConfigOptions.key("io-cache.ignore-vpc-validate")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to use the cache endpoint even when the REST server cannot validate VPC connectivity.");
-
     public static final ConfigOption<Boolean> IO_CACHE_VPC_VALIDATED =
             ConfigOptions.key("io-cache.vpc-validated")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Whether the REST server has validated connectivity from the source VPC to the cache endpoint.");
-
-    public static final ConfigOption<String> IO_CACHE_ENDPOINT =
-            ConfigOptions.key("io-cache.endpoint")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The cache endpoint vended by the REST server.");
 
     public static final ConfigOption<String> IO_CACHE_ORIGIN_ENDPOINT =
             ConfigOptions.key("io-cache.origin.endpoint")

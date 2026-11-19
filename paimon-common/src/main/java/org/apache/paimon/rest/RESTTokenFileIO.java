@@ -54,7 +54,7 @@ import java.util.concurrent.TimeUnit;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -264,6 +264,10 @@ public class RESTTokenFileIO implements FileIO {
 
             Options options = catalogContext.options();
             options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
+            // Connectivity validation can only come from the REST server.
+            options.set(
+                    IO_CACHE_VPC_VALIDATED,
+                    Boolean.parseBoolean(currentToken.token().get(IO_CACHE_VPC_VALIDATED.key())));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -345,15 +349,12 @@ public class RESTTokenFileIO implements FileIO {
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
         Options catalogOptions = catalogContext.options();
-        // DLF OSS endpoint should override the standard OSS endpoint.
+        // Preserve the server endpoint; use the client endpoint only when the server omits it.
         String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
-        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+        if (!newToken.containsKey("fs.oss.endpoint")
+                && dlfOssEndpoint != null
+                && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
-        }
-        if (catalogOptions.contains(IO_CACHE_IGNORE_VPC_VALIDATE)) {
-            newToken.put(
-                    IO_CACHE_IGNORE_VPC_VALIDATE.key(),
-                    String.valueOf(catalogOptions.get(IO_CACHE_IGNORE_VPC_VALIDATE)));
         }
         return ImmutableMap.copyOf(newToken);
     }

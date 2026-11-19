@@ -181,11 +181,10 @@ def _options(**overrides):
     values = {
         CatalogOptions.IO_CACHE_POLICY.key(): "meta,read,write",
         CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): True,
-        CatalogOptions.IO_CACHE_ENDPOINT.key(): "cache-endpoint",
         CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "origin-endpoint",
         CatalogOptions.IO_CACHE_WHITELIST.key(): "*",
         CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "*",
-        OssOptions.OSS_ENDPOINT.key(): "token-endpoint",
+        OssOptions.OSS_ENDPOINT.key(): "cache-endpoint",
         OssOptions.OSS_IMPL.key(): "jindo",
     }
     values.update(overrides)
@@ -193,6 +192,18 @@ def _options(**overrides):
 
 
 class CachePolicyFileIOTest(unittest.TestCase):
+
+    def test_cache_uses_standard_endpoint_and_origin_is_only_a_fallback(self):
+        factory = _RecordingFactory()
+        options = _options(**{"io-cache.endpoint": "unused-cache"})
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, options, factory)
+        self.assertIn("cache-endpoint", file_io.new_input_stream(DATA_PATH)[0])
+        self.assertIn("origin-endpoint", file_io.new_input_stream(LATEST_PATH)[0])
+        self.assertEqual("cache-endpoint", options.get(OssOptions.OSS_ENDPOINT))
+
+        options.to_map().pop(CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key())
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, options, _RecordingFactory())
+        self.assertIn("cache-endpoint", file_io.new_input_stream(LATEST_PATH)[0])
 
     def test_routes_jindo_and_native_file_io_above_concrete_implementation(self):
         for impl in ("jindo", "legacy"):
@@ -415,11 +426,11 @@ class CachePolicyFileIOTest(unittest.TestCase):
             TABLE_ROOT,
             _options(**{
                 CatalogOptions.IO_CACHE_VPC_VALIDATED.key(): False,
-                CatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE.key(): True,
+                "io-cache.ignore-vpc-validate": True,
             }),
             factory,
         )
-        self.assertIsInstance(file_io, CachePolicyFileIO)
+        self.assertNotIsInstance(file_io, CachePolicyFileIO)
 
         factory = _RecordingFactory()
         file_io = CachePolicyFileIO.create(

@@ -51,7 +51,6 @@ import java.util.concurrent.Future;
 
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
@@ -142,9 +141,9 @@ class CachePolicyFileIOTest {
                                         .hadoopOptions(DATA, "read")
                                         .get("fs.oss.endpoint"))
                         .isEqualTo("origin");
-                assertThat(options.get("fs.oss.endpoint")).isEqualTo("configured");
+                assertThat(options.get("fs.oss.endpoint")).isEqualTo("cache");
                 assertThat(loader.delegate("origin").options.keySet())
-                        .doesNotContain(IO_CACHE_ENDPOINT.key(), IO_CACHE_ORIGIN_ENDPOINT.key());
+                        .doesNotContain(IO_CACHE_ORIGIN_ENDPOINT.key());
             }
         }
     }
@@ -193,16 +192,29 @@ class CachePolicyFileIOTest {
     }
 
     @Test
-    void testMissingEndpointRetainsConfiguredEndpoint() throws Exception {
+    void testMissingOriginEndpointRetainsCacheEndpoint() throws Exception {
         Options options = options();
-        options.set(IO_CACHE_ENDPOINT, " ");
         options.remove(IO_CACHE_ORIGIN_ENDPOINT);
         try (FileIO fileIO = create(options, new RecordingLoader())) {
-            assertThat(
-                            ((HadoopOptionsProvider) fileIO)
-                                    .hadoopOptions(DATA, "read")
-                                    .get("fs.oss.endpoint"))
-                    .isEqualTo("configured");
+            HadoopOptionsProvider provider = (HadoopOptionsProvider) fileIO;
+            assertThat(provider.hadoopOptions(DATA, "write").get("fs.oss.endpoint"))
+                    .isEqualTo("cache");
+            assertThat(provider.hadoopOptions(DATA, "read").get("fs.oss.endpoint"))
+                    .isEqualTo("cache");
+        }
+    }
+
+    @Test
+    void testCacheAlwaysUsesStandardOssEndpoint() throws Exception {
+        Options options = options();
+        options.set("io-cache.endpoint", "unused-cache");
+        try (FileIO fileIO = create(options, new RecordingLoader())) {
+            HadoopOptionsProvider provider = (HadoopOptionsProvider) fileIO;
+            assertThat(provider.hadoopOptions(DATA, "read").get("fs.oss.endpoint"))
+                    .isEqualTo("cache");
+            assertThat(provider.hadoopOptions(MUTABLE, "read").get("fs.oss.endpoint"))
+                    .isEqualTo("origin");
+            assertThat(options.get("fs.oss.endpoint")).isEqualTo("cache");
         }
     }
 
@@ -307,8 +319,7 @@ class CachePolicyFileIOTest {
         options.set(IO_CACHE_POLICY, "meta,read,write");
         options.set(IO_CACHE_VPC_VALIDATED, true);
         options.set(IO_CACHE_ORIGIN_ENDPOINT, "origin");
-        options.set(IO_CACHE_ENDPOINT, "cache");
-        options.set("fs.oss.endpoint", "configured");
+        options.set("fs.oss.endpoint", "cache");
         options.set("fs.oss.securityToken", "test-token");
         return options;
     }

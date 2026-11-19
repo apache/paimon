@@ -24,7 +24,6 @@ import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
@@ -57,7 +56,6 @@ class CachePolicyTest {
     void testDisabledPolicies() {
         for (String tags : new String[] {null, "none", "none,read"}) {
             Options options = options(tags);
-            options.set(IO_CACHE_IGNORE_VPC_VALIDATE, true);
             CachePolicy policy = new CachePolicy(options);
             assertThat(policy.enabled()).isFalse();
             assertThat(policy.shouldCache(DATA, "read")).isFalse();
@@ -65,15 +63,12 @@ class CachePolicyTest {
     }
 
     @Test
-    void testVpcValidationAndOverride() {
+    void testServerVpcValidationIsRequired() {
         Options options = options("read");
         options.remove(IO_CACHE_VPC_VALIDATED);
         assertThat(new CachePolicy(options).enabled()).isFalse();
         options.set(IO_CACHE_VPC_VALIDATED, false);
         assertThat(new CachePolicy(options).enabled()).isFalse();
-        options.set(IO_CACHE_IGNORE_VPC_VALIDATE, true);
-        assertThat(new CachePolicy(options).shouldCache(DATA, "read")).isTrue();
-        options.set(IO_CACHE_IGNORE_VPC_VALIDATE, false);
         options.set(IO_CACHE_VPC_VALIDATED, true);
         assertThat(new CachePolicy(options).shouldCache(DATA, "read")).isTrue();
     }

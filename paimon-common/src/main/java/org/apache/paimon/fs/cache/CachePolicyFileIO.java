@@ -30,7 +30,6 @@ import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.StorageType;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
-import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.StringUtils;
@@ -47,12 +46,16 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 
-/** Routes operations between origin and cache FileIOs without depending on a storage backend. */
+/**
+ * Routes operations between origin and cache FileIOs without depending on a storage backend.
+ *
+ * <p>The cache uses {@code fs.oss.endpoint}. Operations bypassing cache use {@code
+ * io-cache.origin.endpoint} when provided.
+ */
 public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
 
     private static final long serialVersionUID = 1L;
@@ -84,20 +87,23 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
     /** Creates the origin FileIO, wrapping it only when the REST cache policy is enabled. */
     public static FileIO create(Path path, CatalogContext context) throws IOException {
         CachePolicy policy = new CachePolicy(context.options());
-        CatalogContext originContext = withEndpoint(context, IO_CACHE_ORIGIN_ENDPOINT);
+        CatalogContext originContext =
+                withEndpoint(context, context.options().get(IO_CACHE_ORIGIN_ENDPOINT));
         FileIO origin = FileIO.get(path, originContext);
         if (!policy.enabled()) {
             return origin;
         }
         return new CachePolicyFileIO(
-                path, policy, origin, originContext, withEndpoint(context, IO_CACHE_ENDPOINT));
+                path,
+                policy,
+                origin,
+                originContext,
+                withEndpoint(context, context.options().get("fs.oss.endpoint")));
     }
 
-    private static CatalogContext withEndpoint(
-            CatalogContext context, ConfigOption<String> endpointOption) {
+    private static CatalogContext withEndpoint(CatalogContext context, String endpoint) {
         Options options = new Options(context.options().toMap());
         Configuration hadoopConf = new Configuration(context.hadoopConf());
-        String endpoint = options.get(endpointOption);
         if (!StringUtils.isNullOrWhitespaceOnly(endpoint)) {
             options.set("fs.oss.endpoint", endpoint);
             hadoopConf.set("fs.oss.endpoint", endpoint);

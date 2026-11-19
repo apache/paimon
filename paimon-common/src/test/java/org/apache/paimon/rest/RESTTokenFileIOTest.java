@@ -32,6 +32,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -41,7 +42,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
@@ -59,6 +60,45 @@ import static org.mockito.Mockito.when;
 class RESTTokenFileIOTest {
 
     @Test
+    void testServerCacheSettingsCannotBeOverriddenByCatalogOptions() throws IOException {
+        for (String validation : new String[] {null, "false"}) {
+            Options options = new Options();
+            options.set(IO_CACHE_VPC_VALIDATED, true);
+            options.set("io-cache.ignore-vpc-validate", "true");
+            options.set("fs.oss.endpoint", "client-endpoint");
+            options.set(DLF_OSS_ENDPOINT, "client-dlf-endpoint");
+            options.set(IO_CACHE_ORIGIN_ENDPOINT, "client-origin");
+            Map<String, String> tokenOptions = new HashMap<>();
+            tokenOptions.put("test.token", UUID.randomUUID().toString());
+            tokenOptions.put(IO_CACHE_POLICY.key(), "read");
+            tokenOptions.put("fs.oss.endpoint", "server-cache");
+            tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "server-origin");
+            if (validation != null) {
+                tokenOptions.put(IO_CACHE_VPC_VALIDATED.key(), validation);
+            }
+            RESTApi api = mock(RESTApi.class);
+            Identifier identifier = Identifier.create("db", "table");
+            when(api.loadTableToken(identifier))
+                    .thenReturn(new GetTableTokenResponse(tokenOptions, Long.MAX_VALUE));
+            FileIOLoader loader = mock(FileIOLoader.class);
+            when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+            RESTTokenFileIO rest =
+                    new RESTTokenFileIO(
+                            CatalogContext.create(options, loader, null),
+                            api,
+                            identifier,
+                            new Path("oss://bucket/table"));
+            FileIO delegate = rest.fileIO();
+            assertThat(delegate).isNotInstanceOf(CachePolicyFileIO.class);
+            ArgumentCaptor<CatalogContext> context = ArgumentCaptor.forClass(CatalogContext.class);
+            verify(delegate).configure(context.capture());
+            assertThat(context.getValue().options().get("fs.oss.endpoint"))
+                    .isEqualTo("server-origin");
+            assertThat(rest.validToken().token().get("fs.oss.endpoint")).isEqualTo("server-cache");
+        }
+    }
+
+    @Test
     void testTokenRefreshRebuildsPolicyWrapper() throws IOException {
         Path root = new Path("oss://bucket/table");
         Path data = new Path(root, "bucket-0/data.orc");
@@ -69,7 +109,7 @@ class RESTTokenFileIOTest {
         Map<String, String> tokenOptions = new HashMap<>();
         tokenOptions.put(IO_CACHE_POLICY.key(), "read");
         tokenOptions.put(IO_CACHE_VPC_VALIDATED.key(), "true");
-        tokenOptions.put(IO_CACHE_ENDPOINT.key(), "cache");
+        tokenOptions.put("fs.oss.endpoint", "cache");
         tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
         Map<String, String> disabledOptions = new HashMap<>(tokenOptions);
         disabledOptions.put(IO_CACHE_POLICY.key(), "none");
@@ -112,7 +152,7 @@ class RESTTokenFileIOTest {
         tokenOptions.put("test.token", UUID.randomUUID().toString());
         tokenOptions.put(IO_CACHE_POLICY.key(), "read");
         tokenOptions.put(IO_CACHE_VPC_VALIDATED.key(), "true");
-        tokenOptions.put(IO_CACHE_ENDPOINT.key(), "cache");
+        tokenOptions.put("fs.oss.endpoint", "cache");
         tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
         tokenOptions.put(IO_CACHE_WHITELIST_PATH.key(), "table-two");
         when(api.loadTableToken(any()))
@@ -160,12 +200,12 @@ class RESTTokenFileIOTest {
         tokenOptions.put("fs.oss.securityToken", UUID.randomUUID().toString());
         tokenOptions.put(IO_CACHE_POLICY.key(), "read");
         tokenOptions.put(IO_CACHE_VPC_VALIDATED.key(), "true");
-        tokenOptions.put(IO_CACHE_ENDPOINT.key(), "cache");
+        tokenOptions.put("fs.oss.endpoint", "cache");
         tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
         Map<String, String> disabledOptions = new HashMap<>(tokenOptions);
         disabledOptions.put(IO_CACHE_POLICY.key(), "none");
         Map<String, String> otherEndpointOptions = new HashMap<>(tokenOptions);
-        otherEndpointOptions.put(IO_CACHE_ENDPOINT.key(), "other-cache");
+        otherEndpointOptions.put("fs.oss.endpoint", "other-cache");
         RESTApi api = mock(RESTApi.class);
         Identifier identifier = Identifier.create("db", "table");
         when(api.loadTableToken(identifier))

@@ -31,7 +31,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
@@ -115,7 +114,7 @@ class CachePolicyJindoFileIOTest {
                         .isEqualTo("hadoop-token");
             }
             assertThat(hadoopConf.get("fs.oss.endpoint")).isEqualTo("hadoop-configured");
-            assertThat(options.get("fs.oss.endpoint")).isEqualTo("configured");
+            assertThat(options.get("fs.oss.endpoint")).isEqualTo("cache");
         }
     }
 
@@ -149,9 +148,8 @@ class CachePolicyJindoFileIOTest {
         Options options = new Options();
         options.set(IO_CACHE_POLICY, "read");
         options.set(IO_CACHE_VPC_VALIDATED, true);
-        options.set(IO_CACHE_ENDPOINT, "cache");
         options.set(IO_CACHE_ORIGIN_ENDPOINT, "origin");
-        options.set("fs.oss.endpoint", "configured");
+        options.set("fs.oss.endpoint", "cache");
         options.set("fs.oss.accessKeyId", "test-ak");
         options.set("fs.oss.accessKeySecret", "test-sk");
         options.set("fs.oss.securityToken", "test-token");
