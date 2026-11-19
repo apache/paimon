@@ -206,8 +206,9 @@ class TableRead:
                 serially when a limit may discard rows, so discarded payloads
                 are not fetched by speculative split workers.
             blob_parallelism: maximum concurrent blob range reads within each
-                split reader. ``None`` or ``1`` (default) reads blobs serially;
-                ``>= 2`` enables concurrent ranged reads. On the
+                split reader. ``None`` (default) allows up to 16 concurrent reads;
+                ``1`` reads blobs serially;
+                ``>= 2`` enables concurrent ranged reads. On the Python
                 parallel path, peak blob threads (``parallelism`` *
                 ``blob_parallelism``) are capped at
                 ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
