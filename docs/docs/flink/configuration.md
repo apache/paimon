@@ -48,7 +48,7 @@ memory to let Flink allocate a share of the slot's managed memory to the Paimon 
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `sink.use-managed-memory-allocator` | `false` | Use Flink managed memory for the writer's merge tree buffers. For append-only tables it only takes effect when `write-buffer-for-append` is also `true`. |
+| `sink.use-managed-memory-allocator` | `false` | Use Flink managed memory for the writer's merge tree buffers. For append-only tables, rows use it only when `write-buffer-for-append` is also `true`; otherwise it is declared but unused. |
 | `sink.managed.writer-buffer-memory` | `256 MiB` | Weight used by Flink to allocate managed memory to the writer. The actual allocation depends on the slot's managed memory and the operators sharing it. |
 
 The writer-buffer setting is a **weight**, not a fixed allocation of that many bytes.
