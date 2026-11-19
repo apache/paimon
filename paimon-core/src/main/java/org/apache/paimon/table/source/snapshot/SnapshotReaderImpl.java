@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -591,8 +592,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         dataEntries,
                         file ->
                                 tableSchema.primaryKeys().isEmpty()
-                                        || Objects.equals(
-                                                beforeVectors.get(file), afterVectors.get(file)));
+                                        || sameDeletionVector(
+                                                part,
+                                                bucket,
+                                                beforeVectors.get(file),
+                                                afterVectors.get(file)));
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -772,6 +776,29 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return count;
+    }
+
+    /**
+     * A changed deletion vector rewrites every vector of its bucket into a new index file, so
+     * different descriptors may still hold the same bitmap.
+     */
+    private boolean sameDeletionVector(
+            BinaryRow partition,
+            int bucket,
+            @Nullable DeletionFile before,
+            @Nullable DeletionFile after) {
+        if (Objects.equals(before, after)) {
+            return true;
+        }
+        if (before == null
+                || after == null
+                || (before.cardinality() != null
+                        && after.cardinality() != null
+                        && !before.cardinality().equals(after.cardinality()))) {
+            return false;
+        }
+        DeletionVectorsIndexFile dvIndex = indexFileHandler.dvIndex(partition, bucket);
+        return dvIndex.readDeletionVector(before).equals(dvIndex.readDeletionVector(after));
     }
 
     /**

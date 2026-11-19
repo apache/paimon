@@ -37,6 +37,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,6 +107,31 @@ class IncrementalDeletionVectorDiffTest extends TableTestBase {
         assertThat(split.beforeFiles()).isEmpty();
         assertThat(split.afterFiles()).hasSize(1);
         assertThat(readDiff(diff)).containsExactly(GenericRow.of(3, 30));
+    }
+
+    @Test
+    void testUnchangedBitmapInRewrittenIndexStillPrunesCommonFile() throws Exception {
+        FileStoreTable table =
+                createTable(true)
+                        .copy(Collections.singletonMap("compaction.small-file-ratio", "0"));
+        commit(table, 0, GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        commit(table, 1, GenericRow.of(10, 100), GenericRow.of(11, 110), GenericRow.of(12, 120));
+        commit(
+                table,
+                2,
+                GenericRow.ofKind(RowKind.DELETE, 1, 10),
+                GenericRow.ofKind(RowKind.DELETE, 10, 100));
+        long before = table.snapshotManager().latestSnapshotId();
+        // Rewrites the index file holding both vectors, but only the first bitmap changes.
+        commit(table, 3, GenericRow.ofKind(RowKind.DELETE, 2, 20));
+
+        FileStoreTable diff = diffFrom(table, before);
+        TableScan.Plan plan = diff.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        IncrementalSplit split = (IncrementalSplit) plan.splits().get(0);
+        assertThat(split.beforeFiles()).hasSize(1);
+        assertThat(split.afterFiles()).hasSize(1);
+        assertThat(readDiff(diff)).containsExactly(GenericRow.ofKind(RowKind.DELETE, 2, 20));
     }
 
     private FileStoreTable createTable(boolean deletionVectors) throws Exception {
