@@ -55,7 +55,7 @@ payloads, and error responses are defined in the OpenAPI specification.
 | Branches and tags | Manage named histories and retained snapshots. | Table-scoped `branches` and `tags`. |
 | Consumers | List and reset streaming consumer progress. | Table-scoped `consumers`. |
 | Views and functions | Manage reusable SQL and function definitions. | Database- and catalog-scoped `views` and `functions`. |
-| Prediction jobs | Submit, list, inspect, and cancel asynchronous predictions. | Catalog-scoped `predictions`; the source table is part of the submission. |
+| Prediction jobs | Submit, list, get, and cancel asynchronous predictions. | Catalog-scoped `predictions`; the source table is part of the submission. |
 
 In this table, **table-scoped** means
 `/v1/{prefix}/databases/{database}/tables/{table}`. Catalog-wide listing and detail-listing
