@@ -253,7 +253,7 @@ def merge_into(
     # Refuse Partial Update keytime sources before Native/Python selection so
     # create_native_merge_into returning None cannot silently fall through to
     # an incorrect Python MERGE read of sequence-group aggregators.
-    from pypaimon.execution.native.keytime_merge_guard import (
+    from pypaimon.common.keytime_merge_guard import (
         refuse_partial_update_keytime_merge_source,
     )
     from pypaimon.write.merge_inputs import _is_self_merge, _normalize_on

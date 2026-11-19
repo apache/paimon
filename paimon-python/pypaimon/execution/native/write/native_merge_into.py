@@ -20,10 +20,10 @@
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.execution.native.keytime_capability import (
+from pypaimon.common.keytime_capability import (
     table_has_string_keytime,
 )
-from pypaimon.execution.native.keytime_merge_guard import (
+from pypaimon.common.keytime_merge_guard import (
     refuse_partial_update_keytime_merge_source,
 )
 from pypaimon.execution.native.table import _native_variant_write_supported

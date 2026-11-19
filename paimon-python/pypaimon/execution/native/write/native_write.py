@@ -35,7 +35,7 @@ from pypaimon.write.row_utils import (
 
 # Native Writer reduces same-batch PK maps with Rust UTF-8 ``&str`` order.
 # Refuse Native when an effective STRING keytime aggregator is present.
-from pypaimon.execution.native.keytime_capability import (
+from pypaimon.common.keytime_capability import (
     native_write_refuses_string_keytime as _native_write_refuses_merge_map_keytime,
 )
 

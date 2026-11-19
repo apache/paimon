@@ -169,6 +169,16 @@ def native_write_refuses_string_keytime(table) -> bool:
     return table_has_string_keytime(table)
 
 
+def native_keytime_timestamp_rejected(error) -> bool:
+    """True when this Native build cannot merge a non-STRING keytime value.
+
+    The failure is raised while reading batches, after Native setup succeeds.
+    Callers fall back to the Python reader, which already accepts these types.
+    """
+    text = str(error)
+    return 'merge_map_with_keytime' in text and 'requires STRING' in text
+
+
 def partial_update_keytime_unsupported_message():
     return (
         "merge_map_with_keytime with merge-engine 'partial-update' is not "

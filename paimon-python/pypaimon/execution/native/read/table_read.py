@@ -27,8 +27,8 @@ from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
-from pypaimon.execution.native import keytime_capability as _keytime_capability
-from pypaimon.execution.native.keytime_capability import (
+from pypaimon.common import keytime_capability as _keytime_capability
+from pypaimon.common.keytime_capability import (
     native_string_keytime_read_supported as _native_merge_map_keytime_timestamp_supported,
     partial_update_keytime_unsupported_message as _partial_update_keytime_unsupported_message,
 )

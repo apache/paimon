@@ -22,7 +22,7 @@ Native writer, read a source, or change effective-aggregator parsing.
 """
 
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.execution.native.keytime_capability import (
+from pypaimon.common.keytime_capability import (
     partial_update_keytime_unsupported_message,
     table_uses_merge_map_keytime,
 )

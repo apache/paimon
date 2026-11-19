@@ -966,7 +966,7 @@ def test_string_keytime_merge_query_auth_permission_denial_stops_merge(tmp_path)
 def test_keytime_guard_parses_aggregators_only_for_partial_update():
     """Non-table and non-partial-update sources skip keytime field parsing."""
     from pypaimon.common.options.core_options import MergeEngine
-    from pypaimon.execution.native import keytime_merge_guard as guard
+    from pypaimon.common import keytime_merge_guard as guard
 
     with patch.object(guard, 'table_uses_merge_map_keytime') as parse:
         assert guard.refuse_partial_update_keytime_merge_source(object()) is None
@@ -994,7 +994,7 @@ def test_keytime_guard_parses_aggregators_only_for_partial_update():
 
 def test_public_self_merge_skips_keytime_guard_and_keeps_native_gate(tmp_path):
     """Self-merge uses merge_inputs identity and still runs Native target checks."""
-    from pypaimon.execution.native.keytime_merge_guard import (
+    from pypaimon.common.keytime_merge_guard import (
         refuse_partial_update_keytime_merge_source,
     )
     from pypaimon.execution.native.write import native_merge_into as merge_mod
@@ -1021,7 +1021,7 @@ def test_public_self_merge_skips_keytime_guard_and_keeps_native_gate(tmp_path):
         return create_python_merge_into_operation(*args, **kwargs)
 
     with patch(
-            'pypaimon.execution.native.keytime_merge_guard.refuse_partial_update_keytime_merge_source',
+            'pypaimon.common.keytime_merge_guard.refuse_partial_update_keytime_merge_source',
             side_effect=spy_guard
     ), patch(
             'pypaimon.write.backend_dispatch.prepare_native_merge_into',
