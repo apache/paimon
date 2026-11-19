@@ -21,7 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
@@ -160,7 +160,7 @@ public class DataEvolutionVectorScan implements VectorScan {
             List<IndexFileMeta> files = entry.getValue();
             // An all-null range still supplies coverage, but has no vectors to search or score.
             if (files.stream().allMatch(file -> file.rowCount() == 0)
-                    && files.stream().anyMatch(CentroidVectorIndexUtils::isRoutingModel)) {
+                    && files.stream().anyMatch(CentroidIndexMeta::isRoutingModel)) {
                 continue;
             }
             String type = entry.getKey().getRight();

@@ -48,29 +48,33 @@ public class NativeVectorGlobalIndexerFactoryTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann"})
-    void centroidTypeSelectsItsOwnOptionsAndLocalAlgorithm(String algorithm) {
-        String type = algorithm + "-centroid";
+    void shardingSelectsTheLayoutAndKeepsTheLocalAlgorithm(String algorithm) {
         Options options = new Options();
-        options.setString(algorithm + ".dimension", "12");
-        options.setString(type + ".dimension", "17");
-        options.setString(type + ".metric", "cosine");
+        options.setString(algorithm + ".dimension", "17");
+        options.setString(algorithm + ".metric", "cosine");
         List<DataField> fields =
                 Collections.singletonList(new DataField(0, "v", new ArrayType(new FloatType())));
-        NativeCentroidVectorGlobalIndexer indexer =
-                (NativeCentroidVectorGlobalIndexer) GlobalIndexer.create(type, fields, options);
-        assertThat(indexer.options)
-                .containsEntry("index.type", algorithm.replace('-', '_'))
-                .containsEntry("dimension", "17");
-        assertThat(indexer.metric()).isEqualTo("cosine");
-        assertThat(GlobalIndexerFactoryUtils.centroidFactory(type)).isNotNull();
-        assertThat(GlobalIndexerFactoryUtils.centroidFactory(algorithm)).isNull();
         assertThat(GlobalIndexer.create(algorithm, fields, options))
                 .isExactlyInstanceOf(NativeVectorGlobalIndexer.class);
+        options.setString(algorithm + ".sharding", "centroid");
+        NativeCentroidVectorGlobalIndexer indexer =
+                (NativeCentroidVectorGlobalIndexer)
+                        GlobalIndexer.create(algorithm, fields, options);
+        assertThat(indexer.options)
+                .containsEntry("index.type", algorithm.replace('-', '_'))
+                .containsEntry("dimension", "17")
+                .doesNotContainKey("sharding");
+        assertThat(indexer.metric()).isEqualTo("cosine");
         assertThatThrownBy(() -> indexer.createWriter(null))
                 .isInstanceOf(UnsupportedOperationException.class);
-        options.setString(algorithm + ".shard", "centroid-based");
+        options.setString(algorithm + ".sharding", "range");
+        assertThat(GlobalIndexer.create(algorithm, fields, options))
+                .isExactlyInstanceOf(NativeVectorGlobalIndexer.class);
+        options.setString(algorithm + ".sharding", "unknown");
         assertThatThrownBy(() -> GlobalIndexer.create(algorithm, fields, options))
-                .hasMessageContaining("index type");
+                .hasMessageContaining(algorithm + ".sharding");
+        assertThatThrownBy(() -> GlobalIndexerFactoryUtils.load(algorithm + "-centroid"))
+                .hasMessageContaining("Can't find global index");
     }
 
     @Test
@@ -79,19 +83,20 @@ public class NativeVectorGlobalIndexerFactoryTest {
         for (int i = 0; i < values.length; i++) {
             values[i] = i % 47;
         }
-        String key = "diskann-centroid.ivf.train.max-points-per-centroid";
+        String key = "diskann.ivf.train.max-points-per-centroid";
         for (boolean dynamic : new boolean[] {false, true}) {
             Options options = new Options(Collections.singletonMap(key, "4"));
             if (dynamic) {
                 options.setString(key, "2");
             }
-            options.setString("diskann-centroid.nlist", "4");
-            options.setString("diskann-centroid.dimension", "2");
-            options.setString("diskann-centroid.metric", "l2");
+            options.setString("diskann.sharding", "centroid");
+            options.setString("diskann.centroid.nlist", "4");
+            options.setString("diskann.dimension", "2");
+            options.setString("diskann.metric", "l2");
             NativeCentroidVectorGlobalIndexer indexer =
                     (NativeCentroidVectorGlobalIndexer)
                             GlobalIndexer.create(
-                                    "diskann-centroid",
+                                    "diskann",
                                     Collections.singletonList(
                                             new DataField(
                                                     0, "vec", new ArrayType(new FloatType()))),

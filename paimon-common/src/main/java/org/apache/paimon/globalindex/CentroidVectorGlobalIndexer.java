@@ -18,31 +18,36 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Iterator;
-import java.util.List;
 
 /** A vector indexer that can train and restore a router for independently built shards. */
 public interface CentroidVectorGlobalIndexer extends VectorGlobalIndexer {
 
-    /** Bind search and exact scoring to the metric of an existing index. */
-    default VectorGlobalIndexer forRead(
-            GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
-        return this;
+    /** Read the index-level build option shared by native vector indexes. */
+    static boolean centroidSharding(String indexType, Options options) {
+        String key = indexType + ".sharding";
+        String layout = options.getString(key, "range");
+        if ("centroid".equals(layout)) {
+            return true;
+        }
+        if ("range".equals(layout)) {
+            return false;
+        }
+        throw new IllegalArgumentException(key + " must be range or centroid, got " + layout);
     }
 
-    /** Persist the trained router and return the model entry with implementation-owned metadata. */
+    /** Persist the trained router and return the model entry with its underlying index metadata. */
     ResultEntry writeRoutingModel(
-            GlobalIndexFileWriter io, String name, byte[] payload, String modelId, int nlist)
+            GlobalIndexFileWriter io, String name, byte[] payload, String modelId)
             throws IOException;
 
     /** Open an independently trained local index for the assigned centroid. */
-    GlobalIndexSingleColumnWriter createCentroidWriter(
-            GlobalIndexFileWriter fileWriter, int centroid, String modelId);
+    GlobalIndexSingleColumnWriter createCentroidWriter(GlobalIndexFileWriter fileWriter);
 
     /** Return non-null input ordinals in the order required for training. */
     long[] planGlobalTrainingSample(long vectorCount);

@@ -22,7 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.errors.ErrorMessages;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -61,7 +61,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -647,18 +646,12 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private Optional<RuntimeException> checkCentroidSourceChanges(
             Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
         Map<Long, List<IndexManifestEntry>> byBaseline = new HashMap<>();
-        // Job-provided factories belong to the current context classloader.
-        Map<String, Predicate<byte[]>> routerPredicates = new HashMap<>();
         long firstBaseline = latestSnapshot.id();
         for (IndexManifestEntry index : indexEntries) {
             IndexFileMeta file = index.indexFile();
             if (index.kind() == FileKind.ADD
                     && file.globalIndexMeta() != null
-                    && routerPredicates
-                            .computeIfAbsent(
-                                    file.indexType(),
-                                    CentroidVectorIndexUtils::routingModelPredicate)
-                            .test(file.globalIndexMeta().indexMeta())) {
+                    && CentroidIndexMeta.isRoutingModel(file.globalIndexMeta().indexMeta())) {
                 long baseline =
                         DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile())
                                 .scanSnapshotId();

@@ -24,6 +24,8 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CentroidIndexFile;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -96,7 +98,7 @@ class CentroidVectorGlobalIndexTest {
         // Explicit expected size still controls automatic nlist on a sampled build.
         options.put("expected-vector-count", "16000000");
         assertThat(indexer.planGlobalTrainingSample(2000000)).hasSize(4096 * 64);
-        options.put("nlist", "2048");
+        options.put("centroid.nlist", "2048");
         assertThat(indexer.planGlobalTrainingSample(1000000)).hasSize(2048 * 64);
     }
 
@@ -147,7 +149,7 @@ class CentroidVectorGlobalIndexTest {
         Map<String, String> options = new HashMap<>();
         options.put("index.type", type.replace('-', '_'));
         options.put("dimension", "2");
-        options.put("nlist", "4");
+        options.put("centroid.nlist", "4");
         options.put("metric", "l2");
         if (type.equals("diskann") || type.equals("ivf-pq")) {
             options.put("pq.m", "1");
@@ -224,11 +226,11 @@ class CentroidVectorGlobalIndexTest {
         options.put("dimension", "2");
         options.put("index.type", type.replace('-', '_'));
         options.put("metric", "l2");
-        options.put("nlist", "4");
+        options.put("centroid.nlist", "4");
         if (diskann) {
             options.put("ivf.train.max-points-per-centroid", "32");
         } else {
-            options.put("centroid.local-nlist", "8");
+            options.put("nlist", "8");
         }
         if ("ivf-pq".equals(type) || diskann) {
             options.put("pq.m", "1");
@@ -262,12 +264,15 @@ class CentroidVectorGlobalIndexTest {
                 }
                 Path modelPath = new Path(directory, name);
                 metas.add(
-                        new GlobalIndexIOMeta(
+                        new CentroidIndexFile(
                                 modelPath,
                                 io.getFileSize(modelPath),
                                 0,
-                                VectorIndexShardMeta.routing(id, model.nlist(), "l2").serialize()));
-                GlobalIndexSingleColumnWriter empty = indexer.createCentroidWriter(files, 0, id);
+                                new VectorIndexMeta(null, "l2").serialize(),
+                                id,
+                                true,
+                                model.nlist()));
+                GlobalIndexSingleColumnWriter empty = indexer.createCentroidWriter(files);
                 try {
                     empty.write(null, 0);
                     assertThat(empty)
@@ -275,14 +280,13 @@ class CentroidVectorGlobalIndexTest {
                             .containsOnlyNulls();
                     ResultEntry result = empty.finish().get(0);
                     Path path = new Path(directory, result.fileName());
-                    emptyMeta = new GlobalIndexIOMeta(path, io.getFileSize(path), 0, result.meta());
+                    emptyMeta = toIOMeta(io, directory, CentroidIndexMeta.shard(result, id, 0));
                     assertThat(io.getFileSize(path)).isEqualTo(8);
                 } finally {
                     ((Closeable) empty).close();
                 }
                 for (int c = 0; c < model.nlist(); c++) {
-                    GlobalIndexSingleColumnWriter writer =
-                            indexer.createCentroidWriter(files, c, id);
+                    GlobalIndexSingleColumnWriter writer = indexer.createCentroidWriter(files);
                     try {
                         assertThatThrownBy(() -> writer.write(vectors[0], -1L))
                                 .isInstanceOf(IllegalArgumentException.class);
@@ -295,11 +299,6 @@ class CentroidVectorGlobalIndexTest {
                         ResultEntry result = writer.finish().get(0);
                         Path path = new Path(directory, result.fileName());
                         if (result.rowCount() > 0) {
-                            VectorIndexShardMeta descriptor =
-                                    VectorIndexShardMeta.deserialize(result.meta());
-                            assertThat(descriptor.centroid()).isEqualTo(c);
-                            assertThat(descriptor.payloadMeta())
-                                    .isEqualTo(new VectorIndexMeta().serialize());
                             try (SeekableInputStream in = io.newInputStream(path);
                                     VectorIndexReader local =
                                             new VectorIndexReader(
@@ -312,12 +311,7 @@ class CentroidVectorGlobalIndexTest {
                                 }
                             }
                         }
-                        metas.add(
-                                new GlobalIndexIOMeta(
-                                        path,
-                                        io.getFileSize(path),
-                                        result.rowCount(),
-                                        result.meta()));
+                        metas.add(toIOMeta(io, directory, CentroidIndexMeta.shard(result, id, c)));
                     } finally {
                         ((Closeable) writer).close();
                     }
@@ -329,11 +323,8 @@ class CentroidVectorGlobalIndexTest {
         List<GlobalIndexIOMeta> legacy = new ArrayList<>(metas);
         legacy.set(
                 0,
-                new GlobalIndexIOMeta(
-                        router.filePath(),
-                        router.fileSize(),
-                        0,
-                        VectorIndexShardMeta.routing("test-model", 4, null).serialize()));
+                new CentroidIndexFile(
+                        router.filePath(), router.fileSize(), 0, null, "test-model", true, 4));
         Map<String, String> otherMetric = new HashMap<>(options);
         otherMetric.put("metric", "cosine");
         NativeCentroidVectorGlobalIndexer fromTable =
@@ -426,9 +417,7 @@ class CentroidVectorGlobalIndexTest {
             assertThat(one.results().contains(BASE)).isTrue();
             assertThat(opened).hasSize(2); // routing model and the selected centroid only
             for (GlobalIndexIOMeta file : metas.subList(1, metas.size())) {
-                boolean selected =
-                        VectorIndexShardMeta.deserialize(file.metadata()).centroid()
-                                == centroidByRow[0];
+                boolean selected = ((CentroidIndexFile) file).centroid() == centroidByRow[0];
                 assertThat(opened.containsKey(file.filePath())).isEqualTo(selected);
             }
             opened.clear();
@@ -557,23 +546,20 @@ class CentroidVectorGlobalIndexTest {
         if (!"current".equals(descriptors)) {
             for (int i = 0; i < metas.size(); i++) {
                 GlobalIndexIOMeta file = metas.get(i);
-                VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
+                CentroidIndexFile meta = (CentroidIndexFile) file;
                 if ("mixed".equals(descriptors) && i % 2 == 0) {
                     continue;
                 }
                 metas.set(
                         i,
-                        new GlobalIndexIOMeta(
+                        new CentroidIndexFile(
                                 file.filePath(),
                                 file.fileSize(),
                                 file.rowCount(),
-                                meta.routingModel()
-                                        ? VectorIndexShardMeta.routing(
-                                                        meta.modelId(), meta.nlist(), null)
-                                                .serialize()
-                                        : VectorIndexShardMeta.centroid(
-                                                        meta.modelId(), meta.centroid())
-                                                .wrap(meta.payloadMeta())));
+                                null,
+                                meta.modelId(),
+                                meta.routingModel(),
+                                meta.routingModel() ? meta.nlist() : meta.centroid()));
             }
         }
         Map<Path, Integer> opened = new ConcurrentHashMap<>();
@@ -595,7 +581,7 @@ class CentroidVectorGlobalIndexTest {
                         }
                     };
                 };
-        indexer = indexer.forRead(input, metas);
+        NativeVectorGlobalIndexer readerIndexer = indexer.forRead(input, metas);
         if ("legacy".equals(descriptors)) {
             assertThat(opened).containsOnlyKeys(metas.get(0).filePath());
         } else {
@@ -615,7 +601,7 @@ class CentroidVectorGlobalIndexTest {
             VectorSearch far = new VectorSearch(landmarks[63], k, "v");
             ScoredGlobalIndexResult joint;
             try (GlobalIndexReader reader =
-                    indexer.createReader(input, metas, 32768, null, executor)) {
+                    readerIndexer.createReader(input, metas, 32768, null, executor)) {
                 joint = reader.visitVectorSearch(near).get(30, TimeUnit.SECONDS).get();
                 assertThat(opened)
                         .hasSize(5)
@@ -630,7 +616,7 @@ class CentroidVectorGlobalIndexTest {
             }
             opened.clear();
             try (GlobalIndexReader reader =
-                    indexer.createReader(input, metas, 32768, null, executor)) {
+                    readerIndexer.createReader(input, metas, 32768, null, executor)) {
                 ScoredGlobalIndexResult independent =
                         reader.visitVectorSearch(far).get(30, TimeUnit.SECONDS).get();
                 assertThat(opened)
@@ -676,7 +662,7 @@ class CentroidVectorGlobalIndexTest {
                     };
             single.add(0);
             try (GlobalIndexReader reader =
-                    indexer.createReader(input, metas, 32768, null, executor)) {
+                    readerIndexer.createReader(input, metas, 32768, null, executor)) {
                 long before = worker.getTaskCount();
                 List<Optional<ScoredGlobalIndexResult>> hits =
                         reader.visitBatchVectorSearch(
@@ -704,7 +690,7 @@ class CentroidVectorGlobalIndexTest {
             // routing starts at eight shards and widens until it finds the only indexed match.
             single.addRange(new Range(32768, 65535));
             try (GlobalIndexReader reader =
-                    indexer.createReader(input, metas, 65536, null, executor)) {
+                    readerIndexer.createReader(input, metas, 65536, null, executor)) {
                 long before = worker.getTaskCount();
                 List<Optional<ScoredGlobalIndexResult>> hits =
                         reader.visitBatchVectorSearch(
@@ -749,7 +735,7 @@ class CentroidVectorGlobalIndexTest {
                             new VectorSearch(landmarks[59], 101, "v"))) {
                 opened.clear();
                 try (GlobalIndexReader reader =
-                        indexer.createReader(input, metas, 32768, null, executor)) {
+                        readerIndexer.createReader(input, metas, 32768, null, executor)) {
                     assertThat(
                                     reader.visitVectorSearch(other)
                                             .get()
@@ -773,8 +759,8 @@ class CentroidVectorGlobalIndexTest {
             options.put("pq.m", "2");
         }
         options.put("metric", "l2");
-        options.put("nlist", "64");
-        options.put("centroid.local-nlist", localLists == 0 ? "auto" : String.valueOf(localLists));
+        options.put("centroid.nlist", "64");
+        options.put("nlist", localLists == 0 ? "auto" : String.valueOf(localLists));
         return new NativeCentroidVectorGlobalIndexer(
                 new ArrayType(new FloatType()), options, type, 1.0);
     }
@@ -794,18 +780,16 @@ class CentroidVectorGlobalIndexTest {
         try (VectorTrainingModel model =
                 indexer.trainGlobalModel(
                         64, Collections.singletonList(new TrainingBatch(sample, 64)).iterator())) {
-            ResultEntry routing =
-                    indexer.writeRoutingModel(
-                            files, "router", model.serialize(), id, model.nlist());
-            metas.add(toIOMeta(io, directory, routing));
+            ResultEntry routing = indexer.writeRoutingModel(files, "router", model.serialize(), id);
+            metas.add(
+                    toIOMeta(io, directory, CentroidIndexMeta.router(routing, id, model.nlist())));
             NativeCentroidVectorGlobalIndexer smallIndexer = jointIndexer(type, 0);
             Random random = new Random(42);
             for (int i = 0; i < landmarks.length; i++) {
                 int centroid = model.assignCentroid(landmarks[i]);
                 // Neighbours of the last landmark encounter one small shard.
                 GlobalIndexSingleColumnWriter writer =
-                        (i == 63 ? smallIndexer : indexer)
-                                .createCentroidWriter(files, centroid, id);
+                        (i == 63 ? smallIndexer : indexer).createCentroidWriter(files);
                 try {
                     for (int j = 0; j < 512; j++) {
                         float[] row = landmarks[i].clone();
@@ -814,8 +798,12 @@ class CentroidVectorGlobalIndexTest {
                         }
                         writer.write(row, 512L * i + j);
                     }
-                    GlobalIndexIOMeta shard = toIOMeta(io, directory, writer.finish().get(0));
-                    VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(shard.metadata());
+                    GlobalIndexIOMeta shard =
+                            toIOMeta(
+                                    io,
+                                    directory,
+                                    CentroidIndexMeta.shard(writer.finish().get(0), id, centroid));
+                    VectorIndexMeta meta = VectorIndexMeta.read(shard.metadata());
                     assertThat(meta.localNlist()).isEqualTo(i == 63 ? 8 : 64);
                     assertThat(meta.metric()).isEqualTo("l2");
                     metas.add(shard);
@@ -839,7 +827,7 @@ class CentroidVectorGlobalIndexTest {
     private static GlobalIndexIOMeta toIOMeta(FileIO io, Path directory, ResultEntry entry)
             throws java.io.IOException {
         Path path = new Path(directory, entry.fileName());
-        return new GlobalIndexIOMeta(path, io.getFileSize(path), entry.rowCount(), entry.meta());
+        return CentroidIndexMeta.file(path, io.getFileSize(path), entry.rowCount(), entry.meta());
     }
 
     private static GlobalIndexFileWriter fileWriter(FileIO io, Path directory) {

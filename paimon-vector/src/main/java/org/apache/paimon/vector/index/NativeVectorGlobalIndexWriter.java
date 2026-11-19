@@ -81,7 +81,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private final Map<String, String> nativeOptions;
     private final int dim;
     private final double trainSampleRatio;
-    private final VectorIndexShardMeta shardMeta;
+    private final boolean centroidShard;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -114,7 +114,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             Map<String, String> options,
             String identifier,
             double trainSampleRatio) {
-        this(fileWriter, fieldType, options, identifier, trainSampleRatio, null);
+        this(fileWriter, fieldType, options, identifier, trainSampleRatio, false);
     }
 
     NativeVectorGlobalIndexWriter(
@@ -123,8 +123,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             Map<String, String> options,
             String identifier,
             double trainSampleRatio,
-            VectorIndexShardMeta shardMeta) {
-        this.shardMeta = shardMeta;
+            boolean centroidShard) {
+        this.centroidShard = centroidShard;
         this.fileWriter = fileWriter;
         this.identifier = identifier;
         validateFieldType(fieldType);
@@ -193,7 +193,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             return;
         }
 
-        if (shardMeta != null && rowId < 0) {
+        if (centroidShard && rowId < 0) {
             throw new IllegalArgumentException(
                     "Centroid shards require nonnegative relative row IDs.");
         }
@@ -273,14 +273,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
         try {
             if (count == 0) {
-                if (shardMeta == null) {
+                if (!centroidShard) {
                     return Collections.emptyList();
                 }
                 String name = fileWriter.newFileName(fileNamePrefix());
                 try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
                     out.write(new byte[] {'P', 'C', 'E', 'M', 'P', 'T', 'Y', '1'});
                 }
-                return Collections.singletonList(new ResultEntry(name, 0, shardMeta.serialize()));
+                return Collections.singletonList(new ResultEntry(name, 0, null));
             }
             flushWriteBuffer();
             writeChannel.close();
@@ -323,9 +323,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
             byte[] header =
-                    shardMeta != null
-                                    && ("ivf-flat".equals(identifier)
-                                            || "ivf-pq".equals(identifier))
+                    centroidShard && ("ivf-flat".equals(identifier) || "ivf-pq".equals(identifier))
                             ? new byte[64]
                             : null;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
@@ -368,21 +366,18 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexShardMeta descriptor = shardMeta;
+            VectorIndexMeta descriptor = new VectorIndexMeta();
             if (header != null) {
                 try (VectorIndexReader reader =
                         new VectorIndexReader(
                                 new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
                                         new ByteArraySeekableStream(header)))) {
                     VectorIndexMetadata local = reader.metadata();
-                    descriptor = descriptor.withLocalIvf(local.nlist(), local.metric());
+                    descriptor = new VectorIndexMeta(local.nlist(), local.metric());
                 }
             }
-            byte[] payloadMeta = new VectorIndexMeta().serialize();
             return new ResultEntry(
-                    fileName,
-                    shardMeta == null ? rowCount : count,
-                    descriptor == null ? payloadMeta : descriptor.wrap(payloadMeta));
+                    fileName, !centroidShard ? rowCount : count, descriptor.serialize());
         }
     }
 
@@ -392,7 +387,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private VectorIndexTraining trainFromTempFile() throws IOException {
         Map<String, String> options = trainingOptions(nativeOptions, count);
-        if (shardMeta != null) {
+        if (centroidShard) {
             options.put("expected-vector-count", Long.toString(count));
             String nlist = options.get("nlist");
             if (nlist != null && !"auto".equals(nlist)) {
@@ -405,7 +400,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             }
         }
         if ("diskann".equals(identifier)) {
-            // nlist belongs to the global router, not an independent DiskANN graph.
             options.remove("nlist");
         }
         try (VectorIndexTrainer trainer = VectorIndexTrainer.create(options)) {
@@ -489,7 +483,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private static Map<String, String> trainingOptions(
             Map<String, String> nativeOptions, long count) {
         Map<String, String> options = new LinkedHashMap<>(nativeOptions);
-        options.remove("centroid.local-nlist");
+        options.remove("centroid.nlist");
         String indexType = options.get("index.type");
         String nlist = options.get("nlist");
         if (indexType != null

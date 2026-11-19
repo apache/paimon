@@ -49,8 +49,8 @@ class CentroidKryoBuildTest extends PaimonSparkTestBase {
       }
       spark.sql(
         """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
-          |index_type=>'ivf-flat-centroid',
-          |options=>'ivf-flat-centroid.dimension=2,ivf-flat-centroid.metric=l2,ivf-flat-centroid.nlist=2')""".stripMargin)
+          |index_type=>'ivf-flat',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=2')""".stripMargin)
       val result = table
         .newVectorSearchBuilder()
         .withVectorColumn("v")

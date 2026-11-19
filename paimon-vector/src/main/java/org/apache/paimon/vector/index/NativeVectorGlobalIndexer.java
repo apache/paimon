@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -27,6 +28,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -83,8 +85,23 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
             long totalRowCount,
             List<Range> rowRanges,
             ExecutorService executor) {
+        if (!files.isEmpty() && files.get(0) instanceof CentroidIndexFile) {
+            return new NativeCentroidRoutedIndexReader(
+                    fileReader, files, fieldType, executor, identifier);
+        }
         return new NativeVectorGlobalIndexReader(
                 fileReader, files, fieldType, executor, identifier);
+    }
+
+    @Override
+    public NativeVectorGlobalIndexer forRead(
+            GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
+        if (files.isEmpty() || !(files.get(0) instanceof CentroidIndexFile)) {
+            return this;
+        }
+        Map<String, String> bound = new LinkedHashMap<>(options);
+        bound.put("metric", NativeCentroidVectorGlobalIndexer.storedMetric(reader, files));
+        return new NativeVectorGlobalIndexer(fieldType, bound, identifier, trainSampleRatio);
     }
 
     @Override

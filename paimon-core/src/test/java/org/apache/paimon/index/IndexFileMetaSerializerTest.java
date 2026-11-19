@@ -37,7 +37,7 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
         byte[] descriptor = {3, 7, 1};
         IndexFileMeta routing =
                 new IndexFileMeta(
-                        "ivf-pq-centroid",
+                        "ivf-pq",
                         "model.index",
                         100,
                         0,

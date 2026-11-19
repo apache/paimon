@@ -24,7 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -52,6 +52,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -143,10 +144,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     protected static Collection<List<IndexVectorSearchSplit>> groupByIndexType(
             List<IndexVectorSearchSplit> splits) {
-        Map<String, List<IndexVectorSearchSplit>> groups = new TreeMap<>();
+        Map<Pair<String, Boolean>, List<IndexVectorSearchSplit>> groups =
+                new TreeMap<>(
+                        Comparator.comparing((Pair<String, Boolean> key) -> key.getLeft())
+                                .thenComparing(Pair::getRight));
         for (IndexVectorSearchSplit split : splits) {
-            groups.computeIfAbsent(
-                            split.vectorIndexFiles().get(0).indexType(), k -> new ArrayList<>())
+            IndexFileMeta file = split.vectorIndexFiles().get(0);
+            boolean routed =
+                    CentroidIndexMeta.isWrapped(checkNotNull(file.globalIndexMeta()).indexMeta());
+            groups.computeIfAbsent(Pair.of(file.indexType(), routed), k -> new ArrayList<>())
                     .add(split);
         }
         return groups.values();
@@ -156,8 +162,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer indexer = createGlobalIndexer(firstFile.indexType(), firstMeta);
-        if (indexer instanceof CentroidVectorGlobalIndexer) {
-            return ((CentroidVectorGlobalIndexer) indexer)
+        if (CentroidIndexMeta.isWrapped(firstMeta.indexMeta())
+                && indexer instanceof VectorGlobalIndexer) {
+            return ((VectorGlobalIndexer) indexer)
                     .forRead(
                             file -> table.fileIO().newInputStream(file.filePath()),
                             buildIOMetaList(
@@ -527,13 +534,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            indexIOMetaList.add(
-                    new GlobalIndexIOMeta(
-                            indexPathFactory.toPath(indexFile),
-                            indexFile.fileSize(),
-                            indexFile.rowCount(),
-                            meta.indexMeta()));
+            indexIOMetaList.add(CentroidIndexMeta.file(indexFile, indexPathFactory));
         }
         return indexIOMetaList;
     }

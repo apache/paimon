@@ -21,6 +21,7 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
@@ -310,8 +311,11 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 Collections.singletonList(context.field),
                                 context.indexType,
                                 Collections.singletonList(
-                                        indexer.writeRoutingModel(
-                                                io, modelFile, payload, modelId, nlist)),
+                                        CentroidIndexMeta.router(
+                                                indexer.writeRoutingModel(
+                                                        io, modelFile, payload, modelId),
+                                                modelId,
+                                                nlist)),
                                 context.sourceMeta())
                         .get(0);
         return context.message(Collections.singletonList(modelMeta));
@@ -457,14 +461,13 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
         // as well, without a second set of input tasks to shuffle sentinel records.
         for (int centroid = partition; centroid < nlist; centroid += parallelism) {
-            GlobalIndexSingleColumnWriter writer =
-                    indexer.createCentroidWriter(io, centroid, modelId);
+            GlobalIndexSingleColumnWriter writer = indexer.createCentroidWriter(io);
             try {
                 while (input.hasNext() && input.peek()._1() == centroid) {
                     Tuple2<Long, float[]> row = input.next()._2();
                     writer.write(row._2(), row._1() - context.rowRange.from);
                 }
-                commits.add(context.finish(writer));
+                commits.add(context.finish(writer, modelId, centroid));
             } finally {
                 close(writer);
             }
@@ -573,7 +576,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                     .withCheckFromSnapshot(snapshotId);
         }
 
-        byte[] finish(GlobalIndexSingleColumnWriter writer) throws IOException {
+        byte[] finish(GlobalIndexSingleColumnWriter writer, String modelId, int centroid)
+                throws IOException {
             List<IndexFileMeta> files =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                             table.fileIO(),
@@ -582,7 +586,9 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                             rowRange,
                             Collections.singletonList(field),
                             indexType,
-                            writer.finish(),
+                            writer.finish().stream()
+                                    .map(file -> CentroidIndexMeta.shard(file, modelId, centroid))
+                                    .collect(Collectors.toList()),
                             sourceMeta());
             return new CommitMessageSerializer().serialize(message(files));
         }

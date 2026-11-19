@@ -18,14 +18,15 @@
 
 package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
 
 /** Utility class for creating {@link GlobalIndexTopologyBuilder} implementations. */
 public class GlobalIndexTopologyBuilderUtils {
 
-    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
-        if (GlobalIndexerFactoryUtils.centroidFactory(indexType) != null) {
+    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType, Options options) {
+        if (CentroidVectorGlobalIndexer.centroidSharding(indexType, options)) {
             return new CentroidGlobalIndexTopoBuilder();
         }
         if (SortedIndexTopoBuilder.supports(indexType)) {

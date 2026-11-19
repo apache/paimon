@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
@@ -44,51 +45,30 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         }
         DataField field = indexFields.get(0);
         String identifier = identifier();
-        if (resolveFieldOverriddenKey(options.dynamicOptions(), identifier, field.name(), "shard")
-                        != null
-                || resolveFieldOverriddenKey(options.toMap(), identifier, field.name(), "shard")
-                        != null) {
-            throw new IllegalArgumentException(
-                    "Use the index type to select the layout (for example, ivf-pq or ivf-pq-centroid). Remove the shard option.");
-        }
-        String algorithm = nativeAlgorithm();
+        boolean centroid = CentroidVectorGlobalIndexer.centroidSharding(identifier, options);
         Map<String, String> nativeOptions =
-                nativeOptions(field.type(), options, identifier, algorithm, field.name());
+                nativeOptions(field.type(), options, identifier, field.name());
         double ratio = trainSampleRatio(options, identifier, field.name());
-        return createIndexer(field.type(), nativeOptions, algorithm, ratio);
-    }
-
-    String nativeAlgorithm() {
-        return identifier();
-    }
-
-    NativeVectorGlobalIndexer createIndexer(
-            DataType fieldType, Map<String, String> options, String algorithm, double ratio) {
-        return new NativeVectorGlobalIndexer(fieldType, options, algorithm, ratio);
+        return centroid
+                ? new NativeCentroidVectorGlobalIndexer(
+                        field.type(), nativeOptions, identifier, ratio)
+                : new NativeVectorGlobalIndexer(field.type(), nativeOptions, identifier, ratio);
     }
 
     static Map<String, String> nativeOptions(
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
-        return nativeOptions(fieldType, tableOptions, identifier, identifier, fieldName);
-    }
-
-    private static Map<String, String> nativeOptions(
-            DataType fieldType,
-            Options tableOptions,
-            String identifier,
-            String algorithm,
-            String fieldName) {
+        boolean centroid = CentroidVectorGlobalIndexer.centroidSharding(identifier, tableOptions);
         Map<String, String> nativeOptions = new LinkedHashMap<>();
         collectNativeOptions(
-                nativeOptions, tableOptions.toMap(), identifier, algorithm, fieldName, false);
+                nativeOptions, tableOptions.toMap(), identifier, centroid, fieldName, false);
         collectNativeOptions(
                 nativeOptions,
                 tableOptions.dynamicOptions(),
                 identifier,
-                algorithm,
+                centroid,
                 fieldName,
                 true);
-        nativeOptions.put("index.type", algorithm.replace('-', '_'));
+        nativeOptions.put("index.type", identifier.replace('-', '_'));
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
         nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
@@ -160,7 +140,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             Map<String, String> nativeOptions,
             Map<String, String> options,
             String identifier,
-            String algorithm,
+            boolean centroid,
             String fieldName,
             boolean validate) {
         String optionPrefix = identifier + ".";
@@ -176,7 +156,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         entry.getKey(),
                         entry.getValue(),
                         identifier,
-                        algorithm,
+                        centroid,
                         validate);
             }
         }
@@ -189,7 +169,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey.substring(optionPrefix.length()),
                         entry.getValue(),
                         identifier,
-                        algorithm,
+                        centroid,
                         validate);
             }
         }
@@ -202,7 +182,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                         optionKey.substring(fieldPrefix.length()),
                         entry.getValue(),
                         identifier,
-                        algorithm,
+                        centroid,
                         validate);
             }
         }
@@ -216,7 +196,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             case "distance.metric":
             case "metric":
                 return "metric";
-            case "centroid.local-nlist":
+            case "centroid.nlist":
             case "nlist":
             case "expected-vector-count":
             case "ivf.coarse-assignment":
@@ -272,14 +252,14 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             String optionSuffix,
             String value,
             String identifier,
-            String algorithm,
+            boolean centroid,
             boolean validate) {
         String nativeKey = nativeOptionKey(optionSuffix);
-        if (nativeKey == null) {
+        if (nativeKey == null || ("centroid.nlist".equals(nativeKey) && !centroid)) {
             return;
         }
         if (is050BuildOption(nativeKey)
-                && !isAllowed050BuildOption(nativeKey, identifier, algorithm)) {
+                && !isAllowed050BuildOption(nativeKey, identifier, centroid)) {
             if (validate) {
                 throw new IllegalArgumentException(
                         "Option '"
@@ -301,19 +281,19 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     }
 
     private static boolean isAllowed050BuildOption(
-            String key, String identifier, String algorithm) {
-        if (!identifier.equals(algorithm) && "ivf.train.max-points-per-centroid".equals(key)) {
+            String key, String identifier, boolean centroid) {
+        if (centroid && "ivf.train.max-points-per-centroid".equals(key)) {
             // All centroid layouts train the outer router with IVF-FLAT.
             return true;
         }
         if ("ivf.pq-encoding".equals(key)) {
-            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
         }
         if ("pq.train.max-points-per-centroid".equals(key)) {
-            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm)
-                    || DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)
+                    || DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
         }
-        return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(algorithm);
+        return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
     }
 
     private static int dimension(

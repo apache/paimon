@@ -50,19 +50,21 @@ public class DefaultGlobalIndexTopoBuilderTest {
 
     @Test
     void testBitmapUsesSortedTopologyBuilder() {
-        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("bitmap"))
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("bitmap", new Options()))
                 .isInstanceOf(SortedIndexTopoBuilder.class);
     }
 
     @Test
     void testFMIndexUsesDefaultTopologyBuilder() {
-        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fm"))
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fm", new Options()))
                 .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
     }
 
     @Test
     void ordinaryVectorIndexUsesDefaultTopology() {
-        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("test-vector-ann"))
+        assertThat(
+                        GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                "test-vector-ann", new Options()))
                 .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
     }
 

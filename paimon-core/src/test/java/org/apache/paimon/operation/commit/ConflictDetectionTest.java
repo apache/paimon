@@ -24,8 +24,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.CentroidVectorIndexFactory;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -55,7 +55,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.MockedStatic;
 
 import javax.annotation.Nullable;
 
@@ -81,7 +80,6 @@ import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntr
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1741,163 +1739,117 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testCentroidFactoryDiscoveryIsScopedToOneConflictCheck() {
-        byte[] routerMeta = {1};
-        byte[] shardMeta = {2};
-        List<IndexManifestEntry> files =
-                Arrays.asList(
-                        centroidRouter("shard", 0, 9, 1, shardMeta),
-                        centroidRouter("router", 0, 9, 1, routerMeta),
-                        createGlobalIndexEntry("scalar1", ADD, BinaryRow.EMPTY_ROW, 0, 4),
-                        createGlobalIndexEntry("scalar2", ADD, BinaryRow.EMPTY_ROW, 5, 9));
-        DataEvolutionConflictDetection detection = createConflictDetection();
+    void testCentroidIndexChecksContiguousSourceRange() {
+        byte[] meta =
+                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        IndexManifestEntry index = centroidRouter("first", 10, 19, 1, meta);
         List<SimpleFileEntry> data =
-                Collections.singletonList(createFileEntryWithRowId("data", ADD, 0L, 10L));
-        // A different job classloader may supply a different factory on the next check.
-        for (int i = 0; i < 2; i++) {
-            CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);
-            when(factory.isRoutingModel(routerMeta)).thenReturn(true);
-            try (MockedStatic<GlobalIndexerFactoryUtils> factories =
-                    mockStatic(GlobalIndexerFactoryUtils.class)) {
-                factories
-                        .when(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"))
-                        .thenReturn(factory);
-                assertThat(
-                                detection.checkConflicts(
+                Arrays.asList(
+                        createFileEntryWithRowId("a", ADD, 10L, 10L),
+                        createFileEntryWithRowId("b", ADD, 100L, 10L));
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
                                         snapshot(1),
                                         data,
                                         Collections.emptyList(),
-                                        files,
+                                        Collections.singletonList(index),
                                         null,
                                         Snapshot.CommitKind.APPEND))
-                        .isEmpty();
-                factories.verify(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"));
-                factories.verify(() -> GlobalIndexerFactoryUtils.centroidFactory("btree"));
-                verify(factory).isRoutingModel(shardMeta);
-                verify(factory).isRoutingModel(routerMeta);
-            }
-        }
-    }
+                .isNotPresent();
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
+                                        snapshot(1),
+                                        data.subList(1, 2),
+                                        Collections.emptyList(),
+                                        Collections.singletonList(index),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isPresent();
 
-    @Test
-    void testCentroidIndexChecksContiguousSourceRange() {
-        byte[] meta = {1};
-        CentroidVectorIndexFactory factory = mock(CentroidVectorIndexFactory.class);
-        when(factory.isRoutingModel(meta)).thenReturn(true);
-        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
-                mockStatic(GlobalIndexerFactoryUtils.class)) {
-            factories
-                    .when(() -> GlobalIndexerFactoryUtils.centroidFactory("test-centroid"))
-                    .thenReturn(factory);
-            IndexManifestEntry index = centroidRouter("first", 10, 19, 1, meta);
-            List<SimpleFileEntry> data =
-                    Arrays.asList(
-                            createFileEntryWithRowId("a", ADD, 10L, 10L),
-                            createFileEntryWithRowId("b", ADD, 100L, 10L));
-            assertThat(
-                            createConflictDetection()
-                                    .checkConflicts(
-                                            snapshot(1),
-                                            data,
-                                            Collections.emptyList(),
-                                            Collections.singletonList(index),
-                                            null,
-                                            Snapshot.CommitKind.APPEND))
-                    .isNotPresent();
-            assertThat(
-                            createConflictDetection()
-                                    .checkConflicts(
-                                            snapshot(1),
-                                            data.subList(1, 2),
-                                            Collections.emptyList(),
-                                            Collections.singletonList(index),
-                                            null,
-                                            Snapshot.CommitKind.APPEND))
-                    .isPresent();
+        Snapshot concurrent = snapshot(2);
+        SnapshotManager snapshots = mock(SnapshotManager.class);
+        when(snapshots.snapshot(2)).thenReturn(concurrent);
+        CommitScanner scanner = mock(CommitScanner.class);
+        TableSchema schema =
+                TableSchema.create(
+                        0,
+                        new Schema.Builder()
+                                .column("label", new IntType())
+                                .column("v", new IntType())
+                                .build());
+        when(scanner.schema(0)).thenReturn(schema);
+        ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
+        when(updated.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+        when(updated.file().writeCols()).thenReturn(Collections.singletonList("v"));
+        when(scanner.readIncrementalEntries(
+                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                .thenReturn(Collections.singletonList(updated));
+        ConflictDetection detection =
+                createConflictDetection(scanner, true, false, false, snapshots);
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
+        when(updated.file().writeCols()).thenReturn(Collections.singletonList("label"));
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+        // A second router starts at snapshot 2. The change in its interval in that
+        // snapshot is already included in its training data. Both are active in snapshot 3.
+        IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
+        ManifestEntry appended = manifestEntry(ADD, "appended", 100L, new Range(100, 109));
+        when(appended.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+        when(appended.file().writeCols()).thenReturn(null);
+        List<BinaryRow> partitions = Collections.singletonList(BinaryRow.EMPTY_ROW);
+        when(scanner.readIncrementalEntries(concurrent, partitions))
+                .thenReturn(Collections.singletonList(appended));
+        Snapshot latest = snapshot(3);
+        when(snapshots.snapshot(3)).thenReturn(latest);
+        assertThat(
+                        detection.checkConflicts(
+                                latest,
+                                data,
+                                Collections.emptyList(),
+                                Arrays.asList(index, second),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isNotPresent();
+        verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
+        verify(scanner).readIncrementalEntries(latest, partitions);
 
-            Snapshot concurrent = snapshot(2);
-            SnapshotManager snapshots = mock(SnapshotManager.class);
-            when(snapshots.snapshot(2)).thenReturn(concurrent);
-            CommitScanner scanner = mock(CommitScanner.class);
-            TableSchema schema =
-                    TableSchema.create(
-                            0,
-                            new Schema.Builder()
-                                    .column("label", new IntType())
-                                    .column("v", new IntType())
-                                    .build());
-            when(scanner.schema(0)).thenReturn(schema);
-            ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
-            when(updated.partition()).thenReturn(BinaryRow.EMPTY_ROW);
-            when(updated.file().writeCols()).thenReturn(Collections.singletonList("v"));
-            when(scanner.readIncrementalEntries(
-                            concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
-                    .thenReturn(Collections.singletonList(updated));
-            ConflictDetection detection =
-                    createConflictDetection(scanner, true, false, false, snapshots);
-            assertThat(
-                            detection.checkConflicts(
-                                    concurrent,
-                                    data,
-                                    Collections.emptyList(),
-                                    Collections.singletonList(index),
-                                    null,
-                                    Snapshot.CommitKind.APPEND))
-                    .hasValueSatisfying(
-                            error -> assertThat(error).hasMessageContaining("source rows changed"));
-            when(updated.file().writeCols()).thenReturn(Collections.singletonList("label"));
-            assertThat(
-                            detection.checkConflicts(
-                                    concurrent,
-                                    data,
-                                    Collections.emptyList(),
-                                    Collections.singletonList(index),
-                                    null,
-                                    Snapshot.CommitKind.APPEND))
-                    .isEmpty();
-            // A second router starts at snapshot 2. The change in its interval in that
-            // snapshot is already included in its training data. Both are active in snapshot 3.
-            IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
-            ManifestEntry appended = manifestEntry(ADD, "appended", 100L, new Range(100, 109));
-            when(appended.partition()).thenReturn(BinaryRow.EMPTY_ROW);
-            when(appended.file().writeCols()).thenReturn(null);
-            List<BinaryRow> partitions = Collections.singletonList(BinaryRow.EMPTY_ROW);
-            when(scanner.readIncrementalEntries(concurrent, partitions))
-                    .thenReturn(Collections.singletonList(appended));
-            Snapshot latest = snapshot(3);
-            when(snapshots.snapshot(3)).thenReturn(latest);
-            assertThat(
-                            detection.checkConflicts(
-                                    latest,
-                                    data,
-                                    Collections.emptyList(),
-                                    Arrays.asList(index, second),
-                                    null,
-                                    Snapshot.CommitKind.APPEND))
-                    .isNotPresent();
-            verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
-            verify(scanner).readIncrementalEntries(latest, partitions);
-
-            when(scanner.readIncrementalEntries(latest, partitions))
-                    .thenReturn(Collections.singletonList(appended));
-            assertThat(
-                            detection.checkConflicts(
-                                    latest,
-                                    data,
-                                    Collections.emptyList(),
-                                    Arrays.asList(index, second),
-                                    null,
-                                    Snapshot.CommitKind.APPEND))
-                    .hasValueSatisfying(
-                            error -> assertThat(error).hasMessageContaining("source rows changed"));
-        }
+        when(scanner.readIncrementalEntries(latest, partitions))
+                .thenReturn(Collections.singletonList(appended));
+        assertThat(
+                        detection.checkConflicts(
+                                latest,
+                                data,
+                                Collections.emptyList(),
+                                Arrays.asList(index, second),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
     }
 
     private IndexManifestEntry centroidRouter(
             String name, long from, long to, long snapshot, byte[] meta) {
         IndexFileMeta file =
                 new IndexFileMeta(
-                        "test-centroid",
+                        "ivf-pq",
                         name,
                         100,
                         0,

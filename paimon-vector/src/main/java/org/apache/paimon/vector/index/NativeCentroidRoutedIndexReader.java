@@ -20,6 +20,7 @@ package org.apache.paimon.vector.index;
 
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
+import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -58,7 +59,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
     private final GlobalIndexFileReader files;
     private final GlobalIndexIOMeta routing;
     private String metric;
-    private final VectorIndexShardMeta metadata;
+    private final CentroidIndexFile metadata;
     private final Map<Integer, GlobalIndexIOMeta> shards = new HashMap<>();
     // Populated for shard descriptors that record their native geometry.
     private final Map<Integer, Boolean> jointLayout = new HashMap<>();
@@ -80,10 +81,10 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.executor = executor;
         this.indexType = indexType;
         GlobalIndexIOMeta routing = null;
-        VectorIndexShardMeta modelMeta = null;
+        CentroidIndexFile modelMeta = null;
         long count = 0;
         for (GlobalIndexIOMeta file : entries) {
-            VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
+            CentroidIndexFile meta = (CentroidIndexFile) file;
             if (meta.routingModel()) {
                 modelMeta = meta;
                 checkArgument(routing == null, "Multiple routing models.");
@@ -91,25 +92,20 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             } else {
                 checkArgument(
                         file.rowCount() >= 0, "Centroid shards must record their vector count.");
-                Integer localNlist = meta.localNlist();
+                VectorIndexMeta local = VectorIndexMeta.read(file.metadata());
+                Integer localNlist = local.localNlist();
                 if (localNlist != null) {
                     jointLayout.put(
-                            meta.centroid(), localNlist == 64 && "l2".equals(meta.metric()));
+                            meta.centroid(), localNlist == 64 && "l2".equals(local.metric()));
                 }
-                shards.put(
-                        meta.centroid(),
-                        new GlobalIndexIOMeta(
-                                file.filePath(),
-                                file.fileSize(),
-                                file.rowCount(),
-                                meta.payloadMeta()));
+                shards.put(meta.centroid(), file);
                 count = Math.addExact(count, file.rowCount());
             }
         }
         checkArgument(routing != null, "Missing routing model.");
         this.routing = routing;
         this.metadata = modelMeta;
-        this.metric = modelMeta.metric();
+        this.metric = VectorIndexMeta.read(routing.metadata()).metric();
         this.vectorCount = count;
     }
 
