@@ -69,6 +69,7 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
     private final Map<String, String> runtimeOptions = new HashMap<>();
 
     private transient volatile FileIO cache;
+    private volatile boolean cacheUnavailable;
     private volatile boolean closed;
 
     private CachePolicyFileIO(
@@ -135,7 +136,7 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
 
     private FileIO fileIO(Path path, String operation) throws IOException {
         ensureOpen();
-        boolean useCache = policy.shouldCache(path, operation);
+        boolean useCache = !cacheUnavailable && policy.shouldCache(path, operation);
         LOG.debug(
                 "CACHE_POLICY_ROUTE operation={} route={} endpoint={} file_type={} path={}",
                 operation,
@@ -150,16 +151,29 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
         if (current == null) {
             synchronized (this) {
                 ensureOpen();
+                if (cacheUnavailable) {
+                    return origin;
+                }
                 current = cache;
                 if (current == null) {
-                    current = FileIO.get(tablePath, cacheContext);
                     try {
+                        current = FileIO.get(tablePath, cacheContext);
                         current.setRuntimeContext(new HashMap<>(runtimeOptions));
-                    } catch (RuntimeException | Error e) {
-                        try {
-                            current.close();
-                        } catch (Exception closeFailure) {
-                            e.addSuppressed(closeFailure);
+                        // Some SDKs defer all network I/O until an output stream is closed.
+                        // Confirm connectivity before returning such a stream or native options.
+                        // A false result is valid: a newly written file need not exist yet.
+                        current.exists(path);
+                    } catch (IOException | RuntimeException | Error e) {
+                        if (current != null) {
+                            try {
+                                current.close();
+                            } catch (Exception closeFailure) {
+                                e.addSuppressed(closeFailure);
+                            }
+                        }
+                        if (CacheConnectionFailure.isConnectionFailure(e)) {
+                            disableCache(path, operation, e);
+                            return origin;
                         }
                         throw e;
                     }
@@ -170,34 +184,73 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
         return current;
     }
 
+    private synchronized void disableCache(Path path, String operation, Throwable failure) {
+        if (!cacheUnavailable) {
+            cacheUnavailable = true;
+            LOG.warn(
+                    "CACHE_POLICY_FALLBACK operation={} cache_endpoint={} origin_endpoint={} path={} failure_type={}; "
+                            + "using origin for subsequent operations on this FileIO",
+                    operation,
+                    cacheContext.options().get("fs.oss.endpoint"),
+                    originContext.options().get("fs.oss.endpoint"),
+                    path,
+                    failure.getClass().getName());
+        }
+    }
+
+    private <T> T execute(Path path, String operation, IOAction<T> action) throws IOException {
+        FileIO delegate = fileIO(path, operation);
+        try {
+            return action.apply(delegate);
+        } catch (IOException | RuntimeException failure) {
+            if (delegate == origin || !CacheConnectionFailure.isConnectionFailure(failure)) {
+                throw failure;
+            }
+            disableCache(path, operation, failure);
+            try {
+                return action.apply(origin);
+            } catch (IOException | RuntimeException originFailure) {
+                if (originFailure != failure) {
+                    originFailure.addSuppressed(failure);
+                }
+                throw originFailure;
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface IOAction<T> {
+        T apply(FileIO fileIO) throws IOException;
+    }
+
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
-        return fileIO(path, "read").newInputStream(path);
+        return execute(path, "read", io -> io.newInputStream(path));
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
-        return fileIO(path, "write").newOutputStream(path, overwrite);
+        return execute(path, "write", io -> io.newOutputStream(path, overwrite));
     }
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
-        return fileIO(path, "meta").getFileStatus(path);
+        return execute(path, "meta", io -> io.getFileStatus(path));
     }
 
     @Override
     public boolean exists(Path path) throws IOException {
-        return fileIO(path, "meta").exists(path);
+        return execute(path, "meta", io -> io.exists(path));
     }
 
     @Override
     public long getFileSize(Path path) throws IOException {
-        return fileIO(path, "meta").getFileSize(path);
+        return execute(path, "meta", io -> io.getFileSize(path));
     }
 
     @Override
     public boolean isDir(Path path) throws IOException {
-        return fileIO(path, "meta").isDir(path);
+        return execute(path, "meta", io -> io.isDir(path));
     }
 
     @Override
@@ -267,6 +320,7 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
     public Options hadoopOptions(Path path, String opType) {
         try {
             FileIO delegate = fileIO(path, opType);
+            boolean useCache = delegate != origin;
             while (delegate instanceof ResolvingFileIO) {
                 delegate = ((ResolvingFileIO) delegate).fileIO(path);
             }
@@ -274,10 +328,7 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
                 return ((HadoopOptionsProvider) delegate).hadoopOptions(path, opType);
             }
             Options options =
-                    new Options(
-                            (policy.shouldCache(path, opType) ? cacheContext : originContext)
-                                    .options()
-                                    .toMap());
+                    new Options((useCache ? cacheContext : originContext).options().toMap());
             synchronized (this) {
                 runtimeOptions.forEach(options::set);
             }

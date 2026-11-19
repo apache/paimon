@@ -137,8 +137,26 @@ Paimon 生成的临时文件，以及会被覆盖的 Iceberg 兼容元数据：`
 | Java `newTwoPhaseOutputStream`、multipart 提交和清理 | 走 origin，上传与提交使用同一类端点；提交时沿现有 REST token 链路取得有效凭证。 |
 | Blob presign、Java archive/restore/unarchive | 走 origin，保留底层签名和存储管理能力。 |
 
-cache delegate 在第一次命中缓存操作时惰性创建。缓存端点访问失败时，错误直接上抛，
-客户端不会自动重试到 origin；这里的“回退”表示策略路由，不是失败重试。
+cache delegate 在第一次命中缓存操作时惰性创建，并对该操作的文件路径执行一次
+`exists` 连通性探测（文件尚不存在是有效结果）。这是为了在 Jindo 等后端延迟到
+输出流关闭时才建立网络连接的情况下，仍能在开始写入前发现不可达端点。
+
+初始化、探测或打开文件/查询元数据遇到可识别的连接错误时，该操作改用 origin，
+并输出一次 `WARN CACHE_POLICY_FALLBACK` 日志，包含操作、路径、两端 endpoint 和
+异常类型。此后同一个 FileIO 实例持续屏蔽 cache endpoint，所有操作使用 origin，
+序列化也保留这一状态；新建 FileIO 实例才会重新尝试缓存。并发中已经开始的请求可能
+仍在使用 cache delegate，delegate 保留至 FileIO 关闭时统一清理。
+
+可回退的错误包括连接拒绝/断开、DNS 解析失败、socket 连接/读取超时，以及 Jindo
+原生 `Failed to connect Http service:` 和 Arrow `NETWORK_CONNECTION` 诊断。
+文件不存在、文件已存在、权限/鉴权失败、取消/中断以及无法确认是连接故障的一般 IO
+错误均直接上抛，不触发回退或屏蔽。若 origin 重试也失败，最终抛出 origin 异常。
+
+回退发生在 FileIO API 调用及 Arrow filesystem adapter 调用的边界，已返回的原生
+输入/输出流不做透明重放。特别是已经开始写入后失败，不能安全地将部分写入或已消费
+的迭代器重放到 origin；Python 格式写入接口仅在开始写入前探测失败时自动改用 origin，
+写入途中失败仍报错，并在确认是连接故障时屏蔽后续缓存操作。调用方仍需处理这种写入
+失败。此机制不新增客户端参数，仍按服务端下发的 policy 和 origin endpoint 工作。
 Java `HadoopOptionsProvider` 与 Python Arrow filesystem adapter 使用同一套路径和操作规则。
 
 ## 服务端下发示例

@@ -17,8 +17,11 @@
 
 import os
 import pickle
+import socket
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pyarrow.fs as pafs
@@ -26,7 +29,7 @@ import pyarrow.fs as pafs
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
-from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO
+from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO, _is_connection_failure
 
 
 TABLE_ROOT = "oss://test-bucket/database/table"
@@ -191,6 +194,132 @@ def _options(**overrides):
 
 
 class CachePolicyFileIOTest(unittest.TestCase):
+
+    def test_transport_classifier_preserves_logical_errors(self):
+        for error in (ConnectionRefusedError("refused"), socket.gaierror("DNS"),
+                      TimeoutError("timeout"),
+                      OSError(b"open file reader failed: Failed to connect Http service: http://cache"),
+                      OSError("AWS Error NETWORK_CONNECTION during HeadObject operation: "
+                              "curlCode: 28, Timeout was reached")):
+            self.assertTrue(_is_connection_failure(error), repr(error))
+        for error in (FileNotFoundError("missing"), PermissionError("denied"),
+                      FileExistsError("exists"), InterruptedError("cancelled"),
+                      OSError("read failed"), OSError("timeout"),
+                      OSError("ErrorCode : 133, No such file"),
+                      OSError("AWS Error ACCESS_DENIED: HTTP 403")):
+            self.assertFalse(_is_connection_failure(error), repr(error))
+
+    def test_unreachable_cache_is_probed_once_and_warns_once(self):
+        factory = _RecordingFactory()
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+        with patch.object(_RecordingFileIO, "exists", side_effect=ConnectionRefusedError("refused")), \
+                self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING") as logs:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(executor.map(file_io.new_input_stream, [DATA_PATH] * 16))
+            self.assertTrue(all("origin-endpoint" in result[0] for result in results))
+            self.assertIn("origin-endpoint", file_io.new_output_stream(DATA_PATH)[0])
+        self.assertEqual(2, len(factory.calls))
+        self.assertEqual(1, len(logs.output))
+        self.assertIn("CACHE_POLICY_FALLBACK", logs.output[0])
+        restored = pickle.loads(pickle.dumps(file_io))
+        self.assertIn("origin-endpoint", restored.new_input_stream(DATA_PATH)[0])
+        self.assertEqual(2, len(restored._file_io_factory.calls))
+
+    def test_operation_failure_retries_origin_and_batch_handler_obeys_disabled_state(self):
+        factory = _RecordingFactory()
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+        file_io.new_input_stream(DATA_PATH)
+        cache = factory.calls[1][2]
+        with patch.object(cache, "exists_batch", side_effect=ConnectionResetError("reset")) as batch, \
+                self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING"):
+            self.assertEqual({DATA_PATH: True, LATEST_PATH: True},
+                             file_io.exists_batch([DATA_PATH, LATEST_PATH]))
+            self.assertIn("origin-endpoint", file_io.new_input_stream(DATA_PATH)[0])
+            infos = file_io._filesystem_handler.get_file_info([DATA_PATH, LATEST_PATH])
+            self.assertTrue(all("origin-endpoint" in info[0] for info in infos))
+            batch.assert_called_once()
+
+    def test_arrow_handler_operation_failure_retries_origin(self):
+        for method, args in (("open_input_file", (DATA_PATH,)),
+                             ("open_output_stream", (DATA_PATH, None)),
+                             ("get_file_info", ([DATA_PATH, LATEST_PATH],))):
+            factory = _RecordingFactory()
+            file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+            file_io.new_input_stream(DATA_PATH)
+            cache_fs = factory.calls[1][2].filesystem
+            with patch.object(cache_fs, method, side_effect=TimeoutError("timeout")), \
+                    self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING"):
+                result = getattr(file_io._filesystem_handler, method)(*args)
+                self.assertIn("origin-endpoint", str(result))
+            self.assertIn("origin-endpoint", file_io.new_input_stream(DATA_PATH)[0])
+
+    def test_missing_permission_and_generic_errors_do_not_disable_cache(self):
+        for error in (FileNotFoundError("missing"), PermissionError("denied"),
+                      OSError("read failed")):
+            factory = _RecordingFactory()
+            file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+            file_io.new_input_stream(DATA_PATH)
+            with patch.object(factory.calls[1][2], "new_input_stream", side_effect=error):
+                with self.assertRaises(type(error)) as caught:
+                    file_io.new_input_stream(DATA_PATH)
+                self.assertIs(error, caught.exception)
+            self.assertIn("cache-endpoint", file_io.new_input_stream(DATA_PATH)[0])
+            self.assertNotIn(("read", DATA_PATH), factory.calls[0][2].calls)
+
+    def test_origin_failure_retains_cache_failure_as_context(self):
+        factory = _RecordingFactory()
+        file_io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+        file_io.new_input_stream(DATA_PATH)
+        cache_error = ConnectionRefusedError("refused")
+        origin_error = FileNotFoundError("origin missing")
+        with patch.object(factory.calls[1][2], "new_input_stream", side_effect=cache_error), \
+                patch.object(factory.calls[0][2], "new_input_stream", side_effect=origin_error), \
+                self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING"):
+            with self.assertRaises(FileNotFoundError) as caught:
+                file_io.new_input_stream(DATA_PATH)
+        self.assertIs(origin_error, caught.exception)
+        self.assertIs(cache_error, caught.exception.__context__)
+
+    def test_real_native_arrow_unreachable_endpoint_falls_back(self):
+        self._assert_real_backend_fallback("legacy")
+
+    def test_real_pyjindo_unreachable_endpoint_falls_back(self):
+        from pypaimon.filesystem.pyarrow_file_io import JINDO_AVAILABLE
+        if not JINDO_AVAILABLE:
+            self.skipTest("pyjindosdk is not installed")
+        self._assert_real_backend_fallback("jindo")
+
+    def _assert_real_backend_fallback(self, impl):
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+
+        class FastFileIO(PyArrowFileIO):
+            def _create_s3_retry_config(self, **kwargs):
+                return super()._create_s3_retry_config(
+                    max_attempts=1, request_timeout=1, connect_timeout=1)
+
+        for first in ("new_input_stream", "new_output_stream", "get_file_status"):
+            options = _options(**{
+                OssOptions.OSS_IMPL.key(): impl,
+                OssOptions.OSS_ENDPOINT.key(): "127.0.0.1:1",
+                "fs.oss.accessKeyId": "probe-id",
+                "fs.oss.accessKeySecret": "probe-secret",
+                "fs.oss.region": "cn-hangzhou",
+                "fs.oss.connection.timeout.millisecond": "500",
+                "fs.oss.timeout.millisecond": "1000",
+                "fs.oss.retry.count": "0",
+            })
+            origin_options = CachePolicyFileIO._origin_options(options)
+            origin = _RecordingFileIO("origin", origin_options)
+            cache = FastFileIO(TABLE_ROOT, options)
+            self.assertEqual(impl == "jindo", cache._use_jindo)
+            file_io = CachePolicyFileIO(
+                TABLE_ROOT, options, origin, options, lambda path, opts: cache)
+            with self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING") as logs:
+                self.assertEqual("origin", getattr(file_io, first)(DATA_PATH)[0])
+                self.assertEqual("origin", file_io.new_input_stream(DATA_PATH)[0])
+                self.assertEqual("origin", file_io.new_output_stream(DATA_PATH)[0])
+            self.assertEqual(1, len(logs.output))
+            file_io.close()
 
     def test_cache_uses_standard_endpoint_and_origin_is_only_a_fallback(self):
         factory = _RecordingFactory()

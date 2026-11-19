@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import errno
 import logging
+import socket
 import threading
 from typing import Dict, List
 from urllib.parse import urlparse
@@ -30,6 +32,38 @@ from pypaimon.utils.file_type import FileType
 
 
 _LOG = logging.getLogger(__name__)
+
+
+def _is_connection_failure(error):
+    """Recognize transport diagnostics, including SDKs which lose socket causes."""
+    visited = set()
+    pending = [error]
+    connected = False
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in visited:
+            continue
+        visited.add(id(current))
+        if isinstance(current, (FileNotFoundError, FileExistsError, PermissionError,
+                                InterruptedError)):
+            return False
+        if isinstance(current, (ConnectionError, TimeoutError, socket.gaierror)):
+            connected = True
+        if isinstance(current, OSError):
+            connected |= current.errno in (
+                errno.ECONNREFUSED, errno.ECONNRESET, errno.ECONNABORTED,
+                errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ETIMEDOUT, errno.EPIPE)
+            # pyjindo stores the native diagnostic as bytes in args[0].
+            message = current.args[0] if current.args else ""
+            if isinstance(message, bytes):
+                message = message.decode("utf-8", errors="replace")
+            if isinstance(message, str):
+                connected |= (
+                    "Failed to connect Http service:" in message
+                    or ("AWS Error NETWORK_CONNECTION" in message
+                        and "curlCode:" in message))
+        pending.extend((current.__cause__, current.__context__))
+    return connected
 
 
 class CachePolicyFileIO(FileIO):
@@ -95,7 +129,8 @@ class CachePolicyFileIO(FileIO):
         self._cache_options = cache_options
         self._file_io_factory = file_io_factory
         self._cache_file_io = None
-        self._cache_file_io_lock = threading.Lock()
+        self._cache_unavailable = False
+        self._cache_file_io_lock = threading.RLock()
         self._filesystem_path_prefix = self._infer_filesystem_path_prefix()
 
         policy = catalog_options.get(CatalogOptions.IO_CACHE_POLICY) or ""
@@ -145,16 +180,60 @@ class CachePolicyFileIO(FileIO):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._cache_file_io_lock = threading.Lock()
+        self._cache_file_io_lock = threading.RLock()
         self._initialize_filesystem()
 
-    def _get_cache_file_io(self) -> FileIO:
+    def _get_cache_file_io(self, path, operation) -> FileIO:
         if self._cache_file_io is None:
             with self._cache_file_io_lock:
+                if self._cache_unavailable:
+                    return self._origin_file_io
                 if self._cache_file_io is None:
-                    self._cache_file_io = self._file_io_factory(
-                        self._path, self._cache_options)
+                    candidate = None
+                    try:
+                        candidate = self._file_io_factory(self._path, self._cache_options)
+                        # Native writers may defer the connection until close. Probe the
+                        # first allowed path before handing out a stream or filesystem.
+                        # False is valid for a file that has not been created yet.
+                        candidate.exists(path)
+                    except Exception as error:
+                        if candidate is not None:
+                            try:
+                                candidate.close()
+                            except Exception:
+                                pass
+                        if not _is_connection_failure(error):
+                            raise
+                        self._disable_cache(path, operation, error)
+                        return self._origin_file_io
+                    self._cache_file_io = candidate
         return self._cache_file_io
+
+    def _disable_cache(self, path, operation, error):
+        with self._cache_file_io_lock:
+            if not self._cache_unavailable:
+                self._cache_unavailable = True
+                _LOG.warning(
+                    "CACHE_POLICY_FALLBACK operation=%s cache_endpoint=%s "
+                    "origin_endpoint=%s path=%s failure_type=%s; "
+                    "using origin for subsequent operations on this FileIO",
+                    operation, self._cache_options.get(OssOptions.OSS_ENDPOINT),
+                    self._origin_file_io.properties.get(OssOptions.OSS_ENDPOINT),
+                    path, type(error).__name__)
+
+    def _execute(self, path, operation, action, retry=True):
+        delegate = self._file_io_for(path, operation)
+        try:
+            return action(delegate)
+        except Exception as error:
+            if delegate is self._origin_file_io or not _is_connection_failure(error):
+                raise
+            self._disable_cache(path, operation, error)
+            if not retry:
+                # A format writer may have consumed an iterator or persisted partial data.
+                raise
+            # Python retains the cache failure as context if origin also fails.
+            return action(self._origin_file_io)
 
     def _infer_filesystem_path_prefix(self) -> str:
         """Find the backend-only prefix, such as the bucket in Arrow S3 paths."""
@@ -202,7 +281,7 @@ class CachePolicyFileIO(FileIO):
             or (operation == "read" and self.read_cache_enabled)
             or (operation == "write" and self.write_cache_enabled)
         )
-        return enabled and self.should_cache(path)
+        return not self._cache_unavailable and enabled and self.should_cache(path)
 
     def _log_route(self, path: str, operation: str, use_cache: bool):
         options = (
@@ -224,7 +303,7 @@ class CachePolicyFileIO(FileIO):
         use_cache = self._should_use_cache(path, operation)
         self._log_route(path, operation, use_cache)
         if use_cache:
-            return self._get_cache_file_io()
+            return self._get_cache_file_io(path, operation)
         return self._origin_file_io
 
     def _origin_file_io_for(self, path: str, operation: str) -> FileIO:
@@ -232,19 +311,19 @@ class CachePolicyFileIO(FileIO):
         return self._origin_file_io
 
     def new_input_stream(self, path: str):
-        return self._file_io_for(path, "read").new_input_stream(path)
+        return self._execute(path, "read", lambda io: io.new_input_stream(path))
 
     def new_output_stream(self, path: str):
-        return self._file_io_for(path, "write").new_output_stream(path)
+        return self._execute(path, "write", lambda io: io.new_output_stream(path))
 
     def get_file_status(self, path: str):
-        return self._file_io_for(path, "meta").get_file_status(path)
+        return self._execute(path, "meta", lambda io: io.get_file_status(path))
 
     def list_status(self, path: str):
         return self._origin_file_io_for(path, "list").list_status(path)
 
     def exists(self, path: str) -> bool:
-        return self._file_io_for(path, "meta").exists(path)
+        return self._execute(path, "meta", lambda io: io.exists(path))
 
     def exists_batch(self, paths: List[str]) -> Dict[str, bool]:
         grouped = {}
@@ -255,10 +334,12 @@ class CachePolicyFileIO(FileIO):
 
         result = {}
         for use_cache, grouped_paths in grouped.items():
-            file_io = (
-                self._get_cache_file_io()
-                if use_cache else self._origin_file_io)
-            result.update(file_io.exists_batch(grouped_paths))
+            if use_cache:
+                values = self._execute(
+                    grouped_paths[0], "meta", lambda io: io.exists_batch(grouped_paths))
+            else:
+                values = self._origin_file_io.exists_batch(grouped_paths)
+            result.update(values)
         return result
 
     def delete(self, path: str, recursive: bool = False) -> bool:
@@ -271,10 +352,10 @@ class CachePolicyFileIO(FileIO):
         return self._origin_file_io_for(src, "rename").rename(src, dst)
 
     def get_file_size(self, path: str) -> int:
-        return self._file_io_for(path, "meta").get_file_size(path)
+        return self._execute(path, "meta", lambda io: io.get_file_size(path))
 
     def is_dir(self, path: str) -> bool:
-        return self._file_io_for(path, "meta").is_dir(path)
+        return self._execute(path, "meta", lambda io: io.is_dir(path))
 
     def to_filesystem_path(self, path: str) -> str:
         return self._origin_file_io.to_filesystem_path(path)
@@ -293,28 +374,28 @@ class CachePolicyFileIO(FileIO):
         return UriReaderFactory.from_file_io(self)
 
     def write_parquet(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_parquet(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_parquet(path, *args, **kwargs), retry=False)
 
     def write_orc(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_orc(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_orc(path, *args, **kwargs), retry=False)
 
     def write_avro(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_avro(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_avro(path, *args, **kwargs), retry=False)
 
     def write_lance(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_lance(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_lance(path, *args, **kwargs), retry=False)
 
     def write_blob(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_blob(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_blob(path, *args, **kwargs), retry=False)
 
     def write_mosaic(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_mosaic(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_mosaic(path, *args, **kwargs), retry=False)
 
     def write_vortex(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_vortex(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_vortex(path, *args, **kwargs), retry=False)
 
     def write_row(self, path: str, *args, **kwargs):
-        return self._file_io_for(path, "write").write_row(path, *args, **kwargs)
+        return self._execute(path, "write", lambda io: io.write_row(path, *args, **kwargs), retry=False)
 
     def __getattr__(self, name):
         return getattr(self._origin_file_io, name)
@@ -333,8 +414,8 @@ class _CachePolicyFileSystemHandler(FileSystemHandler):
     def __init__(self, file_io: CachePolicyFileIO):
         self._file_io = file_io
 
-    def _filesystem_for(self, path: str, operation: str):
-        return self._file_io._file_io_for(path, operation).filesystem
+    def _execute(self, path, operation, action):
+        return self._file_io._execute(path, operation, lambda io: action(io.filesystem))
 
     @property
     def _origin_filesystem(self):
@@ -360,11 +441,12 @@ class _CachePolicyFileSystemHandler(FileSystemHandler):
             grouped.setdefault(use_cache, []).append((index, path))
 
         for use_cache, indexed_paths in grouped.items():
-            filesystem = (
-                self._file_io._get_cache_file_io().filesystem
-                if use_cache else self._origin_filesystem)
-            infos = filesystem.get_file_info(
-                [path for _, path in indexed_paths])
+            grouped_paths = [path for _, path in indexed_paths]
+            if use_cache:
+                infos = self._execute(
+                    grouped_paths[0], "meta", lambda fs: fs.get_file_info(grouped_paths))
+            else:
+                infos = self._origin_filesystem.get_file_info(grouped_paths)
             for (index, _), info in zip(indexed_paths, infos):
                 result[index] = info
         return result
@@ -399,19 +481,15 @@ class _CachePolicyFileSystemHandler(FileSystemHandler):
         return self._origin_filesystem_for(src, "copy").copy_file(src, dest)
 
     def open_input_stream(self, path: str):
-        return self._filesystem_for(path, "read").open_input_stream(path)
+        return self._execute(path, "read", lambda fs: fs.open_input_stream(path))
 
     def open_input_file(self, path: str):
-        return self._filesystem_for(path, "read").open_input_file(path)
+        return self._execute(path, "read", lambda fs: fs.open_input_file(path))
 
     def open_output_stream(self, path: str, metadata):
-        filesystem = self._filesystem_for(path, "write")
-        if metadata is None:
-            return filesystem.open_output_stream(path)
-        return filesystem.open_output_stream(path, metadata=metadata)
+        kwargs = {} if metadata is None else {"metadata": metadata}
+        return self._execute(path, "write", lambda fs: fs.open_output_stream(path, **kwargs))
 
     def open_append_stream(self, path: str, metadata):
-        filesystem = self._filesystem_for(path, "write")
-        if metadata is None:
-            return filesystem.open_append_stream(path)
-        return filesystem.open_append_stream(path, metadata=metadata)
+        kwargs = {} if metadata is None else {"metadata": metadata}
+        return self._execute(path, "write", lambda fs: fs.open_append_stream(path, **kwargs))

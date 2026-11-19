@@ -36,7 +36,9 @@ import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -314,6 +316,103 @@ class CachePolicyFileIOTest {
         }
     }
 
+    @Test
+    void testUnreachableCacheIsDisabledBeforeOpeningWriteAndAfterSerialization() throws Exception {
+        RecordingLoader loader = new RecordingLoader();
+        loader.cacheProbeFailure = new ConnectException("Connection refused");
+        try (FileIO fileIO = create(options(), loader)) {
+            fileIO.newOutputStream(DATA, false);
+            RecordingFileIO cache = loader.delegate("cache");
+            assertThat(cache.calls).containsExactly("exists");
+            assertThat(cache.closeCount).isEqualTo(1);
+            fileIO.newInputStream(DATA);
+            fileIO.getFileStatus(DATA);
+            fileIO.exists(DATA);
+            assertThat(loader.delegate("origin").calls)
+                    .containsSubsequence("write", "read", "stat", "exists");
+            assertThat(cache.calls).containsExactly("exists");
+            try (FileIO cloned = InstantiationUtil.clone(fileIO)) {
+                assertThat(
+                                ((HadoopOptionsProvider) cloned)
+                                        .hadoopOptions(DATA, "read")
+                                        .get("fs.oss.endpoint"))
+                        .isEqualTo("origin");
+            }
+        }
+    }
+
+    @Test
+    void testConnectionFailureAfterInitializationRetriesOriginAndDisablesCache() throws Exception {
+        RecordingLoader loader = new RecordingLoader();
+        try (FileIO fileIO = create(options(), loader)) {
+            fileIO.newInputStream(DATA);
+            RecordingFileIO cache = loader.delegate("cache");
+            cache.readFailure = new IOException("SDK failure", new ConnectException("refused"));
+            fileIO.newInputStream(DATA);
+            int calls = cache.calls.size();
+            fileIO.newInputStream(DATA);
+            fileIO.newOutputStream(DATA, true);
+            assertThat(cache.calls).hasSize(calls);
+            assertThat(loader.delegate("origin").calls)
+                    .containsSubsequence("read", "read", "write");
+        }
+    }
+
+    @Test
+    void testMissingCacheFileDoesNotRetryOrDisableCache() throws Exception {
+        RecordingLoader loader = new RecordingLoader();
+        try (FileIO fileIO = create(options(), loader)) {
+            fileIO.newInputStream(DATA);
+            RecordingFileIO cache = loader.delegate("cache");
+            cache.readFailure = new FileNotFoundException("missing cache object");
+            assertThatThrownBy(() -> fileIO.newInputStream(DATA)).isSameAs(cache.readFailure);
+            assertThat(loader.delegate("origin").calls).doesNotContain("read");
+            cache.readFailure = null;
+            fileIO.newInputStream(DATA);
+            assertThat(
+                            ((HadoopOptionsProvider) fileIO)
+                                    .hadoopOptions(DATA, "read")
+                                    .get("fs.oss.endpoint"))
+                    .isEqualTo("cache");
+        }
+    }
+
+    @Test
+    void testOriginFailureIsPreservedWhenRetryFails() throws Exception {
+        RecordingLoader loader = new RecordingLoader();
+        try (FileIO fileIO = create(options(), loader)) {
+            fileIO.newInputStream(DATA);
+            IOException cacheFailure = new ConnectException("refused");
+            IOException originFailure = new FileNotFoundException("origin missing");
+            loader.delegate("cache").readFailure = cacheFailure;
+            loader.delegate("origin").readFailure = originFailure;
+            assertThatThrownBy(() -> fileIO.newInputStream(DATA))
+                    .isSameAs(originFailure)
+                    .satisfies(error -> assertThat(error.getSuppressed()).contains(cacheFailure));
+        }
+    }
+
+    @Test
+    void testConcurrentUnreachableCacheIsProbedOnlyOnce() throws Exception {
+        RecordingLoader loader = new RecordingLoader();
+        loader.cacheProbeFailure = new ConnectException("refused");
+        try (FileIO fileIO = create(options(), loader)) {
+            ExecutorService executor = Executors.newFixedThreadPool(4);
+            try {
+                List<Callable<Options>> tasks = new ArrayList<>();
+                for (int i = 0; i < 16; i++) {
+                    tasks.add(() -> ((HadoopOptionsProvider) fileIO).hadoopOptions(DATA, "read"));
+                }
+                for (Future<Options> result : executor.invokeAll(tasks)) {
+                    assertThat(result.get().get("fs.oss.endpoint")).isEqualTo("origin");
+                }
+                assertThat(loader.delegate("cache").calls).containsExactly("exists");
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+    }
+
     private static Options options() {
         Options options = new Options();
         options.set(IO_CACHE_POLICY, "meta,read,write");
@@ -330,6 +429,7 @@ class CachePolicyFileIOTest {
     private static class RecordingLoader implements FileIOLoader {
 
         private final List<RecordingFileIO> created = new ArrayList<>();
+        private IOException cacheProbeFailure;
 
         @Override
         public String getScheme() {
@@ -339,6 +439,7 @@ class CachePolicyFileIOTest {
         @Override
         public FileIO load(Path path) {
             RecordingFileIO fileIO = new RecordingFileIO();
+            fileIO.probeFailure = cacheProbeFailure;
             created.add(fileIO);
             return fileIO;
         }
@@ -362,6 +463,8 @@ class CachePolicyFileIOTest {
         private int closeCount;
         private boolean failClose;
         private boolean failRead;
+        private IOException readFailure;
+        private IOException probeFailure;
 
         @Override
         public void configure(CatalogContext context) {
@@ -378,6 +481,9 @@ class CachePolicyFileIOTest {
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
             calls.add("read");
+            if (readFailure != null) {
+                throw readFailure;
+            }
             if (failRead) {
                 throw new IOException("cache read failed");
             }
@@ -397,8 +503,13 @@ class CachePolicyFileIOTest {
         }
 
         @Override
-        public boolean exists(Path path) {
+        public boolean exists(Path path) throws IOException {
             calls.add("exists");
+            if (probeFailure != null
+                    && !ROOT.equals(path)
+                    && "cache".equals(options.get("fs.oss.endpoint"))) {
+                throw probeFailure;
+            }
             return true;
         }
 
