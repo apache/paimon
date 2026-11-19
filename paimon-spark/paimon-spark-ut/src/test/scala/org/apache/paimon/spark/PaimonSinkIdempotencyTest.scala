@@ -20,8 +20,10 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
 import org.apache.paimon.data.{BinaryString, GenericRow}
+import org.apache.paimon.fs.{Path => PaimonPath}
+import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.manifest.ManifestCommittable
-import org.apache.paimon.options.Options
+import org.apache.paimon.options.{ExpireConfig, Options}
 import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.spark.write.{CommitMarker, StreamingWrite, StreamingWriteContext}
 import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
@@ -1073,6 +1075,86 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
             checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
         }
       }
+  }
+
+  test("Paimon Sink: a surviving boundary snapshot does not hide an incomplete history scan") {
+    withTempDir {
+      dir =>
+        // SnapshotManager.deleteSnapshot uses deleteQuietly, so one delete IOException can leave
+        // snapshot (before + 1) stranded while expiration removes later snapshots and advances
+        // EARLIEST. A replay must fail closed when its scan hits missing metadata, rather than
+        // trusting the stranded boundary snapshot.
+        spark.sql("CREATE TABLE T (a INT, b STRING)")
+        val conf = spark.sessionState.newHadoopConf()
+        val marker = new CommitMarker(dir.getCanonicalPath, conf)
+
+        // Boundary 0 -> snapshot 1 (other) -> snapshot 2 (this micro-batch) -> snapshots 3, 4.
+        marker.write("recovery-user", 0, 0)
+        spark.sql("INSERT INTO T VALUES (10, 'other-1')")
+        commitReplayAttempt(marker)
+        spark.sql("INSERT INTO T VALUES (30, 'other-3')")
+        spark.sql("INSERT INTO T VALUES (40, 'other-4')")
+        assert(loadTable("T").snapshotManager().latestSnapshotId() == 4L)
+
+        // Expire down to snapshot 4 while failing the deletion of snapshot 1.
+        val location = loadTable("T").location()
+        val failingFileIO = new LocalFileIO() {
+          override def delete(path: PaimonPath, recursive: Boolean): Boolean = {
+            if (path.getName == "snapshot-1") {
+              throw new IOException("injected failure deleting snapshot-1")
+            }
+            super.delete(path, recursive)
+          }
+        }
+        val expireConfig = ExpireConfig
+          .builder()
+          .snapshotRetainMax(1)
+          .snapshotRetainMin(1)
+          .build()
+        FileStoreTableFactory
+          .create(failingFileIO, location)
+          .newExpireSnapshots()
+          .config(expireConfig)
+          .expire()
+
+        val snapshots = loadTable("T").snapshotManager()
+        assert(snapshots.earliestSnapshotId() == 4L)
+        assert(snapshots.snapshotExists(1L), "snapshot 1 should remain stranded")
+        assert(!snapshots.snapshotExists(2L), "micro-batch snapshot 2 should have expired")
+        assert(!snapshots.snapshotExists(3L), "snapshot 3 should have expired")
+
+        val refused = intercept[IllegalStateException](commitReplayAttempt(marker))
+        assert(refused.getMessage.contains("Cannot tell whether micro-batch 1 of this query"))
+        assert(refused.getMessage.contains("snapshot 3 is no longer retained"))
+        checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
+    }
+  }
+
+  test("Paimon Sink: a retained commit is still recognised after an earlier snapshot expires") {
+    withTempDir {
+      dir =>
+        // Boundary 0 -> snapshot 1 (other) -> snapshot 2 (this micro-batch) -> snapshot 3 (other).
+        // Expiration removes snapshot 1 while keeping 2 and 3: positive commit evidence in snapshot
+        // 2 recognises the replay before the scan reaches the expired snapshot 1.
+        spark.sql(
+          "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+            "'snapshot.num-retained.min' = '2', 'snapshot.num-retained.max' = '2')")
+        val conf = spark.sessionState.newHadoopConf()
+        val marker = new CommitMarker(dir.getCanonicalPath, conf)
+
+        marker.write("recovery-user", 0, 0)
+        spark.sql("INSERT INTO T VALUES (10, 'other-1')")
+        commitReplayAttempt(marker)
+        spark.sql("INSERT INTO T VALUES (30, 'other-3')")
+
+        val snapshots = loadTable("T").snapshotManager()
+        assert(!snapshots.snapshotExists(1L), "snapshot 1 should have expired")
+        assert(snapshots.snapshotExists(2L), "micro-batch snapshot 2 should still be retained")
+
+        commitReplayAttempt(marker)
+        assert(loadTable("T").snapshotManager().latestSnapshotId() == 3L)
+        checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
+    }
   }
 
   test("Paimon Sink: a corrupt marker must not be treated as an uncommitted batch") {
