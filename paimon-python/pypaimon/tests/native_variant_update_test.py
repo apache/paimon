@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native partial updates retain Java's shredded VARIANT physical layout."""
+"""Native preferences retain Java-compatible shredded VARIANT files."""
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import json
@@ -30,7 +30,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
@@ -68,7 +67,8 @@ def _table(tmp_path, key, enabled, native_write=True):
                      'unchanged': _variants(unchanged), 'value': [10, 11, 12, 13]}, schema=schema)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
-    assert isinstance(writer, NativeTableWrite) == native_write
+    assert table.options.native_write_enabled() == native_write
+    assert not isinstance(writer, NativeTableWrite)
     try:
         # Rolling occurs at batch boundaries. Keep the two incremental calls
         # in distinct file groups, as required by the public updater contract.
@@ -105,12 +105,13 @@ def _read(table, native, projection=None):
 
 
 @contextmanager
-def _native_only():
+def _selected_update(native):
     with ExitStack() as stack:
-        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                            (PythonTableUpdate, '_build_predicate_update_table'),
-                            (PythonTableUpsert, '_upsert_partition')]:
-            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
+        if native:
+            for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                (PythonTableUpdate, '_build_predicate_update_table'),
+                                (PythonTableUpsert, '_upsert_partition')]:
+                stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
         yield
 
 
@@ -140,13 +141,13 @@ def test_native_variant_partial_updates(tmp_path, stream, key, enabled, operatio
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     update = builder.new_update().with_update_type(['payload'])
     data = pa.table({'_ROW_ID': [ids[0], ids[2]], 'payload': changed})
-    with _native_only():
+    with _selected_update(operation == 'ordinary_column'):
         if operation == 'row_id':
             messages = (update.update_by_arrow_with_row_id(data, 7) if stream
                         else update.update_by_arrow_with_row_id(data))
         elif operation == 'incremental':
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater._execution, NativeTableUpdateByRowId)
+            assert isinstance(updater._execution, PythonTableUpdateByRowId)
             updater.update_columns(data.slice(0, 1), ['payload'])
             updater.update_columns(data.slice(1), ['payload'])
             messages = updater.commit_messages
@@ -178,6 +179,8 @@ def test_native_variant_partial_updates(tmp_path, stream, key, enabled, operatio
             if 'payload' in physical.names:
                 names = [field.name for field in physical.field('payload').type]
                 assert 'typed_value' in names
+                assert all(field.metadata and b'PARQUET:field_id' in field.metadata
+                           for field in physical.field('payload').type)
             if file.write_cols == ['value']:
                 assert physical.names == ['value']
     commit = builder.new_commit()
@@ -196,3 +199,36 @@ def test_native_variant_partial_updates(tmp_path, stream, key, enabled, operatio
         assert [row['payload'] for row in rows] == expected_payload
         assert [row['unchanged'] for row in rows] == untouched
         assert [row['value'] for row in rows] == expected_values
+
+
+@pytest.mark.parametrize('operation', ['upsert', 'merge'])
+def test_scalar_updates_with_unmatched_inserts_keep_variant_field_ids(tmp_path, operation):
+    from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
+
+    table, schema, original, untouched = _table(tmp_path, 'variant.shreddingSchema', False)
+    source = pa.table({'id': [0, 4], 'payload': _variants([None, {'count': 4, 'name': 'inserted'}]),
+                       'unchanged': _variants([None, {'count': 14, 'name': 'untouched'}]),
+                       'value': [999, 14]}, schema=schema)
+    builder = table.new_batch_write_builder()
+    with _selected_update(False):
+        update = builder.new_update().with_update_type(['value'])
+        if operation == 'upsert':
+            messages = update.upsert_by_arrow_with_key(source, ['id'])
+        else:
+            messages = update.merge_into(source, on=['id'], when_matched=[
+                WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
+    for message in messages:
+        for file in message.new_files:
+            physical = pq.read_schema(file.file_path)
+            if 'payload' in physical.names:
+                assert all(field.metadata and b'PARQUET:field_id' in field.metadata
+                           for field in physical.field('payload').type)
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    rows = _read(table, True)
+    assert [row['payload'] for row in rows] == original + [{'count': 4, 'name': 'inserted'}]
+    assert [row['unchanged'] for row in rows] == untouched + [{'count': 14, 'name': 'untouched'}]
+    assert [row['value'] for row in rows] == [999, 11, 12, 13, 14]

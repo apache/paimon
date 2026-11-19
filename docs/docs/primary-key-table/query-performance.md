@@ -103,6 +103,7 @@ coverage rules, especially for Vector and Full Text search.
 Spark can use compatible fixed-bucket layouts to avoid a join shuffle. For example:
 
 ```sql
+SET spark.paimon.scan.preserve-data-grouping = true;
 SET spark.sql.sources.v2.bucketing.enabled = true;
 
 CREATE TABLE fact_table (order_id INT, f1 STRING) USING paimon
@@ -115,6 +116,7 @@ SELECT * FROM fact_table AS fact
 JOIN dim_table AS dim ON fact.order_id = dim.order_id;
 ```
 
-The setting enables Spark to use partitioning reported by V2 data sources. The join keys, bucket
+These settings let Paimon report its bucket layout to Spark (see
+[Scan Layout and Storage Partition Joins](../spark/sql-query#scan-layout-and-storage-partition-joins)). The join keys, bucket
 keys, and bucket counts must be compatible; the same bucket count alone is not sufficient.
 Check `EXPLAIN` to confirm that Spark avoids the shuffle for the actual query.

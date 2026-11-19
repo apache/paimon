@@ -162,6 +162,11 @@ public class CachingFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        return delegate.listStatusIterative(path);
+    }
+
+    @Override
     public boolean exists(Path path) throws IOException {
         return delegate.exists(path);
     }

@@ -786,6 +786,31 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  Seq(false, true).foreach {
+    useV2Write =>
+      test(s"Row Tracking: update struct columns with V2 write $useV2Write") {
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write.toString) {
+          withTable("t") {
+            sql("""CREATE TABLE t (id INT, data STRUCT<a: INT, b: STRING>, other STRUCT<a: INT>)
+                  |TBLPROPERTIES ('row-tracking.enabled' = 'true')""".stripMargin)
+            sql("""INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES
+                  |(1, named_struct('a', 1, 'b', 'one'), named_struct('a', 10)),
+                  |(2, NULL, NULL)""".stripMargin)
+
+            sql("UPDATE t SET data.a = data.a + 1 WHERE _ROW_ID = 0")
+            checkAnswer(
+              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+              Seq(Row(1, Row(2, "one"), Row(10), 0L, 2L), Row(2, null, null, 1L, 1L)))
+
+            sql("UPDATE t SET data = named_struct('b', 'three', 'a', 3) WHERE _ROW_ID = 0")
+            checkAnswer(
+              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+              Seq(Row(1, Row(3, "three"), Row(10), 0L, 3L), Row(2, null, null, 1L, 1L)))
+          }
+        }
+      }
+  }
+
   test("Row Tracking: update table without condition") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")

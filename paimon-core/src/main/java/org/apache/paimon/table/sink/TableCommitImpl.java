@@ -88,6 +88,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final AtomicReference<Throwable> maintainError;
     private final String tableName;
     private final boolean forceCreatingSnapshot;
+    private final int threadNum;
     private final ExecutorService fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartitionSpec = null;
@@ -128,6 +129,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
+        this.threadNum = threadNum;
         this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
     }
 
@@ -179,6 +181,16 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl materializeDvRowIdCheck() {
         commit.materializeDvRowIdCheck();
         return this;
+    }
+
+    @Override
+    public TableCommitImpl dataEvolutionRangeSortCheck() {
+        commit.dataEvolutionRangeSortCheck();
+        return this;
+    }
+
+    public boolean isRangeSortConflict(RuntimeException failure) {
+        return commit.isRangeSortConflict(failure);
     }
 
     @Override
@@ -464,7 +476,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
-        commit.abort(commitMessages);
+        commit.abort(commitMessages, threadNum);
     }
 
     @VisibleForTesting

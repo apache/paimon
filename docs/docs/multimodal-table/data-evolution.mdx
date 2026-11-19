@@ -210,6 +210,29 @@ row ID. Assign only the columns you intend to change; assigning every column
 can remove the I/O benefit of a partial update. Partition columns cannot be
 changed by a matched partial update.
 
+#### Reuse MERGE Matching Results
+
+For `MERGE INTO` statements containing both matched updates and unmatched
+inserts, `data-evolution.merge-into.join-reuse` can reuse a match result stored
+on executor-local disk. It is disabled by default:
+
+```sql
+ALTER TABLE target_table SET TBLPROPERTIES (
+    'data-evolution.merge-into.join-reuse' = 'true'
+);
+```
+
+Reuse requires Spark adaptive query execution and adaptive partition coalescing.
+It applies to deterministic update-and-insert statements without subqueries,
+delete actions, `WHEN NOT MATCHED BY SOURCE`, or dedicated BLOB/VECTOR columns.
+Other statements use the original execution path.
+
+The shared full outer join avoids repeating the action matching work, but can
+increase shuffle and local disk I/O compared with the separate joins, including
+joins that can broadcast a small input. Compare complete SQL execution time and
+executor disk usage with representative data before enabling it. The shared
+result is released after the command, including when execution fails.
+
 ### Flink SQL
 
 Use the `data_evolution_merge_into` procedure for matched updates. It runs in

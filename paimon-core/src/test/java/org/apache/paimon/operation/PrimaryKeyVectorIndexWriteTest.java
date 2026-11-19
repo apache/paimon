@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.index.IndexFileMeta;
@@ -36,6 +37,8 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import javax.annotation.Nullable;
@@ -56,6 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -63,6 +67,46 @@ import static org.mockito.Mockito.when;
 
 /** Tests primary-key vector index publication through {@link AbstractFileStoreWrite}. */
 class PrimaryKeyVectorIndexWriteTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testRestoreIndexesWhenWriterSkipsDataFiles(boolean primaryKeyIndex) throws Exception {
+        List<DataFileMeta> files = Collections.singletonList(mock(DataFileMeta.class));
+        List<IndexFileMeta> dvFiles = Collections.singletonList(mock(IndexFileMeta.class));
+        List<IndexFileMeta> payloads = Collections.singletonList(mock(IndexFileMeta.class));
+        WriteRestore restore = mock(WriteRestore.class);
+        when(restore.restoreFiles(EMPTY_ROW, 0, false, true, primaryKeyIndex, primaryKeyIndex))
+                .thenReturn(new RestoreFiles(null, 1, files, null, dvFiles, payloads));
+        BucketedDvMaintainer.Factory dvFactory = mock(BucketedDvMaintainer.Factory.class);
+        BucketedDvMaintainer dv = mock(BucketedDvMaintainer.class);
+        when(dvFactory.create(EMPTY_ROW, 0, dvFiles)).thenReturn(dv);
+        BucketedPrimaryKeyIndexMaintainer.Factory pkFactory =
+                primaryKeyIndex ? mock(BucketedPrimaryKeyIndexMaintainer.Factory.class) : null;
+
+        TestingFileStoreWrite write = new TestingFileStoreWrite(dvFactory, pkFactory);
+        try {
+            write.withWriteRestore(restore);
+            AbstractFileStoreWrite.WriterContainer<String> container =
+                    write.createWriterContainer(EMPTY_ROW, 0);
+            assertThat(container.deletionVectorsMaintainer).isSameAs(dv);
+            verify(dvFactory).create(EMPTY_ROW, 0, dvFiles);
+            if (primaryKeyIndex) {
+                verify(pkFactory)
+                        .create(
+                                eq(EMPTY_ROW),
+                                eq(0),
+                                same(files),
+                                same(payloads),
+                                any(),
+                                isNull(),
+                                any());
+            }
+            verify(restore)
+                    .restoreFiles(EMPTY_ROW, 0, false, true, primaryKeyIndex, primaryKeyIndex);
+        } finally {
+            write.close();
+        }
+    }
 
     @Test
     void testRestoreRebindsSharedIndexExecutor() throws Exception {
@@ -198,6 +242,23 @@ class PrimaryKeyVectorIndexWriteTest {
     private static class TestingFileStoreWrite extends AbstractFileStoreWrite<String> {
 
         @Nullable private final RecordWriter<String> restoredWriter;
+        private boolean skipDataFiles;
+
+        private TestingFileStoreWrite(
+                BucketedDvMaintainer.Factory dvFactory,
+                @Nullable BucketedPrimaryKeyIndexMaintainer.Factory pkFactory) {
+            super(
+                    mock(SnapshotManager.class),
+                    mock(FileStoreScan.class),
+                    null,
+                    dvFactory,
+                    pkFactory,
+                    "test-table",
+                    new CoreOptions(Collections.singletonMap(CoreOptions.BUCKET.key(), "1")),
+                    RowType.of());
+            this.restoredWriter = mock(RecordWriter.class);
+            this.skipDataFiles = true;
+        }
 
         private TestingFileStoreWrite() {
             this(null, 1);
@@ -240,6 +301,15 @@ class PrimaryKeyVectorIndexWriteTest {
         }
 
         @Override
+        protected boolean ignorePreviousFilesForWriter(
+                BinaryRow partition,
+                int bucket,
+                @Nullable Snapshot latestSnapshot,
+                boolean ignorePreviousFiles) {
+            return skipDataFiles || ignorePreviousFiles;
+        }
+
+        @Override
         protected RecordWriter<String> createWriter(
                 BinaryRow partition,
                 int bucket,
@@ -249,6 +319,10 @@ class PrimaryKeyVectorIndexWriteTest {
                 ExecutorService compactExecutor,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 boolean ignorePreviousFiles) {
+            if (skipDataFiles) {
+                assertThat(restoreFiles).isEmpty();
+                assertThat(ignorePreviousFiles).isTrue();
+            }
             if (restoredWriter == null) {
                 throw new UnsupportedOperationException();
             }

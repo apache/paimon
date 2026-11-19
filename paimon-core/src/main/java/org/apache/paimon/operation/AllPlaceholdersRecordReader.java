@@ -42,12 +42,8 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
     private static final Path PLACEHOLDER_PATH = new Path("placeholder");
 
     private final long firstRowId;
-    private final int fieldCount;
-    private final int blobIndex;
-    private final Object blobPlaceholder;
+    private final GenericRow row;
     private final int rowIdIndex;
-    private final int seqNumIndex;
-    private final long sequenceNumber;
     private final List<Range> selectedRanges;
     private boolean returned;
 
@@ -59,12 +55,14 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
             int blobIndex,
             long sequenceNumber) {
         this.firstRowId = firstRowId;
-        this.fieldCount = readRowType.getFieldCount();
-        this.blobIndex = blobIndex;
-        this.blobPlaceholder = blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot());
+        this.row = new GenericRow(readRowType.getFieldCount());
+        this.row.setField(
+                blobIndex, blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot()));
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
-        this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
-        this.sequenceNumber = sequenceNumber;
+        int seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        if (seqNumIndex >= 0) {
+            row.setField(seqNumIndex, sequenceNumber);
+        }
         this.selectedRanges = selectedRanges(firstRowId, rowCount, rowRanges);
     }
 
@@ -112,13 +110,8 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
     }
 
     private InternalRow placeholderRow(long rowId) {
-        GenericRow row = new GenericRow(fieldCount);
-        row.setField(blobIndex, blobPlaceholder);
         if (rowIdIndex >= 0) {
             row.setField(rowIdIndex, rowId);
-        }
-        if (seqNumIndex >= 0) {
-            row.setField(seqNumIndex, sequenceNumber);
         }
         return row;
     }

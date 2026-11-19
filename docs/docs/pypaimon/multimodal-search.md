@@ -165,6 +165,12 @@ column and `order_by_score()` to sort by descending score, with ascending
 the existing result order, and `order_by_score()` does not require projecting
 scores. Without either method, result behavior is unchanged.
 
+For local single-vector searches on data-evolution tables with the Python read
+backend, NaN scores rank after all numeric scores. A NaN row can appear in the
+top K only when fewer than K candidates have numeric scores. Ties, including
+ties between NaNs, favor the smaller row ID. Returned NaN scores retain their
+original value.
+
 ```python
 neighbors = (
     docs.search([0.1, 0.2, 0.3], column="embedding")

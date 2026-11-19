@@ -39,20 +39,29 @@ _ENGINES = [False, pytest.param(True, marks=[pytest.mark.native_plan, pytest.mar
 def _commit(table, messages, native=False):
     commit = table.new_batch_write_builder().new_commit()
     try:
-        if native:
+        row_id_update = any(file.first_row_id is not None for message in messages for file in message.new_files)
+        if native and not row_id_update:
             with patch('pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit',
                        side_effect=AssertionError('Python fallback')):
                 commit.commit(messages)
         else:
-            commit.commit(messages)
+            with patch('pypaimon.execution.native.write.native_commit.create_native_commit',
+                       side_effect=AssertionError('Row-ID publication requires Python validation')):
+                commit.commit(messages)
+            if native:
+                assert commit._native_commit is None
+                assert commit._python_commit is not None
     finally:
         commit.close()
 
 
 @pytest.mark.parametrize('native', _ENGINES)
-@pytest.mark.parametrize('evolution', ['rename', 'drop_readd', 'complete_row'])
+@pytest.mark.parametrize('evolution,stale_handle,keep_baseline', [
+    ('rename', False, True), ('drop_readd', False, True),
+    ('drop_readd', True, True), ('drop_readd', False, False), ('complete_row', False, True)])
 @pytest.mark.parametrize('action', ['THROW_ERROR', 'DROP_PARTITION_INDEX', 'IGNORE'])
-def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalog, native, evolution, action):
+def test_commit_resolves_updated_index_columns_by_file_schema(
+        native_rest_catalog, native, evolution, stale_handle, keep_baseline, action):
     catalog = native_rest_catalog
     schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
     catalog.create_table('default.identity', Schema.from_pyarrow_schema(schema, options={
@@ -95,7 +104,10 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
         messages[0].new_files[0].write_cols = None
     else:
         assert messages[0].new_files[0].schema_id == original.table_schema.id
-    target = latest.copy({'commit.native.enabled': str(native).lower()})
+    if not keep_baseline:
+        for message in messages:
+            message.check_from_snapshot = None
+    target = (original if stale_handle else latest).copy({'commit.native.enabled': str(native).lower()})
     # Reject updates to removed field IDs even when a new field has the same name.
     dropped_update = evolution == 'drop_readd'
     if dropped_update or action == 'THROW_ERROR':
@@ -119,6 +131,12 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
     assert rows == {'id': [1], index_field.name: [expected_value]}
     if dropped_update:
         assert all(latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
+        commit = target.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(messages)
+        finally:
+            commit.close()
+        assert all(not latest.file_io.exists(file.file_path) for message in messages for file in message.new_files)
 
 
 @pytest.mark.parametrize('native', _ENGINES)

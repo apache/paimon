@@ -19,27 +19,37 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.catalog.SparkBaseCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
 import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 
 import scala.collection.JavaConverters._
 
 case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strategy {
 
-  // Spark plans the replace itself, which drops the old table before it writes, so reject what
-  // it cannot write before that. The check uses the properties Spark creates the table with.
+  // Keep Spark's replacement planning and prepare the write after the target table is created.
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     plan match {
-      case ReplaceTableAsSelect(catalog: SparkCatalog, ident, parts, _, props, _, _) =>
+      case ReplaceTableAsSelect(catalog: SparkBaseCatalog, ident, parts, _, props, _, _)
+          if supportsCatalog(catalog, props.get(TableCatalog.PROP_PROVIDER).orNull) =>
         val properties = CatalogV2Util.withDefaultOwnership(props)
-        catalog.checkPartitionedFormatTableCtas(
-          ident,
-          properties.get(TableCatalog.PROP_PROVIDER).orNull,
-          parts.nonEmpty,
-          properties.asJava)
+        catalog match {
+          case paimon: SparkCatalog =>
+            paimon.checkPartitionedFormatTableCtas(
+              ident,
+              properties.get(TableCatalog.PROP_PROVIDER).orNull,
+              parts.nonEmpty,
+              properties.asJava)
+          case _ =>
+        }
+        return new DataSourceV2Strategy(spark)
+          .apply(plan)
+          .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
       case _ =>
     }
     Nil

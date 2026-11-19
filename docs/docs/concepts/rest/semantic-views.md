@@ -222,7 +222,14 @@ This experimental execution profile supports:
   be unique, ignoring case, in the resulting Spark relation.
 - Portable `expression.sql` or an `OSSIE_SQL_2026` dialect expression; arithmetic, comparisons,
   boolean logic, `CASE`, `IN`, numeric/string/boolean/date casts, `SUM`, `COUNT` (including
-  distinct), `AVG`, `MIN`, `MAX`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `CEILING`, and `COALESCE`.
+  distinct), `AVG`, `MIN`, `MAX`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `CEILING`, `COALESCE`,
+  and `DATE_TRUNC`.
+- `DATE_TRUNC(unit, input)` requires a case-insensitive string literal for the unit. The supported
+  units are `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, and `second`. Weeks
+  start on Monday. The result is `TIMESTAMP_LTZ`. Spark uses the session time zone to truncate
+  `TIMESTAMP_LTZ` values and implicitly convert `DATE` values and timestamp strings to
+  `TIMESTAMP_LTZ`. A `NULL` input returns `NULL`. `TIMESTAMP_NTZ` inputs are rejected during
+  analysis.
 
 Other expressions, relationships, multiple datasets, external joins, streaming reads and writes
 are rejected. SQL Semantic View DDL and SQL discovery are not added; use the management API to

@@ -84,7 +84,11 @@ public class LuminaVectorIndexOptions {
             ConfigOptions.key("lumina.diskann.build.thread_count")
                     .intType()
                     .defaultValue(32)
-                    .withDescription("Number of threads used for DiskANN index building.");
+                    .withDescription(
+                            "Number of threads used for DiskANN index building. The build runs"
+                                    + " on Lumina's native executor, whose size is read from the"
+                                    + " environment variable LUMINA_EXECUTOR_THREAD_COUNT of the"
+                                    + " process (default 32); this option does not change it.");
 
     public static final ConfigOption<Integer> DISKANN_SEARCH_LIST_SIZE =
             ConfigOptions.key("lumina.diskann.search.list_size")
