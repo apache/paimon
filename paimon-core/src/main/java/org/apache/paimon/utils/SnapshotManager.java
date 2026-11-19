@@ -863,27 +863,29 @@ public class SnapshotManager implements Serializable {
         int retryNumber = 0;
         Exception exception = null;
         while (retryNumber++ < 10) {
-            String content;
             try {
-                content = fileIO.readFileUtf8(path);
+                String content = fileIO.readFileUtf8(path);
+                try {
+                    return Snapshot.fromJson(content);
+                } catch (Exception e) {
+                    exception = e;
+                }
             } catch (FileNotFoundException e) {
-                throw e;
+                // Catalog metadata may become visible before the snapshot file is published.
+                exception = e;
             } catch (IOException e) {
                 throw new RuntimeException("Fails to read snapshot from path " + path, e);
             }
 
             try {
-                return Snapshot.fromJson(content);
-            } catch (Exception e) {
-                // retry
-                exception = e;
-                try {
-                    Thread.sleep(200);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException(ie);
-                }
+                Thread.sleep(200);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(ie);
             }
+        }
+        if (exception instanceof FileNotFoundException) {
+            throw (FileNotFoundException) exception;
         }
         throw new RuntimeException("Retry fail after 10 times", exception);
     }
