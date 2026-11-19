@@ -21,7 +21,8 @@ import asyncio
 import unittest
 from unittest.mock import Mock, patch
 
-from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.common.options.core_options import ChangelogProducer, StartupMode
+from pypaimon.common.options.options import Options
 from pypaimon.read.plan import Plan
 from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.snapshot.snapshot import Snapshot
@@ -45,6 +46,8 @@ def _create_mock_table(latest_snapshot_id: int = 5):
     table.table_path = "/tmp/test_table"
     table.is_primary_key_table = False
     table.options = Mock()
+    table.options.options = Options({})
+    table.options.startup_mode.return_value = StartupMode.LATEST_FULL
     table.options.source_split_target_size.return_value = 128 * 1024 * 1024
     table.options.source_split_open_file_cost.return_value = 4 * 1024 * 1024
     table.options.scan_manifest_parallelism.return_value = 8

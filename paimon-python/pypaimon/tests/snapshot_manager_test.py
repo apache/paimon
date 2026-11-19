@@ -47,6 +47,16 @@ def _build_manager(file_io):
 class SnapshotManagerTest(unittest.TestCase):
     """Tests for SnapshotManager batch lookahead methods."""
 
+    def test_stream_timestamp_starts_at_first_retained_match(self):
+        manager = _build_manager(Mock())
+        history = {2: 100, 4: 200, 5: 200, 8: 300}
+        manager.list_snapshot_ids = Mock(return_value=sorted(history))
+        manager.get_snapshot_by_id = lambda id_: _create_mock_snapshot_with_time(id_, history[id_])
+        for timestamp, expected in ((0, 2), (200, 4), (201, 8), (301, 9)):
+            self.assertEqual(manager.first_id_at_or_after_time_millis(timestamp), expected)
+        manager.list_snapshot_ids.return_value = []
+        self.assertIsNone(manager.first_id_at_or_after_time_millis(0))
+
     def test_rest_snapshot_response_can_be_empty(self):
         from pypaimon.api.api_response import GetTableSnapshotResponse
         from pypaimon.common.json_util import JSON

@@ -44,6 +44,7 @@ import random
 import shutil
 import tempfile
 import unittest
+from contextlib import closing
 from dataclasses import replace
 from typing import Any, Dict, List
 from unittest.mock import patch
@@ -983,6 +984,102 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         self.assertLessEqual(len(splits), 2,
                              "per-partition pruning should keep ≤ 2 splits, "
                              "got %d" % len(splits))
+
+
+@pytest.fixture
+def custom_bucket_stream_table(tmp_path):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', False)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.events', Schema.from_pyarrow_schema(schema, options={
+        'bucket': '4', 'bucket-key': 'id', 'bucket-function.provider': 'test-last-bucket',
+    }), False)
+    table = catalog.get_table('default.events')
+
+    def append(value):
+        builder = table.new_batch_write_builder()
+        data = pa.Table.from_pydict({'id': [1, 2], 'value': [value, value]}, schema=schema)
+        with closing(builder.new_write()) as writer, closing(builder.new_commit()) as commit:
+            writer.write_arrow(data, bucket=3)
+            commit.commit(writer.prepare_commit())
+
+    return table, append
+
+
+@pytest.mark.execution_defaults
+@pytest.mark.parametrize('filtered', [False, True])
+@pytest.mark.parametrize('options,first_values,next_id', [
+    ({'scan.mode': 'latest'}, None, 3),
+    ({'scan.mode': 'latest-full'}, [10, 20], 3),
+    ({'scan.mode': 'from-snapshot-full', 'scan.snapshot-id': '1'}, [10], 2),
+    ({'scan.mode': 'from-snapshot-full', 'scan.snapshot-id': '2'}, [10, 20], 3),
+    ({'scan.snapshot-id': '2'}, [20], 3),
+    ({'scan.timestamp-millis': '0'}, [10], 2),
+    ({'scan.timestamp': '1970-01-01'}, [10], 2),
+])
+def test_custom_bucket_stream_startup(custom_bucket_stream_table, options, first_values, next_id, filtered):
+    table, append = custom_bucket_stream_table
+    append(10)
+    append(20)
+    builder = table.copy_without_time_travel(options).new_stream_read_builder()
+    if filtered:
+        builder.with_filter(builder.new_predicate_builder().equal('id', 1))
+
+    def check(plan, values):
+        if values is None:
+            assert plan is None
+            return
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+        expected_ids = [1] if filtered else [1, 2]
+        assert sorted((r['id'], r['value']) for r in rows) == [
+            (id_, value) for id_ in expected_ids for value in values]
+
+    with closing(builder.new_streaming_scan()) as scan:
+        check(scan.plan(), first_values)
+        assert scan.checkpoint() == next_id
+        append(30)
+        plan = scan.plan()
+        if plan is None:
+            # A poll prefetched before append(30) may observe the old end of the stream.
+            assert scan.checkpoint() == next_id
+            plan = scan.plan()
+        expected = [20] if next_id == 2 else [30]
+        check(plan, expected)
+        assert scan.checkpoint() == next_id + 1
+    with closing(builder.new_streaming_scan()) as resumed:
+        resumed.restore(next_id)
+        check(resumed.plan(), expected)
+
+
+@pytest.mark.execution_defaults
+def test_custom_bucket_stream_consumer_overrides_startup(custom_bucket_stream_table):
+    table, append = custom_bucket_stream_table
+    builder = table.copy_without_time_travel({'scan.mode': 'latest', 'consumer-id': 'job'}).new_stream_read_builder()
+    with closing(builder.new_streaming_scan()) as scan:
+        assert scan.plan() is None
+        assert scan.checkpoint() == 1
+        append(10)
+        assert scan.plan().snapshot_id == 1
+        scan.notify_checkpoint_complete(scan.checkpoint())
+    append(20)
+    with closing(builder.new_streaming_scan()) as resumed:
+        assert resumed.plan().snapshot_id == 2
+        assert resumed.checkpoint() == 3
+
+
+@pytest.mark.execution_defaults
+def test_custom_bucket_stream_retries_missing_full_snapshot(custom_bucket_stream_table):
+    table, append = custom_bucket_stream_table
+    append(10)
+    options = {'scan.mode': 'from-snapshot-full', 'scan.snapshot-id': '2'}
+    builder = table.copy_without_time_travel(options).new_stream_read_builder()
+    with closing(builder.new_streaming_scan()) as scan:
+        with pytest.raises(ValueError, match='Snapshot 2'):
+            scan.plan()
+        assert scan.checkpoint() is None
+        append(20)
+        assert scan.plan().snapshot_id == 2
+        assert scan.checkpoint() == 3
 
 
 # ---------------------------------------------------------------------------

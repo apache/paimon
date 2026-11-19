@@ -289,6 +289,23 @@ class SnapshotManager:
 
         return final_snapshot
 
+    def first_id_at_or_after_time_millis(self, timestamp: int) -> Optional[int]:
+        """First retained commit at or after the time, or the next ID if all are older."""
+        ids = self.list_snapshot_ids()
+        if not ids:
+            return None
+        low, high = 0, len(ids)
+        while low < high:
+            mid = (low + high) // 2
+            snapshot = self.get_snapshot_by_id(ids[mid])
+            if snapshot is None:
+                raise FileNotFoundError("Snapshot %s disappeared during stream startup" % ids[mid])
+            if snapshot.time_millis < timestamp:
+                low = mid + 1
+            else:
+                high = mid
+        return ids[low] if low < len(ids) else ids[-1] + 1
+
     def list_snapshots(self) -> List[Snapshot]:
         """Return every persisted snapshot in ascending ID order.
 

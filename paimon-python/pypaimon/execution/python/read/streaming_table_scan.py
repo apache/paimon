@@ -21,12 +21,13 @@ import operator
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import AsyncGenerator, Callable, Iterator, List, Optional
 
-from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.common.options.core_options import ChangelogProducer, StartupMode
 from pypaimon.common.predicate import Predicate
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_config import validate_scan_options
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
@@ -38,7 +39,11 @@ from pypaimon.execution.python.read.scanner.follow_up_scanner import FollowUpSca
 from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.time_travel_util import SCAN_KEYS, _parse_timestamp_to_millis
 from pypaimon.table.bucket_mode import BucketMode
+
+
+_AUTH_NOT_QUERIED = object()
 
 
 class AsyncStreamingTableScan:
@@ -98,13 +103,14 @@ class AsyncStreamingTableScan:
         self._manifest_file_manager = ManifestFileManager(table)
 
         # Consumer management for persisting streaming progress
-        self._consumer_id = consumer_id
+        self._consumer_id = (consumer_id if consumer_id is not None else
+                             table.options.options.to_map().get('consumer-id'))
         self._read_type = None
         self._query_auth_fn = self.table.catalog_environment.table_query_auth(
             self.table.options, self.table.identifier)
         self._consumer_manager = (
             table.consumer_manager()
-            if consumer_id else None
+            if self._consumer_id is not None else None
         )
 
         # Scanner for determining which snapshots to read
@@ -178,15 +184,19 @@ class AsyncStreamingTableScan:
             self._consumer_restored = True
         if self._next_snapshot_id is None:
             generation = self._generation
-            latest = self._snapshot_manager.get_latest_snapshot()
-            if latest is None:
-                self.__auth_query()
-                return None
-            plan = self._create_initial_plan(latest)
+            auth_result = self.__auth_query()
             self._check_generation(generation)
-            self._next_snapshot_id = latest.id + 1
-            self._watermark = latest.watermark
-            return plan
+            snapshot, next_id = self._starting_position()
+            if snapshot is not None:
+                plan = self._create_initial_plan(snapshot, auth_result)
+                self._check_generation(generation)
+                self._next_snapshot_id = snapshot.id + 1
+                self._watermark = snapshot.watermark
+                return plan
+            self._check_generation(generation)
+            if next_id is None:
+                return None
+            self._next_snapshot_id = next_id
 
         while True:
             generation = self._generation
@@ -214,6 +224,41 @@ class AsyncStreamingTableScan:
                 return None
             else:
                 self._missing_snapshot_polls = 0
+
+    def _starting_position(self):
+        """Return a full snapshot, a follow-up snapshot ID, or neither while waiting."""
+        validate_scan_options(self.table)
+        options = self.table.options
+        mode = options.startup_mode()
+        manager = self._snapshot_manager
+        if mode == StartupMode.LATEST_FULL:
+            return manager.get_latest_snapshot(), None
+        if mode == StartupMode.LATEST:
+            latest = manager.get_latest_snapshot()
+            return None, latest.id + 1 if latest is not None else 1
+        if mode == StartupMode.FROM_TIMESTAMP:
+            timestamp = options.scan_timestamp_millis()
+            if timestamp is None:
+                timestamp = _parse_timestamp_to_millis(options.scan_timestamp())
+            if not -(1 << 63) <= timestamp < (1 << 63):
+                raise ValueError("scan timestamp is outside the signed 64-bit range")
+            return None, manager.first_id_at_or_after_time_millis(timestamp)
+        if mode in (StartupMode.FROM_SNAPSHOT, StartupMode.FROM_SNAPSHOT_FULL):
+            snapshot_id = options.scan_snapshot_id()
+            if snapshot_id is None or sum(options.options.contains_key(k) for k in SCAN_KEYS) != 1:
+                raise ValueError("Streaming from a snapshot requires scan.snapshot-id as its only selector")
+            snapshot_id = self._snapshot_id(snapshot_id)
+            ids = manager.list_snapshot_ids()
+            if not ids:
+                return None, None
+            snapshot_id = max(snapshot_id, ids[0])
+            if mode == StartupMode.FROM_SNAPSHOT:
+                return None, snapshot_id
+            snapshot = manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError("Snapshot %s does not exist" % snapshot_id)
+            return snapshot, None
+        raise ValueError("Unsupported streaming startup mode: %s" % mode.value)
 
     async def stream(self) -> AsyncGenerator[Plan, None]:
         """Poll plan(), acknowledging each yielded frame on iterator resume."""
@@ -425,9 +470,10 @@ class AsyncStreamingTableScan:
                         snapshot_id=plan.snapshot_id)
         return plan
 
-    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
-        """Create a Plan for the initial full scan of the latest snapshot."""
-        auth_result = self.__auth_query()
+    def _create_initial_plan(self, snapshot: Snapshot, auth_result=_AUTH_NOT_QUERIED) -> Plan:
+        """Create a plan for the full state of the selected starting snapshot."""
+        if auth_result is _AUTH_NOT_QUERIED:
+            auth_result = self.__auth_query()
         plan = self.__create_initial_plan_raw(snapshot, auth_result)
         return wrap_plan_with_auth(auth_result, plan)
 

@@ -22,6 +22,7 @@ from typing import Optional
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.common.time_utils import local_datetime_to_system_zone_millis
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag_manager import TagManager
 
@@ -45,16 +46,20 @@ def _parse_timestamp_to_millis(timestamp_str: str) -> int:
     - '2023-12-01T12:00:00'
     - '2023-12-01 12:00:00.123'
     """
-    formats = [
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ]
+    whole, dot, fraction = timestamp_str.partition('.')
+    if dot:
+        if not (1 <= len(fraction) <= 9 and all('0' <= digit <= '9' for digit in fraction)):
+            raise ValueError(f"Cannot parse timestamp '{timestamp_str}'.")
+        # Java truncates fractional seconds to milliseconds before applying the local zone.
+        value = whole + '.' + fraction[:3]
+        formats = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%f")
+    else:
+        value = whole
+        formats = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d")
     for fmt in formats:
         try:
-            dt = datetime.strptime(timestamp_str, fmt)
-            return int(dt.timestamp() * 1000)
+            dt = datetime.strptime(value, fmt)
+            return local_datetime_to_system_zone_millis(dt)
         except ValueError:
             continue
     raise ValueError(
