@@ -432,7 +432,9 @@ public abstract class AbstractCatalog implements Catalog {
                             Map<String, String> options = schema.toSchema().options();
                             return Arrays.stream(
                                     new String[] {
-                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
+                                        EntropyInjectTemplateFilesDeletion.isTemplate(schema)
+                                                ? null
+                                                : options.get(DATA_FILE_EXTERNAL_PATHS.key()),
                                         options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
                                     });
                         })

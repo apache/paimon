@@ -74,12 +74,12 @@ public class TemplateEntropyInjectExternalPathProvider implements ExternalPathPr
 
     /** Whether the given external path is a template handled by this provider. */
     public static boolean isTemplate(String externalPath) {
-        return externalPath.contains(HASH_PLACEHOLDER);
+        return externalPath != null && externalPath.contains(HASH_PLACEHOLDER);
     }
 
     private static void checkTemplate(Path template) {
         checkArgument(
-                isTemplate(template.toString()),
+                isTemplate(template.toUri().getPath()),
                 "External path '%s' must contain the '%s' placeholder.",
                 template,
                 HASH_PLACEHOLDER);
