@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.FieldIgnoreRetractAgg;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory;
@@ -133,6 +134,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final List<WrapperWithFieldIndex<FieldAggregator>> fieldAggregators;
+    private final Set<Integer> retractingFields;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
@@ -164,6 +166,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = getKeySortedListFromMap(fieldSeqComparators);
         this.fieldAggregators = getKeySortedListFromMap(fieldAggregators);
+        this.retractingFields =
+                fieldAggregators.entrySet().stream()
+                        .filter(
+                                entry ->
+                                        fieldSeqComparators.containsKey(entry.getKey())
+                                                && !(entry.getValue()
+                                                        instanceof FieldIgnoreRetractAgg))
+                        .map(Map.Entry::getKey)
+                        .collect(Collectors.toSet());
         this.fieldSequenceEnabled = fieldSequenceEnabled;
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
@@ -188,7 +199,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (kv.valueKind().isRetract()) {
 
             if (!notNullColumnFilled) {
-                initRow(row, kv.value());
+                if (fieldSequenceEnabled && !ignoreDelete) {
+                    initRetractRow(row, kv.value());
+                } else {
+                    initRow(row, kv.value());
+                }
                 notNullColumnFilled = true;
             }
 
@@ -226,6 +241,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             throw new IllegalArgumentException(msg);
         }
 
+        if (ignoreDelete && fieldSequenceEnabled && notNullColumnFilled && !meetInsert) {
+            // The first ignored retract supplied the payload for a possible DELETE result.
+            // Start the first positive record with an empty accumulator.
+            row = new GenericRow(getters.length);
+        }
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
             currentDeleteRow = false;
@@ -410,6 +430,21 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(
                             i,
                             aggregator.retract(accumulator, getters[i].getFieldOrNull(kv.value())));
+                }
+            }
+        }
+    }
+
+    private void initRetractRow(GenericRow row, InternalRow value) {
+        // A first retraction must not seed the accumulator with its own contribution.
+        for (int i = 0; i < getters.length; i++) {
+            if (!nullables[i]) {
+                Object field = getters[i].getFieldOrNull(value);
+                if (field == null) {
+                    throw new IllegalArgumentException("Field " + i + " can not be null");
+                }
+                if (!retractingFields.contains(i)) {
+                    row.setField(i, field);
                 }
             }
         }
