@@ -313,8 +313,9 @@ case class MergeIntoPaimonDataEvolutionTable(
         !table.coreOptions().dataEvolutionMergeIntoSourcePersist() &&
         canReuseMergeJoin(sparkSession) && narrowSharedSourceKey.isDefined &&
         sourceTable.output.exists(
-          attr => allSharedDependencies.contains(attr.exprId) &&
-            !updateSharedDependencies.contains(attr.exprId))
+          attr =>
+            allSharedDependencies.contains(attr.exprId) &&
+              !updateSharedDependencies.contains(attr.exprId))
       ) {
         pinNarrowSource(sourceTable, originalTargetRelation)
       } else {
@@ -1276,8 +1277,8 @@ case class MergeIntoPaimonDataEvolutionTable(
           case Some(key) =>
             val cachedKey = plan.output.find(_.exprId == key.exprId).get
             val membershipKey = Alias(cachedKey, "__paimon_unmatched_source_key")()
-            val unmatched = Project(
-              Seq(membershipKey), Filter(IsNull(shared.targetMarker(plan)), plan))
+            val unmatched =
+              Project(Seq(membershipKey), Filter(IsNull(shared.targetMarker(plan)), plan))
             // Membership must retain NULL keys and every duplicate row in the fixed source.
             Join(
               sourceReadPlan,
@@ -1500,7 +1501,9 @@ object MergeIntoPaimonDataEvolutionTable {
       plan: LogicalPlan,
       targetRelation: DataSourceV2Relation): Option[LogicalPlan] = {
     def identity(table: FileStoreTable): (String, String) =
-      (table.location().toString, BranchManager.normalizeBranch(CoreOptions.branch(table.options())))
+      (
+        table.location().toString,
+        BranchManager.normalizeBranch(CoreOptions.branch(table.options())))
 
     val target = targetRelation.table match {
       case sparkTable: SparkTable => sparkTable.getTable.asInstanceOf[FileStoreTable]
@@ -1526,29 +1529,33 @@ object MergeIntoPaimonDataEvolutionTable {
                       CoreOptions.StartupMode.LATEST,
                       CoreOptions.StartupMode.FROM_TIMESTAMP,
                       CoreOptions.StartupMode.FROM_SNAPSHOT,
-                      CoreOptions.StartupMode.FROM_SNAPSHOT_FULL)
+                      CoreOptions.StartupMode.FROM_SNAPSHOT_FULL
+                    )
                       .contains(source.coreOptions().startupMode()) =>
                 // Resolving scan.version can mutate options; never resolve it on the input table.
                 val copied = source.copy(new JHashMap[String, String]())
                 Option(TimeTravelUtil.tryTravelOrLatest(copied))
                   .filter(snapshot => copied.snapshotManager().snapshotExists(snapshot.id()))
                   .flatMap {
-                  snapshot =>
-                    val options = new JHashMap[String, String]()
-                    timeTravelOptionKeys.foreach(options.put(_, null))
-                    options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshot.id().toString)
-                    options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
-                    val pinned = copied.copy(options)
-                    // A schema-only change is newer than the data snapshot's read schema.
-                    if (pinned.schema().id() != source.schema().id()) {
-                      None
-                    } else {
-                      Some(SparkShimLoader.shim.copyDataSourceV2Relation(
-                        relation,
-                        SparkTable.of(pinned),
-                        relation.output))
-                    }
-                }
+                    snapshot =>
+                      val options = new JHashMap[String, String]()
+                      timeTravelOptionKeys.foreach(options.put(_, null))
+                      options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshot.id().toString)
+                      options.put(
+                        CoreOptions.SCAN_MODE.key(),
+                        CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
+                      val pinned = copied.copy(options)
+                      // A schema-only change is newer than the data snapshot's read schema.
+                      if (pinned.schema().id() != source.schema().id()) {
+                        None
+                      } else {
+                        Some(
+                          SparkShimLoader.shim.copyDataSourceV2Relation(
+                            relation,
+                            SparkTable.of(pinned),
+                            relation.output))
+                      }
+                  }
               case _ => None
             }
           case _ => None

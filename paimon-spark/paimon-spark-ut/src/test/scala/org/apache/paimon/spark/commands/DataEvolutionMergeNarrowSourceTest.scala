@@ -23,8 +23,8 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerBlockUpdated}
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.PaimonUtils.createDataset
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -39,9 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
 
-class DataEvolutionMergeNarrowSourceTest
-  extends PaimonSparkTestBase
-  with AdaptiveSparkPlanHelper {
+class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
   private def relation(plan: LogicalPlan): DataSourceV2Relation =
     plan.collectFirst { case r: DataSourceV2Relation => r }.get
@@ -123,8 +121,7 @@ class DataEvolutionMergeNarrowSourceTest
         assert(metadataValue != null)
         if (dataEvolution) assert(metadataValue == 0L)
         val plan = sql(
-          s"SELECT s.id AS source_id,s.value,s.insert_payload,s.$metadataColumn FROM source s")
-          .queryExecution.analyzed
+          s"SELECT s.id AS source_id,s.value,s.insert_payload,s.$metadataColumn FROM source s").queryExecution.analyzed
         val original = fileTable(plan)
         val originalOptions = original.options().asScala.toMap
         val snapshot = original.snapshotManager().latestSnapshotId()
@@ -180,8 +177,8 @@ class DataEvolutionMergeNarrowSourceTest
       sql("INSERT INTO source VALUES (1,10,'historical')")
       val historicalSnapshot = loadTable("source").snapshotManager().latestSnapshotId()
       sql("UPDATE source SET value=20 WHERE id=1")
-      val plan = sql(s"SELECT * FROM source VERSION AS OF $historicalSnapshot")
-        .queryExecution.analyzed
+      val plan =
+        sql(s"SELECT * FROM source VERSION AS OF $historicalSnapshot").queryExecution.analyzed
       val originalOptions = fileTable(plan).options().asScala.toMap
       val pinned = MergeIntoPaimonDataEvolutionTable
         .pinNarrowSource(plan, createRelationV2("target"))
@@ -215,7 +212,8 @@ class DataEvolutionMergeNarrowSourceTest
           MergeIntoPaimonDataEvolutionTable
             .pinNarrowSource(plan, createRelationV2("target"))
             .isEmpty,
-          "Pinning must not replace the current source schema with the data snapshot schema")
+          "Pinning must not replace the current source schema with the data snapshot schema"
+        )
         val payload = if (rename) "s.payload2" else "COALESCE(s.payload2,s.insert_payload)"
         sql(s"""MERGE INTO target t USING source s ON t.id=s.id
                |WHEN MATCHED THEN UPDATE SET value=s.value
@@ -244,7 +242,8 @@ class DataEvolutionMergeNarrowSourceTest
         MergeIntoPaimonDataEvolutionTable
           .pinNarrowSource(plan, createRelationV2("target"))
           .isEmpty,
-        "A retained tag must keep its tag reader when the numbered snapshot file has expired")
+        "A retained tag must keep its tag reader when the numbered snapshot file has expired"
+      )
       checkAnswer(createDataset(spark, plan), Seq(Row(1, 100, "tagged")))
       assert(fileTable(plan).options().asScala.toMap == originalOptions)
     }
@@ -343,7 +342,8 @@ class DataEvolutionMergeNarrowSourceTest
               Row(3, 30, "c"),
               Row(null, if (nullSafe) 900 else 40, "d"),
               Row(4, 400, "new4")) ++
-              (if (nullSafe) Nil else Seq(Row(null, 900, "newnull"))))
+              (if (nullSafe) Nil else Seq(Row(null, 900, "newnull")))
+          )
           assert(
             sql("SELECT payload,_ROW_ID FROM target WHERE payload IN ('a','b','c','d')")
               .collect()
@@ -430,14 +430,17 @@ class DataEvolutionMergeNarrowSourceTest
         assert(
           causes.exists(
             cause => Option(cause.getMessage).exists(_.contains("Row ID should be incremental."))),
-          s"Expected duplicate RowID rejection, got ${causes.mkString("; ")}")
+          s"Expected duplicate RowID rejection, got ${causes.mkString("; ")}"
+        )
         assert(
           !causes.exists(
             cause =>
               Option(cause.getMessage).exists(
-                message => message.contains("MISSING_ATTRIBUTES") ||
-                  message.contains("Resolved attribute(s)"))),
-          "Duplicate matches must fail on RowID validation rather than cache attribute binding")
+                message =>
+                  message.contains("MISSING_ATTRIBUTES") ||
+                    message.contains("Resolved attribute(s)"))),
+          "Duplicate matches must fail on RowID validation rather than cache attribute binding"
+        )
         assert(cachedBlockSeen.await(10, TimeUnit.SECONDS), "Expected a materialized disk cache")
         checkAnswer(sql("SELECT *,_ROW_ID FROM target"), rows)
         assert(loadTable("target").snapshotManager().latestSnapshotId() == snapshot)
