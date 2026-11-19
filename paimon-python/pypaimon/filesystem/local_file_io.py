@@ -249,6 +249,26 @@ class LocalFileIO(FileIO):
         except (PermissionError, OSError):
             return False
     
+    def create_file_if_absent(self, path: str, content: str) -> bool:
+        destination = self._to_file(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(create_temp_path(str(destination)))
+        try:
+            with open(temporary, 'x', encoding='utf-8') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # A hard link publishes the complete file and cannot replace a
+            # competing process's destination, unlike POSIX rename.
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                return False
+            return True
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         file_path = self._to_file(path)
         if file_path.exists() and file_path.is_dir():

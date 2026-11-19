@@ -42,6 +42,7 @@ for name in (
     'pypaimon.catalog.table_query_auth', 'pypaimon.filesystem.local_file_io',
     'pypaimon.filesystem.pyarrow_file_io', 'pypaimon.ray.merge_condition',
     'pypaimon.ray.vector_index_build',
+    'pypaimon.ray.recoverable_write', 'pypaimon.write.recoverable_write',
 ):
     importlib.import_module(name)
 import pypaimon.globalindex as indexes
