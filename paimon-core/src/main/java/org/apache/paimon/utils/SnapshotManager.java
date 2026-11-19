@@ -844,18 +844,31 @@ public class SnapshotManager implements Serializable {
     }
 
     public static Snapshot fromPath(FileIO fileIO, Path path) {
-        try {
-            return tryFromPath(fileIO, path);
-        } catch (FileNotFoundException e) {
-            String errorMessage =
-                    String.format(
-                            "Snapshot file %s does not exist. "
-                                    + "It might have been expired by other jobs operating on this table. "
-                                    + "In this case, you can avoid concurrent modification issues by configuring "
-                                    + "write-only = true and use a dedicated compaction job, or configuring "
-                                    + "different expiration thresholds for different jobs.",
-                            path);
-            throw new RuntimeException(errorMessage, e);
+        int retryNumber = 0;
+        while (true) {
+            try {
+                return tryFromPath(fileIO, path);
+            } catch (FileNotFoundException e) {
+                if (++retryNumber < SNAPSHOT_EXISTS_MAX_ATTEMPTS) {
+                    // Catalog metadata may become visible before the snapshot file is published.
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(ie);
+                    }
+                    continue;
+                }
+                String errorMessage =
+                        String.format(
+                                "Snapshot file %s does not exist. "
+                                        + "It might have been expired by other jobs operating on this table. "
+                                        + "In this case, you can avoid concurrent modification issues by configuring "
+                                        + "write-only = true and use a dedicated compaction job, or configuring "
+                                        + "different expiration thresholds for different jobs.",
+                                path);
+                throw new RuntimeException(errorMessage, e);
+            }
         }
     }
 
@@ -863,29 +876,27 @@ public class SnapshotManager implements Serializable {
         int retryNumber = 0;
         Exception exception = null;
         while (retryNumber++ < 10) {
+            String content;
             try {
-                String content = fileIO.readFileUtf8(path);
-                try {
-                    return Snapshot.fromJson(content);
-                } catch (Exception e) {
-                    exception = e;
-                }
+                content = fileIO.readFileUtf8(path);
             } catch (FileNotFoundException e) {
-                // Catalog metadata may become visible before the snapshot file is published.
-                exception = e;
+                throw e;
             } catch (IOException e) {
                 throw new RuntimeException("Fails to read snapshot from path " + path, e);
             }
 
             try {
-                Thread.sleep(200);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(ie);
+                return Snapshot.fromJson(content);
+            } catch (Exception e) {
+                // retry
+                exception = e;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
             }
-        }
-        if (exception instanceof FileNotFoundException) {
-            throw (FileNotFoundException) exception;
         }
         throw new RuntimeException("Retry fail after 10 times", exception);
     }
