@@ -152,9 +152,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private boolean meetInsert;
 
     /**
-     * Whether a DELETE record re-initialized the row. A row removed only by UPDATE_BEFORE records
-     * keeps its fields, so the result stays UPDATE_BEFORE and a later merge does not re-initialize
-     * the row from it.
+     * Whether a DELETE record re-initialized the row and no later insert has brought the row back.
+     * A row removed only by UPDATE_BEFORE records keeps its fields, so the result stays
+     * UPDATE_BEFORE and a later merge does not re-initialize the row from it. An insert after the
+     * DELETE clears it, because the INSERT result of a write buffer does not keep the DELETE
+     * either.
      */
     private boolean meetDelete;
 
@@ -241,6 +243,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
             currentDeleteRow = false;
+            meetDelete = false;
             updateNonNullFields(kv);
         } else {
             updateWithSequenceGroup(kv);

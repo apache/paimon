@@ -1569,6 +1569,31 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testRemoveRecordOnDeleteWithUpdateBeforeAfterDeleteAndInsert() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> function =
+                PartialUpdateMergeFunction.factory(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT()),
+                                ImmutableList.of("f0"))
+                        .create();
+        function.reset();
+
+        // The INSERT result of a write buffer does not re-initialize the row of older files, so
+        // the +I overrides the -D, and the result stays INSERT as when the +I is merged alone.
+        add(function, RowKind.DELETE, 1, 5, null);
+        add(function, 1, 10, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+
+        // The lone -U after them gives -U as in a write buffer that was flushed after the +I,
+        // and not a DELETE that would drop the columns of other writers in older files.
+        add(function, RowKind.UPDATE_BEFORE, 1, 10, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+        validate(function, 1, 10, null);
+    }
+
+    @Test
     public void testRemoveRecordOnDeleteWithOnlyUpdateBefore() {
         Options options = new Options();
         options.set("partial-update.remove-record-on-delete", "true");

@@ -2105,6 +2105,63 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testPartialUpdateRemoveRecordOnDeleteMixedDeleteAndUpdateBeforeAcrossFlushes()
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "partial-update");
+                            options.set("partial-update.remove-record-on-delete", "true");
+                            // no compaction, so every flushed file is merged again on read
+                            options.set("write-only", "true");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+
+        // 1. Another writer fills c = 20 for both keys
+        write.write(GenericRow.of(1, 1, null, 20));
+        write.write(GenericRow.of(1, 2, null, 20));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // 2. One commit with the same records for both keys and different flush points:
+        // a = 1: -D, +I, -U in one write buffer, flush, +U
+        // a = 2: -D, +I, flush, -U, flush, +U
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 5, null));
+        write.write(GenericRow.of(1, 1, 10, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 10, null));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 2, 5, null));
+        write.write(GenericRow.of(1, 2, 10, null));
+        write.compact(binaryRow(1), 0, false);
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, null));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 2, 10, null));
+        write.compact(binaryRow(1), 0, false);
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 2, 11, null));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // Both keys read c = 20 of the other writer. This is the result of a = 2, where the -D and
+        // +I merge into an INSERT that does not re-initialize the row, and the lone -U keeps the
+        // fields. It is also the result of the base implementation for both layouts. A -D that an
+        // +I in the same write buffer has already overridden must not make the later -U a DELETE
+        // that wipes c, which is what a = 1 read before.
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 11, 20]", "+I[1, 2, 11, 20]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testPartialUpdateRemoveRecordOnSequenceGroup() throws Exception {
         RowType rowType =
                 RowType.of(
