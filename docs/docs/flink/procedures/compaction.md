@@ -352,7 +352,8 @@ CALL sys.sort_data_evolution('default.samples', '[0,99999]', 'tenant_id,event_ti
 Each selected partition is sorted independently by the listed top-level fields
 in ascending order, with nulls first and the old row ID as a tie-breaker.
 The writer applies deletion vectors and rewrites all current column values together,
-including managed BLOBs and dedicated vectors. Surviving rows receive new row IDs.
+including managed BLOBs and dedicated vectors. Surviving rows receive new row IDs
+and the sort snapshot's ID as their `_SEQUENCE_NUMBER`.
 Update downstream references to the old row IDs. The commit removes each global index file
 whose row-ID range overlaps a rewritten input file group in the same partition. Disjoint
 index files remain usable. Rebuild missing index coverage for the new row IDs and any

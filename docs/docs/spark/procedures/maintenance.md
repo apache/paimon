@@ -111,7 +111,8 @@ Output files follow the table's normal rolling settings.
 The shuffle carries managed BLOB descriptors. Each reducer copies the referenced data
 when writing its sorted files. New row IDs are assigned in shuffle-range order.
 
-Surviving rows in the selection receive new row IDs. Coordinate persisted row-ID
+Surviving rows in the selection receive new row IDs and the sort snapshot's ID as their
+`_SEQUENCE_NUMBER`. Coordinate persisted row-ID
 references, including BLOB views in downstream tables, before invoking the procedure.
 The commit removes each global index file whose row-ID range overlaps a rewritten input
 file group in the same partition. Disjoint index files remain usable. Rebuild missing index

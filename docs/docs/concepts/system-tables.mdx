@@ -317,9 +317,11 @@ See [Data File Metadata](./spec/manifest#data-file-metadata) for the underlying 
 ### Row Ranges Table
 
 For a Data Evolution table, `row_ranges` lists the smallest inclusive row-ID ranges that
-can be rewritten independently within each partition. It groups all live files whose ranges
-overlap, including overlaps connected through a chain of ordinary, BLOB, or vector files.
-Adjacent groups with no shared row ID appear as separate rows.
+can be rewritten independently within each partition. In the standard
+[Data Evolution layout](../multimodal-table/data-evolution-file-layout), each BLOB or vector
+file fits within one ordinary file range. If a snapshot contains a dedicated file spanning
+multiple ordinary ranges, `row_ranges` combines all ranges connected by that overlap.
+Adjacent ranges with no shared row ID appear as separate rows.
 
 ```sql
 SELECT `partition`, start_row_id, end_row_id, file_count, file_size_in_bytes, snapshot_id
