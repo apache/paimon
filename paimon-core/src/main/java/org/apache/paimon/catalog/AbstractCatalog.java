@@ -31,6 +31,7 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.operation.EntropyInjectTemplateFilesDeletion;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -83,6 +84,7 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -380,44 +382,60 @@ public abstract class AbstractCatalog implements Catalog {
 
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
+                try {
+                    Path tablePath = getTableLocation(identifier);
+                    TemplateFileDeletionPlan.retryTableDrops(
+                            fileIO(tablePath),
+                            tablePath,
+                            Runtime.getRuntime().availableProcessors());
+                } catch (RuntimeException e) {
+                    LOG.warn("Cannot retry file cleanup for {}", identifier, e);
+                }
                 return;
             }
             throw new TableNotExistException(identifier);
         }
 
         Set<Path> externalPaths = new HashSet<>();
+        TemplateFileDeletionPlan plan = null;
+        int cleanupThreads = 1;
         Path tablePath = getTableLocation(identifier);
         if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
-            TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
-            if (tableType == TableType.TABLE || tableType == TableType.MATERIALIZED_TABLE) {
-                // Cleanup only needs persisted metadata, even if runtime options are invalid.
+            CoreOptions options = CoreOptions.fromMap(loadTableSchema(identifier).options());
+            if (options.type() == TableType.TABLE
+                    || options.type() == TableType.MATERIALIZED_TABLE) {
                 FileIO tableFileIO = fileIO(tablePath);
                 SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
-                externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
                 boolean isExternal = loadTableMetadata(identifier).isExternal();
-                Optional<TableSchema> latestMainSchema = schemaManager.latest();
-                if (!isExternal
-                        && latestMainSchema.isPresent()
-                        && EntropyInjectTemplateFilesDeletion.isTemplate(latestMainSchema.get())) {
-                    EntropyInjectTemplateFilesDeletion.delete(
-                            tableFileIO, tablePath, DEFAULT_MAIN_BRANCH, latestMainSchema.get());
-                }
-                for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
-                    SchemaManager schemaBranch = schemaManager.copyWithBranch(branch);
-                    externalPaths.addAll(getSchemaExternalPaths(schemaBranch.listAll()));
-                    Optional<TableSchema> latestBranchSchema = schemaBranch.latest();
+                List<String> branches = new ArrayList<>();
+                branches.add(DEFAULT_MAIN_BRANCH);
+                branches.addAll(FileSystemBranchManager.branches(tableFileIO, tablePath));
+                for (String branch : branches) {
+                    SchemaManager branchSchema = schemaManager.copyWithBranch(branch);
+                    externalPaths.addAll(getSchemaExternalPaths(branchSchema.listAll()));
+                    Optional<TableSchema> latest = branchSchema.latest();
                     if (!isExternal
-                            && latestBranchSchema.isPresent()
-                            && EntropyInjectTemplateFilesDeletion.isTemplate(
-                                    latestBranchSchema.get())) {
-                        EntropyInjectTemplateFilesDeletion.delete(
-                                tableFileIO, tablePath, branch, latestBranchSchema.get());
+                            && latest.isPresent()
+                            && EntropyInjectTemplateFilesDeletion.isTemplate(latest.get())) {
+                        if (plan == null) {
+                            plan = TemplateFileDeletionPlan.prepare(tableFileIO, tablePath);
+                            cleanupThreads = options.fileOperationThreadNum();
+                        }
+                        EntropyInjectTemplateFilesDeletion.collect(
+                                tableFileIO, tablePath, branch, latest.get(), plan);
                     }
                 }
             }
         }
 
+        if (plan != null) {
+            plan = plan.archiveForTableDrop();
+        }
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
+        if (plan != null) {
+            checkState(!tableExists(identifier), "Table %s still exists after DROP.", identifier);
+            plan.confirmTableDrop(cleanupThreads);
+        }
     }
 
     protected boolean tableExists(Identifier identifier) {

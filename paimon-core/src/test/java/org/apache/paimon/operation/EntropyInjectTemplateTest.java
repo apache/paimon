@@ -54,6 +54,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -227,6 +228,86 @@ public class EntropyInjectTemplateTest {
             external.dropTable(id, false);
 
             assertThat(sharedTableFiles("kept")).isEqualTo(files);
+        }
+    }
+
+    @Test
+    public void testDropTableKeepsTheFilesWhenTheCatalogRefusesIt() throws Exception {
+        java.nio.file.Path warehouse = tempPath.resolve("refusing-warehouse");
+        try (Catalog refusing =
+                new FileSystemCatalog(LocalFileIO.create(), new Path("file://" + warehouse)) {
+                    @Override
+                    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
+                        throw new RuntimeException("the metastore refuses to drop the table");
+                    }
+                }) {
+            refusing.createDatabase(DATABASE, true);
+            Identifier id = Identifier.create(DATABASE, "kept");
+            refusing.createTable(id, sharedSchema("kept"), false);
+            write((FileStoreTable) refusing.getTable(id), 1, "a");
+            Set<String> files = sharedTableFiles("kept");
+            assertThat(files).hasSize(1);
+
+            assertThatThrownBy(() -> refusing.dropTable(id, false))
+                    .hasMessageContaining("refuses to drop the table");
+
+            FileStoreTable keptTable = (FileStoreTable) refusing.getTable(id);
+            TemplateFileDeletionPlan.retryTableDrops(keptTable.fileIO(), keptTable.location(), 1);
+            assertThat(sharedTableFiles("kept")).isEqualTo(files);
+        }
+    }
+
+    @Test
+    public void testDropPlanSpillsPathsInBatches() throws Exception {
+        FileStoreTable table = createTable("batched");
+        LocalFileIO fileIO = LocalFileIO.create();
+        TemplateFileDeletionPlan plan = TemplateFileDeletionPlan.prepare(fileIO, table.location());
+        for (int i = 0; i <= 1024; i++) {
+            plan.add(new Path("file://" + sharedRoot.resolve("file-" + i)));
+        }
+        plan.seal();
+        try (Stream<java.nio.file.Path> files =
+                Files.walk(java.nio.file.Paths.get(table.location().toUri()))) {
+            assertThat(
+                            files.filter(path -> path.getFileName().toString().startsWith("batch-"))
+                                    .count())
+                    .isEqualTo(2);
+        }
+        catalog.dropTable(Identifier.create(DATABASE, "batched"), false);
+        try (Stream<java.nio.file.Path> files = Files.walk(tempPath.resolve("warehouse"))) {
+            assertThat(files.noneMatch(path -> path.getFileName().toString().startsWith("batch-")))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testDropTableRetriesFailedTemplateDeletion() throws Exception {
+        Path warehouse = new Path("file://" + tempPath.resolve("retry-warehouse"));
+        LocalFileIO failingFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public boolean delete(Path path, boolean recursive) throws IOException {
+                        if (!recursive
+                                && path.toUri().getPath().startsWith(sharedRoot.toString() + "/")) {
+                            throw new IOException("transient data deletion failure");
+                        }
+                        return super.delete(path, recursive);
+                    }
+                };
+        Identifier identifier = Identifier.create(DATABASE, "retry");
+        try (Catalog retrying = new FileSystemCatalog(failingFileIO, warehouse)) {
+            retrying.createDatabase(DATABASE, true);
+            retrying.createTable(identifier, sharedSchema("retry"), false);
+            write((FileStoreTable) retrying.getTable(identifier), 1, "a");
+
+            retrying.dropTable(identifier, false);
+
+            assertThat(sharedTableFiles("retry")).hasSize(1);
+        }
+
+        try (Catalog retrying = new FileSystemCatalog(LocalFileIO.create(), warehouse)) {
+            retrying.dropTable(identifier, true);
+            assertThat(sharedTableFiles("retry")).isEmpty();
         }
     }
 
