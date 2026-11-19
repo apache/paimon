@@ -311,25 +311,26 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             rollback = new CommitRollback(tableRollback);
         }
         return new FileStoreCommitImpl(
-                snapshotCommit,
-                fileIO,
-                schemaManager,
-                tableName,
-                commitUser,
-                partitionType,
-                options,
-                pathFactory(),
-                snapshotManager,
-                manifestFileFactory(),
-                manifestListFactory(),
-                indexManifestFileFactory(),
-                this::newScan,
-                newStatsFileHandler(),
-                bucketMode(),
-                createCommitPreCallbacks(table),
-                createCommitCallbacks(commitUser, table),
-                conflictDetectFactory,
-                rollback);
+                        snapshotCommit,
+                        fileIO,
+                        schemaManager,
+                        tableName,
+                        commitUser,
+                        partitionType,
+                        options,
+                        pathFactory(),
+                        snapshotManager,
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        indexManifestFileFactory(),
+                        this::newScan,
+                        newStatsFileHandler(),
+                        bucketMode(),
+                        createCommitPreCallbacks(table),
+                        createCommitCallbacks(commitUser, table),
+                        conflictDetectFactory,
+                        rollback)
+                .withWriteSchemaId(schema.id());
     }
 
     @Override

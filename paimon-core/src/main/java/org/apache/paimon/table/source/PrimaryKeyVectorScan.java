@@ -135,7 +135,25 @@ public class PrimaryKeyVectorScan implements VectorScan {
                                                 == vectorFieldId
                                         && (partitionFilter == null
                                                 || partitionFilter.test(entry.partition())));
-        return plan(snapshot.id(), snapshotPlan.splits(), vectorIndexEntries);
+        if (filter == null || snapshotPlan.splits().isEmpty()) {
+            return plan(snapshot.id(), snapshotPlan.splits(), vectorIndexEntries);
+        }
+
+        // Index validity and direct-read eligibility depend on the complete bucket. Keep
+        // pruned files in the plan with empty row ranges so they cannot produce candidates.
+        SnapshotReader completeReader =
+                scanTable.newSnapshotReader().keepStats().withSnapshot(snapshot);
+        if (partitionFilter != null) {
+            completeReader.withPartitionFilter(partitionFilter);
+        }
+        if (scanTable.coreOptions().batchScanSkipLevel0()) {
+            completeReader.withLevelFilter(level -> level > 0);
+        }
+        return plan(
+                snapshot.id(),
+                completeReader.read().splits(),
+                vectorIndexEntries,
+                snapshotPlan.splits());
     }
 
     private FileStoreTable scanTable() {
@@ -153,6 +171,14 @@ public class PrimaryKeyVectorScan implements VectorScan {
             long snapshotId,
             List<? extends Split> dataSplits,
             List<IndexManifestEntry> vectorIndexEntries) {
+        return plan(snapshotId, dataSplits, vectorIndexEntries, null);
+    }
+
+    private static Plan plan(
+            long snapshotId,
+            List<? extends Split> dataSplits,
+            List<IndexManifestEntry> vectorIndexEntries,
+            @Nullable List<? extends Split> filteredSplits) {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> payloads = new LinkedHashMap<>();
         for (IndexManifestEntry entry : vectorIndexEntries) {
             checkArgument(
@@ -168,6 +194,36 @@ public class PrimaryKeyVectorScan implements VectorScan {
             payloads.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entry.indexFile());
         }
 
+        Map<Pair<BinaryRow, Integer>, BucketAccumulator> buckets = buckets(snapshotId, dataSplits);
+        Map<Pair<BinaryRow, Integer>, BucketAccumulator> filteredBuckets =
+                filteredSplits == null ? null : buckets(snapshotId, filteredSplits);
+        List<BucketVectorSearchSplit> result = new ArrayList<>(buckets.size());
+        for (Map.Entry<Pair<BinaryRow, Integer>, BucketAccumulator> entry : buckets.entrySet()) {
+            BucketAccumulator bucket = entry.getValue();
+            Map<String, List<Range>> ranges = bucket.rowRangesByFile();
+            if (filteredBuckets != null) {
+                BucketAccumulator filtered = filteredBuckets.get(entry.getKey());
+                if (filtered == null) {
+                    continue;
+                }
+                ranges = new LinkedHashMap<>(filtered.rowRangesByFile());
+                for (DataFileMeta file : bucket.dataFiles) {
+                    if (!filtered.dataFileNames.contains(file.fileName())) {
+                        ranges.put(file.fileName(), Collections.emptyList());
+                    }
+                }
+            }
+            result.add(
+                    new BucketVectorSearchSplit(
+                            bucket.build(),
+                            payloads.getOrDefault(entry.getKey(), Collections.emptyList()),
+                            ranges));
+        }
+        return new Plan(snapshotId, result);
+    }
+
+    private static Map<Pair<BinaryRow, Integer>, BucketAccumulator> buckets(
+            long snapshotId, List<? extends Split> dataSplits) {
         Map<Pair<BinaryRow, Integer>, BucketAccumulator> buckets = new LinkedHashMap<>();
         for (Split split : dataSplits) {
             DataSplit dataSplit = unwrapDataSplit(split);
@@ -187,15 +243,7 @@ public class PrimaryKeyVectorScan implements VectorScan {
             accumulator.add(split);
         }
 
-        List<BucketVectorSearchSplit> result = new ArrayList<>(buckets.size());
-        for (Map.Entry<Pair<BinaryRow, Integer>, BucketAccumulator> entry : buckets.entrySet()) {
-            result.add(
-                    new BucketVectorSearchSplit(
-                            entry.getValue().build(),
-                            payloads.getOrDefault(entry.getKey(), Collections.emptyList()),
-                            entry.getValue().rowRangesByFile()));
-        }
-        return new Plan(snapshotId, result);
+        return buckets;
     }
 
     private static DataSplit unwrapDataSplit(Split split) {

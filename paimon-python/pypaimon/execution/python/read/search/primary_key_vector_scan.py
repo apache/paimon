@@ -33,6 +33,8 @@ from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVe
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.execution.python.read.search.global_index_live_row_filter import table_at_snapshot
 from pypaimon.execution.python.read.search.vector_search_scan import VectorSearchScan
+from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import (
+    can_read_bucket_without_merge)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 
@@ -62,24 +64,18 @@ class PrimaryKeyVectorScan(VectorSearchScan):
             builder = builder.with_partition_filter(self._partition_filter)
         if self._filter is not None:
             builder = builder.with_filter(self._filter)
-        source_splits = []
-        for split in builder.new_scan().plan().splits():
-            split = split.split if isinstance(split, QueryAuthSplit) else split
-            if isinstance(split, IndexedSplit):
-                data_split = split.data_split()
-                if len(data_split.files) != 1:
-                    raise ValueError("Primary-key pre-filter split must contain one data file.")
-                source_splits.append((data_split, {
-                    data_split.files[0].file_name: tuple(split.row_ranges())}))
-            elif isinstance(split, DataSplit):
-                source_splits.append((split, {}))
-
-        if self._filter is not None:
+        source_splits = _source_splits(builder)
+        complete_splits = None
+        if self._filter is not None and source_splits:
             source_splits = [
                 (split, _residual_row_ranges(
                     scan_table, self._filter, split, ranges))
                 for split, ranges in source_splits
             ]
+            complete_builder = scan_table.new_read_builder()
+            if self._partition_filter is not None:
+                complete_builder = complete_builder.with_partition_filter(self._partition_filter)
+            complete_splits = _source_splits(complete_builder)
 
         index_type = self._index_type
         if index_type is None:
@@ -91,7 +87,24 @@ class PrimaryKeyVectorScan(VectorSearchScan):
             lambda entry: _matches(entry, self._vector_column.id, index_type,
                                    self._partition_filter))
         return PrimaryKeyVectorScanPlan(
-            snapshot.id, _bucket_splits(source_splits, entries, snapshot.id), snapshot)
+            snapshot.id, _bucket_splits(
+                source_splits, entries, snapshot.id, scan_table.options, complete_splits),
+            snapshot)
+
+
+def _source_splits(builder):
+    source_splits = []
+    for split in builder.new_scan().plan().splits():
+        split = split.split if isinstance(split, QueryAuthSplit) else split
+        if isinstance(split, IndexedSplit):
+            data_split = split.data_split()
+            if len(data_split.files) != 1:
+                raise ValueError("Primary-key pre-filter split must contain one data file.")
+            source_splits.append((data_split, {
+                data_split.files[0].file_name: tuple(split.row_ranges())}))
+        elif isinstance(split, DataSplit):
+            source_splits.append((split, {}))
+    return source_splits
 
 
 def _matches(entry, field_id, index_type, partition_filter):
@@ -102,16 +115,22 @@ def _matches(entry, field_id, index_type, partition_filter):
             and (partition_filter is None or partition_filter.test(entry.partition)))
 
 
-def _bucket_splits(source_splits, entries, snapshot_id=None):
+def _bucket_splits(source_splits, entries, snapshot_id=None, options=None, complete_splits=None):
     payloads_by_bucket = {}
     for entry in entries:
         key = (_partition_key(entry.partition), entry.bucket)
         payloads_by_bucket.setdefault(key, []).append(entry.index_file)
     combined = {}
     ranges_by_bucket = {}
+    filtered_files = {}
     for split, ranges in source_splits:
         key = (_partition_key(split.partition), split.bucket)
         ranges_by_bucket.setdefault(key, {}).update(ranges)
+        if complete_splits is not None:
+            filtered_files.setdefault(key, set()).update(file.file_name for file in split.files)
+
+    for split, _ in source_splits if complete_splits is None else complete_splits:
+        key = (_partition_key(split.partition), split.bucket)
         previous = combined.get(key)
         if previous is None:
             combined[key] = copy(split)
@@ -131,14 +150,25 @@ def _bucket_splits(source_splits, entries, snapshot_id=None):
         combined[key] = merged
 
     result = []
-    for split in combined.values():
-        active = {data_file.file_name: data_file for data_file in split.files
-                  if _should_read_source(data_file)}
+    for key, split in combined.items():
+        if complete_splits is not None and key not in filtered_files:
+            continue
+        ranges = dict(ranges_by_bucket.get(key, {}))
+        if complete_splits is not None:
+            for data_file in split.files:
+                if data_file.file_name not in filtered_files[key]:
+                    ranges[data_file.file_name] = ()
+        active = _eligible_files(split.files, options)
         sources_by_level = {}
+        legacy_sources_by_level = {}
         for data_file in active.values():
-            sources_by_level.setdefault(data_file.level, []).append(
-                (data_file.file_name, data_file.row_count))
+            source = (data_file.file_name, data_file.row_count)
+            sources_by_level.setdefault(data_file.level, []).append(source)
+            if _should_read_source(data_file):
+                legacy_sources_by_level.setdefault(data_file.level, []).append(source)
         for sources in sources_by_level.values():
+            sources.sort(key=lambda source: source[0])
+        for sources in legacy_sources_by_level.values():
             sources.sort(key=lambda source: source[0])
         payloads_by_level = {}
         for payload in payloads_by_bucket.get(
@@ -153,9 +183,10 @@ def _bucket_splits(source_splits, entries, snapshot_id=None):
                 if (payload.row_count == source_row_count
                         and global_meta.row_range_start == 0
                         and global_meta.row_range_end == source_row_count - 1
-                        and sources_by_level.get(source_meta.data_level) == sources):
+                        and (sources_by_level.get(source_meta.data_level) == sources
+                             or legacy_sources_by_level.get(source_meta.data_level) == sources)):
                     payloads_by_level.setdefault(
-                        source_meta.data_level, []).append(payload)
+                        source_meta.data_level, []).append((payload, sources))
             except (ValueError, OverflowError, TypeError, AttributeError):
                 pass
         current = []
@@ -164,13 +195,24 @@ def _bucket_splits(source_splits, entries, snapshot_id=None):
             level_payloads = payloads_by_level[level]
             if len(level_payloads) != 1:
                 continue
-            current.append(level_payloads[0])
-            covered.update(name for name, _ in sources_by_level[level])
-        key = (_partition_key(split.partition), split.bucket)
+            payload, sources = level_payloads[0]
+            current.append(payload)
+            covered.update(name for name, _ in sources)
         result.append(PrimaryKeyVectorSearchSplit(
             split, tuple(current), tuple(name for name in active if name not in covered),
-            dict(ranges_by_bucket.get(key, {}))))
+            ranges))
     return result
+
+
+def _eligible_files(bucket_files, options):
+    if options is not None:
+        visible_files = ([file for file in bucket_files if file.level > 0]
+                         if options.batch_scan_skip_level0() else bucket_files)
+        if (can_read_bucket_without_merge(
+                visible_files, options.deletion_vectors_enabled(), options.merge_engine())
+                and all(file.level > 0 and file.delete_row_count is not None for file in visible_files)):
+            return {file.file_name: file for file in visible_files}
+    return {file.file_name: file for file in bucket_files if _should_read_source(file)}
 
 
 def _residual_row_ranges(table, predicate, split, candidate_ranges):

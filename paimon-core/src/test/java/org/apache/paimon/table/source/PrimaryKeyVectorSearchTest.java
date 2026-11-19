@@ -27,6 +27,9 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -53,6 +56,7 @@ import java.util.Map;
 
 import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** End-to-end tests for bucket-local primary-key vector search. */
 class PrimaryKeyVectorSearchTest extends TableTestBase {
@@ -307,6 +311,72 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                 .extracting(IndexFileMeta::fileName)
                 .containsExactlyInAnyOrderElementsOf(
                         completedPayloads.stream().map(IndexFileMeta::fileName).collect(toList()));
+    }
+
+    @Test
+    void testBackfillPromotedAppendFile() throws Exception {
+        String indexOption =
+                "global-index." + TestVectorGlobalIndexerFactory.IDENTIFIER + ".index-columns";
+        Schema schema = schemaDefault();
+        schema.options().remove(indexOption);
+        schema.options().put(CoreOptions.COMPACTION_SMALL_FILE_RATIO.key(), "0");
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable original = getTableDefault();
+        write(original, ioManager, GenericRow.of(1, vector(1, 0)), GenericRow.of(2, vector(9, 0)));
+        compact(original, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+
+        List<DataFileMeta> promoted = dataFiles(original);
+        assertThat(promoted)
+                .hasSize(1)
+                .allSatisfy(
+                        file -> {
+                            assertThat(file.fileSource()).contains(FileSource.APPEND);
+                            assertThat(file.level()).isPositive();
+                        });
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.setOption(indexOption, "embedding")),
+                false);
+        FileStoreTable indexed = getTableDefault();
+        assertThat(searchIds(indexed, "embedding", new float[] {0, 0}, 1)).isEmpty();
+        FileStoreTable full =
+                (FileStoreTable)
+                        indexed.copy(Collections.singletonMap("vector-index.search-mode", "full"));
+        assertThat(searchIds(full, "embedding", new float[] {0, 0}, 1)).containsExactly(1);
+
+        BatchWriteBuilder backfill = indexed.newBatchWriteBuilder();
+        BatchWriteBuilder concurrent = indexed.newBatchWriteBuilder();
+        try (BatchTableWrite firstWrite = backfill.newWrite();
+                BatchTableWrite secondWrite = concurrent.newWrite();
+                BatchTableCommit firstCommit = backfill.newCommit();
+                BatchTableCommit secondCommit = concurrent.newCommit()) {
+            firstWrite.withIOManager(ioManager);
+            secondWrite.withIOManager(ioManager);
+            firstWrite.compact(BinaryRow.EMPTY_ROW, 0, true);
+            secondWrite.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> first = firstWrite.prepareCommit();
+            List<CommitMessage> second = secondWrite.prepareCommit();
+            CompactIncrement increment = ((CommitMessageImpl) first.get(0)).compactIncrement();
+            assertThat(increment.compactBefore()).isEmpty();
+            assertThat(increment.compactAfter()).isEmpty();
+            assertThat(increment.newIndexFiles()).hasSize(1);
+
+            firstCommit.commit(first);
+            assertThatThrownBy(() -> secondCommit.commit(second))
+                    .hasStackTraceContaining("Concurrent compaction conflict");
+        }
+
+        assertThat(dataFiles(indexed)).containsExactlyElementsOf(promoted);
+        assertThat(vectorPayloads(indexed)).hasSize(1);
+        assertThat(searchIds(indexed, "embedding", new float[] {0, 0}, 1)).containsExactly(1);
+        compact(indexed, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+        assertThat(vectorPayloads(indexed)).hasSize(1);
+    }
+
+    private static List<DataFileMeta> dataFiles(FileStoreTable table) {
+        return table.newSnapshotReader().read().splits().stream()
+                .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                .collect(toList());
     }
 
     private Schema multipleVectorSchema(
