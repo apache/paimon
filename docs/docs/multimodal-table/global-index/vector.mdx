@@ -471,18 +471,16 @@ and `diskann-centroid` on Data Evolution append tables. Each contiguous source r
 partition gets one routing model and one shard file per centroid. The table must enable row tracking and
 Data Evolution, have no primary key, and use `bucket=-1`.
 
-```sql
-ALTER TABLE db.model_embeddings SET TBLPROPERTIES (
-    'ivf-pq-centroid.dimension' = '768',
-    'ivf-pq-centroid.distance.metric' = 'cosine'
-);
+For the 768-dimensional example table above, this call builds a cosine IVF-PQ index on one
+`dt` partition. The `options` apply to this build.
 
+```sql
 CALL sys.create_global_index(
     table => 'db.model_embeddings',
     index_column => 'embedding',
     index_type => 'ivf-pq-centroid',
     partitions => 'dt="2026-11-17"',
-    options => 'ivf-pq-centroid.nlist=256'
+    options => 'ivf-pq-centroid.dimension=768,ivf-pq-centroid.distance.metric=cosine,ivf-pq-centroid.nlist=256'
 );
 ```
 
@@ -530,8 +528,9 @@ The router and its shards share one `GlobalIndexMeta.rowRange`, as with BTree. E
 the range start back to matching IDs. Gaps belonging to other partitions remain eligible for raw search in
 `vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
 only indexed rows.
-Persist the metric and dimension on the table when using raw fallback so indexed
-and unindexed ranges use the same distance definition.
+For raw fallback, set the column’s metric in the table properties so unindexed rows use the
+same distance as the index. For the example above, use `fields.embedding.metric=cosine`.
+You can also set `fields.embedding.dimension=768` there to reuse the dimension in later builds.
 Batch queries share each selected shard across the queries routed to it.
 
 For all four IVF types, Spark shuffles vectors by their assigned routing centroid.
