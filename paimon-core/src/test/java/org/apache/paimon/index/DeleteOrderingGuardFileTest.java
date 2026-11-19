@@ -38,6 +38,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -97,6 +98,96 @@ class DeleteOrderingGuardFileTest {
                 assertThat(actual.ordering().getInt(0)).isEqualTo(expected.ordering().getInt(0));
             }
             assertThat(actual.sequenceNumber()).isEqualTo(expected.sequenceNumber());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 1000})
+    void testReadAheadBeforeConsumingBatches(int rowCount) throws Exception {
+        DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
+        List<DeleteOrderingGuard> input = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            input.add(guard(i, i, i));
+        }
+        IndexFileMeta meta = write(file, input);
+
+        try (RecordReader<DeleteOrderingGuard> reader = file.read(meta)) {
+            List<RecordReader.RecordIterator<DeleteOrderingGuard>> batches = new ArrayList<>();
+            RecordReader.RecordIterator<DeleteOrderingGuard> batch;
+            while ((batch = reader.readBatch()) != null) {
+                batches.add(batch);
+            }
+            if (rowCount == 1) {
+                assertThat(batches).hasSize(1);
+            } else {
+                assertThat(batches).hasSizeGreaterThan(1);
+            }
+            assertThat(reader.readBatch()).isNull();
+
+            int key = 0;
+            for (RecordReader.RecordIterator<DeleteOrderingGuard> held : batches) {
+                DeleteOrderingGuard actual;
+                while ((actual = held.next()) != null) {
+                    assertThat(actual.key().getInt(0)).isEqualTo(key);
+                    assertThat(actual.ordering().getInt(0)).isEqualTo(key);
+                    assertThat(actual.sequenceNumber()).isEqualTo(key);
+                    key++;
+                }
+                held.releaseBatch();
+            }
+            assertThat(key).isEqualTo(rowCount);
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @Test
+    void testEofWithPartiallyConsumedBatch() throws Exception {
+        DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
+        IndexFileMeta meta = write(file, Arrays.asList(guard(1, 4, 4), guard(2, 5, 5)));
+
+        try (RecordReader<DeleteOrderingGuard> reader = file.read(meta)) {
+            RecordReader.RecordIterator<DeleteOrderingGuard> held = reader.readBatch();
+            assertThat(held).isNotNull();
+            assertThat(held.next().key().getInt(0)).isEqualTo(1);
+            assertThat(reader.readBatch()).isNull();
+            assertThat(held.next().key().getInt(0)).isEqualTo(2);
+            assertThat(held.next()).isNull();
+            held.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0, false", "0, true", "2, false", "2, true"})
+    void testIncorrectRowCountRejected(long rowCount, boolean consumeBatches) throws Exception {
+        DeleteOrderingGuardFile file = file(LocalFileIO.create(), serializer(7), false);
+        IndexFileMeta meta = write(file, Collections.singletonList(guard(1, 4, 4)));
+        IndexFileMeta incorrect =
+                new IndexFileMeta(
+                        meta.indexType(),
+                        meta.fileName(),
+                        meta.fileSize(),
+                        rowCount,
+                        null,
+                        meta.externalPath(),
+                        null);
+
+        try (RecordReader<DeleteOrderingGuard> reader = file.read(incorrect)) {
+            assertThatThrownBy(
+                            () -> {
+                                RecordReader.RecordIterator<DeleteOrderingGuard> batch;
+                                while ((batch = reader.readBatch()) != null) {
+                                    if (consumeBatches) {
+                                        while (batch.next() != null) {}
+                                    }
+                                    batch.releaseBatch();
+                                }
+                            })
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(
+                            rowCount == 0
+                                    ? "segment contains extra rows"
+                                    : "row count mismatch: expected 2, found 1");
         }
     }
 

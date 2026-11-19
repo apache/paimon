@@ -40,6 +40,11 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
         this.polledPosition = -1;
     }
 
+    /** Returns the total number of records in the block, regardless of the iterator position. */
+    public int recordCount() {
+        return reader.recordCount();
+    }
+
     @Override
     public boolean hasNext() {
         return polledPosition >= 0 || (!exhausted && input.isReadable());

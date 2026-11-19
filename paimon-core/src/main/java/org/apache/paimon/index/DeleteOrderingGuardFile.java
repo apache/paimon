@@ -290,15 +290,17 @@ public class DeleteOrderingGuardFile extends IndexFile {
                 }
                 return null;
             }
+            // Callers may retain batches, so count physical rows before handing out the iterator.
+            readRowCount += batch.recordCount();
+            if (readRowCount > expectedRowCount) {
+                throw new IOException("Delete ordering guard segment contains extra rows.");
+            }
             return new RecordIterator<DeleteOrderingGuard>() {
                 @Nullable
                 @Override
                 public DeleteOrderingGuard next() throws IOException {
                     if (!batch.hasNext()) {
                         return null;
-                    }
-                    if (++readRowCount > expectedRowCount) {
-                        throw new IOException("Delete ordering guard segment contains extra rows.");
                     }
                     Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
                     return serializer.deserialize(entry.getKey(), entry.getValue());
