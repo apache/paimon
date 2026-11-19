@@ -550,6 +550,11 @@ Spark fallback/chain, audit-log and incremental reads, including `latest-delta`,
 keep their existing planner and its metadata memory boundaries. Internal batch
 scan modes also keep the existing planner.
 
+For LIMIT reads without data predicates, RowID filters or deletion vectors,
+replay keeps only the required complete dependency groups. Candidate metadata
+is still scanned and externally sorted before selecting that prefix; the
+largest-group and sorting memory boundaries still apply.
+
 Streaming commit conflict checking requires at least six sort-buffer pages for
 its two sorters. Smaller buffers remain valid and use ordinary conflict checking,
 which retains its original metadata memory boundary instead of increasing the

@@ -46,11 +46,13 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.AppendBatchTableScan;
@@ -76,6 +78,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -559,6 +563,123 @@ class DataEvolutionIncrementalScanTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = {1, 3})
+    void testSmallLimitStreamsCompleteGroupsAcrossOverlappingManifests(long limit)
+            throws Exception {
+        Fixture fixture = new Fixture();
+        List<ManifestEntry> bases = new ArrayList<>();
+        List<ManifestEntry> updates = new ArrayList<>();
+        for (int i = 0; i < 64; i++) {
+            bases.add(entry("base-" + i + ".parquet", 2L * i, 2, 1, "a", i, 1, 1, 0, 0));
+            updates.add(entry("update-" + i + ".parquet", 2L * i, 2, 2, "b", i, 1, 1, 0, 0));
+        }
+        fixture.write(bases.toArray(new ManifestEntry[0]));
+        fixture.write(updates.toArray(new ManifestEntry[0]));
+        assertThat(fixture.manifests).hasSize(2);
+        assertThat(fixture.manifests).extracting(ManifestFileMeta::minRowId).containsOnly(0L);
+        assertThat(fixture.manifests).extracting(ManifestFileMeta::maxRowId).containsOnly(127L);
+        CapturingRegistry metrics = new CapturingRegistry();
+        DataEvolutionFileStoreScan scan = fixture.scan(true);
+        scan.withMetrics(new ScanMetrics(metrics, "fixture"));
+        Path metadata = Files.createDirectory(directory.resolve("limit-prefix-metadata"));
+        try (ObservedIOManager io = fixture.io();
+                DataFileMetaStore store =
+                        new DataFileMetaStore(metadata, limit == 1 ? 1024 : 2048)) {
+            SnapshotReader reader = fixture.reader(scan).withLimit(limit);
+            SnapshotReader.Plan plan = reader.readIncrementally(store, io);
+            int expectedGroups = (int) ((limit + 1) / 2);
+            List<String> expectedFiles = new ArrayList<>();
+            for (int i = 0; i < expectedGroups; i++) {
+                expectedFiles.add("base-" + i + ".parquet");
+                expectedFiles.add("update-" + i + ".parquet");
+            }
+            assertThat(plan.snapshot()).isSameAs(fixture.snapshot);
+            assertThat(plan.dataSplits()).hasSize(1);
+            DataSplit split = plan.dataSplits().get(0);
+            assertThat(split.dataFiles())
+                    .extracting(DataFileMeta::fileName)
+                    .containsExactlyElementsOf(expectedFiles);
+            assertThat(split.rawConvertible()).isFalse();
+            assertThat(split.mergedRowCount().getAsLong()).isEqualTo(expectedGroups * 2L);
+            assertThat(fixture.streamedGroups.get()).isEqualTo(expectedGroups);
+            assertThat(store.serializedBytes()).isLessThanOrEqualTo(limit == 1 ? 1024 : 2048);
+            assertThat(metrics.value(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES))
+                    .isEqualTo(expectedGroups * 2L);
+            assertThat(metrics.value(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES))
+                    .isEqualTo(128L - expectedGroups * 2);
+        }
+        fixture.assertNoSpillFiles();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testStreamingLimitDoesNotPruneBeforeDataFilter(boolean configureScan) throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.write(
+                entry("first-a.parquet", 0L, 2, 1, "a", 100, 1, 1, 0, 0),
+                entry("last-a.parquet", 2L, 2, 1, "a", 101, 1, 1, 0, 0));
+        fixture.write(
+                entry("first-b.parquet", 0L, 2, 2, "b", 200, 1, 1, 0, 0),
+                entry("last-b.parquet", 2L, 2, 2, "b", 201, 1, 1, 0, 0));
+        Path metadata = Files.createDirectory(directory.resolve("filtered-limit-metadata"));
+        try (ObservedIOManager io = fixture.io();
+                DataFileMetaStore store = new DataFileMetaStore(metadata, 1024 * 1024)) {
+            DataEvolutionFileStoreScan scan = fixture.scan(true);
+            Predicate filter =
+                    new PredicateBuilder(fixture.schema.logicalRowType()).greaterOrEqual(3, 100);
+            SnapshotReader reader = fixture.reader(scan);
+            if (configureScan) {
+                scan.withFilter(filter);
+            } else {
+                reader.withFilter(filter);
+            }
+            reader.withLimit(1);
+            SnapshotReader.Plan plan = reader.readIncrementally(store, io);
+            assertThat(
+                            plan.dataSplits().stream()
+                                    .flatMap(split -> split.dataFiles().stream())
+                                    .map(DataFileMeta::fileName)
+                                    .collect(Collectors.toList()))
+                    .containsExactly(
+                            "first-a.parquet",
+                            "first-b.parquet",
+                            "last-a.parquet",
+                            "last-b.parquet");
+        }
+        fixture.assertNoSpillFiles();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testStreamingLimitDoesNotCountRowsOutsideRanges(boolean configureScan) throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.write(
+                entry("first.parquet", 0L, 2, 1, "a", 1, 1, 1, 0, 0),
+                entry("last.parquet", 2L, 2, 1, "a", 2, 1, 1, 0, 0));
+        Path metadata = Files.createDirectory(directory.resolve("row-range-limit-metadata"));
+        try (ObservedIOManager io = fixture.io();
+                DataFileMetaStore store = new DataFileMetaStore(metadata, 1024 * 1024)) {
+            DataEvolutionFileStoreScan scan = fixture.scan(true);
+            List<Range> ranges = Arrays.asList(new Range(0, 0), new Range(2, 2));
+            SnapshotReader reader = fixture.reader(scan);
+            if (configureScan) {
+                scan.withRowRanges(ranges);
+            } else {
+                reader.withRowRanges(ranges);
+            }
+            reader.withLimit(2);
+            SnapshotReader.Plan plan = reader.readIncrementally(store, io);
+            assertThat(
+                            plan.dataSplits().stream()
+                                    .flatMap(split -> split.dataFiles().stream())
+                                    .map(DataFileMeta::fileName)
+                                    .collect(Collectors.toList()))
+                    .containsExactly("first.parquet", "last.parquet");
+        }
+        fixture.assertNoSpillFiles();
+    }
+
     @Test
     void testSnapshotPackingDoesNotCutProvidersWhenPartitionsInterleave() throws Exception {
         Fixture fixture = new Fixture();
@@ -927,6 +1048,7 @@ class DataEvolutionIncrementalScanTest {
         private final FileStorePathFactory paths;
         private final List<ManifestFileMeta> manifests = new ArrayList<>();
         private final AtomicInteger reads = new AtomicInteger();
+        private final AtomicInteger streamedGroups = new AtomicInteger();
         private final Snapshot snapshot =
                 new Snapshot(
                         17,
@@ -1020,6 +1142,10 @@ class DataEvolutionIncrementalScanTest {
         }
 
         private DataEvolutionFileStoreScan scan() {
+            return scan(false);
+        }
+
+        private DataEvolutionFileStoreScan scan(boolean forbidMaterializedPlan) {
             ManifestsReader reader =
                     new ManifestsReader(partitionType, "default", null, null) {
                         @Override
@@ -1028,8 +1154,33 @@ class DataEvolutionIncrementalScanTest {
                             return new Result(snapshot, manifests, manifests);
                         }
                     };
+            BucketSelectConverter bucketSelectConverter =
+                    new BucketSelectConverter(
+                            BucketMode.BUCKET_UNAWARE,
+                            new CoreOptions(schema.options()),
+                            schema.logicalRowType(),
+                            partitionType,
+                            schema.logicalBucketKeyType());
             return new DataEvolutionFileStoreScan(
-                    reader, null, null, null, schema, factory, 2, false);
+                    reader, bucketSelectConverter, null, null, schema, factory, 2, false) {
+                @Override
+                protected List<ManifestEntry> postFilterManifestEntries(
+                        List<ManifestEntry> entries) {
+                    if (forbidMaterializedPlan) {
+                        streamedGroups.incrementAndGet();
+                    }
+                    return super.postFilterManifestEntries(entries);
+                }
+
+                @Override
+                public FileStoreScan.Plan plan() {
+                    if (forbidMaterializedPlan) {
+                        throw new AssertionError(
+                                "Streaming LIMIT must not materialize scan.plan()");
+                    }
+                    return super.plan();
+                }
+            };
         }
 
         private ObservedIOManager io() {

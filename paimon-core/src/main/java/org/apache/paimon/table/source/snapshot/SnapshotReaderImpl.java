@@ -119,8 +119,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private DataFileMetaStore incrementalStore;
     @Nullable private IOManager incrementalIoManager;
     private boolean incrementalRead;
-    @Nullable private Long limit;
-    private boolean hasRowRangeFilter;
 
     public SnapshotReaderImpl(
             FileStoreScan scan,
@@ -347,14 +345,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withRowRanges(List<Range> sortedPushdownRowRanges) {
-        hasRowRangeFilter = sortedPushdownRowRanges != null;
         scan.withRowRanges(sortedPushdownRowRanges);
         return this;
     }
 
     @Override
     public SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
-        hasRowRangeFilter = rowRangeIndex != null;
         scan.withRowRangeIndex(rowRangeIndex);
         return this;
     }
@@ -373,7 +369,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withLimit(long limit) {
-        this.limit = limit;
         scan.withLimit(limit);
         return this;
     }
@@ -464,23 +459,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         "Incremental metadata planning requires a DE batch ALL scan.");
             }
             IncrementalSplitPlanner planner = new IncrementalSplitPlanner(store);
-            Snapshot snapshot;
-            if (limit != null
-                    && limit > 0
-                    && limit <= INCREMENTAL_PENDING_FILE_LIMIT
-                    && !hasNonPartitionFilter
-                    && !hasRowRangeFilter
-                    && !deletionVectors) {
-                // Reuse safe early manifest termination for small limits. Large limits retain
-                // bounded group production rather than materializing the entire candidate set.
-                FileStoreScan.Plan plan = scan.plan();
-                snapshot = plan.snapshot();
-                planner.accept(plan.files(FileKind.ADD));
-            } else {
-                snapshot =
-                        ((DataEvolutionFileStoreScan) scan)
-                                .forEachFileGroup(ioManager, planner::accept);
-            }
+            Snapshot snapshot =
+                    ((DataEvolutionFileStoreScan) scan)
+                            .forEachFileGroup(ioManager, planner::accept);
             planner.finish();
             store.seal();
             if (options.scanPlanSortPartition()) {

@@ -281,6 +281,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         long started = System.nanoTime();
         ManifestsReader.Result manifests = readManifests();
         long[] resultedFiles = {0};
+        Long rowLimit =
+                limit != null
+                                && limit > 0
+                                && inputFilter == null
+                                && rowRangeIndex == null
+                                && !deletionVectorsEnabled
+                        ? limit
+                        : null;
+        long[] remainingRows = {rowLimit == null ? 0 : rowLimit};
         CompactFileIdentifierSet deleted = new CompactFileIdentifierSet();
         ReusableIdentifier identifier = new ReusableIdentifier();
         Function<ManifestEntry, ManifestEntry> converter =
@@ -317,8 +326,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                             int count = filtered.size();
                             consumer.accept(filtered);
                             resultedFiles[0] += count;
+                            if (rowLimit != null) {
+                                // Providers can cover the same rows; summing them would stop early.
+                                long rows =
+                                        filtered.stream()
+                                                .mapToLong(entry -> entry.file().rowCount())
+                                                .max()
+                                                .orElse(0L);
+                                remainingRows[0] -= Math.min(remainingRows[0], rows);
+                            }
                         }
-                    });
+                    },
+                    () -> rowLimit == null || remainingRows[0] > 0);
         } finally {
             deleted.release();
             identifier.release();

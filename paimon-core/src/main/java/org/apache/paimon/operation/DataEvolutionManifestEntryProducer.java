@@ -31,6 +31,7 @@ import org.apache.paimon.utils.ThrowingConsumer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 /**
  * Sorts valid binary entries with bounded buffers and decodes one complete RowID group at a time.
@@ -74,6 +75,14 @@ final class DataEvolutionManifestEntryProducer implements AutoCloseable {
     }
 
     void forEachGroup(ThrowingConsumer<List<ManifestEntry>, Exception> consumer) throws Exception {
+        forEachGroup(consumer, () -> true);
+    }
+
+    /** Stops only between complete dependency groups, without decoding a partial successor. */
+    void forEachGroup(
+            ThrowingConsumer<List<ManifestEntry>, Exception> consumer,
+            BooleanSupplier continueReading)
+            throws Exception {
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
         BinaryRow reuse = new BinaryRow(SORT_TYPE.getFieldCount());
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
@@ -84,6 +93,9 @@ final class DataEvolutionManifestEntryProducer implements AutoCloseable {
             long first = next.getLong(0);
             if (!group.isEmpty() && first > end) {
                 emit(group, consumer);
+                if (!continueReading.getAsBoolean()) {
+                    return;
+                }
                 group.clear();
             }
             end = group.isEmpty() ? next.getLong(1) : Math.max(end, next.getLong(1));
