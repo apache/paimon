@@ -152,27 +152,50 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             int driverSlots =
                     Math.min(sc.defaultParallelism(), Runtime.getRuntime().availableProcessors());
             int workers = Math.min(ranges.size(), Math.min(driverSlots, budget));
-            int slotsPerRange = budget / workers;
+            // Give larger input ranges their share of the slots before scheduling tiny ones.
+            ranges.sort((a, b) -> Integer.compare(b.getRight().size(), a.getRight().size()));
             ExecutorService pool =
                     ThreadPoolUtils.createCachedThreadPool(workers, "centroid-build");
-            try (ThreadPoolUtils.CloseableBatchIterator<CommitMessage> built =
-                    ThreadPoolUtils.sequentialBatchedExecuteCloseable(
-                            pool,
-                            range -> {
-                                try {
-                                    return buildRange(
-                                            sc,
-                                            range.getLeft(),
-                                            range.getRight(),
-                                            indexer,
-                                            slotsPerRange);
-                                } catch (IOException e) {
-                                    throw new UncheckedIOException(e);
-                                }
-                            },
-                            ranges,
-                            workers)) {
-                built.forEachRemaining(messages::add);
+            try {
+                for (int start = 0; start < ranges.size(); ) {
+                    long splitsInBatch = 0;
+                    int end = start;
+                    while (end < ranges.size() && end - start < workers) {
+                        int splitCount = ranges.get(end).getRight().size();
+                        if ((long) budget * splitCount < splitsInBatch + splitCount) {
+                            // This range would get less than one slot. Start it in the next batch.
+                            break;
+                        }
+                        splitsInBatch += splitCount;
+                        end++;
+                    }
+                    final long totalSplits = splitsInBatch;
+                    try (ThreadPoolUtils.CloseableBatchIterator<CommitMessage> built =
+                            ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                                    pool,
+                                    range -> {
+                                        int slots =
+                                                (int)
+                                                        ((long) budget
+                                                                * range.getRight().size()
+                                                                / totalSplits);
+                                        try {
+                                            return buildRange(
+                                                    sc,
+                                                    range.getLeft(),
+                                                    range.getRight(),
+                                                    indexer,
+                                                    slots);
+                                        } catch (IOException e) {
+                                            throw new UncheckedIOException(e);
+                                        }
+                                    },
+                                    ranges.subList(start, end),
+                                    workers)) {
+                        built.forEachRemaining(messages::add);
+                    }
+                    start = end;
+                }
             } catch (UncheckedIOException e) {
                 throw e.getCause();
             } finally {
@@ -252,7 +275,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                                     input,
                                                     partition,
                                                     parallelism,
-                                                    broadcast.value(),
+                                                    nlist,
                                                     modelId),
                                     false)
                             .collect();
@@ -423,28 +446,27 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             Iterator<Tuple2<Integer, Tuple2<Long, float[]>>> rows,
             int partition,
             int parallelism,
-            byte[] payload,
+            int nlist,
             String modelId)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
         PeekingIterator<Tuple2<Integer, Tuple2<Long, float[]>>> input =
                 Iterators.peekingIterator(rows);
-        try (VectorTrainingModel model = context.indexer().restoreTrainingModel(payload)) {
-            // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
-            // as well, without a second set of input tasks to shuffle sentinel records.
-            int nlist = model.nlist();
-            for (int centroid = partition; centroid < nlist; centroid += parallelism) {
-                GlobalIndexSingleColumnWriter writer =
-                        model.createCentroidWriter(context.io(), centroid, modelId);
-                try {
-                    while (input.hasNext() && input.peek()._1() == centroid) {
-                        Tuple2<Long, float[]> row = input.next()._2();
-                        writer.write(row._2(), row._1() - context.rowRange.from);
-                    }
-                    commits.add(context.finish(writer));
-                } finally {
-                    close(writer);
+        CentroidVectorGlobalIndexer indexer = context.indexer();
+        GlobalIndexFileReadWrite io = context.io();
+        // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
+        // as well, without a second set of input tasks to shuffle sentinel records.
+        for (int centroid = partition; centroid < nlist; centroid += parallelism) {
+            GlobalIndexSingleColumnWriter writer =
+                    indexer.createCentroidWriter(io, centroid, modelId);
+            try {
+                while (input.hasNext() && input.peek()._1() == centroid) {
+                    Tuple2<Long, float[]> row = input.next()._2();
+                    writer.write(row._2(), row._1() - context.rowRange.from);
                 }
+                commits.add(context.finish(writer));
+            } finally {
+                close(writer);
             }
         }
         return commits.iterator();

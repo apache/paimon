@@ -40,6 +40,10 @@ public interface CentroidVectorGlobalIndexer extends VectorGlobalIndexer {
             GlobalIndexFileWriter io, String name, byte[] payload, String modelId, int nlist)
             throws IOException;
 
+    /** Open an independently trained local index for the assigned centroid. */
+    GlobalIndexSingleColumnWriter createCentroidWriter(
+            GlobalIndexFileWriter fileWriter, int centroid, String modelId);
+
     /** Return non-null input ordinals in the order required for training. */
     long[] planGlobalTrainingSample(long vectorCount);
 

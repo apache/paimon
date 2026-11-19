@@ -267,10 +267,12 @@ class CentroidVectorGlobalIndexTest {
                                 io.getFileSize(modelPath),
                                 0,
                                 VectorIndexShardMeta.routing(id, model.nlist(), "l2").serialize()));
-                GlobalIndexSingleColumnWriter empty = model.createCentroidWriter(files, 0, id);
+                GlobalIndexSingleColumnWriter empty = indexer.createCentroidWriter(files, 0, id);
                 try {
                     empty.write(null, 0);
-                    assertThat(empty).extracting("tempVectorFile", "writeBuf").containsOnlyNulls();
+                    assertThat(empty)
+                            .extracting("tempVectorFile", "spillBuffer")
+                            .containsOnlyNulls();
                     ResultEntry result = empty.finish().get(0);
                     Path path = new Path(directory, result.fileName());
                     emptyMeta = new GlobalIndexIOMeta(path, io.getFileSize(path), 0, result.meta());
@@ -279,7 +281,8 @@ class CentroidVectorGlobalIndexTest {
                     ((Closeable) empty).close();
                 }
                 for (int c = 0; c < model.nlist(); c++) {
-                    GlobalIndexSingleColumnWriter writer = model.createCentroidWriter(files, c, id);
+                    GlobalIndexSingleColumnWriter writer =
+                            indexer.createCentroidWriter(files, c, id);
                     try {
                         assertThatThrownBy(() -> writer.write(vectors[0], -1L))
                                 .isInstanceOf(IllegalArgumentException.class);
@@ -791,7 +794,8 @@ class CentroidVectorGlobalIndexTest {
                 int centroid = model.assignCentroid(landmarks[i]);
                 // Neighbours of the last landmark encounter one small shard.
                 GlobalIndexSingleColumnWriter writer =
-                        (i == 63 ? smallIndexer : indexer).createLocalWriter(files, centroid, id);
+                        (i == 63 ? smallIndexer : indexer)
+                                .createCentroidWriter(files, centroid, id);
                 try {
                     for (int j = 0; j < 512; j++) {
                         float[] row = landmarks[i].clone();

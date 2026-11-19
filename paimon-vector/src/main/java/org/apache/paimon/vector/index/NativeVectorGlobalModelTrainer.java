@@ -57,7 +57,7 @@ final class NativeVectorGlobalModelTrainer implements VectorGlobalModelTrainer {
         }
         finished = true;
         try {
-            return indexer.wrap(samples.finishRoutingModel(indexer));
+            return new NativeVectorTrainingModel(samples.finishRoutingModel(indexer));
         } finally {
             samples.close();
         }

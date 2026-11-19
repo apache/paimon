@@ -291,6 +291,40 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       }
   }
 
+  test("a large centroid range uses the map slots when built with a singleton range") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (v ARRAY<FLOAT>, p INT) PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.row-count-per-shard'='16',
+                  |'global-index.build.max-parallelism'='2')""".stripMargin)
+      spark.sql("""INSERT INTO T PARTITION(p=0) SELECT array(cast(id AS FLOAT),1.0f)
+                  |FROM range(256)""".stripMargin)
+      spark.sql("INSERT INTO T PARTITION(p=1) VALUES (array(1.0f,1.0f))")
+
+      val sc = spark.sparkContext
+      val group = s"centroid-skew-${System.nanoTime()}"
+      sc.setJobGroup(group, group)
+      try {
+        spark
+          .sql("""CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+                 |index_type=>'ivf-flat-centroid', options=>'ivf-flat-centroid.dimension=2,
+                 |ivf-flat-centroid.nlist=2')""".stripMargin.replace("\n", ""))
+          .collect()
+      } finally {
+        sc.clearJobGroup()
+      }
+      val tracker = sc.statusTracker
+      val mapWidths = tracker
+        .getJobIdsForGroup(group)
+        .flatMap(id => tracker.getJobInfo(id).toSeq.flatMap(_.stageIds))
+        .distinct
+        .flatMap(id => tracker.getStageInfo(id).toSeq)
+        .filter(_.name.startsWith("mapPartitionsWithIndex at CentroidGlobalIndexTopoBuilder"))
+        .map(_.numTasks)
+      assert(mapWidths.sorted.toSeq == Seq(1, 2))
+    }
+  }
+
   test("distributed training preserves the model across sparse splits and different task counts") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (

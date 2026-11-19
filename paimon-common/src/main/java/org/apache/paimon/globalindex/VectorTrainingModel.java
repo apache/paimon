@@ -18,8 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-
 import java.io.IOException;
 
 /** Portable shared training state. Each restored instance owns its native resources. */
@@ -31,9 +29,6 @@ public interface VectorTrainingModel extends AutoCloseable {
     int[] nearestCentroids(float[] vector, int nprobe);
 
     byte[] serialize();
-
-    GlobalIndexSingleColumnWriter createCentroidWriter(
-            GlobalIndexFileWriter fileWriter, int centroid, String modelId);
 
     @Override
     void close() throws IOException;

@@ -160,7 +160,8 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
         return VectorIndexTrainer.create(coarse);
     }
 
-    GlobalIndexSingleColumnWriter createLocalWriter(
+    @Override
+    public GlobalIndexSingleColumnWriter createCentroidWriter(
             GlobalIndexFileWriter fileWriter, int centroid, String modelId) {
         Map<String, String> local = new LinkedHashMap<>(options);
         if ("diskann".equals(identifier)) {
@@ -187,7 +188,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
                 trainer.addTrainingVectors(batch.vectors, batch.count);
             }
             try (VectorIndexTraining coarse = trainer.finishTraining()) {
-                return wrap(CentroidRouter.fromTraining(coarse));
+                return new NativeVectorTrainingModel(CentroidRouter.fromTraining(coarse));
             }
         }
     }
@@ -200,10 +201,6 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
 
     @Override
     public VectorTrainingModel restoreTrainingModel(byte[] payload) {
-        return wrap(CentroidRouter.deserialize(payload));
-    }
-
-    NativeVectorTrainingModel wrap(CentroidRouter model) {
-        return new NativeVectorTrainingModel(model, this);
+        return new NativeVectorTrainingModel(CentroidRouter.deserialize(payload));
     }
 }

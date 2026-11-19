@@ -85,7 +85,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private File tempVectorFile;
     private FileChannel writeChannel;
-    private ByteBuffer writeBuf;
+    // Writes, training reads and index insertion use this buffer in sequence.
+    private ByteBuffer spillBuffer;
 
     private final int recordSizeInBytes;
     private float[] vectorBuf;
@@ -145,7 +146,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private void openSpillFile() {
         this.vectorBuf = new float[dim];
-        this.writeBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE).order(ByteOrder.nativeOrder());
+        this.spillBuffer =
+                ByteBuffer.allocateDirect(Math.max(8192, recordSizeInBytes))
+                        .order(ByteOrder.nativeOrder());
 
         try {
             this.tempVectorFile = File.createTempFile("paimon-vector-vectors-", ".bin");
@@ -194,17 +197,23 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             throw new IllegalArgumentException(
                     "Centroid shards require nonnegative relative row IDs.");
         }
-        if (writeBuf == null) {
+        if (spillBuffer == null) {
             openSpillFile();
         }
         float[] src = materializeAndValidate(fieldData, rowId);
 
-        if (writeBuf.remaining() < recordSizeInBytes) {
+        if (spillBuffer.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
+            if (spillBuffer.capacity() < IO_BUFFER_SIZE) {
+                spillBuffer =
+                        ByteBuffer.allocateDirect(
+                                        Math.min(IO_BUFFER_SIZE, spillBuffer.capacity() * 2))
+                                .order(ByteOrder.nativeOrder());
+            }
         }
-        writeBuf.putLong(rowId);
+        spillBuffer.putLong(rowId);
         for (int i = 0; i < dim; i++) {
-            writeBuf.putFloat(src[i]);
+            spillBuffer.putFloat(src[i]);
         }
         rowCount++;
         count++;
@@ -247,11 +256,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private void flushWriteBuffer() {
         try {
-            writeBuf.flip();
-            while (writeBuf.hasRemaining()) {
-                writeChannel.write(writeBuf);
+            spillBuffer.flip();
+            while (spillBuffer.hasRemaining()) {
+                writeChannel.write(spillBuffer);
             }
-            writeBuf.clear();
+            spillBuffer.clear();
         } catch (IOException e) {
             throw new RuntimeException("Failed to flush vector buffer to disk", e);
         }
@@ -276,7 +285,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             flushWriteBuffer();
             writeChannel.close();
             writeChannel = null;
-            writeBuf = null;
             return Collections.singletonList(buildIndex());
         } catch (IOException e) {
             throw new RuntimeException("Failed to write vector global index", e);
@@ -410,13 +418,16 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private void addTrainingBatches(VectorIndexTrainer trainer, long trainCount)
             throws IOException {
-        int trainBatchSize = Math.min(TRAIN_BATCH_SIZE, IO_BUFFER_SIZE / recordSizeInBytes);
+        int trainBatchSize =
+                (int)
+                        Math.min(
+                                trainCount,
+                                Math.min(TRAIN_BATCH_SIZE, IO_BUFFER_SIZE / recordSizeInBytes));
         float[] batchVectors = new float[trainBatchSize * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
-            ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
-            readBuf.order(ByteOrder.nativeOrder());
+            ByteBuffer readBuf = spillBuffer;
             readBuf.limit(0);
 
             long selected = 0;
@@ -491,14 +502,13 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {
-        int addBatchSize = vectorBatchSize(ADD_BATCH_SIZE, dim);
+        int addBatchSize = vectorBatchSize((int) Math.min(count, ADD_BATCH_SIZE), dim);
         long[] batchIds = new long[addBatchSize];
         float[] batchVectors = new float[addBatchSize * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
-            ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
-            readBuf.order(ByteOrder.nativeOrder());
+            ByteBuffer readBuf = spillBuffer;
             readBuf.limit(0);
 
             long remaining = count;
@@ -683,7 +693,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 }
             } catch (IOException ignored) {
             }
-            writeBuf = null;
+            spillBuffer = null;
             vectorBuf = null;
             if (tempVectorFile != null) {
                 tempVectorFile.delete();

@@ -39,12 +39,14 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,16 +125,16 @@ public class DataEvolutionVectorScan implements VectorScan {
                 };
 
         List<IndexManifestEntry> indexEntries = indexFileHandler.scan(snapshot, indexFileFilter);
-        List<IndexFileMeta> allIndexFiles =
-                indexEntries.stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .collect(Collectors.toList());
+        List<IndexFileMeta> scalarFiles = new ArrayList<>();
         // Only the primary field serves this vector search. Each split goes to its own index type.
         Map<Pair<Range, String>, List<IndexFileMeta>> rangeGroups = new HashMap<>();
         List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : indexEntries) {
             IndexFileMeta file = entry.indexFile();
             GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
+            if (filter != null && canServeScalarFilter(meta)) {
+                scalarFiles.add(file);
+            }
             if (isPrimaryColumn(meta, vectorColumn.id())) {
                 vectorIndexFiles.add(file);
                 rangeGroups
@@ -142,6 +144,15 @@ public class DataEvolutionVectorScan implements VectorScan {
             }
         }
 
+        Map<Range, List<IndexFileMeta>> scalarFilesByRange =
+                scalarFiles.isEmpty()
+                        ? Collections.emptyMap()
+                        : groupScalarFiles(
+                                scalarFiles,
+                                rangeGroups.keySet().stream()
+                                        .map(Pair::getLeft)
+                                        .distinct()
+                                        .collect(Collectors.toList()));
         List<VectorSearchSplit> splits = new ArrayList<>();
         List<Range> indexedRanges = new ArrayList<>();
         String scoringIndexType = null;
@@ -163,7 +174,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                             range.from,
                             range.to,
                             files,
-                            scalarIndexFiles(allIndexFiles, Collections.singletonList(range))));
+                            scalarFilesByRange.getOrDefault(range, Collections.emptyList())));
         }
         CoreOptions effectiveOptions = effectiveCoreOptions();
         GlobalIndexSearchMode vectorSearchMode = effectiveOptions.vectorIndexSearchMode();
@@ -179,7 +190,7 @@ public class DataEvolutionVectorScan implements VectorScan {
             List<Range> scalarUnindexedRanges =
                     scalarUnindexedRanges(
                             snapshot,
-                            scalarIndexFiles(allIndexFiles),
+                            scalarFiles,
                             effectiveOptions.scalarIndexSearchMode(),
                             filterFieldIds);
             if (vectorSearchMode == GlobalIndexSearchMode.FAST) {
@@ -192,10 +203,23 @@ public class DataEvolutionVectorScan implements VectorScan {
                     Range.sortAndMergeOverlap(addAll(rawRowRanges, scalarUnindexedRanges), true);
         }
         if (!rawRowRanges.isEmpty()) {
+            List<IndexFileMeta> rawScalarFiles = Collections.emptyList();
+            if (!scalarFiles.isEmpty()) {
+                RowRangeIndex raw = RowRangeIndex.create(rawRowRanges);
+                rawScalarFiles =
+                        scalarFiles.stream()
+                                .filter(
+                                        file -> {
+                                            GlobalIndexMeta meta = file.globalIndexMeta();
+                                            return raw.intersects(
+                                                    meta.rowRangeStart(), meta.rowRangeEnd());
+                                        })
+                                .collect(Collectors.toList());
+            }
             splits.add(
                     new RawVectorSearchSplit(
                             rawRowRanges,
-                            scalarIndexFiles(allIndexFiles, rawRowRanges),
+                            rawScalarFiles,
                             scoringIndexType == null
                                     ? configuredVectorIndexType()
                                     : scoringIndexType));
@@ -273,28 +297,38 @@ public class DataEvolutionVectorScan implements VectorScan {
         return meta.indexFieldId() == fieldId;
     }
 
-    private List<IndexFileMeta> scalarIndexFiles(List<IndexFileMeta> allIndexFiles) {
-        return allIndexFiles.stream()
-                .filter(
-                        f -> {
-                            GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            return canServeScalarFilter(globalIndex);
-                        })
-                .collect(Collectors.toList());
-    }
-
-    private List<IndexFileMeta> scalarIndexFiles(
-            List<IndexFileMeta> allIndexFiles, List<Range> rowRanges) {
-        return allIndexFiles.stream()
-                .filter(
-                        f -> {
-                            GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            if (!canServeScalarFilter(globalIndex)) {
-                                return false;
-                            }
-                            return hasIntersection(rowRanges, globalIndex.rowRange());
-                        })
-                .collect(Collectors.toList());
+    private static Map<Range, List<IndexFileMeta>> groupScalarFiles(
+            List<IndexFileMeta> scalarFiles, List<Range> ranges) {
+        ranges.sort(Comparator.comparingLong(range -> range.from));
+        // Ends need not be ordered when ranges overlap. The prefix maximum lets us skip
+        // every earlier range that ends before the scalar file starts.
+        long[] maxEnds = new long[ranges.size()];
+        long maxEnd = Long.MIN_VALUE;
+        for (int i = 0; i < ranges.size(); i++) {
+            maxEnd = Math.max(maxEnd, ranges.get(i).to);
+            maxEnds[i] = maxEnd;
+        }
+        Map<Range, List<IndexFileMeta>> byRange = new HashMap<>();
+        for (IndexFileMeta file : scalarFiles) {
+            Range scalar = file.globalIndexMeta().rowRange();
+            int lo = 0;
+            int hi = ranges.size();
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (maxEnds[mid] < scalar.from) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            for (int i = lo; i < ranges.size() && ranges.get(i).from <= scalar.to; i++) {
+                Range range = ranges.get(i);
+                if (range.to >= scalar.from) {
+                    byRange.computeIfAbsent(range, k -> new ArrayList<>()).add(file);
+                }
+            }
+        }
+        return byRange;
     }
 
     private boolean canServeScalarFilter(GlobalIndexMeta meta) {
@@ -304,15 +338,6 @@ public class DataEvolutionVectorScan implements VectorScan {
     private static boolean hasExtraFields(GlobalIndexMeta meta) {
         int[] extraFieldIds = meta.extraFieldIds();
         return extraFieldIds != null && extraFieldIds.length > 0;
-    }
-
-    private static boolean hasIntersection(List<Range> ranges, Range range) {
-        for (Range r : ranges) {
-            if (r.hasIntersection(range)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static List<Range> addAll(List<Range> left, List<Range> right) {

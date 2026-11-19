@@ -18,20 +18,14 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.VectorTrainingModel;
-import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
 
-/** JNI-backed portable partition model and independent centroid writers. */
+/** JNI-backed portable centroid router. */
 final class NativeVectorTrainingModel implements VectorTrainingModel {
     private final CentroidRouter training;
 
-    private final NativeCentroidVectorGlobalIndexer localIndexer;
-
-    NativeVectorTrainingModel(
-            CentroidRouter training, NativeCentroidVectorGlobalIndexer localIndexer) {
-        this.localIndexer = localIndexer;
+    NativeVectorTrainingModel(CentroidRouter training) {
         this.training = training;
     }
 
@@ -58,14 +52,5 @@ final class NativeVectorTrainingModel implements VectorTrainingModel {
     @Override
     public void close() {
         training.close();
-    }
-
-    @Override
-    public GlobalIndexSingleColumnWriter createCentroidWriter(
-            GlobalIndexFileWriter fileWriter, int centroid, String modelId) {
-        if (centroid < 0 || centroid >= nlist()) {
-            throw new IllegalArgumentException("Invalid routing centroid.");
-        }
-        return localIndexer.createLocalWriter(fileWriter, centroid, modelId);
     }
 }
