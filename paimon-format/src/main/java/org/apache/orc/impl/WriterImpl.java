@@ -113,6 +113,7 @@ public class WriterImpl implements WriterInternal, MemoryManager.Callback {
     private long previousAllocation = -1;
     private long memoryLimit;
     private final long rowsPerCheck;
+    private final double stripeSizePerCheck;
     private long rowsSinceCheck = 0;
     private final OrcFile.Version version;
     private final Configuration conf;
@@ -221,6 +222,8 @@ public class WriterImpl implements WriterInternal, MemoryManager.Callback {
         this.stripeRowCount = opts.getStripeRowCountValue();
         this.stripeSize = opts.getStripeSize();
         memoryLimit = stripeSize;
+        double stripeSizeCheckRatio = OrcConf.STRIPE_SIZE_CHECKRATIO.getDouble(conf);
+        stripeSizePerCheck = stripeSizeCheckRatio <= 0 ? 0 : stripeSizeCheckRatio * stripeSize;
         memoryManager = opts.getMemoryManager();
         memoryManager.addWriter(path, stripeSize, this);
 
@@ -321,9 +324,12 @@ public class WriterImpl implements WriterInternal, MemoryManager.Callback {
     }
 
     private boolean checkMemory() throws IOException {
-        if (rowsSinceCheck >= rowsPerCheck) {
+        long size =
+                rowsSinceCheck < rowsPerCheck && stripeSizePerCheck == 0
+                        ? 0
+                        : treeWriter.estimateMemory();
+        if (rowsSinceCheck >= rowsPerCheck || size > stripeSizePerCheck) {
             rowsSinceCheck = 0;
-            long size = treeWriter.estimateMemory();
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
                         "ORC writer "
