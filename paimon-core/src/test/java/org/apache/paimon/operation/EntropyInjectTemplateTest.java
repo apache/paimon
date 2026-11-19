@@ -44,6 +44,8 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -173,9 +175,9 @@ public class EntropyInjectTemplateTest {
         return names.size();
     }
 
-    /** The literal template path remains subject to the catalog's existing directory cleanup. */
+    /** The literal template path is excluded from recursive directory cleanup. */
     @Test
-    public void testDropTableRemovesTheLiteralPlaceholderDirectory() throws Exception {
+    public void testDropTablePreservesTheLiteralPlaceholderDirectory() throws Exception {
         FileStoreTable t1 = createTable("t1");
         FileStoreTable t2 = createTable("t2");
         write(t1, 1, "a");
@@ -185,12 +187,13 @@ public class EntropyInjectTemplateTest {
         java.nio.file.Path literal =
                 sharedRoot.resolve("{hash}").resolve(DATABASE + ".db").resolve("t1");
         Files.createDirectories(literal);
-        Files.write(literal.resolve("data-from-an-older-version.parquet"), new byte[] {1});
+        Files.write(literal.resolve("legacy.parquet"), new byte[] {1});
 
         catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
 
-        assertThat(Files.exists(literal)).isFalse();
-        assertThat(sharedTableFiles("t1")).isEmpty();
+        assertThat(sharedTableFiles("t1"))
+                .containsExactly(
+                        sharedRoot.relativize(literal.resolve("legacy.parquet")).toString());
         assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
     }
 
@@ -234,8 +237,9 @@ public class EntropyInjectTemplateTest {
                 .hasMessageContaining(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
     }
 
-    @Test
-    public void testExternalPathMustContainPlaceholder() {
+    @ParameterizedTest
+    @ValueSource(strings = {"/bad", "/{hash}/.."})
+    public void testExternalPathMustContainPlaceholder(String suffix) {
         assertThatThrownBy(
                         () ->
                                 catalog.createTable(
@@ -243,7 +247,7 @@ public class EntropyInjectTemplateTest {
                                         schemaBuilder()
                                                 .option(
                                                         CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
-                                                        "file://" + sharedRoot + "/bad")
+                                                        "file://" + sharedRoot + suffix)
                                                 .option(
                                                         CoreOptions
                                                                 .DATA_FILE_EXTERNAL_PATHS_STRATEGY

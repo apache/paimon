@@ -72,14 +72,11 @@ public class TemplateEntropyInjectExternalPathProvider implements ExternalPathPr
         return new Path(new Path(externalTablePath, relativeBucketPath), fileName);
     }
 
-    /** Whether the given external path is a template handled by this provider. */
-    public static boolean isTemplate(String externalPath) {
-        return externalPath.contains(HASH_PLACEHOLDER);
-    }
-
-    private static void checkTemplate(Path template) {
+    /** Validates that the normalized URI path contains the hash placeholder. */
+    public static void checkTemplate(Path template) {
+        String path = template.toUri().getPath();
         checkArgument(
-                isTemplate(template.toString()),
+                path != null && path.contains(HASH_PLACEHOLDER),
                 "External path '%s' must contain the '%s' placeholder.",
                 template,
                 HASH_PLACEHOLDER);
