@@ -505,7 +505,10 @@ selected partitions' previous routers and shards of the requested type.
 Queries load each selected range's routing model, select centroids with `centroid.nprobe`,
 and open their shard files. Inside each selected shard, `ivf.nprobe` controls how many
 local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
-Automatic probe sizing and filtered search remain available.
+With the small-router tuning in the native library, automatic outer probing starts at three
+of four centroids or four of eight. A larger top-K or a row-ID filter can raise that initial
+width. If the search returns fewer than top-K results, automatic routing can probe additional
+shards. Set `centroid.nprobe` explicitly to use a fixed outer width.
 The trained outer centers live in the routing model file. In the manifest, each
 centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta`.
 For a shard, this descriptor identifies the model and centroid and wraps the local

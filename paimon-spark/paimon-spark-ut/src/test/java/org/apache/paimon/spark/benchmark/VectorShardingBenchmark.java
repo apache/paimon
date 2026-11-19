@@ -52,6 +52,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.spark.sql.SparkSession;
 
@@ -90,7 +91,7 @@ import java.util.concurrent.atomic.LongAdder;
  * <p>Import and row-ID mapping are excluded from build time. Query time includes fresh reader
  * creation, routing/model loads, all shard searches, top-K merge and close. It excludes manifest
  * planning, source-row fetch and SQL scheduling. Every configuration uses the same held-out query
- * IDs, top-10, warm OS page cache and no refinement. I/O counters measure logical bytes actually
+ * IDs, top-K, warm OS page cache and no refinement. I/O counters measure logical bytes actually
  * returned by Paimon streams, including metadata and routing, and preserve vectored reads.
  *
  * <p>Run serially, after compilation, with RAYON_NUM_THREADS set to the thread argument. Output
@@ -99,22 +100,24 @@ import java.util.concurrent.atomic.LongAdder;
  * <p>System properties: {@code benchmark.range-based.options} and {@code
  * benchmark.centroid-based.options} add comma-separated procedure options for each mode. {@code
  * benchmark.range-based.nprobes} and {@code benchmark.centroid-based.nprobes} override the probe
- * sweep separately, allowing comparisons at a common recall target. {@code benchmark.query-offset}
- * skips that many entries in the fixed shuffled query order before warmup, allowing disjoint
- * calibration and validation sets. {@code benchmark.source-warehouse} reuses this benchmark's
- * existing source table; index generations are replaced but source rows are unchanged. {@code
- * benchmark.modes} selects one or both modes. With one mode, {@code benchmark.skip-build=true}
- * reads the current generation and records build time as -1 (unmeasured). {@code
- * benchmark.source-ranges} splits the source partition into this many disjoint row-ID ranges by
- * inserting a row in a different partition between commits. The default is one. {@code
- * benchmark.index-type} selects any native vector index family. {@code benchmark.read-snapshot}
- * selects a retained generation for query-only sweeps. DiskANN independently sweeps {@code
- * benchmark.<mode>.l-searches} and outer centroid probes; range mode has no outer probe. {@code
- * benchmark.reuse-readers=true} is exclusively for recall calibration: it records I/O as -1 and its
- * query timing must not be compared with fresh-reader measurements.
+ * sweep separately. Use the value {@code auto} to omit the probe option. {@code
+ * benchmark.query-offset} skips that many entries in the fixed shuffled query order before warmup,
+ * allowing disjoint calibration and validation sets. {@code benchmark.source-warehouse} reuses this
+ * benchmark's existing source table; index generations are replaced but source rows are unchanged.
+ * {@code benchmark.modes} selects one or both modes. With one mode, {@code
+ * benchmark.skip-build=true} reads the current generation and records build time as -1
+ * (unmeasured). {@code benchmark.source-ranges} splits the source partition into this many disjoint
+ * row-ID ranges by inserting a row in a different partition between commits. The default is one.
+ * {@code benchmark.index-type} selects any native vector index family. {@code
+ * benchmark.read-snapshot} selects a retained generation for query-only sweeps. DiskANN
+ * independently sweeps {@code benchmark.<mode>.l-searches} and outer centroid probes; range mode
+ * has no outer probe. {@code benchmark.reuse-readers=true} is exclusively for recall calibration:
+ * it records I/O as -1 and its query timing must not be compared with fresh-reader measurements.
+ * {@code benchmark.top-k} defaults to 10. {@code benchmark.allowed-ids} points to a text file with
+ * one eligible base vector ID per line. Supply exact ground truth over those eligible vectors when
+ * using a filter.
  */
 public final class VectorShardingBenchmark {
-    private static final int TOP_K = 10;
     private static final int WARMUP = 16;
     private static final long SEED = 20261117L;
 
@@ -128,6 +131,9 @@ public final class VectorShardingBenchmark {
     private final int threads;
     private final List<Integer> probes;
     private final List<String> configuredModes;
+    private final int topK = Integer.parseInt(System.getProperty("benchmark.top-k", "10"));
+    private final String allowedIds = System.getProperty("benchmark.allowed-ids");
+    private RoaringNavigableMap64 includeRowIds;
     private final int sourceRanges =
             Integer.parseInt(System.getProperty("benchmark.source-ranges", "1"));
     private final int queryOffset =
@@ -185,7 +191,8 @@ public final class VectorShardingBenchmark {
         }
         if (sourceRanges < 1
                 || sourceRanges > rows
-                || rows < TOP_K
+                || topK < 1
+                || rows < topK
                 || queryCount < 1
                 || repetitions < 1
                 || threads < 1
@@ -242,7 +249,8 @@ public final class VectorShardingBenchmark {
                         "indexType=" + indexType,
                         "rows=" + rows,
                         "dimension=" + dimension,
-                        "topK=" + TOP_K,
+                        "topK=" + topK,
+                        "allowedIds=" + allowedIds,
                         "queries=" + queryCount,
                         "warmup=" + WARMUP,
                         "repetitions=" + repetitions,
@@ -299,7 +307,9 @@ public final class VectorShardingBenchmark {
                 PrintWriter measurements =
                         csv(
                                 "queries.csv",
-                                "repetition,mode,nprobe,query_id,latency_ns,hits_at_10,result_count,files,opens,read_calls,read_bytes,routing_bytes,l_search,index_type")) {
+                                "repetition,mode,nprobe,query_id,latency_ns,hits_at_"
+                                        + topK
+                                        + ",result_count,files,opens,read_calls,read_bytes,routing_bytes,l_search,index_type")) {
             spark.sql("CREATE DATABASE IF NOT EXISTS bench").collect();
             spark.sql("USE bench").collect();
             tablePath =
@@ -466,16 +476,18 @@ public final class VectorShardingBenchmark {
                                             throw new IllegalStateException(
                                                     "Unknown absolute row ID " + rowId);
                                         }
-                                        long logical = logicalIds[(int) rowId];
-                                        for (int k = 0; k < TOP_K; k++) {
-                                            if (logical == truth[id][k]) {
-                                                hits++;
-                                                break;
-                                            }
+                                        if (includeRowIds != null
+                                                && !includeRowIds.contains(rowId)) {
+                                            throw new IllegalStateException(
+                                                    "Search returned an excluded row ID " + rowId);
+                                        }
+                                        if (Arrays.binarySearch(
+                                                        truth[id], (int) logicalIds[(int) rowId])
+                                                >= 0) {
+                                            hits++;
                                         }
                                     }
-                                    if (observation.result.results().getLongCardinality()
-                                            != TOP_K) {
+                                    if (observation.result.results().getLongCardinality() != topK) {
                                         throw new IllegalStateException("Incomplete top-K");
                                     }
                                     if (i >= WARMUP) {
@@ -488,7 +500,7 @@ public final class VectorShardingBenchmark {
                                                 id,
                                                 observation.nanos,
                                                 hits,
-                                                TOP_K,
+                                                topK,
                                                 reuseReaders ? -1 : stats.files.size(),
                                                 reuseReaders ? -1 : stats.opens.sum(),
                                                 reuseReaders ? -1 : stats.calls.sum(),
@@ -563,8 +575,9 @@ public final class VectorShardingBenchmark {
         List<Integer> widths = new ArrayList<>();
         int modeNlist = Integer.parseInt(buildOptions(mode).get(typeForMode(mode) + ".nlist"));
         for (String value : override.split(",")) {
-            int width = Integer.parseInt(value);
-            if (width < 1 || width > modeNlist || widths.contains(width)) {
+            boolean automatic = "auto".equals(value);
+            int width = automatic ? 0 : Integer.parseInt(value);
+            if ((!automatic && width < 1) || width > modeNlist || widths.contains(width)) {
                 throw new IllegalArgumentException("Invalid nprobe override: " + override);
             }
             widths.add(width);
@@ -631,6 +644,30 @@ public final class VectorShardingBenchmark {
         if (ids.size() != rows) {
             throw new IllegalStateException("Incomplete source mapping");
         }
+        if (allowedIds != null) {
+            Set<Integer> allowed = new HashSet<>();
+            for (String id : Files.readAllLines(java.nio.file.Paths.get(allowedIds))) {
+                allowed.add(Integer.parseInt(id));
+            }
+            if (!ids.containsAll(allowed) || allowed.size() < topK) {
+                throw new IllegalArgumentException(
+                        "Filter must contain at least top-K valid base IDs");
+            }
+            includeRowIds = new RoaringNavigableMap64();
+            for (int rowId = 0; rowId < logicalIds.length; rowId++) {
+                if (logicalIds[rowId] >= 0 && allowed.contains((int) logicalIds[rowId])) {
+                    includeRowIds.add(rowId);
+                }
+            }
+            for (int[] neighbors : truth) {
+                for (int id : neighbors) {
+                    if (!allowed.contains(id)) {
+                        throw new IllegalArgumentException(
+                                "Ground truth contains an excluded base ID");
+                    }
+                }
+            }
+        }
         System.out.println("Validated absolute row-ID mapping rows=" + ids.size());
     }
 
@@ -640,9 +677,12 @@ public final class VectorShardingBenchmark {
         }
         List<Integer> result = new ArrayList<>();
         for (String value :
-                System.getProperty("benchmark." + mode + ".l-searches", "64").split(",")) {
+                System.getProperty(
+                                "benchmark." + mode + ".l-searches",
+                                String.valueOf(Math.max(64, topK)))
+                        .split(",")) {
             int width = Integer.parseInt(value);
-            if (width < TOP_K || result.contains(width)) {
+            if (width < topK || result.contains(width)) {
                 throw new IllegalArgumentException("Invalid DiskANN search width: " + value);
             }
             result.add(width);
@@ -685,7 +725,8 @@ public final class VectorShardingBenchmark {
         if (lSearch > 0) {
             options.put("diskann.l_search", String.valueOf(lSearch));
         }
-        VectorSearch search = new VectorSearch(vector, TOP_K, "v", options);
+        VectorSearch search =
+                new VectorSearch(vector, topK, "v", options).withIncludeRowIds(includeRowIds);
         long started = System.nanoTime();
         List<GlobalIndexReader> readers =
                 cached == null ? openReaders(mode, files, metas, input) : cached;
@@ -701,7 +742,7 @@ public final class VectorShardingBenchmark {
             for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
                 future.get().ifPresent(results::add);
             }
-            result = ScoredGlobalIndexResult.merge(results).topK(TOP_K);
+            result = ScoredGlobalIndexResult.merge(results).topK(topK);
         } finally {
             if (cached == null) {
                 for (GlobalIndexReader reader : readers) {
@@ -794,12 +835,12 @@ public final class VectorShardingBenchmark {
         try (DataInputStream in = input("groundtruth.ivecs")) {
             width = littleInt(in);
         }
-        if (width < TOP_K) {
+        if (width < topK) {
             throw new IOException("Ground truth is shorter than top-K");
         }
         int count =
                 Math.toIntExact(Files.size(data.resolve("groundtruth.ivecs")) / ((width + 1L) * 4));
-        int[][] neighbors = new int[count][TOP_K];
+        int[][] neighbors = new int[count][topK];
         try (DataInputStream in = input("groundtruth.ivecs")) {
             for (int i = 0; i < count; i++) {
                 if (littleInt(in) != width) {
@@ -810,10 +851,11 @@ public final class VectorShardingBenchmark {
                     if (id < 0 || id >= rows) {
                         throw new IOException("Ground truth must refer to the exact source corpus");
                     }
-                    if (j < TOP_K) {
+                    if (j < topK) {
                         neighbors[i][j] = id;
                     }
                 }
+                Arrays.sort(neighbors[i]);
             }
         }
         return neighbors;
