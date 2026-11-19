@@ -22,11 +22,16 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.DateTimeUtils
 
+import org.apache.spark.ShuffleDependency
+import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.paimon.Utils
 
 import java.nio.file.{Files, Paths}
 import java.nio.file.attribute.FileTime
 import java.util.concurrent.TimeUnit
+
+import scala.collection.mutable
 
 class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
@@ -313,55 +318,126 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
         .contains(partitionValue))
   }
 
-  test("Paimon procedure: abort when cached references are recomputed after expiration") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id INT, name STRING)
-                 |USING PAIMON
-                 |TBLPROPERTIES (
-                 |  'bucket' = '1',
-                 |  'bucket-key' = 'id',
-                 |  'manifest.merge-min-count' = '1')
-                 |""".stripMargin)
+  test("Paimon procedure: abort when only data references are recomputed after expiration") {
+    withSparkSQLConf(
+      "spark.sql.adaptive.enabled" -> "false",
+      "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, name STRING)
+                   |USING PAIMON
+                   |TBLPROPERTIES (
+                   |  'bucket' = '1',
+                   |  'bucket-key' = 'id',
+                   |  'manifest.merge-min-count' = '1')
+                   |""".stripMargin)
 
-    spark.sql("INSERT INTO T VALUES (1, 'a')")
-    spark.sql("INSERT INTO T VALUES (2, 'b')")
+      spark.sql("INSERT INTO T VALUES (1, 'a')")
+      spark.sql("INSERT INTO T VALUES (2, 'b')")
 
-    val oldDataFiles =
-      spark.sql("SELECT file_path FROM `T$files`").collect().map(_.getString(0)).toSeq
-    val oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2)
-    oldDataFiles.foreach(
-      path => Files.setLastModifiedTime(Paths.get(path), FileTime.fromMillis(oldTime)))
+      val oldDataFiles =
+        spark.sql("SELECT file_path FROM `T$files`").collect().map(_.getString(0)).toSeq
+      assert(oldDataFiles.nonEmpty)
+      val oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2)
+      oldDataFiles.foreach(
+        path => Files.setLastModifiedTime(Paths.get(path), FileTime.fromMillis(oldTime)))
 
-    val (deleted, cachedDatasets) = new SparkOrphanFilesClean(
-      loadTable("T"),
-      System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1),
-      1,
-      dryRunPara = false,
-      spark
-    ).doOrphanClean()
+      val existingCacheIds = spark.sparkContext.getPersistentRDDs.keySet.toSet
+      val (deleted, cachedDatasets) = new SparkOrphanFilesClean(
+        loadTable("T"),
+        System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1),
+        1,
+        dryRunPara = false,
+        spark
+      ).doOrphanClean()
+      try {
+        val deletionRDD = deleted.queryExecution.executedPlan.execute()
+        val unions = lineage(deletionRDD).collect { case union: UnionRDD[_] => union }
+        assert(unions.size == 1)
+        val references = unions.head
+        assert(references.rdds.size == 2)
+        val metadata = references.rdds.head
+        val data = references.rdds(1)
+        val referenceShuffles = shuffleDependencies(deletionRDD).filter(
+          dependency => lineage(dependency.rdd, narrowOnly = true).exists(_.id == references.id))
+        assert(referenceShuffles.size == 1)
+        val referenceShuffle = referenceShuffles.head
+        assert(referenceShuffle.rdd.getNumPartitions == references.getNumPartitions)
 
-    try {
-      deleted.queryExecution.executedPlan
-      spark.sql("INSERT INTO T VALUES (3, 'c')")
-      spark.sql("CALL sys.expire_snapshots(table => 'T', retain_max => 1, retain_min => 1)")
-      spark.sparkContext.getPersistentRDDs.values.foreach(_.unpersist(blocking = true))
+        val metadataShuffleIds = shuffleDependencies(metadata).map(_.shuffleId).toSet
+        val dataOnlyShuffles = shuffleDependencies(data).filterNot(
+          dependency => metadataShuffleIds.contains(dependency.shuffleId))
+        assert(dataOnlyShuffles.size == 1)
+        val manifestGroupingShuffle = dataOnlyShuffles.head
 
-      val exception = intercept[org.apache.spark.SparkException] {
-        deleted.collect()
+        Utils.materializeShuffle(spark, referenceShuffle)
+        val metadataPartitions = metadata.getNumPartitions
+        val dataPartitions = metadataPartitions until references.getNumPartitions
+        assert(dataPartitions.nonEmpty)
+        assert(
+          Utils.availableShuffleOutputs(referenceShuffle.shuffleId) ==
+            references.getNumPartitions)
+        val referenceCaches = spark.sparkContext.getPersistentRDDs
+          .filterNot { case (id, _) => existingCacheIds.contains(id) }
+          .values
+          .toSeq
+        assert(referenceCaches.size == cachedDatasets.size)
+        spark.sql("INSERT INTO T VALUES (3, 'c')")
+        spark.sql("CALL sys.expire_snapshots(table => 'T', retain_max => 1, retain_min => 1)")
+        checkAnswer(
+          spark.sql("SELECT * FROM T ORDER BY id"),
+          Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+        referenceCaches.foreach(_.unpersist(blocking = true))
+        Utils.invalidateShuffleOutputs(referenceShuffle.shuffleId, dataPartitions)
+        Utils.invalidateShuffleOutputs(
+          manifestGroupingShuffle.shuffleId,
+          0 until manifestGroupingShuffle.rdd.getNumPartitions)
+        assert(Utils.availableShuffleOutputs(referenceShuffle.shuffleId) == metadataPartitions)
+        assert(Utils.availableShuffleOutputs(manifestGroupingShuffle.shuffleId) == 0)
+        assert(metadataShuffleIds.nonEmpty)
+        metadataShuffleIds.foreach(id => assert(Utils.availableShuffleOutputs(id) > 0))
+
+        val exception = intercept[org.apache.spark.SparkException] {
+          deleted.collect()
+        }
+        assert(
+          Iterator
+            .iterate[Throwable](exception)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(
+              cause =>
+                Option(cause.getMessage).exists(_.contains("Detected missing live manifest"))))
+        assert(oldDataFiles.forall(path => Files.exists(Paths.get(path))))
+        checkAnswer(
+          spark.sql("SELECT * FROM T ORDER BY id"),
+          Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+      } finally {
+        cachedDatasets.foreach(_.unpersist())
       }
-      assert(
-        Iterator
-          .iterate[Throwable](exception)(_.getCause)
-          .takeWhile(_ != null)
-          .exists(
-            cause => Option(cause.getMessage).exists(_.contains("Detected missing live manifest"))))
-      assert(oldDataFiles.forall(path => Files.exists(Paths.get(path))))
-      checkAnswer(
-        spark.sql("SELECT * FROM T ORDER BY id"),
-        Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
-    } finally {
-      cachedDatasets.foreach(_.unpersist())
     }
+  }
+
+  private def lineage(root: RDD[_], narrowOnly: Boolean = false): Seq[RDD[_]] = {
+    val visited = mutable.Set[Int]()
+
+    def collect(rdd: RDD[_]): Seq[RDD[_]] = {
+      if (!visited.add(rdd.id)) {
+        Seq.empty
+      } else {
+        Seq(rdd) ++ rdd.dependencies.flatMap {
+          case _: ShuffleDependency[_, _, _] if narrowOnly => Seq.empty
+          case dependency => collect(dependency.rdd)
+        }
+      }
+    }
+
+    collect(root)
+  }
+
+  private def shuffleDependencies(root: RDD[_]): Seq[ShuffleDependency[_, _, _]] = {
+    lineage(root)
+      .flatMap(_.dependencies)
+      .collect { case shuffle: ShuffleDependency[_, _, _] => shuffle }
+      .distinct
   }
 
 }

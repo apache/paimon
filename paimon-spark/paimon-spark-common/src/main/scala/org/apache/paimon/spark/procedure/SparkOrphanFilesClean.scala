@@ -129,7 +129,14 @@ case class SparkOrphanFilesClean(
     }
 
     val dataFilesWithFlag = usedManifestFiles
-      .filter(f => f.isManifestFile && !f.isMissing)
+      .filter {
+        file =>
+          if (file.isMissing) {
+            throw new RuntimeException(
+              "Detected missing live manifest during used-files collection, aborting clean.")
+          }
+          file.isManifestFile
+      }
       .groupByKey(f => (f.branch, f.manifestName))
       .reduceGroups((a, b) => a.copy(isLiveSnapshot = a.isLiveSnapshot || b.isLiveSnapshot))
       .map(_._2)
