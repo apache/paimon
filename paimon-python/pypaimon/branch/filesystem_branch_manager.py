@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import logging
 import os
 import re
@@ -307,18 +308,25 @@ class FileSystemBranchManager(BranchManager):
                 path for snapshot_id, path in main_snapshots.items()
                 if snapshot_id >= earliest_snapshot.id and snapshot_id not in branch_snapshots
             ]
-            delete_paths.extend(
-                self.schema_manager._to_schema_path(schema_id)
-                for schema_id in self.schema_manager._list_versioned_files()
-                if schema_id >= earliest_snapshot.schema_id and schema_id not in branch_schema_ids
-            )
+            main_schema_ids = set(self.schema_manager._list_versioned_files())
+            removed_schema_ids = {schema_id for schema_id in main_schema_ids - branch_schema_ids
+                                  if schema_id >= earliest_snapshot.schema_id}
+            delete_paths.extend(self.schema_manager._to_schema_path(schema_id)
+                                for schema_id in removed_schema_ids)
+            max_tag_schema_id = -1
             if self.file_io.exists(self.tag_manager.tag_directory()):
-                delete_paths.extend(
-                    self.tag_manager.tag_path(tag_name)
-                    for tag_name in self.tag_manager.list_tags()
-                    if tag_name not in branch_tags
-                    and self.tag_manager.get_or_throw(tag_name).id >= earliest_snapshot.id
-                )
+                for tag_name in set(self.tag_manager.list_tags()) - branch_tags:
+                    tag = self.tag_manager.get_or_throw(tag_name)
+                    if tag.id >= earliest_snapshot.id:
+                        delete_paths.append(self.tag_manager.tag_path(tag_name))
+                    else:
+                        max_tag_schema_id = max(max_tag_schema_id, tag.schema_id)
+
+            retained_snapshots = {snapshot_id: path for snapshot_id, path in main_snapshots.items()
+                                  if snapshot_id < earliest_snapshot.id}
+            protected_schemas = self._protected_schemas(
+                branch_schema_manager, main_schema_ids & branch_schema_ids, removed_schema_ids,
+                retained_snapshots, max_tag_schema_id)
 
             if isinstance(self.file_io, CachingFileIO):
                 # Clear replaced and removed paths, including IDs a later commit may reuse.
@@ -333,11 +341,10 @@ class FileSystemBranchManager(BranchManager):
             # Install schemas before snapshots which may reference them.
             # This operation is not a multi-file transaction.
             self.schema_manager.schema_cache.clear()
-            self.file_io.copy_files(
-                branch_schema_manager.schema_path,
-                self.schema_manager.schema_path,
-                overwrite=True
-            )
+            for schema_id in sorted(branch_schema_ids - protected_schemas):
+                self.file_io.copy_file(
+                    branch_schema_manager._to_schema_path(schema_id),
+                    self.schema_manager._to_schema_path(schema_id), overwrite=True)
             if branch_tags:
                 self.file_io.copy_files(
                     branch_tag_directory, self.tag_manager.tag_directory(), overwrite=True)
@@ -350,11 +357,9 @@ class FileSystemBranchManager(BranchManager):
                     raise IOError(f"Failed to delete metadata file {path}")
 
             # Branch hints do not describe the older history retained on main.
-            retained_ids = [snapshot_id for snapshot_id in main_snapshots
-                            if snapshot_id < earliest_snapshot.id]
             self.file_io.overwrite_file_utf8(
                 f"{self.snapshot_manager.snapshot_dir}/EARLIEST",
-                str(min(retained_ids + list(branch_snapshots))))
+                str(min(retained_snapshots.keys() | branch_snapshots.keys())))
             self.file_io.overwrite_file_utf8(
                 self.snapshot_manager.latest_file, str(max(branch_snapshots)))
             
@@ -365,8 +370,34 @@ class FileSystemBranchManager(BranchManager):
         except Exception as e:
             raise RuntimeError(
                 f"Exception occurs when fast forward '{branch_name}' "
-                f"(directory in {self.branch_path(branch_name)})."
+                f"(directory in {self.branch_path(branch_name)}): {e}"
             ) from e
+
+    def _protected_schemas(self, branch_schemas, shared_ids, removed_ids, retained_snapshots, max_schema_id):
+        # Read persisted metadata directly: a cached definition may predate a fast-forward.
+        file_io = self.file_io._delegate if isinstance(self.file_io, CachingFileIO) else self.file_io
+        candidates = shared_ids | removed_ids
+        highest_candidate = max(candidates, default=-1)
+        for snapshot_id in sorted(retained_snapshots, reverse=True):
+            if max_schema_id >= highest_candidate:
+                break
+            snapshot = json.loads(file_io.read_file_utf8(retained_snapshots[snapshot_id]))
+            max_schema_id = max(max_schema_id, snapshot["schemaId"])
+
+        # A retained snapshot or tag can still read data files written under older schemas.
+        protected = set()
+        for schema_id in sorted(candidates):
+            if schema_id > max_schema_id:
+                break
+            if schema_id in shared_ids:
+                main = file_io.read_file_utf8(self.schema_manager._to_schema_path(schema_id))
+                branch = file_io.read_file_utf8(branch_schemas._to_schema_path(schema_id))
+                if main == branch or json.loads(main) == json.loads(branch):
+                    protected.add(schema_id)
+                    continue
+            raise ValueError(f"schema {schema_id} is needed by retained snapshots or tags on "
+                             f"'{self.current_branch}' and cannot be replaced or removed")
+        return protected
 
     def _snapshot_paths(self, manager: SnapshotManager):
         paths = {}
