@@ -102,6 +102,11 @@ The writer applies deletion vectors, writes the latest values of all columns, an
 copies managed BLOB and dedicated vector data into new files in the same order.
 Output files follow the table's normal rolling settings.
 
+When a partition outgrows `write-buffer-size`, the task spills to the Spark executor's
+local directories. `write-buffer-spill.max-disk-size` limits the combined size of
+spill files for that task, including intermediate merge output. Exceeding it fails
+the rewrite before commit.
+
 Surviving rows in the selection receive new row IDs. Coordinate persisted row-ID
 references, including BLOB views in downstream tables, before invoking the procedure.
 The commit invalidates global indexes in the rewritten partitions. Rebuild those

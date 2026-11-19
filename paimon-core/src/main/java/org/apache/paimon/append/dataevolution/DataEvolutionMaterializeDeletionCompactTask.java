@@ -21,6 +21,7 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -85,6 +87,14 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     @Override
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
+        return doCompact(
+                table, commitUser, () -> IOManager.create(System.getProperty("java.io.tmpdir")));
+    }
+
+    @Override
+    public CommitMessage doCompact(
+            FileStoreTable table, String commitUser, Supplier<IOManager> ioManagerFactory)
+            throws Exception {
         table = configureTable(table);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
@@ -98,7 +108,7 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
             storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
             storeWrite.withWriteType(table.rowType());
             writer = storeWrite.createWriter(partition, 0);
-            writeRows(table, reader, writer);
+            writeRows(table, reader, writer, ioManagerFactory);
 
             compactAfter.addAll(writer.prepareCommit(false).newFilesIncrement().newFiles());
         } finally {
@@ -131,7 +141,8 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
     protected void writeRows(
             FileStoreTable table,
             RecordReader<InternalRow> reader,
-            RecordWriter<InternalRow> writer)
+            RecordWriter<InternalRow> writer,
+            Supplier<IOManager> ioManagerFactory)
             throws Exception {
         reader.forEachRemaining(
                 row -> {

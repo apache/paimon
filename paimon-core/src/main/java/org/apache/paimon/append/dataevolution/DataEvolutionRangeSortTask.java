@@ -52,6 +52,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -100,6 +101,12 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
             @Nullable PartitionPredicate partitionFilter,
             List<String> sortFields) {
         validate(table, range.from, range.to, sortFields);
+        checkArgument(
+                table.schema().id() >= snapshot.schemaId(),
+                "Table schema %s is older than the schema of planning snapshot %s (%s). Reload the table before sorting.",
+                table.schema().id(),
+                snapshot.id(),
+                snapshot.schemaId());
         List<DataSplit> splits =
                 table.newSnapshotReader()
                         .withSnapshot(snapshot)
@@ -155,7 +162,7 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
         options.put(CoreOptions.BLOB_WRITE_NULL_ON_FETCH_FAILURE.key(), "false");
         options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
-        return table.copy(options);
+        return table.copyWithoutTimeTravel(options);
     }
 
     @Override
@@ -167,13 +174,14 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
     protected void writeRows(
             FileStoreTable table,
             RecordReader<InternalRow> reader,
-            RecordWriter<InternalRow> writer)
+            RecordWriter<InternalRow> writer,
+            Supplier<IOManager> ioManagerFactory)
             throws Exception {
         RowType input = readType(table);
         int[] fields = Arrays.copyOf(input.getFieldIndices(sortFields), sortFields.size() + 1);
         fields[sortFields.size()] = input.getFieldIndex(SpecialFields.ROW_ID.name());
         CoreOptions options = table.coreOptions();
-        try (IOManager io = IOManager.create(System.getProperty("java.io.tmpdir"))) {
+        try (IOManager io = ioManagerFactory.get()) {
             BinaryExternalSortBuffer sorter =
                     BinaryExternalSortBuffer.create(
                             io,
@@ -184,6 +192,7 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
                             options.localSortMaxNumFileHandles(),
                             options.spillCompressOptions(),
                             options.writeBufferSpillDiskSize());
+            sorter.enforceSpillDiskLimit();
             try {
                 try (CloseableIterator<InternalRow> rows = reader.toCloseableIterator()) {
                     while (rows.hasNext()) {

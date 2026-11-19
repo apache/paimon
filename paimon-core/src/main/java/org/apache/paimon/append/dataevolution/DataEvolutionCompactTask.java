@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
@@ -94,6 +96,13 @@ public abstract class DataEvolutionCompactTask {
 
     public abstract CommitMessage doCompact(FileStoreTable table, String commitUser)
             throws Exception;
+
+    /** Supplies worker-local scratch space to tasks that spill. The task closes the manager. */
+    public CommitMessage doCompact(
+            FileStoreTable table, String commitUser, Supplier<IOManager> ioManagerFactory)
+            throws Exception {
+        return doCompact(table, commitUser);
+    }
 
     protected CommitMessage commitMessage(
             List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) {

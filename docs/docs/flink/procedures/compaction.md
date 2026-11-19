@@ -340,6 +340,10 @@ CALL sys.sort_data_evolution(
     end_row_id => 99999,
     order_by => 'tenant_id,event_time',
     `where` => 'dt = 20261119');
+
+-- Flink 1.18 positional calls
+CALL sys.sort_data_evolution('default.samples', 0, 99999, 'tenant_id,event_time');
+CALL sys.sort_data_evolution('default.samples', 0, 99999, 'tenant_id,event_time', 'dt = 20261119');
 ```
 
 Each selected partition is sorted independently by the listed top-level fields
@@ -350,6 +354,11 @@ Update downstream references to the old row IDs and rebuild global indexes for t
 rewritten partitions. A selection with no matching rows or files to process is
 successful. With `table.dml-sync` enabled the call waits and returns `Success`.
 In asynchronous mode it returns the Flink job ID.
+
+When a partition outgrows `write-buffer-size`, the task spills to the TaskManager's
+temporary directories. `write-buffer-spill.max-disk-size` limits the combined size
+of spill files for that task, including intermediate merge output. Exceeding it
+fails the rewrite before commit.
 
 ## materialize_deletion_vectors
 
