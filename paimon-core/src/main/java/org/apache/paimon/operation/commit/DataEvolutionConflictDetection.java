@@ -365,7 +365,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
      * Checks the no-DV successful path without complete base/delta/merged metadata collections.
      * Possible conflicts fall back to the original checker after closing spill resources,
      * preserving its diagnostics, error priority and throw/return contract. That diagnostic path
-     * retains the original memory boundary. Callback and DV callers keep the ordinary path.
+     * retains the original memory boundary. Buffers too small for both sorters also use that
+     * boundary instead of increasing the configured sort-buffer budget. Callback and DV callers
+     * keep the ordinary path.
      */
     public Optional<RuntimeException> checkConflictsStreaming(
             CoreOptions options,
@@ -376,7 +378,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<IndexManifestEntry> indexFiles,
             @Nullable RowIdConflictChecker rowIdConflictChecker,
             CommitKind commitKind) {
-        boolean ordinary = !supportsStreamingConflicts();
+        boolean ordinary =
+                !supportsStreamingConflicts() || !FileEntryMergeBuffer.supportsBufferSize(options);
         if (!ordinary) {
             boolean globalIndexes =
                     indexFiles.stream()

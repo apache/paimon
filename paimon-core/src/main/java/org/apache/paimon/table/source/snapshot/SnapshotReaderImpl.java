@@ -119,6 +119,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private DataFileMetaStore incrementalStore;
     @Nullable private IOManager incrementalIoManager;
     private boolean incrementalRead;
+    @Nullable private Long limit;
+    private boolean hasRowRangeFilter;
 
     public SnapshotReaderImpl(
             FileStoreScan scan,
@@ -345,12 +347,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withRowRanges(List<Range> sortedPushdownRowRanges) {
+        hasRowRangeFilter = sortedPushdownRowRanges != null;
         scan.withRowRanges(sortedPushdownRowRanges);
         return this;
     }
 
     @Override
     public SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        hasRowRangeFilter = rowRangeIndex != null;
         scan.withRowRangeIndex(rowRangeIndex);
         return this;
     }
@@ -369,6 +373,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withLimit(long limit) {
+        this.limit = limit;
         scan.withLimit(limit);
         return this;
     }
@@ -459,9 +464,23 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         "Incremental metadata planning requires a DE batch ALL scan.");
             }
             IncrementalSplitPlanner planner = new IncrementalSplitPlanner(store);
-            Snapshot snapshot =
-                    ((DataEvolutionFileStoreScan) scan)
-                            .forEachFileGroup(ioManager, planner::accept);
+            Snapshot snapshot;
+            if (limit != null
+                    && limit > 0
+                    && limit <= INCREMENTAL_PENDING_FILE_LIMIT
+                    && !hasNonPartitionFilter
+                    && !hasRowRangeFilter
+                    && !deletionVectors) {
+                // Reuse safe early manifest termination for small limits. Large limits retain
+                // bounded group production rather than materializing the entire candidate set.
+                FileStoreScan.Plan plan = scan.plan();
+                snapshot = plan.snapshot();
+                planner.accept(plan.files(FileKind.ADD));
+            } else {
+                snapshot =
+                        ((DataEvolutionFileStoreScan) scan)
+                                .forEachFileGroup(ioManager, planner::accept);
+            }
             planner.finish();
             store.seal();
             if (options.scanPlanSortPartition()) {
@@ -518,8 +537,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final class IncrementalSplitPlanner {
         private final DataFileMetaStore store;
         private final List<SpilledSplit> splits = new ArrayList<>();
-        private IncrementalBucket current;
-        private DataEvolutionSplitGenerator.BatchPacker<IOException> packer;
+        private final Map<Pair<BinaryRow, Integer>, IncrementalBucket> pending =
+                new LinkedHashMap<>(16, 0.75f, true);
+        private long pendingFiles;
         private int nextFile;
 
         private IncrementalSplitPlanner(DataFileMetaStore store) {
@@ -534,11 +554,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     partitions.entrySet()) {
                 for (Map.Entry<Integer, List<ManifestEntry>> bucket :
                         partition.getValue().entrySet()) {
-                    if (current == null
-                            || current.bucket != bucket.getKey()
-                            || !current.partition.equals(partition.getKey())) {
-                        finish();
-                        current =
+                    Pair<BinaryRow, Integer> key = Pair.of(partition.getKey(), bucket.getKey());
+                    IncrementalBucket target = pending.get(key);
+                    if (target == null) {
+                        target =
                                 new IncrementalBucket(
                                         partition.getKey(),
                                         bucket.getKey(),
@@ -546,12 +565,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                         pathFactory
                                                 .bucketPath(partition.getKey(), bucket.getKey())
                                                 .toString());
-                        IncrementalBucket target = current;
-                        packer =
+                        IncrementalBucket spillBucket = target;
+                        target.packer =
                                 ((DataEvolutionSplitGenerator) splitGenerator)
                                         .newBatchPacker(
                                                 INCREMENTAL_PENDING_FILE_LIMIT,
-                                                split -> spill(target, split));
+                                                split -> spill(spillBucket, split));
+                        pending.put(key, target);
                     }
                     List<DataFileMeta> files =
                             bucket.getValue().stream()
@@ -560,7 +580,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     RangeHelper<DataFileMeta> ranges =
                             new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
                     for (List<DataFileMeta> range : ranges.mergeOverlappingRanges(files)) {
-                        packer.addRangeGroup(range);
+                        pendingFiles += range.size();
+                        target.packer.addRangeGroup(range);
+                    }
+                    // Bound all partitions together, but only evict complete RowID groups.
+                    while (pendingFiles > INCREMENTAL_PENDING_FILE_LIMIT) {
+                        Iterator<IncrementalBucket> oldest = pending.values().iterator();
+                        IncrementalBucket evicted = oldest.next();
+                        oldest.remove();
+                        evicted.packer.finish();
                     }
                 }
             }
@@ -568,6 +596,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         private void spill(IncrementalBucket bucket, SplitGenerator.SplitGroup group)
                 throws IOException {
+            pendingFiles -= group.files.size();
             int start = nextFile;
             for (DataFileMeta file : group.files) {
                 store.append(file);
@@ -577,9 +606,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         private void finish() throws IOException {
-            if (packer != null) {
-                packer.finish();
+            for (IncrementalBucket bucket : pending.values()) {
+                bucket.packer.finish();
             }
+            pending.clear();
         }
     }
 
@@ -588,6 +618,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         private final int bucket;
         private final int totalBuckets;
         private final String path;
+        private DataEvolutionSplitGenerator.BatchPacker<IOException> packer;
 
         private IncrementalBucket(BinaryRow partition, int bucket, int totalBuckets, String path) {
             this.partition = partition;

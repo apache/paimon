@@ -545,8 +545,15 @@ Partial-write Tasks consume contiguous row-ID ranges as Spark requests results.
 Each completed range produces its original commit-message payload directly,
 without retaining all decoded messages or writing a Task-local message replay file.
 The original Snapshot, authorization, filtering and read-protection rules still
-apply. This path supports batch ALL planning; change and diff scans cannot use
-the incremental replay reader.
+apply. This path supports batch ALL planning with one physical snapshot reader.
+Spark fallback/chain, audit-log and incremental reads, including `latest-delta`,
+keep their existing planner and its metadata memory boundaries. Internal batch
+scan modes also keep the existing planner.
+
+Streaming commit conflict checking requires at least six sort-buffer pages for
+its two sorters. Smaller buffers remain valid and use ordinary conflict checking,
+which retains its original metadata memory boundary instead of increasing the
+configured buffer budget.
 
 Tasks receive the normal serialized metadata, so Executors do not need access
 to the Driver's replay-file paths. MERGE closes its preparation stores after

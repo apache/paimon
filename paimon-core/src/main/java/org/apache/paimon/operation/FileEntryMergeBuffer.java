@@ -63,6 +63,8 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
  */
 public final class FileEntryMergeBuffer implements AutoCloseable {
 
+    private static final int MIN_SORT_BUFFER_PAGES = 6;
+
     private static final RowType ROW_TYPE =
             DataTypes.ROW(
                     DataTypes.BYTES(), // complete identity, including DV subtype
@@ -93,7 +95,9 @@ public final class FileEntryMergeBuffer implements AutoCloseable {
         maxEncodedSize = options.dataEvolutionMetadataMaxDiskSize();
         ExternalSortConfig configured = ExternalSortConfig.from(options, ioManager);
         long pages = configured.bufferSize / configured.pageSize;
-        checkArgument(pages >= 6, "Metadata merge requires at least six sort-buffer pages.");
+        checkArgument(
+                pages >= MIN_SORT_BUFFER_PAGES,
+                "Metadata merge requires at least six sort-buffer pages.");
         this.ownedIOManager = ioManager == null;
         this.ioManager =
                 ownedIOManager ? IOManager.create(System.getProperty("java.io.tmpdir")) : ioManager;
@@ -114,6 +118,11 @@ public final class FileEntryMergeBuffer implements AutoCloseable {
             }
             throw failure;
         }
+    }
+
+    /** Whether one configured budget can supply both sorters with at least three full pages. */
+    public static boolean supportsBufferSize(CoreOptions options) {
+        return options.sortSpillBufferSize() / options.pageSize() >= MIN_SORT_BUFFER_PAGES;
     }
 
     private ExternalSortConfig config(ExternalSortConfig configured, long pages) {

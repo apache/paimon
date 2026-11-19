@@ -27,7 +27,7 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
+import org.apache.paimon.table.{DataTable, FallbackReadFileStoreTable, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataFileMetaStore, InnerTableScan, Split}
 
 import org.apache.spark.sql.SparkSession
@@ -52,10 +52,23 @@ abstract class PaimonBaseScan(table: InnerTable)
   @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
 
   protected def getInputSplits: Array[Split] = {
-    if (coreOptions.dataEvolutionMetadataStreamingEnabled()) {
+    if (coreOptions.dataEvolutionMetadataStreamingEnabled() && supportsMetadataReplay) {
       return getIncrementalInputSplits
     }
     planInputSplits(readBuilder.newScan().asInstanceOf[InnerTableScan])
+  }
+
+  private def supportsMetadataReplay: Boolean = {
+    // A replay store belongs to one ALL-snapshot reader, not composite or incremental scans.
+    if (!table.isInstanceOf[FileStoreTable] || table.isInstanceOf[FallbackReadFileStoreTable]) {
+      return false
+    }
+    coreOptions.startupMode() match {
+      case CoreOptions.StartupMode.INCREMENTAL | CoreOptions.StartupMode.LATEST_DELTA => false
+      case _ =>
+        coreOptions.toConfiguration.get(CoreOptions.BATCH_SCAN_MODE) ==
+          CoreOptions.BatchScanMode.NONE
+    }
   }
 
   private def planInputSplits(inputScan: InnerTableScan): Array[Split] = {

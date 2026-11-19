@@ -584,6 +584,49 @@ class DataEvolutionIncrementalScanTest {
     }
 
     @Test
+    void testPartitionPackerEvictionKeepsEveryCompleteProviderGroup() throws Exception {
+        Fixture fixture = new Fixture();
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 1030; i++) {
+            entries.add(entry("base-" + i + ".parquet", i * 2L, 2, 1, "a", i, 1, i, 0, 0));
+        }
+        entries.add(entry("late-a.parquet", 3000L, 2, 1, "a", 1, 1, 0, 0, 0));
+        entries.add(entry("late-b.parquet", 3000L, 2, 2, "b", 2, 1, 0, 0, 0));
+        fixture.write(entries.toArray(new ManifestEntry[0]));
+        Path metadata = Files.createDirectory(directory.resolve("eviction-metadata"));
+        try (ObservedIOManager io = fixture.io();
+                DataFileMetaStore store = new DataFileMetaStore(metadata, 1024 * 1024)) {
+            SnapshotReader.Plan plan = fixture.reader(fixture.scan()).readIncrementally(store, io);
+            assertThat(
+                            plan.dataSplits().stream()
+                                    .flatMap(split -> split.dataFiles().stream())
+                                    .map(DataFileMeta::fileName)
+                                    .collect(Collectors.toList()))
+                    .containsExactlyInAnyOrderElementsOf(
+                            entries.stream()
+                                    .map(entry -> entry.file().fileName())
+                                    .collect(Collectors.toList()));
+            List<DataSplit> updated =
+                    plan.dataSplits().stream()
+                            .filter(
+                                    split ->
+                                            split.dataFiles().stream()
+                                                    .anyMatch(
+                                                            file ->
+                                                                    file.fileName()
+                                                                            .equals(
+                                                                                    "late-a.parquet")))
+                            .collect(Collectors.toList());
+            assertThat(updated).hasSize(1);
+            assertThat(updated.get(0).dataFiles())
+                    .extracting(DataFileMeta::fileName)
+                    .contains("late-a.parquet", "late-b.parquet");
+            assertThat(updated.get(0).rawConvertible()).isFalse();
+        }
+        fixture.assertNoSpillFiles();
+    }
+
+    @Test
     void testSnapshotStoreFailureDoesNotReturnAPartialPlanOrCloseBorrowedIo() throws Exception {
         Fixture fixture = new Fixture();
         List<ManifestEntry> entries = new ArrayList<>();
