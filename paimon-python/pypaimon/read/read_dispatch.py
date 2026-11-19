@@ -124,8 +124,6 @@ def _new_arrow_batch_reader(
     effective = self._resolve_parallelism(parallelism, len(splits))
     effective_bp = self._resolve_blob_parallelism(blob_parallelism)
     native = _native_read_execution(self)
-    if native is not None:
-        effective = self._resolve_parallelism(parallelism, len(splits), native=True)
     native_batches = None if native is None else native.read_batches(
         splits,
         schema,
@@ -186,7 +184,7 @@ def to_arrow(
 
     native = _native_read_execution(self)
     if native is not None:
-        effective = self._resolve_parallelism(parallelism, len(splits), native=True)
+        effective = self._resolve_parallelism(parallelism, len(splits), materialized_native=True)
     native_batches = None if native is None else native.read_batches(
         splits,
         schema,

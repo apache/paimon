@@ -92,9 +92,10 @@ def to_arrow_batch_reader(
 
     ``parallelism`` follows :meth:`to_arrow`: an explicit value overrides
     ``read.parallelism``, otherwise the reader auto-scales to the available
-    splits and CPUs. Native filtered Data Evolution BLOB payload reads without
-    LIMIT instead use up to 32 workers. Native workers buffer at most one batch
-    each; batches from different split groups are emitted as they become ready because
+    splits and CPUs, including filtered BLOB reads. The materialized
+    ``to_arrow`` auto-concurrency exception does not apply to streaming reads.
+    Native workers buffer at most one batch each; batches from different split
+    groups are emitted as they become ready because
     table reads do not guarantee row order. Python fallback reads remain
     serial.
     """
@@ -210,12 +211,12 @@ def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
 
 
 def _resolve_parallelism(
-        self, runtime: Optional[int], num_splits: int, native: bool = False) -> int:
+        self, runtime: Optional[int], num_splits: int, materialized_native: bool = False) -> int:
     """Pick the effective parallelism and reject illegal values.
 
     Priority: explicit ``parallelism`` argument > ``read.parallelism``
     table option > auto. When neither the argument nor the option is set
-    the read auto-scales to ``min(num_splits, CPU count)``. Native filtered
+    the read auto-scales to ``min(num_splits, CPU count)``. Materialized native filtered
     Data Evolution BLOB payload reads without LIMIT use up to 32 workers
     instead, to overlap remote I/O. A value >= 1
     caps the thread pool; ``1`` forces serial reads. The validation
@@ -227,8 +228,9 @@ def _resolve_parallelism(
         value, source = self._read_parallelism, "read.parallelism"
     else:
         # Remote payload reads benefit from more in-flight split readers than
-        # CPU count alone allows. Core still owns the total BLOB read budget.
-        if (native and self.predicate is not None and self.limit is None
+        # CPU count alone allows. Streaming callers retain the CPU default
+        # because each worker can retain a decoded BLOB batch.
+        if (materialized_native and self.predicate is not None and self.limit is None
                 and self.table.options.data_evolution_enabled()
                 and not self.table.options.blob_as_descriptor()
                 and any(is_blob_file_field(field) for field in self.read_type)):

@@ -395,6 +395,8 @@ def test_native_read_delegates_all_splits_and_parallelism_once(method_name, orde
     assert result.to_pydict() == {'id': [0, 1, 2, 3]}
     native.assert_called_once()
     assert native.call_args.args == (read.table, list(range(4)))
+    if method_name != 'to_arrow' and option is None and runtime is None:
+        expected = min(num_splits, cpu)
     assert native.call_args.kwargs['parallelism'] == expected
     assert native.call_args.kwargs['ordered'] == ordered
 
@@ -948,6 +950,7 @@ def test_native_read_supports_precision_zero_timestamps(data_type, values):
 @pytest.mark.parametrize('num_splits, option, runtime, expected', [
     (64, None, None, 32), (3, None, None, 3),
     (64, 8, None, 8), (64, 8, 1, 1), (64, None, 16, 16),
+    (64, 32, None, 32), (64, None, 32, 32),
 ])
 def test_filtered_native_blob_auto_parallelism(
         method_name, ordered, cpu, num_splits, option, runtime, expected):
@@ -965,6 +968,8 @@ def test_filtered_native_blob_auto_parallelism(
         if method_name != 'to_arrow':
             result = result.read_all()
     assert result.to_pydict() == {'payload': [b'a', None, b'']}
+    if method_name != 'to_arrow' and option is None and runtime is None:
+        expected = min(num_splits, cpu)
     assert native.call_args.kwargs['parallelism'] == expected
     assert native.call_args.kwargs['ordered'] == ordered
     assert native.call_args.args[1] == list(range(num_splits))

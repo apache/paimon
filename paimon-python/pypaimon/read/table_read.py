@@ -130,7 +130,9 @@ class TableRead:
 
         ``parallelism`` follows :meth:`to_arrow`: an explicit value overrides
         ``read.parallelism``, otherwise the reader auto-scales to the available
-        splits and CPUs. Native workers buffer at most one batch each; batches
+        splits and CPUs, including filtered BLOB reads. The materialized
+        ``to_arrow`` auto-concurrency exception does not apply to streaming reads.
+        Native workers buffer at most one batch each; batches
         from different split groups are emitted as they become ready because
         table reads do not guarantee row order. Python fallback reads remain
         serial.
@@ -312,18 +314,18 @@ class TableRead:
         return output_schema(schema, projection)
 
     def _resolve_parallelism(
-            self, runtime: Optional[int], num_splits: int, native: bool = False) -> int:
+            self, runtime: Optional[int], num_splits: int, materialized_native: bool = False) -> int:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
         table option > auto. When neither the argument nor the option is set
-        the read auto-scales to ``min(num_splits, CPU count)``. Native filtered
+        the read auto-scales to ``min(num_splits, CPU count)``. Materialized native filtered
         Data Evolution BLOB payload reads without LIMIT use up to 32 workers.
         A value >= 1 caps the thread pool; ``1`` forces serial reads. The validation
         message names whichever source produced the offending value.
         """
         from pypaimon.read.read_support import _resolve_parallelism
-        return _resolve_parallelism(self, runtime, num_splits, native=native)
+        return _resolve_parallelism(self, runtime, num_splits, materialized_native=materialized_native)
 
     def _effective_parallelism(
             self, runtime: Optional[int], num_splits: int) -> int:
