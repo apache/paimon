@@ -63,6 +63,20 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
                         .orElse(input.getExecutionEnvironment().getParallelism());
         DataStream<Committable> written =
                 doWrite(input.rebalance(), initialCommitUser, parallelism);
+        return commitWritten(written, initialCommitUser);
+    }
+
+    public static DataStreamSink<?> commitSorted(
+            FileStoreTable table,
+            Snapshot snapshot,
+            DataStream<Committable> written,
+            String commitUser) {
+        return new DataEvolutionRowIdRewriteSink(table, snapshot, true)
+                .commitWritten(written, commitUser);
+    }
+
+    private DataStreamSink<?> commitWritten(
+            DataStream<Committable> written, String initialCommitUser) {
         written =
                 written.transform(
                                 "Data Evolution Row ID Rewrite Commit Preparation : "

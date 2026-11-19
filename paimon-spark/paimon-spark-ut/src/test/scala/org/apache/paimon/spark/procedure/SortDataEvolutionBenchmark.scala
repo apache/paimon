@@ -60,8 +60,11 @@ class SortDataEvolutionBenchmark extends PaimonSparkTestBase {
       }
       val ordinarySeconds = rewriteSeconds(s"CALL sys.compact('test.$baseline')")
       assert(loadTable("T").switchToBranch("baseline").latestSnapshot().get().id() > input)
-      sql("ALTER TABLE T SET TBLPROPERTIES ('target-file-row-num'='4096')")
-      val sortedSeconds = rewriteSeconds("CALL sys.sort_data_evolution('test.T', '[0,32767]', 'k')")
+      sql("ALTER TABLE T SET TBLPROPERTIES ('target-file-row-num'='32768')")
+      var sortedSeconds = 0.0
+      withSQLConf("spark.sql.shuffle.partitions" -> "8") {
+        sortedSeconds = rewriteSeconds("CALL sys.sort_data_evolution('test.T', '[0,32767]', 'k')")
+      }
       info(
         f"Maintenance elapsed time: ordinary=$ordinarySeconds%.2f s, sorted=$sortedSeconds%.2f s")
 
@@ -79,7 +82,11 @@ class SortDataEvolutionBenchmark extends PaimonSparkTestBase {
           .map(_.rowCount())
           .sorted
           .toVector
-      assert(sizes(sorted) == sizes(ordinary) && sizes(sorted).size == 8)
+      val sortedSizes = sizes(sorted)
+      val ordinarySizes = sizes(ordinary)
+      assert(sortedSizes.size == 8 && ordinarySizes.size == 8)
+      assert(sortedSizes.sum == 32768 && sortedSizes.sum == ordinarySizes.sum)
+      info(s"Main file row counts: ordinary=$ordinarySizes, sorted=$sortedSizes")
       def measureIO(table: FileStoreTable): (Int, Long) = {
         val pb = new PredicateBuilder(table.rowType())
         val pred =

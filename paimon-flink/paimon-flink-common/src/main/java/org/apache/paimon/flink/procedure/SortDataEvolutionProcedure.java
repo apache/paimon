@@ -22,8 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortTask;
 import org.apache.paimon.flink.action.ActionPartitionPredicate;
+import org.apache.paimon.flink.compact.DataEvolutionRangeSort;
 import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
-import org.apache.paimon.flink.sink.DataEvolutionRowIdRewriteSink;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -93,7 +93,7 @@ public class SortDataEvolutionProcedure extends ProcedureBase {
                                     new DataEvolutionCompactionTaskTypeInfo())
                             .name("Plan Data Evolution Sort : " + tableId)
                             .setParallelism(1);
-            DataEvolutionRowIdRewriteSink.sink(table, tasks, snapshot, true);
+            DataEvolutionRangeSort.build(table, tasks, fields, snapshot);
         }
         return execute(env, "Sort Data Evolution : " + tableId);
     }

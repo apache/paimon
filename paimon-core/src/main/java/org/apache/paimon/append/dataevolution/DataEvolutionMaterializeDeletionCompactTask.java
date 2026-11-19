@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -99,9 +98,13 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
-        RecordReader<InternalRow> reader =
-                createReader(
-                        store, readType(table), pathFactory.bucketPath(partition, 0).toString());
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+        RowType readType = readType(table);
+        for (IndexedSplit split : readSplits(pathFactory.bucketPath(partition, 0).toString())) {
+            readers.add(
+                    () -> store.newDataEvolutionRead().withReadType(readType).createReader(split));
+        }
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(readers);
         @Nullable AppendFileStoreWrite storeWrite = null;
         @Nullable RecordWriter<InternalRow> writer = null;
         try {
@@ -154,37 +157,27 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
                 });
     }
 
-    private RecordReader<InternalRow> createReader(
-            AppendOnlyFileStore store, RowType readType, String bucketPath) throws IOException {
-        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+    List<IndexedSplit> readSplits(String bucketPath) {
+        List<IndexedSplit> splits = new ArrayList<>();
         for (Map.Entry<Range, List<Integer>> group : filesByNormalRange().entrySet()) {
-            Range range = group.getKey();
-            List<Integer> positions = group.getValue();
-            readers.add(
-                    () -> {
-                        DataSplit split =
-                                DataSplit.builder()
-                                        .withPartition(partition)
-                                        .withBucket(0)
-                                        .withBucketPath(bucketPath)
-                                        .withDataFiles(
-                                                positions.stream()
-                                                        .map(compactBefore::get)
-                                                        .collect(Collectors.toList()))
-                                        .withDataDeletionFiles(
-                                                positions.stream()
-                                                        .map(deletionFiles::get)
-                                                        .collect(Collectors.toList()))
-                                        .rawConvertible(false)
-                                        .build();
-                        return store.newDataEvolutionRead()
-                                .withReadType(readType)
-                                .createReader(
-                                        new IndexedSplit(
-                                                split, Collections.singletonList(range), null));
-                    });
+            List<DataFileMeta> files = new ArrayList<>();
+            List<DeletionFile> deletions = new ArrayList<>();
+            for (int position : group.getValue()) {
+                files.add(compactBefore.get(position));
+                deletions.add(deletionFiles.get(position));
+            }
+            DataSplit split =
+                    DataSplit.builder()
+                            .withPartition(partition)
+                            .withBucket(0)
+                            .withBucketPath(bucketPath)
+                            .withDataFiles(files)
+                            .withDataDeletionFiles(deletions)
+                            .rawConvertible(false)
+                            .build();
+            splits.add(new IndexedSplit(split, Collections.singletonList(group.getKey()), null));
         }
-        return ConcatRecordReader.create(readers);
+        return splits;
     }
 
     private NavigableMap<Range, List<Integer>> filesByNormalRange() {

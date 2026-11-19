@@ -52,6 +52,30 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("one range shuffle replaces multiple partitions including a fully deleted input") {
+    withTable("T") {
+      sql("""CREATE TABLE T (id INT, p INT) PARTITIONED BY (p) TBLPROPERTIES (
+            |'data-evolution.enabled'='true', 'row-tracking.enabled'='true',
+            |'deletion-vectors.enabled'='true', 'write-only'='true')""".stripMargin)
+      sql(
+        "INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES (4,0),(2,0),(3,1),(1,1),(100,2),(101,2) AS s(id,p)")
+      sql("DELETE FROM T WHERE id >= 100")
+      assert(sql("SELECT * FROM `T$row_ranges` WHERE partition = '{2}'").collect().nonEmpty)
+      val snapshot = loadTable("T").latestSnapshot().get().id()
+      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+        checkAnswer(sql("CALL sys.sort_data_evolution('T', '[0,5]', 'id')"), Row(3) :: Nil)
+      }
+      assert(loadTable("T").latestSnapshot().get().id() == snapshot + 1)
+      assert(
+        sql("SELECT p, id FROM T ORDER BY p, _ROW_ID").collect().toList ==
+          List(Row(0, 2), Row(0, 4), Row(1, 1), Row(1, 3)))
+      assert(
+        sql("SELECT * FROM `T$row_ranges` WHERE start_row_id < 6 OR partition = '{2}'")
+          .collect()
+          .isEmpty)
+    }
+  }
+
   test("sort complete groups within a partition and rewrite the aligned payloads") {
     withTable("T") {
       sql("""
@@ -112,9 +136,13 @@ class SortDataEvolutionProcedureTest extends PaimonSparkTestBase {
       assert(ranges == Seq(Row(0L, 3L), Row(7L, 9L)))
       val start = ranges.head.getLong(0)
       val end = ranges.last.getLong(1)
-      checkAnswer(
-        sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
-        Row(1) :: Nil)
+      withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+        checkAnswer(
+          sql(s"CALL sys.sort_data_evolution('T', '[$start,$end]', 'k,priority', 'p = 0')"),
+          Row(1) :: Nil)
+      }
+      // Six tiny rows would fit in one writer file. The two output groups come from distinct reducers.
+      assert(rows("SELECT start_row_id FROM `T$row_ranges` WHERE start_row_id >= 12").size == 2)
       assert(rows(s"SELECT $columns FROM T WHERE _ROW_ID >= 12 ORDER BY _ROW_ID") == expected)
       assert(
         rows(s"SELECT _ROW_ID, $columns FROM T WHERE _ROW_ID < 12 ORDER BY _ROW_ID") == untouched)

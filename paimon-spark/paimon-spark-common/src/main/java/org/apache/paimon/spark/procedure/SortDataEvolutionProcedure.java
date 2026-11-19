@@ -26,7 +26,6 @@ import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Range;
 
-import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -89,13 +88,10 @@ public class SortDataEvolutionProcedure extends BaseProcedure {
                     }
                     List<DataEvolutionCompactTask> tasks =
                             DataEvolutionRangeSortTask.plan(table, snapshot, range, filter, fields);
-                    DataEvolutionRewriteExecutor.execute(
-                            table,
-                            snapshot,
-                            ignored -> new DataEvolutionRewriteExecutor.PlanResult(tasks, true),
-                            new JavaSparkContext(spark().sparkContext()),
-                            spark(),
-                            DataEvolutionRewriteExecutor.rowIdRewriteCommit(true));
+                    if (!tasks.isEmpty()) {
+                        SparkDataEvolutionRangeSort.execute(
+                                table, snapshot, fields, tasks, spark());
+                    }
                     return new InternalRow[] {newInternalRow(tasks.size())};
                 });
     }

@@ -23,12 +23,14 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
@@ -184,6 +186,18 @@ public class DataEvolutionRangeSortTask extends DataEvolutionMaterializeDeletion
 
     @Override
     protected FileStoreTable configureTable(FileStoreTable table) {
+        return rewriteTable(table);
+    }
+
+    public List<IndexedSplit> readSplits(FileStoreTable table) {
+        return readSplits(table.store().pathFactory().bucketPath(partition, 0).toString());
+    }
+
+    public CommitMessage inputFiles() {
+        return commitMessage(compactBefore, Collections.emptyList());
+    }
+
+    public static FileStoreTable rewriteTable(FileStoreTable table) {
         Map<String, String> options = new HashMap<>(BLOB_COMPACT_READ_OPTIONS);
         // A replacement must fail if the source cannot be read in full.
         options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "false");

@@ -38,6 +38,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -98,7 +99,7 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T (id INT, payload BYTES, v ARRAY<FLOAT>) WITH ("
                         + "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', "
-                        + "'write-only'='true', 'sink.parallelism'='1', 'blob-field'='payload', "
+                        + "'write-only'='true', 'sink.parallelism'='1', 'unaware-bucket.compaction.parallelism'='2', 'blob-field'='payload', "
                         + "'vector-field'='v', 'field.v.vector-dim'='2', 'vector.file.format'='parquet')");
         assertThat(sql("SELECT * FROM T$row_ranges")).isEmpty();
         for (int id = 7; id > 0; id -= 2) {
@@ -152,7 +153,7 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
                         Row.of(10L, 4, "4", 104F, -104F), Row.of(11L, 5, "b", 5F, -5F),
                         Row.of(12L, 6, "a", 6F, -6F), Row.of(13L, 7, "7", 7F, -7F));
         assertThat(sql("SELECT start_row_id, end_row_id FROM T$row_ranges ORDER BY start_row_id"))
-                .containsExactly(Row.of(6L, 7L), Row.of(8L, 13L));
+                .containsExactly(Row.of(6L, 7L), Row.of(8L, 10L), Row.of(11L, 13L));
     }
 
     private static void writeDedicatedFile(
@@ -176,6 +177,29 @@ public class SortDataEvolutionProcedureITCase extends CatalogITCaseBase {
             files.replaceAll(file -> file.assignFirstRowId(firstRowId));
             commit.commit(messages);
         }
+    }
+
+    @Test
+    public void testOrderedRangesWithOneHeavyRow() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T (id INT, payload STRING) WITH ('data-evolution.enabled'='true', "
+                        + "'row-tracking.enabled'='true', 'sink.parallelism'='1', 'unaware-bucket.compaction.parallelism'='4')");
+        String values =
+                IntStream.rangeClosed(1, 32)
+                        .mapToObj(id -> "(" + (33 - id) + ")")
+                        .collect(Collectors.joining(","));
+        sql(
+                "INSERT INTO T SELECT id, REPEAT('x', IF(id = 32, 65536, 1)) FROM (VALUES %s) AS s(id)",
+                values);
+        sql("CALL sys.sort_data_evolution('default.T', '[0,31]', 'id')");
+        // Size-weighted sampling can choose the heavy last row as every range boundary.
+        List<Row> expected =
+                IntStream.rangeClosed(1, 32)
+                        .mapToObj(id -> Row.of(id, id == 32 ? 65536 : 1))
+                        .collect(Collectors.toList());
+        assertThat(sql("SELECT id, CHAR_LENGTH(payload) FROM T$row_tracking ORDER BY _ROW_ID"))
+                .containsExactlyElementsOf(expected);
     }
 
     @Test

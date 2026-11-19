@@ -500,11 +500,11 @@ public class RangeShuffle {
                 }
             }
 
-            // key not found, but the low index is the target
-            // bucket, since the boundaries are the upper bound
+            // Only equal keys can be spread across duplicate upper bounds. A strictly smaller
+            // key belongs before all of them, and a larger key after the last one.
             return low > lastIndex
-                    ? (keyIndex.get(lastIndex).getRight().get() + 1)
-                    : keyIndex.get(low).getRight().get();
+                    ? keyIndex.get(lastIndex).getRight().last() + 1
+                    : keyIndex.get(low).getRight().first();
         }
 
         /** A {@link KeySelector} to select by f0 of tuple2. */
@@ -635,6 +635,14 @@ public class RangeShuffle {
 
         public void add(int i) {
             list.add(i);
+        }
+
+        public int first() {
+            return list.get(0);
+        }
+
+        public int last() {
+            return list.get(list.size() - 1);
         }
 
         public int get() {

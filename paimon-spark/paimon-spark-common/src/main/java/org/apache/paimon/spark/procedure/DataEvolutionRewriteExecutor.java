@@ -233,6 +233,16 @@ final class DataEvolutionRewriteExecutor {
         }
     }
 
+    static void commitSorted(
+            FileStoreTable table,
+            Snapshot snapshot,
+            List<CommitMessage> messages,
+            String commitUser,
+            SparkSession spark) {
+        commitWithMergeConflictRetry(
+                table, snapshot, messages, commitUser, spark, rowIdRewriteCommit(true), null, null);
+    }
+
     private static Snapshot commitWithMergeConflictRetry(
             FileStoreTable table,
             Snapshot taskSnapshot,

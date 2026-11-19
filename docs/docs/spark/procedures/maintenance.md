@@ -99,14 +99,17 @@ CALL sys.sort_data_evolution(
 );
 ```
 
-Each selected partition uses one spillable sort task. List comparable top-level
+Spark range-partitions the selected rows by table partition, the requested sort fields,
+and the old row ID. A single table partition can use multiple reducers. Set
+`spark.sql.shuffle.partitions` to control the number of shuffle partitions. A value of 1
+uses the local sorter for each table partition. List comparable top-level
 fields in ascending priority order. Nulls sort first, and the old row ID breaks ties.
 The writer applies deletion vectors, writes the latest values of all columns, and
 copies managed BLOB and dedicated vector data into new files in the same order.
 Output files follow the table's normal rolling settings.
 
-When a partition outgrows `write-buffer-size`, the task spills to the Spark executor's
-local directories.
+The shuffle carries managed BLOB descriptors. Each reducer copies the referenced data
+when writing its sorted files. New row IDs are assigned in shuffle-range order.
 
 Surviving rows in the selection receive new row IDs. Coordinate persisted row-ID
 references, including BLOB views in downstream tables, before invoking the procedure.

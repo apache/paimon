@@ -360,8 +360,13 @@ unchanged rows covered by a removed index file. A selection with no matching row
 to process is successful. With `table.dml-sync` enabled the call waits and returns `Success`.
 In asynchronous mode it returns the Flink job ID.
 
-When a partition outgrows `write-buffer-size`, the task spills to the TaskManager's
-temporary directories.
+Flink range-partitions the selected rows by table partition, sort fields and old row ID.
+Multiple subtasks can sort and write parts of one table partition. Set
+`unaware-bucket.compaction.parallelism` to control the number of subtasks. The default
+uses the execution environment's parallelism, or 1 if it is unspecified. A parallelism
+of 1 uses the local sorter for each table partition. Each subtask sorts its received rows and
+spills to TaskManager temporary directories as needed. Managed BLOBs travel through
+the shuffle as descriptors. New row IDs follow shuffle-range order.
 
 ## materialize_deletion_vectors
 
