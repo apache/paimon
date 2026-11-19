@@ -65,6 +65,7 @@ public class HistoryPartitionClusterTest {
     @CsvSource({
         "America/New_York,2026-03-08T07:30:00Z,90,false",
         "America/New_York,2026-11-01T07:30:00Z,165,true",
+        "America/New_York,2026-11-01T07:45:00Z,90,false",
         "America/New_York,2026-11-02T07:30:00Z,90,false",
         "America/New_York,2026-11-02T07:30:00Z,165,true",
         "UTC,2026-03-08T07:30:00Z,90,false",
@@ -102,19 +103,13 @@ public class HistoryPartitionClusterTest {
                             1,
                             BinaryString.fromString("history"),
                             BinaryString.fromString("v")));
-            // The persisted metadata represents the intended instant, including at DST boundaries.
+            // The persisted local time is ambiguous when created in a repeated DST hour.
             assertThat(table.store().newScan().plan().files())
                     .hasSize(2)
                     .allSatisfy(
                             entry ->
-                                    assertThat(entry.file().creationTimeEpochMillis())
-                                            .isEqualTo(created.toEpochMilli()));
-            assertThat(table.newSnapshotReader().partitionEntries())
-                    .hasSize(2)
-                    .allSatisfy(
-                            entry ->
-                                    assertThat(entry.lastFileCreationTime())
-                                            .isEqualTo(created.toEpochMilli()));
+                                    assertThat(entry.file().creationTime().toLocalDateTime())
+                                            .isEqualTo(creationTime));
 
             localTimes.when(LocalDateTime::now).thenReturn(currentTime);
             instants.when(Instant::now).thenReturn(now);

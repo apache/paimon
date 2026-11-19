@@ -37,6 +37,8 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -134,7 +136,10 @@ public class HistoryPartitionCluster {
                 table.newSnapshotReader().withSnapshot(snapshot)
                         .withLevelMinMaxFilter((min, max) -> min < maxLevel)
                         .withLevelFilter(level -> level < maxLevel).partitionEntries().stream()
-                        .filter(entry -> entry.lastFileCreationTime() < historyMilli)
+                        .filter(
+                                entry ->
+                                        latestCreationMillis(entry.lastFileCreationTime())
+                                                < historyMilli)
                         .sorted(Comparator.comparingLong(PartitionEntry::lastFileCreationTime))
                         .map(PartitionEntry::partition)
                         .collect(Collectors.toList());
@@ -163,6 +168,20 @@ public class HistoryPartitionCluster {
                         Collectors.toMap(
                                 Map.Entry::getKey,
                                 entry -> constructPartitionLevels(entry.getValue())));
+    }
+
+    /**
+     * File creation times are persisted as local date-times, and {@link
+     * DataFileMeta#creationTimeEpochMillis()} resolves a repeated DST hour to its earlier
+     * occurrence. Re-resolve to the later one so a partition is never treated as idle early.
+     */
+    private static long latestCreationMillis(long creationMillis) {
+        ZoneId zone = ZoneId.systemDefault();
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli(creationMillis), zone)
+                .atZone(zone)
+                .withLaterOffsetAtOverlap()
+                .toInstant()
+                .toEpochMilli();
     }
 
     private Map<BinaryRow, List<DataFileMeta>> filterPartitions(
