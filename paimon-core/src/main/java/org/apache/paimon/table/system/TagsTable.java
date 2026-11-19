@@ -46,9 +46,9 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
@@ -87,7 +87,7 @@ public class TagsTable implements ReadonlyTable {
                             new DataField(0, TAG_NAME, SerializationUtils.newStringType(false)),
                             new DataField(1, "snapshot_id", new BigIntType(false)),
                             new DataField(2, "schema_id", new BigIntType(false)),
-                            new DataField(3, "commit_time", new TimestampType(false, 3)),
+                            new DataField(3, "commit_time", new LocalZonedTimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true)),
                             new DataField(5, "create_time", new TimestampType(true, 3)),
                             new DataField(
@@ -296,7 +296,7 @@ public class TagsTable implements ReadonlyTable {
                     BinaryString.fromString(snapshot.getKey()),
                     tag.id(),
                     tag.schemaId(),
-                    Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
+                    Timestamp.fromEpochMillis(tag.timeMillis()),
                     tag.totalRecordCount(),
                     Optional.ofNullable(tag.getTagCreateTime())
                             .map(Timestamp::fromLocalDateTime)
