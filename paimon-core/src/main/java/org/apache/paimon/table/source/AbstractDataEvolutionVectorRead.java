@@ -24,7 +24,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -429,9 +428,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeEnd - rowRangeStart + 1,
                         null,
                         executor);
-        return CentroidVectorIndexUtils.centroidBased(vectorIndexFiles.get(0))
-                ? reader
-                : new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalPostFilter(

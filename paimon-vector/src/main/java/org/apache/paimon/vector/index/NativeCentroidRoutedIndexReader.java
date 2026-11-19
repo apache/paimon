@@ -42,7 +42,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Routes before opening shard files; all filters and results use absolute Paimon row IDs. */
+/** Routes queries to shard files using row IDs relative to their shared range. */
 final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader {
     private final GlobalIndexFileReader files;
     private final GlobalIndexIOMeta routing;

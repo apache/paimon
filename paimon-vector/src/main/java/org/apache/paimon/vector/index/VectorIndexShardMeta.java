@@ -33,8 +33,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Private wire format for the indexMeta of native centroid models and shards. */
 public final class VectorIndexShardMeta {
     private static final byte[] MAGIC = {'P', 'C', 'S', 'M'};
-    private static final byte VERSION = 2;
-    private static final String ABSOLUTE_ROW_ID = "ABSOLUTE_ROW_ID";
+    private static final byte VERSION = 3;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, String>> TYPE =
             new TypeReference<LinkedHashMap<String, String>>() {};
@@ -96,7 +95,6 @@ public final class VectorIndexShardMeta {
         checkArgument(centroid >= 0, "Centroid must be nonnegative.");
         Map<String, String> values = base(modelId);
         values.put("centroid", Integer.toString(centroid));
-        values.put("rowIdEncoding", ABSOLUTE_ROW_ID);
         return new VectorIndexShardMeta(values, null);
     }
 
@@ -123,9 +121,6 @@ public final class VectorIndexShardMeta {
     }
 
     public int centroid() {
-        checkArgument(
-                ABSOLUTE_ROW_ID.equals(values.get("rowIdEncoding")),
-                "Unsupported centroid row ID encoding.");
         int centroid = Integer.parseInt(values.get("centroid"));
         checkArgument(centroid >= 0, "Invalid centroid id.");
         return centroid;

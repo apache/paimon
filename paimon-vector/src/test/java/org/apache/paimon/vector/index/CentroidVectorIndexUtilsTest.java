@@ -34,11 +34,9 @@ class CentroidVectorIndexUtilsTest {
     @Test
     void indexTypeSelectsTheMetadataCodec() {
         byte[] opaque = {(byte) 0xff, 0, 7, 42};
-        assertThat(CentroidVectorIndexUtils.centroidBased(file("ivf-pq", opaque, false))).isFalse();
         VectorIndexShardMeta shard = VectorIndexShardMeta.centroid("g", 7);
         byte[] wrapped = shard.wrap(opaque);
         IndexFileMeta ordinary = file("ivf-pq", wrapped, false);
-        assertThat(CentroidVectorIndexUtils.centroidBased(ordinary)).isFalse();
         assertThat(CentroidVectorIndexUtils.isRoutingModel(ordinary)).isFalse();
         assertThatThrownBy(() -> CentroidVectorIndexUtils.isRoutingModel(file(opaque, false)))
                 .hasMessageContaining("Invalid centroid metadata header");
@@ -54,8 +52,8 @@ class CentroidVectorIndexUtilsTest {
                                 VectorIndexShardMeta.deserialize(
                                         Arrays.copyOf(wrapped, wrapped.length - 1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        wrapped[4] =
-                1; // The pre-release partition-wide router used a different row-range contract.
+        // Version 2 shards stored absolute table row IDs.
+        wrapped[4] = 2;
         assertThatThrownBy(() -> VectorIndexShardMeta.deserialize(wrapped))
                 .hasMessageContaining("version");
     }

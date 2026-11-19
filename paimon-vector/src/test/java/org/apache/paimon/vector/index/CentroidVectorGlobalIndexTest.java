@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
@@ -206,7 +207,7 @@ class CentroidVectorGlobalIndexTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann"})
-    void testRoutingPrunesFilesAndPreservesAbsoluteIds(String type) throws Exception {
+    void testRoutingPrunesFilesAndAppliesRangeOffset(String type) throws Exception {
         FileIO io = new LocalFileIO();
         Path directory = new Path(temp.toString());
         boolean diskann = "diskann".equals(type);
@@ -284,7 +285,7 @@ class CentroidVectorGlobalIndexTest {
                         for (int i = 0; i < vectors.length; i++) {
                             centroidByRow[i] = model.assignCentroid(vectors[i]);
                             if (centroidByRow[i] == c) {
-                                writer.write(vectors[i], BASE + 101L * i);
+                                writer.write(vectors[i], 101L * i);
                             }
                         }
                         ResultEntry result = writer.finish().get(0);
@@ -328,8 +329,12 @@ class CentroidVectorGlobalIndexTest {
                             .incrementAndGet();
                     return io.newInputStream(meta.filePath());
                 };
+        long rowCount = 101L * (vectors.length - 1) + 1;
         try (GlobalIndexReader reader =
-                indexer.createReader(fileReader, metas, 256, null, executor)) {
+                new OffsetGlobalIndexReader(
+                        indexer.createReader(fileReader, metas, rowCount, null, executor),
+                        BASE,
+                        BASE + rowCount - 1)) {
             try (GlobalIndexReader empty =
                     new NativeVectorGlobalIndexReader(
                             fileReader,
@@ -390,7 +395,9 @@ class CentroidVectorGlobalIndexTest {
             assertThat(opened.values()).allSatisfy(count -> assertThat(count.get()).isEqualTo(1));
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
+            include.add(BASE - 1);
             include.add(BASE + 101L * 200);
+            include.add(BASE + rowCount);
             ScoredGlobalIndexResult filtered =
                     reader.visitVectorSearch(
                                     new VectorSearch(vectors[0], 1, "v").withIncludeRowIds(include))
@@ -398,6 +405,15 @@ class CentroidVectorGlobalIndexTest {
                             .get();
             assertThat(filtered.results().getLongCardinality()).isEqualTo(1);
             assertThat(filtered.results().contains(BASE + 101L * 200)).isTrue();
+            List<Optional<ScoredGlobalIndexResult>> filteredBatch =
+                    reader.visitBatchVectorSearch(
+                                    new BatchVectorSearch(queries, 1, "v")
+                                            .withIncludeRowIds(include))
+                            .get(30, TimeUnit.SECONDS);
+            assertThat(filteredBatch).hasSize(queries.length);
+            for (Optional<ScoredGlobalIndexResult> result : filteredBatch) {
+                assertThat(result.get().results().toArray(1)).containsExactly(BASE + 101L * 200);
+            }
 
             assertThat(
                             reader.visitVectorSearch(

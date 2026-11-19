@@ -20,7 +20,7 @@ package org.apache.paimon.globalindex;
 
 /**
  * A centroid index groups the router and shards for one contiguous source row-ID range. Its reader
- * accepts and returns absolute table row IDs. The factory identifies the router entry without
+ * uses row IDs relative to the start of that range. The factory identifies the router entry without
  * opening index files.
  */
 public interface CentroidVectorIndexFactory extends GlobalIndexerFactory {

@@ -395,7 +395,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                         writer = model.createCentroidWriter(context.io(), centroid, modelId);
                     }
                     if (row._2().vector != null) {
-                        writer.write(row._2().vector, row._2().id);
+                        writer.write(row._2().vector, row._2().id - context.rowRange.from);
                     }
                 }
                 if (writer != null) {

@@ -511,8 +511,9 @@ centroid index entry stores its routing descriptor in `GlobalIndexMeta.indexMeta
 For a shard, this descriptor identifies the model and centroid and wraps the local
 index writer’s metadata. The local reader receives those original bytes.
 
-Centroid shards store absolute row IDs. The router and all its shards share the same
-`GlobalIndexMeta.rowRange`, as with BTree. Gaps belonging to other partitions remain eligible for raw search in
+The router and its shards share one `GlobalIndexMeta.rowRange`, as with BTree. Each shard stores
+`rowId - rowRange.from`. The reader translates table row-ID filters into that range and adds
+the range start back to matching IDs. Gaps belonging to other partitions remain eligible for raw search in
 `vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
 only indexed rows.
 Persist the metric and dimension on the table when using raw fallback so indexed
@@ -548,14 +549,14 @@ For example, use `index_type => 'diskann-centroid'` and
 
 If source rows change while the build is running, including through compaction,
 the commit fails and the build must be retried. Appends outside its source ranges
-can proceed. Maintenance that reassigns row IDs invalidates the complete index
-generation and requires a rebuild.
+can proceed. When row IDs are reassigned, a whole range that moves by a constant offset can
+reuse its router and shards with the updated manifest range.
 
 This build mode and its reader currently require the Java/Spark implementation
 and a matching native library with centroid model APIs. Install the vector plugin on readers
 and on jobs that plan, commit or maintain these indexes. The plugin interprets manifest metadata without loading JNI.
-For pre-release indexes built with a partition-wide router, drop the index using the previous
-build before upgrading, then rebuild with a router per contiguous range. Older readers and Python index
+For pre-release centroid indexes that store absolute row IDs, drop the index using the previous
+build before upgrading, then rebuild it with relative row IDs. Older readers and Python index
 builders do not support this layout; drop the centroid index before downgrading
 or rebuilding it through those clients. The model file and each populated shard carry
 training metadata, so measure model-loading cost and total index size alongside

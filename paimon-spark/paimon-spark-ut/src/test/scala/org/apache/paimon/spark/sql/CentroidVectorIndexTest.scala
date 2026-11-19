@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
 import org.apache.paimon.globalindex.CentroidVectorIndexUtils
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -139,6 +140,15 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L)))
       assert(routers.size == 4)
       assert(nearest(200) == 200)
+
+      def fileRanges = indexes.map(f => f.fileName() -> f.globalIndexMeta().rowRange()).toMap
+      val before = fileRanges
+      assert(new DataEvolutionRowIdReassigner(table).reassign().reassigned)
+      val after = fileRanges
+      assert(after.keySet == before.keySet)
+      assert(after != before)
+      assert(nearest(301) == 301)
+      assert(nearest(300) != 300)
     }
   }
   Seq(true, false).foreach {

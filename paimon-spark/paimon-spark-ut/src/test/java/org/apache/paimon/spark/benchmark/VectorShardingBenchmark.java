@@ -726,37 +726,20 @@ public final class VectorShardingBenchmark {
                         new Options());
         List<GlobalIndexReader> readers = new ArrayList<>();
         try {
-            if ("centroid-based".equals(mode)) {
-                Map<Range, List<GlobalIndexIOMeta>> groups = new LinkedHashMap<>();
-                for (int i = 0; i < files.size(); i++) {
-                    groups.computeIfAbsent(
-                                    files.get(i).globalIndexMeta().rowRange(),
-                                    k -> new ArrayList<>())
-                            .add(metas.get(i));
-                }
-                for (Map.Entry<Range, List<GlobalIndexIOMeta>> group : groups.entrySet()) {
-                    readers.add(
-                            indexer.createReader(
-                                    input,
-                                    group.getValue(),
-                                    group.getKey().count(),
-                                    null,
-                                    executor));
-                }
-            } else {
-                for (int i = 0; i < metas.size(); i++) {
-                    IndexFileMeta file = files.get(i);
-                    readers.add(
-                            new OffsetGlobalIndexReader(
-                                    indexer.createReader(
-                                            input,
-                                            Collections.singletonList(metas.get(i)),
-                                            file.rowCount(),
-                                            null,
-                                            executor),
-                                    file.globalIndexMeta().rowRangeStart(),
-                                    file.globalIndexMeta().rowRangeEnd()));
-                }
+            Map<Range, List<GlobalIndexIOMeta>> groups = new LinkedHashMap<>();
+            for (int i = 0; i < files.size(); i++) {
+                groups.computeIfAbsent(
+                                files.get(i).globalIndexMeta().rowRange(), k -> new ArrayList<>())
+                        .add(metas.get(i));
+            }
+            for (Map.Entry<Range, List<GlobalIndexIOMeta>> group : groups.entrySet()) {
+                Range range = group.getKey();
+                readers.add(
+                        new OffsetGlobalIndexReader(
+                                indexer.createReader(
+                                        input, group.getValue(), range.count(), null, executor),
+                                range.from,
+                                range.to));
             }
             return readers;
         } catch (RuntimeException e) {

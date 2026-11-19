@@ -24,11 +24,6 @@ import org.apache.paimon.index.IndexFileMeta;
 public final class CentroidVectorIndexUtils {
     private CentroidVectorIndexUtils() {}
 
-    public static boolean centroidBased(IndexFileMeta file) {
-        return file.globalIndexMeta() != null
-                && GlobalIndexerFactoryUtils.centroidFactory(file.indexType()) != null;
-    }
-
     public static boolean isRoutingModel(IndexFileMeta file) {
         if (file.globalIndexMeta() == null) {
             return false;

@@ -183,7 +183,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
         if (shardMeta != null && rowId < 0) {
             throw new IllegalArgumentException(
-                    "Centroid shards require nonnegative absolute row IDs.");
+                    "Centroid shards require nonnegative relative row IDs.");
         }
         float[] src = materializeAndValidate(fieldData, rowId);
 
