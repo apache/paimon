@@ -268,12 +268,159 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                                 Collections.emptyMap(),
                                 "reference-cancel"));
         waitForPredictionState(toCancel.predictionId(), PredictionStatus.State.RUNNING);
-        Prediction canceled = catalog.cancelPrediction(toCancel.predictionId());
-        assertThat(canceled.status().state()).isEqualTo(PredictionStatus.State.TERMINATED);
+        Prediction canceling = catalog.cancelPrediction(toCancel.predictionId());
+        assertThat(canceling.status().state()).isEqualTo(PredictionStatus.State.TERMINATING);
+        resumePredictionExecution.run();
+        Prediction canceled = waitForPrediction(toCancel.predictionId());
         assertThat(canceled.status().terminationDetails().code())
                 .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
         assertThat(canceled.output()).isNull();
-        resumePredictionExecution.run();
+    }
+
+    @Test
+    void testConcurrentIdempotentPredictionSubmissionsReturnSameJob() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_concurrent_same");
+        PredictionSpec spec = fixture.spec("same-request", "same-token");
+        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        restCatalogServer.synchronizeNextPredictionSubmissions(2);
+        ExecutorService submissions = Executors.newFixedThreadPool(2);
+        try {
+            Future<Prediction> first =
+                    submissions.submit(() -> catalog.submitPrediction(fixture.source, spec));
+            Future<Prediction> second =
+                    submissions.submit(() -> catalog.submitPrediction(fixture.source, spec));
+
+            assertThat(first.get(10, TimeUnit.SECONDS).predictionId())
+                    .isEqualTo(second.get(10, TimeUnit.SECONDS).predictionId());
+        } finally {
+            resumePredictionExecution.run();
+            submissions.shutdownNow();
+        }
+    }
+
+    @Test
+    void testConcurrentConflictingPredictionSubmissionsReturnConflict() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_concurrent_conflict");
+        PredictionSpec firstSpec = fixture.spec("first-request", "conflict-token");
+        PredictionSpec secondSpec = fixture.spec("second-request", "conflict-token");
+        Runnable resumePredictionExecution = restCatalogServer.pausePredictionExecution();
+        restCatalogServer.synchronizeNextPredictionSubmissions(2);
+        ExecutorService submissions = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Prediction>> results =
+                    Arrays.asList(
+                            submissions.submit(
+                                    () -> catalog.submitPrediction(fixture.source, firstSpec)),
+                            submissions.submit(
+                                    () -> catalog.submitPrediction(fixture.source, secondSpec)));
+            int accepted = 0;
+            int conflicts = 0;
+            for (Future<Prediction> result : results) {
+                try {
+                    result.get(10, TimeUnit.SECONDS);
+                    accepted++;
+                } catch (ExecutionException e) {
+                    assertThat(e.getCause()).isInstanceOf(AlreadyExistsException.class);
+                    conflicts++;
+                }
+            }
+            assertThat(accepted).isEqualTo(1);
+            assertThat(conflicts).isEqualTo(1);
+        } finally {
+            resumePredictionExecution.run();
+            submissions.shutdownNow();
+        }
+    }
+
+    @Test
+    void testCancelAfterOutputTableCreationDoesNotPublishTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_create");
+        Runnable resume = restCatalogServer.pausePredictionAfterOutputCreated();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("cancel-after-create", "cancel-create-token"));
+
+        restCatalogServer.awaitPredictionOutputCreated();
+        assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
+                .isEqualTo(PredictionStatus.State.TERMINATING);
+        resume.run();
+
+        assertCanceledWithoutOutputTable(fixture, submitted.predictionId());
+    }
+
+    @Test
+    void testCancelAfterOutputCommitDoesNotPublishTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_commit");
+        Runnable resume = restCatalogServer.pausePredictionAfterOutputCommitted();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("cancel-after-commit", "cancel-commit-token"));
+
+        restCatalogServer.awaitPredictionOutputCommitted();
+        assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
+                .isEqualTo(PredictionStatus.State.TERMINATING);
+        resume.run();
+
+        assertCanceledWithoutOutputTable(fixture, submitted.predictionId());
+    }
+
+    private PredictionFixture createPredictionFixture(String database) throws Exception {
+        Identifier source = Identifier.create(database, "clips");
+        Identifier model = Identifier.create(database, "echo_model");
+        catalog.createDatabase(database, false);
+        catalog.createTable(
+                source,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("content", DataTypes.STRING())
+                        .build(),
+                false);
+        commitRows(
+                (FileStoreTable) catalog.getTable(source),
+                GenericRow.of(1, BinaryString.fromString("first")));
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "reference",
+                        "echo",
+                        Collections.singletonList(new ModelField("text", "STRING", null)),
+                        Collections.singletonList(new ModelField("response", "STRING", null)),
+                        Collections.emptyMap());
+        catalog.createModel(
+                model, new Model(model, "Deterministic reference model", definition), false);
+        return new PredictionFixture(source, model);
+    }
+
+    private void assertCanceledWithoutOutputTable(PredictionFixture fixture, String predictionId)
+            throws Exception {
+        Prediction canceled = waitForPrediction(predictionId);
+        assertThat(canceled.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
+        assertThat(canceled.output()).isNull();
+        String outputName = fixture.source.getObjectName() + "__" + predictionId.replace('-', '_');
+        assertThat(catalog.listTables(fixture.source.getDatabaseName())).doesNotContain(outputName);
+    }
+
+    private static final class PredictionFixture {
+
+        private final Identifier source;
+        private final Identifier model;
+
+        private PredictionFixture(Identifier source, Identifier model) {
+            this.source = source;
+            this.model = model;
+        }
+
+        private PredictionSpec spec(String name, String idempotencyToken) {
+            return new PredictionSpec(
+                    name,
+                    model,
+                    Collections.singletonMap("text", "content"),
+                    Collections.singletonList("id"),
+                    "Echo the input",
+                    null,
+                    Collections.emptyMap(),
+                    idempotencyToken);
+        }
     }
 
     private Prediction waitForPrediction(String predictionId) throws Exception {

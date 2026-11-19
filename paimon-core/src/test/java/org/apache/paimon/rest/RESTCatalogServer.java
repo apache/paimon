@@ -340,6 +340,28 @@ public class RESTCatalogServer {
         return predictionHandler::resumeExecution;
     }
 
+    public void synchronizeNextPredictionSubmissions(int parties) {
+        predictionHandler.synchronizeNextSubmissions(parties);
+    }
+
+    public Runnable pausePredictionAfterOutputCreated() {
+        predictionHandler.pauseAfterOutputCreated();
+        return predictionHandler::resumeAfterOutputCreated;
+    }
+
+    public void awaitPredictionOutputCreated() throws InterruptedException {
+        predictionHandler.awaitOutputCreated();
+    }
+
+    public Runnable pausePredictionAfterOutputCommitted() {
+        predictionHandler.pauseAfterOutputCommitted();
+        return predictionHandler::resumeAfterOutputCommitted;
+    }
+
+    public void awaitPredictionOutputCommitted() throws InterruptedException {
+        predictionHandler.awaitOutputCommitted();
+    }
+
     public void setTableSnapshot(
             Identifier identifier,
             Snapshot snapshot,
@@ -353,6 +375,14 @@ public class RESTCatalogServer {
         tableLatestSnapshotStore.put(identifier.getFullName(), tableSnapshot);
         tableWithSnapshotId2SnapshotStore.put(
                 geTableFullNameWithSnapshotId(identifier, snapshot.id()), tableSnapshot);
+    }
+
+    public void removeTableSnapshot(Identifier identifier) {
+        TableSnapshot snapshot = tableLatestSnapshotStore.remove(identifier.getFullName());
+        if (snapshot != null) {
+            tableWithSnapshotId2SnapshotStore.remove(
+                    geTableFullNameWithSnapshotId(identifier, snapshot.snapshot().id()));
+        }
     }
 
     public void setDataToken(Identifier identifier, RESTToken token) {

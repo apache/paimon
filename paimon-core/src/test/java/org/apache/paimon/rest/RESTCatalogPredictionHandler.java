@@ -62,9 +62,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -93,6 +93,9 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
     private final ExecutorService executor;
 
     private volatile CountDownLatch executionGate = new CountDownLatch(0);
+    private volatile ExecutionGate outputCreatedGate = ExecutionGate.open();
+    private volatile ExecutionGate outputCommittedGate = ExecutionGate.open();
+    private volatile @Nullable CyclicBarrier submissionBarrier;
 
     RESTCatalogPredictionHandler(
             RESTCatalogServer server,
@@ -149,18 +152,39 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
         executionGate.countDown();
     }
 
+    void synchronizeNextSubmissions(int parties) {
+        submissionBarrier = new CyclicBarrier(parties);
+    }
+
+    void pauseAfterOutputCreated() {
+        outputCreatedGate = ExecutionGate.paused();
+    }
+
+    void awaitOutputCreated() throws InterruptedException {
+        outputCreatedGate.awaitReached();
+    }
+
+    void resumeAfterOutputCreated() {
+        outputCreatedGate.resume();
+    }
+
+    void pauseAfterOutputCommitted() {
+        outputCommittedGate = ExecutionGate.paused();
+    }
+
+    void awaitOutputCommitted() throws InterruptedException {
+        outputCommittedGate.awaitReached();
+    }
+
+    void resumeAfterOutputCommitted() {
+        outputCommittedGate.resume();
+    }
+
     private MockResponse submit(String data) throws Exception {
         SubmitPredictionRequest request = parseRequest(data, SubmitPredictionRequest.class);
         PredictionJob existing = jobsByIdempotencyToken.get(request.getIdempotencyToken());
         if (existing != null) {
-            if (existing.requestPayload.equals(data)) {
-                return response(new GetPredictionResponse(existing.snapshot()), 202);
-            }
-            return error(
-                    ErrorResponse.RESOURCE_TYPE_PREDICTION,
-                    existing.predictionId,
-                    "idempotencyToken is already used by another prediction",
-                    409);
+            return idempotencyResponse(existing, data);
         }
 
         Identifier source = request.getSource().toIdentifier();
@@ -176,11 +200,45 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
         PredictionJob job =
                 new PredictionJob(
                         predictionId, request.getSource(), spec, snapshotId, data, executionGate);
-        jobs.put(predictionId, job);
-        jobsByIdempotencyToken.put(request.getIdempotencyToken(), job);
-        Future<?> future = executor.submit(() -> execute(job));
-        job.setFuture(future);
-        return response(new GetPredictionResponse(job.snapshot()), 202);
+        awaitSubmissionBarrier();
+        PredictionJob selected =
+                jobsByIdempotencyToken.compute(
+                        request.getIdempotencyToken(),
+                        (token, current) -> {
+                            if (current != null) {
+                                return current;
+                            }
+                            jobs.put(predictionId, job);
+                            try {
+                                executor.submit(() -> execute(job));
+                                return job;
+                            } catch (RuntimeException e) {
+                                jobs.remove(predictionId, job);
+                                throw e;
+                            }
+                        });
+        return selected == job
+                ? response(new GetPredictionResponse(job.snapshot()), 202)
+                : idempotencyResponse(selected, data);
+    }
+
+    private MockResponse idempotencyResponse(PredictionJob existing, String data) {
+        if (existing.requestPayload.equals(data)) {
+            return response(new GetPredictionResponse(existing.snapshot()), 202);
+        }
+        return error(
+                ErrorResponse.RESOURCE_TYPE_PREDICTION,
+                existing.predictionId,
+                "idempotencyToken is already used by another prediction",
+                409);
+    }
+
+    private void awaitSubmissionBarrier() throws Exception {
+        CyclicBarrier barrier = submissionBarrier;
+        if (barrier != null) {
+            barrier.await(10, TimeUnit.SECONDS);
+            submissionBarrier = null;
+        }
     }
 
     @Nullable
@@ -275,20 +333,32 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
     }
 
     private void execute(PredictionJob job) {
+        @Nullable Identifier preparedOutput = null;
         try {
             if (!job.markRunning()) {
+                job.completeCanceled();
                 return;
             }
             job.executionGate.await();
-            checkCanceled();
-            Identifier output = executePrediction(job);
-            job.completeSuccess(output);
+            checkCanceled(job);
+            preparedOutput = executePrediction(job);
+            Identifier output = preparedOutput;
+            if (!job.publishSuccess(output, () -> publishOutput(output))) {
+                cleanupOutput(output);
+                job.completeCanceled();
+            }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            cleanupOutput(job.stagingOutput());
             job.completeCanceled();
+            Thread.currentThread().interrupt();
         } catch (Throwable t) {
-            job.completeFailure(
-                    t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            cleanupOutput(preparedOutput == null ? job.stagingOutput() : preparedOutput);
+            if (job.isTerminating()) {
+                job.completeCanceled();
+            } else {
+                job.completeFailure(
+                        t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            }
         }
     }
 
@@ -308,8 +378,10 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                                 + job.predictionId.replace('-', '_'));
         Schema outputSchema = outputSchema(source.schema(), job.spec.mergeKeyColumns());
         catalog.createTable(outputIdentifier, outputSchema, false);
+        job.setStagingOutput(outputIdentifier);
         FileStoreTable output = (FileStoreTable) catalog.getTable(outputIdentifier);
-        registerOutputTable(outputIdentifier, output);
+        outputCreatedGate.reachAndAwait();
+        checkCanceled(job);
 
         Map<String, Integer> fieldIndexes = fieldIndexes(source.schema());
         BatchWriteBuilder writeBuilder = output.newBatchWriteBuilder();
@@ -322,23 +394,47 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                 BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             while (rows.hasNext()) {
-                checkCanceled();
+                checkCanceled(job);
                 InternalRow sourceRow = rows.next();
                 write.write(toOutputRow(sourceRow, source.schema(), fieldIndexes, job.spec));
             }
-            checkCanceled();
+            checkCanceled(job);
             commit.commit(write.prepareCommit());
         }
 
-        Snapshot outputSnapshot = output.snapshotManager().latestSnapshot();
-        server.setTableSnapshot(
-                outputIdentifier,
-                outputSnapshot,
-                outputSnapshot.totalRecordCount(),
-                0L,
-                0L,
-                outputSnapshot.timeMillis());
+        outputCommittedGate.reachAndAwait();
+        checkCanceled(job);
         return outputIdentifier;
+    }
+
+    private void publishOutput(Identifier identifier) {
+        try {
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            Snapshot snapshot = table.snapshotManager().latestSnapshot();
+            registerOutputTable(identifier, table);
+            server.setTableSnapshot(
+                    identifier,
+                    snapshot,
+                    snapshot.totalRecordCount(),
+                    0L,
+                    0L,
+                    snapshot.timeMillis());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void cleanupOutput(@Nullable Identifier identifier) {
+        if (identifier == null) {
+            return;
+        }
+        tableMetadataStore.remove(identifier.getFullName());
+        server.removeTableSnapshot(identifier);
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception ignored) {
+            // Best-effort cleanup for a test reference provider.
+        }
     }
 
     private void registerOutputTable(Identifier identifier, FileStoreTable table) {
@@ -461,8 +557,8 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                 : Math.min(requested, RESTCatalogServer.DEFAULT_MAX_RESULTS);
     }
 
-    private static void checkCanceled() throws InterruptedException {
-        if (Thread.currentThread().isInterrupted()) {
+    private static void checkCanceled(PredictionJob job) throws InterruptedException {
+        if (job.isTerminating() || Thread.currentThread().isInterrupted()) {
             throw new InterruptedException("Prediction was canceled");
         }
     }
@@ -497,11 +593,47 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
     @Override
     public void close() {
         executionGate.countDown();
+        outputCreatedGate.resume();
+        outputCommittedGate.resume();
         executor.shutdownNow();
         try {
             executor.awaitTermination(10, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private static final class ExecutionGate {
+
+        private final CountDownLatch reached;
+        private final CountDownLatch resume;
+
+        private ExecutionGate(int count) {
+            this.reached = new CountDownLatch(count);
+            this.resume = new CountDownLatch(count);
+        }
+
+        private static ExecutionGate open() {
+            return new ExecutionGate(0);
+        }
+
+        private static ExecutionGate paused() {
+            return new ExecutionGate(1);
+        }
+
+        private void reachAndAwait() throws InterruptedException {
+            reached.countDown();
+            resume.await();
+        }
+
+        private void awaitReached() throws InterruptedException {
+            if (!reached.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("Prediction execution did not reach the expected phase");
+            }
+        }
+
+        private void resume() {
+            resume.countDown();
         }
     }
 
@@ -519,7 +651,7 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
         private @Nullable PredictionOutput output;
         private @Nullable Long startTime;
         private @Nullable Long endTime;
-        private @Nullable Future<?> future;
+        private @Nullable Identifier stagingOutput;
 
         private PredictionJob(
                 String predictionId,
@@ -540,12 +672,8 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             return predictionId;
         }
 
-        private synchronized void setFuture(Future<?> future) {
-            this.future = future;
-        }
-
         private synchronized boolean markRunning() {
-            if (status.isTerminal()) {
+            if (status.state() != PredictionStatus.State.PENDING) {
                 return false;
             }
             status = new PredictionStatus(PredictionStatus.State.RUNNING, null);
@@ -553,10 +681,12 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             return true;
         }
 
-        private synchronized void completeSuccess(Identifier outputIdentifier) {
-            if (status.isTerminal()) {
-                return;
+        private synchronized boolean publishSuccess(
+                Identifier outputIdentifier, Runnable publisher) {
+            if (status.state() != PredictionStatus.State.RUNNING) {
+                return false;
             }
+            publisher.run();
             output = new PredictionOutput(new PredictionSource(outputIdentifier));
             status =
                     new PredictionStatus(
@@ -564,6 +694,7 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                             new PredictionStatus.TerminationDetails(
                                     PredictionStatus.TerminationCode.SUCCESS, null));
             endTime = System.currentTimeMillis();
+            return true;
         }
 
         private synchronized void completeFailure(String message) {
@@ -590,19 +721,27 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
             endTime = System.currentTimeMillis();
         }
 
-        private void cancel() {
-            Future<?> task;
-            synchronized (this) {
-                if (status.isTerminal()) {
-                    return;
-                }
+        private synchronized void setStagingOutput(Identifier stagingOutput) {
+            this.stagingOutput = stagingOutput;
+        }
+
+        private synchronized @Nullable Identifier stagingOutput() {
+            return stagingOutput;
+        }
+
+        private synchronized boolean isTerminating() {
+            return status.state() == PredictionStatus.State.TERMINATING;
+        }
+
+        private synchronized void cancel() {
+            if (status.isTerminal() || status.state() == PredictionStatus.State.TERMINATING) {
+                return;
+            }
+            if (status.state() == PredictionStatus.State.PENDING) {
+                completeCanceled();
+            } else {
                 status = new PredictionStatus(PredictionStatus.State.TERMINATING, null);
-                task = future;
             }
-            if (task != null) {
-                task.cancel(true);
-            }
-            completeCanceled();
         }
 
         private synchronized Prediction snapshot() {
