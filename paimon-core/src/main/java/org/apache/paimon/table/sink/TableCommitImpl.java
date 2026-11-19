@@ -184,6 +184,16 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl dataEvolutionRangeSortCheck() {
+        commit.dataEvolutionRangeSortCheck();
+        return this;
+    }
+
+    public boolean isRangeSortConflict(RuntimeException failure) {
+        return commit.isRangeSortConflict(failure);
+    }
+
+    @Override
     public TableCommitImpl withOperation(Snapshot.Operation operation) {
         commit.withOperation(operation);
         return this;

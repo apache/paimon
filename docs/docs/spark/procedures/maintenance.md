@@ -78,6 +78,46 @@ CALL sys.compact(
 );
 ```
 
+## sort_data_evolution
+
+Sort a Data Evolution append table within an inclusive range of input row IDs. Pass `range` as a
+string of the form `'[start, end]'` with two nonnegative BIGINT bounds. The optional `where`
+expression selects partitions. Every live file intersecting the selection must fit entirely
+inside the range. An endpoint that
+cuts a file causes the call to fail before writing. The result is the number of
+rewritten partitions, including zero for an empty selection.
+Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
+to find complete ranges for a partition. The procedure requires `query-auth.enabled = false`
+because it reads and rewrites the underlying physical files.
+
+```sql
+CALL sys.sort_data_evolution(
+  table => 'default.samples',
+  `range` => '[0,99999]',
+  order_by => 'tenant_id,event_time',
+  where => 'dt = 20261119'
+);
+```
+
+Spark range-partitions the selected rows by table partition, the requested sort fields,
+and the old row ID. A single table partition can use multiple reducers. Set
+`spark.sql.shuffle.partitions` to control the number of shuffle partitions. A value of 1
+sends all selected rows to one reducer. List comparable top-level fields in ascending priority order.
+Nulls sort first, and the old row ID breaks ties.
+The writer applies deletion vectors, writes the latest values of all columns, and
+copies managed BLOB and dedicated vector data into new files in the same order.
+Output files follow the table's normal rolling settings.
+
+The shuffle carries managed BLOB descriptors. Each reducer copies the referenced data
+when writing its sorted files. New row IDs are assigned in shuffle-range order.
+
+Surviving rows in the selection receive new row IDs and the sort snapshot's ID as their
+`_SEQUENCE_NUMBER`. Coordinate persisted row-ID
+references, including BLOB views in downstream tables, before invoking the procedure.
+The commit removes each global index file whose row-ID range overlaps a rewritten input
+file group in the same partition. Disjoint index files remain usable. Rebuild missing index
+coverage for the new row IDs and any unchanged rows covered by a removed index file.
+
 ## compact_database
 
 Compact all tables across one or more databases.

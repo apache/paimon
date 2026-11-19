@@ -28,6 +28,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -101,6 +102,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+import static org.apache.paimon.table.DataEvolutionRangeSortTest.writePlannedRows;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1359,6 +1361,91 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .containsExactly(new Range(0, 4));
         assertThat(normalFileRowRanges(tasks.get(1).compactBefore()))
                 .containsExactly(new Range(10, 14));
+    }
+
+    @Test
+    public void testRangeSortFailsOnMissingInput() throws Exception {
+        createTableDefault();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        options.put(CoreOptions.BLOB_WRITE_NULL_ON_MISSING_FILE.key(), "true");
+        FileStoreTable table = getTableDefault().copy(options);
+        writeBaseRows(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        DataEvolutionRangeSortPlan plan =
+                DataEvolutionRangeSortPlan.plan(
+                                table,
+                                snapshot,
+                                new Range(0, 4),
+                                null,
+                                Collections.singletonList("f0"))
+                        .get(0);
+        DataFileMeta blob =
+                plan.readSplits().stream()
+                        .flatMap(split -> split.dataSplit().dataFiles().stream())
+                        .filter(f -> BlobFileFormat.isBlobFile(f.fileName()))
+                        .findFirst()
+                        .get();
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0)
+                        .toPath(blob);
+        assertThat(table.fileIO().delete(path, false)).isTrue();
+        assertThatThrownBy(() -> writePlannedRows(table, plan, "f0", "range-sort"))
+                .hasStackTraceContaining(blob.fileName());
+    }
+
+    @Test
+    public void testRangeSortDropsOnlyOverlappingGlobalIndexesWithoutDeletionVectors()
+            throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(0), GenericRow.of(1));
+        write(table, GenericRow.of(2), GenericRow.of(3));
+        write(table, GenericRow.of(4), GenericRow.of(5));
+        write(table, GenericRow.of(6), GenericRow.of(7));
+        write(table, GenericRow.of(8), GenericRow.of(9));
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        commitGlobalIndex(table, partition, globalIndexFile("before", new Range(0, 0)));
+        commitGlobalIndex(table, partition, globalIndexFile("left-endpoint", new Range(1, 2)));
+        commitGlobalIndex(table, partition, globalIndexFile("in-gap", new Range(4, 5)));
+        commitGlobalIndex(table, partition, globalIndexFile("inside", new Range(3, 3)));
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = new ArrayList<>();
+        // Leave a live same-partition index inside the gap between the two input groups.
+        for (Range range : Arrays.asList(new Range(2, 3), new Range(6, 7))) {
+            DataEvolutionRangeSortPlan plan =
+                    DataEvolutionRangeSortPlan.plan(
+                                    table, snapshot, range, null, Collections.singletonList("id"))
+                            .get(0);
+            messages.add(writePlannedRows(table, plan, "id", "range-sort"));
+        }
+        commitGlobalIndex(
+                table, partition, globalIndexFile("late-right-endpoint", new Range(7, 8)));
+        commitGlobalIndex(table, partition, globalIndexFile("late-after", new Range(9, 9)));
+        messages.replaceAll(
+                message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
+        try (TableCommitImpl commit = table.newCommit("range-sort")) {
+            commit.dataEvolutionRangeSortCheck().commit(messages);
+        }
+        assertThat(liveGlobalIndexFileNames(table))
+                .containsExactly("before", "in-gap", "late-after");
+        assertThat(normalFileRowRanges(table))
+                .containsExactly(
+                        new Range(0, 1),
+                        new Range(4, 5),
+                        new Range(8, 9),
+                        new Range(10, 11),
+                        new Range(12, 13));
     }
 
     @Test
