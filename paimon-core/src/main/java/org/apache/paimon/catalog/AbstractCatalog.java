@@ -39,6 +39,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -72,6 +73,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -393,30 +395,21 @@ public abstract class AbstractCatalog implements Catalog {
                 // Cleanup only needs persisted metadata, even if runtime options are invalid.
                 FileIO tableFileIO = fileIO(tablePath);
                 SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
-                externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
-                boolean isExternal = loadTableMetadata(identifier).isExternal();
-                Optional<TableSchema> latestMainSchema = schemaManager.latest();
-                if (!isExternal
-                        && latestMainSchema.isPresent()
-                        && EntropyInjectTemplateFilesDeletion.isTemplate(latestMainSchema.get())) {
-                    templateDeletions.add(
-                            EntropyInjectTemplateFilesDeletion.collect(
-                                    tableFileIO,
-                                    tablePath,
-                                    DEFAULT_MAIN_BRANCH,
-                                    latestMainSchema.get()));
+                boolean deletesData = !loadTableMetadata(identifier).isExternal();
+                List<TableSchema> mainSchemas = schemaManager.listAll();
+                externalPaths.addAll(getSchemaExternalPaths(mainSchemas));
+                if (deletesData) {
+                    EntropyInjectTemplateFilesDeletion.collectIfTemplate(
+                                    tableFileIO, tablePath, DEFAULT_MAIN_BRANCH, mainSchemas)
+                            .ifPresent(templateDeletions::add);
                 }
                 for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
-                    SchemaManager schemaBranch = schemaManager.copyWithBranch(branch);
-                    externalPaths.addAll(getSchemaExternalPaths(schemaBranch.listAll()));
-                    Optional<TableSchema> latestBranchSchema = schemaBranch.latest();
-                    if (!isExternal
-                            && latestBranchSchema.isPresent()
-                            && EntropyInjectTemplateFilesDeletion.isTemplate(
-                                    latestBranchSchema.get())) {
-                        templateDeletions.add(
-                                EntropyInjectTemplateFilesDeletion.collect(
-                                        tableFileIO, tablePath, branch, latestBranchSchema.get()));
+                    List<TableSchema> branchSchemas = schemaManager.copyWithBranch(branch).listAll();
+                    externalPaths.addAll(getSchemaExternalPaths(branchSchemas));
+                    if (deletesData) {
+                        EntropyInjectTemplateFilesDeletion.collectIfTemplate(
+                                        tableFileIO, tablePath, branch, branchSchemas)
+                                .ifPresent(templateDeletions::add);
                     }
                 }
             }
@@ -582,6 +575,9 @@ public abstract class AbstractCatalog implements Catalog {
                             + "). Drop and re-create the table instead.");
         }
 
+        String strategy = DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        SchemaValidation.validateExternalPathStrategyChange(
+                existing.options().get(strategy), newSchema.options().get(strategy));
         replaceTableImpl(identifier, (FileStoreTable) existing, newSchema);
     }
 

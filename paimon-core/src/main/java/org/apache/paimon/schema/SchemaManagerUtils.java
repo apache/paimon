@@ -74,6 +74,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
@@ -153,7 +154,9 @@ final class SchemaManagerUtils {
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
-                if (hasSnapshots.get() && !unchanged) {
+                if (!unchanged
+                        && (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(setOption.key())
+                                || hasSnapshots.get())) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
                 if (!unchanged) {
@@ -164,7 +167,8 @@ final class SchemaManagerUtils {
                 if (CoreOptions.TYPE.key().equals(removeOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
-                if (hasSnapshots.get()) {
+                if (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(removeOption.key())
+                        || hasSnapshots.get()) {
                     checkResetTableOption(oldOptions, removeOption.key());
                 }
                 newOptions.remove(removeOption.key());
@@ -1065,6 +1069,10 @@ final class SchemaManagerUtils {
                     String.format("Change '%s' is not supported yet.", key));
         }
 
+        if (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(key)) {
+            SchemaValidation.validateExternalPathStrategyChange(oldValue, newValue);
+        }
+
         if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(key)) {
             boolean oldEnabled =
                     oldValue == null
@@ -1159,6 +1167,14 @@ final class SchemaManagerUtils {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    DATA_FILE_EXTERNAL_PATHS_STRATEGY.defaultValue().toString());
         }
 
         if (DELETION_VECTORS_ENABLED.key().equals(key)) {

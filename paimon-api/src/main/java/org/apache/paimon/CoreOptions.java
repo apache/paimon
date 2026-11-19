@@ -5830,7 +5830,8 @@ public class CoreOptions implements Serializable {
                 "entropy-inject-template",
                 "Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. "
                         + "The placeholder is replaced in place by hash directories computed from the file name. "
-                        + "Place '{hash}' before the database and table directories to share object storage prefixes across tables."),
+                        + "Place '{hash}' before the database and table directories to share object storage prefixes across tables. "
+                        + "This strategy cannot be enabled or disabled on an existing table."),
 
         WEIGHTED(
                 "weight-robin",

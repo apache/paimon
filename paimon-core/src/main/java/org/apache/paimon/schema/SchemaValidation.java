@@ -61,6 +61,8 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -442,6 +444,15 @@ public class SchemaValidation {
         validateManifestSort(schema, options);
 
         validateExternalPaths(options);
+    }
+
+    public static void validateExternalPathStrategyChange(
+            @Nullable String previous, @Nullable String next) {
+        String template = ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString();
+        if (template.equalsIgnoreCase(previous) != template.equalsIgnoreCase(next)) {
+            throw new UnsupportedOperationException(
+                    "Switching to or from " + template + " is not supported.");
+        }
     }
 
     private static void validateExternalPaths(CoreOptions options) {

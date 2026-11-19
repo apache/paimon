@@ -34,8 +34,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -50,6 +52,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -254,6 +257,124 @@ public class EntropyInjectTemplateTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCannotSwitchTemplateStrategy(boolean withData) throws Exception {
+        String strategy = CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        String paths = CoreOptions.DATA_FILE_EXTERNAL_PATHS.key();
+        String template = ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString();
+        String roundRobin = ExternalPathStrategy.ROUND_ROBIN.toString();
+        String templatePath = "file://" + sharedRoot + "/{hash}/template";
+        String normalPath = "file://" + tempPath.resolve("normal");
+        Identifier templateId = Identifier.create(DATABASE, "template");
+        Identifier normalId = Identifier.create(DATABASE, "normal");
+        catalog.createTable(templateId, sharedSchema("template"), false);
+        Schema normalSchema =
+                schemaBuilder().option(paths, normalPath).option(strategy, roundRobin).build();
+        catalog.createTable(normalId, normalSchema, false);
+        FileStoreTable templateTable = (FileStoreTable) catalog.getTable(templateId);
+        FileStoreTable normalTable = (FileStoreTable) catalog.getTable(normalId);
+        if (withData) {
+            write(templateTable, 1, "template");
+            write(normalTable, 2, "normal");
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        normalId,
+                                        Arrays.asList(
+                                                SchemaChange.setOption(paths, templatePath),
+                                                SchemaChange.setOption(strategy, template)),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        templateId,
+                                        Arrays.asList(
+                                                SchemaChange.setOption(paths, normalPath),
+                                                SchemaChange.setOption(strategy, roundRobin)),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        templateId,
+                                        Collections.singletonList(
+                                                SchemaChange.removeOption(strategy)),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        assertThatThrownBy(() -> normalTable.copy(Collections.singletonMap(strategy, template)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        assertThatThrownBy(() -> templateTable.copy(Collections.singletonMap(strategy, roundRobin)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+
+        assertThatThrownBy(() -> catalog.replaceTable(templateId, normalSchema, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        assertThatThrownBy(() -> catalog.replaceTable(normalId, sharedSchema("normal"), false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(template);
+        if (withData) {
+            assertThat(
+                            ((FileStoreTable) catalog.getTable(templateId))
+                                    .snapshotManager()
+                                    .latestSnapshotId())
+                    .isEqualTo(1L);
+            assertThat(
+                            ((FileStoreTable) catalog.getTable(normalId))
+                                    .snapshotManager()
+                                    .latestSnapshotId())
+                    .isEqualTo(1L);
+        }
+    }
+
+    @Test
+    public void testDropTableDeletesTheFilesOfAnEarlierTemplateSchema() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE, "t1");
+        FileStoreTable t1 = createTable("t1");
+        FileStoreTable t2 = createTable("t2");
+        write(t1, 1, "a");
+        write(t2, 2, "b");
+        Set<String> t2Files = sharedTableFiles("t2");
+        assertThat(sharedTableFiles("t1")).hasSize(1);
+
+        // Persist the schema that an earlier implementation allowed through ALTER TABLE.
+        java.nio.file.Path ownRoot = tempPath.resolve("own");
+        Schema legacySchema =
+                schemaBuilder()
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                "file://" + ownRoot + "/t1")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                ExternalPathStrategy.ROUND_ROBIN.toString())
+                        .build();
+        long legacySchemaId = t1.schema().id() + 1;
+        FileSystemSchemaManager schemaManager =
+                new FileSystemSchemaManager(t1.fileIO(), t1.location());
+        assertThat(
+                        t1.fileIO()
+                                .tryToWriteAtomic(
+                                        schemaManager.toSchemaPath(legacySchemaId),
+                                        TableSchema.create(legacySchemaId, legacySchema)
+                                                .toString()))
+                .isTrue();
+        write((FileStoreTable) catalog.getTable(identifier), 3, "c");
+
+        catalog.dropTable(identifier, false);
+
+        assertThat(sharedTableFiles("t1")).isEmpty();
+        assertThat(Files.exists(ownRoot.resolve("t1"))).isFalse();
+        assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
+    }
+
     @Test
     public void testRemoveOrphanFilesIsNotSupported() throws Exception {
         FileStoreTable table = createTable("t1");
@@ -322,13 +443,15 @@ public class EntropyInjectTemplateTest {
                                         false))
                 .rootCause()
                 .hasMessageContaining("requires a non-empty template");
-        catalog.createTable(identifier, schemaBuilder().build(), false);
+        catalog.createTable(identifier, sharedSchema("missing_path"), false);
         assertThatThrownBy(
                         () ->
                                 catalog.alterTable(
                                         identifier,
                                         Collections.singletonList(
-                                                SchemaChange.setOption(strategy, template)),
+                                                SchemaChange.removeOption(
+                                                        CoreOptions.DATA_FILE_EXTERNAL_PATHS
+                                                                .key())),
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("requires a non-empty template");

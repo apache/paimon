@@ -41,7 +41,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -87,16 +90,23 @@ public class EntropyInjectTemplateFilesDeletion {
         this.files = files;
     }
 
-    public static EntropyInjectTemplateFilesDeletion collect(
-            FileIO fileIO, Path tablePath, String branch, TableSchema schema) {
+    /** Collects branch files if a historical schema used the template strategy. */
+    public static Optional<EntropyInjectTemplateFilesDeletion> collectIfTemplate(
+            FileIO fileIO, Path tablePath, String branch, List<TableSchema> schemas) {
+        if (schemas == null
+                || schemas.stream().noneMatch(EntropyInjectTemplateFilesDeletion::isTemplate)) {
+            return Optional.empty();
+        }
+
+        TableSchema latest = schemas.stream().max(Comparator.comparingLong(TableSchema::id)).get();
         FileStoreTable table =
                 FileStoreTableFactory.createWithoutFallbackBranch(
                         fileIO,
                         tablePath,
-                        schema,
+                        latest,
                         new Options().set(CoreOptions.BRANCH, branch),
                         CatalogEnvironment.empty());
-        return collect(table);
+        return Optional.of(collect(table));
     }
 
     /**
