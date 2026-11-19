@@ -63,6 +63,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -71,6 +72,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -137,6 +139,17 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                             + " must be positive, got "
                             + candidatesFactor);
         }
+    }
+
+    protected static Collection<List<IndexVectorSearchSplit>> groupByIndexType(
+            List<IndexVectorSearchSplit> splits) {
+        Map<String, List<IndexVectorSearchSplit>> groups = new TreeMap<>();
+        for (IndexVectorSearchSplit split : splits) {
+            groups.computeIfAbsent(
+                            split.vectorIndexFiles().get(0).indexType(), k -> new ArrayList<>())
+                    .add(split);
+        }
+        return groups.values();
     }
 
     protected GlobalIndexer createGlobalIndexer(List<IndexVectorSearchSplit> splits) {
@@ -501,14 +514,6 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
         return firstVectorIndexFile(splits).indexType();
-    }
-
-    protected ScoredGlobalIndexResult[] emptyScoredResults(int n) {
-        ScoredGlobalIndexResult[] results = new ScoredGlobalIndexResult[n];
-        for (int i = 0; i < n; i++) {
-            results[i] = ScoredGlobalIndexResult.createEmpty();
-        }
-        return results;
     }
 
     private List<GlobalIndexIOMeta> buildIOMetaList(

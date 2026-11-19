@@ -38,6 +38,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -127,75 +128,59 @@ public class DataEvolutionVectorScan implements VectorScan {
                 indexEntries.stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
-        String vectorIndexType = vectorIndexType(allIndexFiles);
-        if (vectorIndexType == null) {
-            vectorIndexType = configuredVectorIndexType();
-        }
-
-        // Group vector index files by (rowRangeStart, rowRangeEnd). A file is treated as the vector
-        // index for this search only when the vector column is its PRIMARY field (indexFieldId);
-        // the canonical ES hybrid layout is vector-as-primary with text/scalar columns carried as
-        // extra fields. If the vector column were instead an extra field, no IndexVectorSearchSplit
-        // is produced here and the search falls back to a brute-force RawVectorSearchSplit (correct
-        // results, but the ANN index is bypassed).
-        Map<Range, List<IndexFileMeta>> vectorByRange = new HashMap<>();
+        // Only the primary field serves this vector search. Each split goes to its own index type.
+        Map<Pair<Range, String>, List<IndexFileMeta>> rangeGroups = new HashMap<>();
+        Map<Pair<BinaryRow, String>, List<IndexFileMeta>> centroidGroups = new HashMap<>();
         List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
-        for (IndexFileMeta indexFile : allIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+        for (IndexManifestEntry entry : indexEntries) {
+            IndexFileMeta file = entry.indexFile();
+            GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
             if (isPrimaryColumn(meta, vectorColumn.id())) {
-                vectorIndexFiles.add(indexFile);
-                if (CentroidVectorIndexUtils.centroidBased(indexFile)) {
-                    continue;
+                vectorIndexFiles.add(file);
+                if (CentroidVectorIndexUtils.centroidBased(file)) {
+                    centroidGroups
+                            .computeIfAbsent(
+                                    Pair.of(entry.partition(), file.indexType()),
+                                    k -> new ArrayList<>())
+                            .add(file);
+                } else {
+                    rangeGroups
+                            .computeIfAbsent(
+                                    Pair.of(meta.rowRange(), file.indexType()),
+                                    k -> new ArrayList<>())
+                            .add(file);
                 }
-                Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-                vectorByRange.computeIfAbsent(range, k -> new ArrayList<>()).add(indexFile);
             }
         }
 
-        // Build splits: for each vector range, attach matching scalar index files
         List<VectorSearchSplit> splits = new ArrayList<>();
-        for (Map.Entry<Range, List<IndexFileMeta>> entry : vectorByRange.entrySet()) {
-            Range range = entry.getKey();
-            List<IndexFileMeta> vectorFiles = entry.getValue();
-            List<IndexFileMeta> scalarFiles =
-                    allIndexFiles.stream()
-                            .filter(
-                                    f -> {
-                                        GlobalIndexMeta globalIndex =
-                                                checkNotNull(f.globalIndexMeta());
-                                        if (!canServeScalarFilter(globalIndex)) {
-                                            return false;
-                                        }
-                                        return range.hasIntersection(globalIndex.rowRange());
-                                    })
+        List<Range> indexedRanges = new ArrayList<>();
+        for (Map.Entry<Pair<Range, String>, List<IndexFileMeta>> entry : rangeGroups.entrySet()) {
+            Range range = entry.getKey().getLeft();
+            indexedRanges.add(range);
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            range.from,
+                            range.to,
+                            entry.getValue(),
+                            scalarIndexFiles(allIndexFiles, Collections.singletonList(range))));
+        }
+        for (List<IndexFileMeta> files : centroidGroups.values()) {
+            Range envelope = files.get(0).globalIndexMeta().rowRange();
+            List<Range> coverage =
+                    files.stream()
+                            .flatMap(file -> CentroidVectorIndexUtils.coverage(file).stream())
                             .collect(Collectors.toList());
-            splits.add(new IndexVectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
+            indexedRanges.addAll(coverage);
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            envelope.from,
+                            envelope.to,
+                            files,
+                            scalarIndexFiles(allIndexFiles, coverage)));
         }
 
         CoreOptions effectiveOptions = effectiveCoreOptions();
-        Map<BinaryRow, List<IndexFileMeta>> partitionVectors = new HashMap<>();
-        for (IndexManifestEntry entry : indexEntries) {
-            if (isPrimaryColumn(
-                    checkNotNull(entry.indexFile().globalIndexMeta()), vectorColumn.id())) {
-                partitionVectors
-                        .computeIfAbsent(entry.partition(), p -> new ArrayList<>())
-                        .add(entry.indexFile());
-            }
-        }
-        for (List<IndexFileMeta> files : partitionVectors.values()) {
-            if (files.stream().noneMatch(CentroidVectorIndexUtils::centroidBased)) {
-                continue;
-            }
-            List<Range> coverage = CentroidVectorIndexUtils.validateModel(files);
-            long from = coverage.get(0).from;
-            long to = coverage.get(coverage.size() - 1).to;
-            List<IndexFileMeta> scalarFiles = scalarIndexFiles(allIndexFiles, coverage);
-            splits.add(new IndexVectorSearchSplit(from, to, files, scalarFiles));
-            // FAST scalar fallback is restricted to actual source coverage, not the envelope.
-            for (Range range : coverage) {
-                vectorByRange.putIfAbsent(range, Collections.emptyList());
-            }
-        }
         GlobalIndexSearchMode vectorSearchMode = effectiveOptions.vectorIndexSearchMode();
         List<Range> rawRowRanges =
                 new DataEvolutionGlobalIndexCoverage(
@@ -216,8 +201,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                 scalarUnindexedRanges =
                         Range.and(
                                 scalarUnindexedRanges,
-                                Range.sortAndMergeOverlap(
-                                        new ArrayList<>(vectorByRange.keySet()), true));
+                                Range.sortAndMergeOverlap(indexedRanges, true));
             }
             rawRowRanges =
                     Range.sortAndMergeOverlap(addAll(rawRowRanges, scalarUnindexedRanges), true);
@@ -227,7 +211,10 @@ public class DataEvolutionVectorScan implements VectorScan {
                     new RawVectorSearchSplit(
                             rawRowRanges,
                             scalarIndexFiles(allIndexFiles, rawRowRanges),
-                            vectorIndexType));
+                            vectorIndexFiles.stream()
+                                    .map(IndexFileMeta::indexType)
+                                    .min(String::compareTo)
+                                    .orElseGet(this::configuredVectorIndexType)));
         }
 
         @Nullable Snapshot planSnapshot = snapshot;
@@ -349,26 +336,6 @@ public class DataEvolutionVectorScan implements VectorScan {
         result.addAll(left);
         result.addAll(right);
         return result;
-    }
-
-    @Nullable
-    private String vectorIndexType(List<IndexFileMeta> indexFiles) {
-        String indexType = null;
-        for (IndexFileMeta indexFile : indexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            if (!isPrimaryColumn(meta, vectorColumn.id())) {
-                continue;
-            }
-            if (indexType == null) {
-                indexType = indexFile.indexType();
-            } else if (!indexType.equals(indexFile.indexType())) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Vector column '%s' has multiple index types: %s and %s.",
-                                vectorColumn.name(), indexType, indexFile.indexType()));
-            }
-        }
-        return indexType;
     }
 
     @Nullable

@@ -488,9 +488,12 @@ CALL sys.create_global_index(
 
 Use the registered index type in both `index_type` and the option prefix.
 The ordinary names (`ivf-pq`, for example) select range-based sharding.
-Drop the previous index on the vector column before switching types, including
-when different partitions are built in separate calls. A centroid
-build pins one snapshot. Spark map tasks count non-null vectors in their input
+Different partitions of the same table can use different layouts. For example, keep an
+existing `ivf-pq` partition while building a new one with `ivf-pq-centroid`. A search
+opens each partition with its registered reader and merges results by score. Set the same
+distance metric for the column across layouts, for example with `fields.embedding.metric`.
+
+A centroid build pins one snapshot. Spark map tasks count non-null vectors in their input
 splits. Using those counts and the configured training ratio, the driver plans
 the exact row ordinals that the outer IVF-FLAT trainer would retain. Each
 map task reads its own splits and shuffles selected vectors by reservoir slot.

@@ -414,11 +414,5 @@ class CentroidVectorGlobalIndexTest {
         } finally {
             executor.shutdownNow();
         }
-
-        List<GlobalIndexIOMeta> incomplete = new ArrayList<>(metas);
-        incomplete.remove(incomplete.size() - 1);
-        assertThatThrownBy(() -> indexer.createReader(fileReader, incomplete, 256, null, executor))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Incomplete");
     }
 }

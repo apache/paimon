@@ -24,13 +24,10 @@ import java.util.List;
 
 /**
  * A centroid index groups all files for one field in a partition into a single generation. Its
- * reader accepts and returns absolute table row IDs. Committers and scan planners can inspect the
- * generation through this factory without opening files or initializing the native runtime.
+ * reader accepts and returns absolute table row IDs. Scan planners can obtain its source coverage
+ * through this factory without opening files or initializing the native runtime.
  */
 public interface CentroidVectorIndexFactory extends GlobalIndexerFactory {
     /** Exact indexed row ranges for a model entry, or an empty list for a shard entry. */
     List<Range> sourceRowRanges(byte[] indexMeta);
-
-    /** Validate that these entries form one complete generation and return its source coverage. */
-    List<Range> validateGeneration(List<byte[]> indexMetas);
 }

@@ -19,7 +19,6 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.CentroidVectorIndexUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -73,39 +72,14 @@ public class IndexManifestFileHandler {
         Set<String> indexes = new HashSet<>();
         indexes.addAll(previous.keySet());
         indexes.addAll(current.keySet());
-        Map<Integer, String> centroidTypes = new HashMap<>();
         for (String indexName : indexes) {
-            List<IndexManifestEntry> combined =
+            indexEntries.addAll(
                     getIndexManifestFileCombine(indexName)
                             .combine(
                                     previous.getOrDefault(indexName, Collections.emptyList()),
-                                    current.getOrDefault(indexName, Collections.emptyList()));
-            if (!combined.isEmpty()
-                    && CentroidVectorIndexUtils.centroidBased(combined.get(0).indexFile())) {
-                for (IndexManifestEntry entry : combined) {
-                    centroidTypes.put(
-                            entry.indexFile().globalIndexMeta().indexFieldId(), indexName);
-                }
-            }
-            indexEntries.addAll(combined);
+                                    current.getOrDefault(indexName, Collections.emptyList())));
         }
 
-        // Queries resolve a single vector index type for the column across partitions.
-        if (!centroidTypes.isEmpty()) {
-            for (IndexManifestEntry entry : indexEntries) {
-                IndexFileMeta file = entry.indexFile();
-                if (file.globalIndexMeta() != null) {
-                    int field = file.globalIndexMeta().indexFieldId();
-                    String type = centroidTypes.get(field);
-                    checkState(
-                            type == null || type.equals(file.indexType()),
-                            "Cannot mix %s and %s on vector field %s. Drop the previous index before switching types.",
-                            type,
-                            file.indexType(),
-                            field);
-                }
-            }
-        }
         return indexManifestFile.writeWithoutRolling(indexEntries);
     }
 
@@ -260,22 +234,6 @@ public class IndexManifestFileHandler {
             validateRetainedIndexFiles(indexEntries.values(), added);
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
-            }
-            if (!indexEntries.isEmpty()
-                    && CentroidVectorIndexUtils.centroidBased(
-                            indexEntries.values().iterator().next().indexFile())) {
-                Map<BinaryRow, Map<Integer, List<IndexFileMeta>>> partitions = new HashMap<>();
-                for (IndexManifestEntry entry : indexEntries.values()) {
-                    IndexFileMeta file = entry.indexFile();
-                    partitions
-                            .computeIfAbsent(entry.partition(), key -> new HashMap<>())
-                            .computeIfAbsent(
-                                    file.globalIndexMeta().indexFieldId(), key -> new ArrayList<>())
-                            .add(file);
-                }
-                for (Map<Integer, List<IndexFileMeta>> partition : partitions.values()) {
-                    partition.values().forEach(CentroidVectorIndexUtils::validateModel);
-                }
             }
             return new ArrayList<>(indexEntries.values());
         }

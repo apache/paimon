@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.read;
 
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResultSerializer;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
@@ -29,8 +28,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataEvolutionVectorRead;
 import org.apache.paimon.table.source.IndexVectorSearchSplit;
-import org.apache.paimon.table.source.RawVectorSearchSplit;
-import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -70,37 +67,15 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
     }
 
     @Override
-    public GlobalIndexResult read(VectorScan.Plan plan) {
-        this.planSnapshot = plan.snapshot();
-        List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
-        List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
-        prepareSplits(plan.splits(), indexSplits, rawSplits);
-        if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
-        }
-
-        GlobalIndexer globalIndexer =
-                !indexSplits.isEmpty() && !rawSplits.isEmpty()
-                        ? createGlobalIndexer(indexSplits)
-                        : null;
-        ScoredGlobalIndexResult result =
-                indexSplits.isEmpty()
-                        ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexSplitsInSpark(indexSplits, globalIndexer);
-        return result.or(readRawSplitsInSpark(rawSplits, globalIndexer, rawPreFilter(rawSplits)))
-                .topK(limit);
-    }
-
-    protected ScoredGlobalIndexResult readIndexSplitsInSpark(
-            List<IndexVectorSearchSplit> splits, @Nullable GlobalIndexer globalIndexer) {
+    protected ScoredGlobalIndexResult readIndexed(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         if (splits.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         int parallelism = sparkParallelism();
         if (splits.size() < parallelism * 2) {
-            return readIndexed(
-                    splits, globalIndexer == null ? createGlobalIndexer(splits) : globalIndexer);
+            return super.readIndexed(splits, globalIndexer);
         }
 
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
@@ -174,31 +149,26 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
         List<byte[]> remoteResults = mapInSpark(splitGroups, task, splitGroups.size());
 
-        GlobalIndexer rerankGlobalIndexer =
-                globalIndexer == null ? createGlobalIndexer(splits) : globalIndexer;
         return maybeRerankIndexedResult(
-                mergeRemoteResults(remoteResults, searchLimit),
-                indexType,
-                rerankGlobalIndexer,
-                vector);
+                mergeRemoteResults(remoteResults, searchLimit), indexType, globalIndexer, vector);
     }
 
-    protected ScoredGlobalIndexResult readRawSplitsInSpark(
-            List<RawVectorSearchSplit> splits,
+    @Override
+    protected ScoredGlobalIndexResult readRawSearch(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 preFilter,
             @Nullable GlobalIndexer globalIndexer,
-            @Nullable RoaringNavigableMap64 preFilter) {
-        List<Range> rawRowRanges = rawRowRanges(splits);
+            float[] queryVector) {
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         int parallelism = sparkParallelism();
         if (rawRowCount(rawRowRanges) < parallelism * 2L) {
-            return readRawSearch(
-                    rawRowRanges, preFilter, rawSearchIndexer(splits, globalIndexer), vector);
+            return super.readRawSearch(rawRowRanges, preFilter, globalIndexer, queryVector);
         }
 
-        String metric = rawSearchMetric(rawSearchIndexer(splits, globalIndexer));
+        String metric = rawSearchMetric(globalIndexer);
         List<List<Range>> rangeGroups = rangeGroups(rawRowRanges, parallelism);
         List<SerializedSplit> serializedSplits = new ArrayList<>(rangeGroups.size());
         for (List<Range> rangeGroup : rangeGroups) {
@@ -225,7 +195,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                                         rowRanges,
                                         deserializePreFilter(serializedSplit.preFilter),
                                         metric,
-                                        vector);
+                                        queryVector);
                         results.add(splitResult);
                     }
                     ScoredGlobalIndexResult result =

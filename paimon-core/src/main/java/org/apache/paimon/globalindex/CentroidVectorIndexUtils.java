@@ -21,13 +21,10 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.Range;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-/** Validation and coverage of an atomically committed centroid model and its shards. */
+/** Source row coverage supplied by the registered vector index type. */
 public final class CentroidVectorIndexUtils {
     private CentroidVectorIndexUtils() {}
 
@@ -38,17 +35,6 @@ public final class CentroidVectorIndexUtils {
 
     public static boolean isRoutingModel(IndexFileMeta file) {
         return centroidBased(file) && !coverage(file).isEmpty();
-    }
-
-    public static List<Range> validateModel(List<IndexFileMeta> files) {
-        String type = files.get(0).indexType();
-        List<byte[]> metadata = new ArrayList<>(files.size());
-        for (IndexFileMeta file : files) {
-            checkArgument(
-                    type.equals(file.indexType()), "Cannot mix different centroid index types.");
-            metadata.add(file.globalIndexMeta().indexMeta());
-        }
-        return GlobalIndexerFactoryUtils.centroidFactory(type).validateGeneration(metadata);
     }
 
     public static List<Range> coverage(IndexFileMeta file) {

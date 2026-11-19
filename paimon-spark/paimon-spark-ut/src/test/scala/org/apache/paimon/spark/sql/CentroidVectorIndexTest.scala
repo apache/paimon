@@ -120,6 +120,65 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       assert(nearest(300) != 300)
     }
   }
+  Seq(true, false).foreach {
+    centroidFirst =>
+      test(
+        s"range and centroid partitions share vector search with centroid built first=$centroidFirst") {
+        withTable("T") {
+          spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p)
+                      |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                      |'data-evolution.enabled'='true', 'vector-index.search-mode'='detail',
+                      |'fields.v.dimension'='2', 'fields.v.metric'='l2',
+                      |'global-index.row-count-per-shard'='32')""".stripMargin)
+          Seq(0, 1, 2).foreach {
+            part =>
+              val first = if (part == 2) 5000 else 0
+              spark.sql(s"""INSERT INTO T SELECT CAST(id + ${part * 128} AS INT),
+                           |array(CAST(IF(id = 0, $first, 1000 + id) AS FLOAT), 0.0f), $part
+                           |FROM range(0, 128, 1, 1)""".stripMargin)
+          }
+          val builds = Seq(("ivf-pq-centroid", 0), ("ivf-pq", 1))
+          (if (centroidFirst) builds else builds.reverse).foreach {
+            case (kind, part) =>
+              spark
+                .sql(s"""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+                        |index_type => '$kind', partitions => 'p=$part',
+                        |options => '$kind.nlist=2,$kind.pq.m=1')""".stripMargin)
+                .collect()
+          }
+
+          val ids = spark
+            .sql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),2,
+                   |map('ivf.nprobe','2','centroid.nprobe','2'))""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSet
+          assert(ids == Set(0, 128))
+
+          val table = loadTable("T")
+          val local = table
+            .newVectorSearchBuilder()
+            .withVectorColumn("v")
+            .withVector(Array(0.0f, 0.0f))
+            .withLimit(2)
+            .withOption("centroid.nprobe", "2")
+            .withOption("ivf.nprobe", "2")
+            .executeLocal()
+          assert(local.results().toArray(2).toSet == Set(0L, 128L))
+          val batch = table
+            .newBatchVectorSearchBuilder()
+            .withVectorColumn("v")
+            .withVectors(Array(Array(0.0f, 0.0f), Array(5000.0f, 0.0f)))
+            .withLimit(2)
+            .withOption("centroid.nprobe", "2")
+            .withOption("ivf.nprobe", "2")
+            .executeBatchLocal()
+          assert(batch.get(0).results().toArray(2).toSet == Set(0L, 128L))
+          assert(batch.get(1).results().contains(256L))
+        }
+      }
+  }
+
   test("distributed training preserves the model across sparse splits and different task counts") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (

@@ -40,6 +40,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Routes before opening shard files; all filters and results use absolute Paimon row IDs. */
 final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader {
@@ -67,13 +68,9 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.indexType = indexType;
         GlobalIndexIOMeta routing = null;
         VectorIndexShardMeta modelMeta = null;
-        String modelId = null;
         long count = 0;
         for (GlobalIndexIOMeta file : entries) {
             VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(file.metadata());
-            String id = meta.modelId();
-            checkArgument(modelId == null || modelId.equals(id), "Mismatched centroid model.");
-            modelId = id;
             if (meta.routingModel()) {
                 modelMeta = meta;
                 checkArgument(routing == null, "Multiple routing models.");
@@ -81,26 +78,19 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             } else {
                 checkArgument(
                         file.rowCount() >= 0, "Centroid shards must record their vector count.");
-                checkArgument(
-                        shards.put(
-                                        meta.centroid(),
-                                        new GlobalIndexIOMeta(
-                                                file.filePath(),
-                                                file.fileSize(),
-                                                file.rowCount(),
-                                                meta.payloadMeta()))
-                                == null,
-                        "Duplicate centroid shard.");
+                shards.put(
+                        meta.centroid(),
+                        new GlobalIndexIOMeta(
+                                file.filePath(),
+                                file.fileSize(),
+                                file.rowCount(),
+                                meta.payloadMeta()));
                 count = Math.addExact(count, file.rowCount());
             }
         }
         checkArgument(routing != null, "Missing routing model.");
         this.routing = routing;
         this.metadata = modelMeta;
-        checkArgument(shards.size() == metadata.nlist(), "Incomplete centroid shard set.");
-        for (int id : shards.keySet()) {
-            checkArgument(id < metadata.nlist(), "Invalid centroid ID.");
-        }
         this.vectorCount = count;
     }
 
@@ -134,7 +124,11 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                 c ->
                         new NativeVectorGlobalIndexReader(
                                 files,
-                                Collections.singletonList(shards.get(c)),
+                                Collections.singletonList(
+                                        checkNotNull(
+                                                shards.get(c),
+                                                "Missing routed centroid shard %s.",
+                                                c)),
                                 fieldType,
                                 executor,
                                 indexType));

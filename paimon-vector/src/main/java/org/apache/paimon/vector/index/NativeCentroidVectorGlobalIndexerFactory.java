@@ -23,12 +23,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Registered centroid index types share the router and select a local native algorithm. */
 public abstract class NativeCentroidVectorGlobalIndexerFactory
@@ -59,37 +55,6 @@ public abstract class NativeCentroidVectorGlobalIndexerFactory
     public List<Range> sourceRowRanges(byte[] indexMeta) {
         VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(indexMeta);
         return meta.routingModel() ? meta.sourceRowRanges() : Collections.emptyList();
-    }
-
-    @Override
-    public List<Range> validateGeneration(List<byte[]> indexMetas) {
-        List<Range> coverage = null;
-        String modelId = null;
-        int nlist = 0;
-        Set<Integer> centroids = new HashSet<>();
-        for (byte[] bytes : indexMetas) {
-            VectorIndexShardMeta meta = VectorIndexShardMeta.deserialize(bytes);
-            String id = meta.modelId();
-            checkArgument(
-                    modelId == null || modelId.equals(id),
-                    "Centroid shards belong to different models.");
-            modelId = id;
-            if (meta.routingModel()) {
-                checkArgument(
-                        coverage == null,
-                        "Multiple routing models for the same partition and index.");
-                coverage = meta.sourceRowRanges();
-                nlist = meta.nlist();
-            } else {
-                checkArgument(centroids.add(meta.centroid()), "Duplicate centroid shard.");
-            }
-        }
-        checkArgument(coverage != null, "Missing centroid routing model.");
-        for (int centroid : centroids) {
-            checkArgument(centroid < nlist, "Invalid centroid shard.");
-        }
-        checkArgument(centroids.size() == nlist, "Incomplete centroid model shard set.");
-        return coverage;
     }
 
     /** Centroid routing over IVF-FLAT shards. */

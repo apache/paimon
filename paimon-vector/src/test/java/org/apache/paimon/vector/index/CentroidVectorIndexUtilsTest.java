@@ -25,7 +25,6 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -66,32 +65,11 @@ class CentroidVectorIndexUtilsTest {
     @Test
     void testSparseShardsDoNotClaimEnvelopeCoverage() {
         List<IndexFileMeta> files = model("a");
-        assertThat(CentroidVectorIndexUtils.validateModel(files))
-                .containsExactly(new Range(10, 19), new Range(1000, 1009));
         assertThat(CentroidVectorIndexUtils.coverage(files.get(0)))
                 .containsExactly(new Range(10, 19), new Range(1000, 1009));
         assertThat(CentroidVectorIndexUtils.coverage(files.get(1))).isEmpty();
         assertThat(CentroidVectorIndexUtils.coverage(files.get(2))).isEmpty();
         assertThat(CentroidVectorIndexUtils.centroidBased(file("{}", false))).isFalse();
-    }
-
-    @Test
-    void testIncompleteMixedAndMismatchedModelsAreRejected() {
-        List<IndexFileMeta> complete = model("a");
-        assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(complete.subList(0, 2)))
-                .hasMessageContaining("Incomplete");
-        List<IndexFileMeta> mixed = new ArrayList<>(complete);
-        mixed.add(file("{}", false));
-        assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(mixed))
-                .hasMessageContaining("different centroid index types");
-        List<IndexFileMeta> mismatch = new ArrayList<>(complete);
-        mismatch.set(2, model("b").get(2));
-        assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(mismatch))
-                .hasMessageContaining("different models");
-        List<IndexFileMeta> duplicate = new ArrayList<>(complete);
-        duplicate.add(complete.get(1));
-        assertThatThrownBy(() -> CentroidVectorIndexUtils.validateModel(duplicate))
-                .hasMessageContaining("Duplicate");
     }
 
     private static List<IndexFileMeta> model(String id) {

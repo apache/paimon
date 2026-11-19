@@ -73,13 +73,21 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             return GlobalIndexResult.createEmpty();
         }
 
-        GlobalIndexer globalIndexer =
-                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
-        ScoredGlobalIndexResult result =
-                indexSplits.isEmpty()
-                        ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexed(indexSplits, globalIndexer);
-        return withRawSearch(result, rawSplits, globalIndexer, rawPreFilter(rawSplits), vector);
+        List<ScoredGlobalIndexResult> results = new ArrayList<>();
+        GlobalIndexer rawIndexer = null;
+        for (List<IndexVectorSearchSplit> group : groupByIndexType(indexSplits)) {
+            GlobalIndexer indexer = createGlobalIndexer(group);
+            results.add(readIndexed(group, indexer));
+            if (rawIndexer == null) {
+                rawIndexer = indexer;
+            }
+        }
+        return withRawSearch(
+                ScoredGlobalIndexResult.merge(results),
+                rawSplits,
+                rawIndexer,
+                rawPreFilter(rawSplits),
+                vector);
     }
 
     protected ScoredGlobalIndexResult readIndexed(
