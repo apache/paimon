@@ -108,7 +108,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      */
     @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
 
-    private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
+    static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
 
@@ -497,6 +497,16 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             @Nullable GlobalIndexer globalIndexer,
             @Nullable RoaringNavigableMap64 preFilter,
             float[] queryVector) {
+        return withRawSearch(result, rawSplits, globalIndexer, preFilter, queryVector, null);
+    }
+
+    protected ScoredGlobalIndexResult withRawSearch(
+            ScoredGlobalIndexResult result,
+            List<RawVectorSearchSplit> rawSplits,
+            @Nullable GlobalIndexer globalIndexer,
+            @Nullable RoaringNavigableMap64 preFilter,
+            float[] queryVector,
+            @Nullable RoaringNavigableMap64 indexedRows) {
         List<Range> rawRowRanges = rawRowRanges(rawSplits);
         if (rawRowRanges.isEmpty()) {
             return result.topK(limit);
@@ -508,6 +518,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         preFilter,
                         rawSearchIndexer(rawSplits, globalIndexer),
                         queryVector);
+        if (indexedRows != null) {
+            // An indexed row keeps its first score even if it was evicted from the heap.
+            RoaringNavigableMap64 unique = new RoaringNavigableMap64();
+            unique.or(rawResult.results());
+            unique.andNot(indexedRows);
+            rawResult = ScoredGlobalIndexResult.create(unique, rawResult.scoreGetter());
+        }
         return result.or(rawResult).topK(limit);
     }
 
@@ -724,8 +741,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return scoredResult(topKHeap);
     }
 
-    private static void offerScore(
-            PriorityQueue<long[]> topKHeap, int topK, long rowId, float score) {
+    static void offerScore(PriorityQueue<long[]> topKHeap, int topK, long rowId, float score) {
         if (topK <= 0) {
             return;
         }
@@ -738,7 +754,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
     }
 
-    private static ScoredGlobalIndexResult scoredResult(PriorityQueue<long[]> topKHeap) {
+    static ScoredGlobalIndexResult scoredResult(PriorityQueue<long[]> topKHeap) {
         if (topKHeap.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
