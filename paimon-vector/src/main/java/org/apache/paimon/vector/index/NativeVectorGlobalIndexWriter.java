@@ -42,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -77,13 +78,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     static final int MAX_FLOAT_ARRAY_LENGTH = Integer.MAX_VALUE - 8;
     private static final long TRAIN_MEMORY_WARNING_BYTES = 4L * 1024 * 1024 * 1024;
 
+    static final int EMPTY_MULTIVECTOR_MAGIC = 0x504D5645; // PMVE
+
     private final GlobalIndexFileWriter fileWriter;
     private final String identifier;
     private final Map<String, String> nativeOptions;
     private final int dim;
     private final double trainSampleRatio;
     private final boolean centroidShard;
-    private final MultiVectorIndexRows parents;
     private final InternalArray.ElementGetter childGetter;
 
     private File tempVectorFile;
@@ -135,7 +137,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             NativeVectorGlobalIndexerFactory.validateMultiVectorOptions(
                     centroidShard, options.get("metric"));
         }
-        parents = multiVector ? new MultiVectorIndexRows() : null;
         DataType childType = multiVector ? ((ArrayType) fieldType).getElementType() : fieldType;
         childGetter = multiVector ? InternalArray.createElementGetter(childType) : null;
         validateFieldType(childType);
@@ -209,22 +210,18 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             rowCount++;
             return;
         }
-        if (parents != null) {
+        if (childGetter != null) {
             InternalArray children = (InternalArray) fieldData;
-            long start = count;
             try {
                 for (int i = 0; i < children.size(); i++) {
                     if (!children.isNullAt(i)) {
-                        writeVector(childGetter.getElementOrNull(children, i), count);
+                        writeVector(childGetter.getElementOrNull(children, i), rowId);
                     }
                 }
             } catch (RuntimeException e) {
-                // Children already appended for this row must never be assigned to another parent.
+                // A partially written list cannot be published.
                 close();
                 throw e;
-            }
-            if (count > start) {
-                parents.append(rowId, count);
             }
         } else {
             writeVector(fieldData, rowId);
@@ -233,9 +230,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     }
 
     private void writeVector(Object fieldData, long rowId) {
-        if (centroidShard && rowId < 0) {
+        if ((centroidShard || childGetter != null) && rowId < 0) {
             throw new IllegalArgumentException(
-                    "Centroid shards require nonnegative relative row IDs.");
+                    "Vector index labels require nonnegative relative row IDs.");
         }
         if (spillBuffer == null) {
             openSpillFile();
@@ -312,10 +309,12 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
         try {
             if (count == 0) {
-                if (parents != null) {
+                if (childGetter != null) {
                     String name = fileWriter.newFileName(fileNamePrefix());
-                    try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
-                        parents.write(out, dim);
+                    try (DataOutputStream out =
+                            new DataOutputStream(fileWriter.newOutputStream(name))) {
+                        out.writeInt(EMPTY_MULTIVECTOR_MAGIC);
+                        out.writeInt(dim);
                     }
                     return Collections.singletonList(new ResultEntry(name, rowCount, null));
                 }
@@ -373,9 +372,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                             ? new byte[64]
                             : null;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
-                if (parents != null) {
-                    parents.write(out, dim);
-                }
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;

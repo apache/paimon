@@ -21,8 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -35,20 +34,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput}. */
 public class SeekableStreamVectorIndexInputTest {
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 44})
-    public void testVectoredReadableInputUsesParallelPositionReads(int baseOffset)
-            throws Exception {
+    @Test
+    public void testVectoredReadableInputUsesParallelPositionReads() throws Exception {
         byte[] data = data(128 * 1024);
         TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 2);
         NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
-                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input, baseOffset);
+                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
 
         byte[][] buffers = new byte[][] {new byte[64], new byte[64]};
         indexInput.pread(new long[] {0, 32 * 1024}, buffers);
 
-        assertThat(buffers[0]).isEqualTo(slice(data, baseOffset, 64));
-        assertThat(buffers[1]).isEqualTo(slice(data, baseOffset + 32 * 1024, 64));
+        assertThat(buffers[0]).isEqualTo(slice(data, 0, 64));
+        assertThat(buffers[1]).isEqualTo(slice(data, 32 * 1024, 64));
         assertThat(input.positionReads).hasValue(2);
         assertThat(input.sequentialReads).hasValue(0);
         assertThat(input.maxActiveReads).hasValue(2);
@@ -58,19 +55,18 @@ public class SeekableStreamVectorIndexInputTest {
                 .isTrue();
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 44})
-    public void testFallbackToSequentialReadWhenRangesOverlap(int baseOffset) {
+    @Test
+    public void testFallbackToSequentialReadWhenRangesOverlap() {
         byte[] data = data(1024);
         TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 0);
         NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
-                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input, baseOffset);
+                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
 
         byte[][] buffers = new byte[][] {new byte[64], new byte[64]};
         indexInput.pread(new long[] {0, 32}, buffers);
 
-        assertThat(buffers[0]).isEqualTo(slice(data, baseOffset, 64));
-        assertThat(buffers[1]).isEqualTo(slice(data, baseOffset + 32, 64));
+        assertThat(buffers[0]).isEqualTo(slice(data, 0, 64));
+        assertThat(buffers[1]).isEqualTo(slice(data, 32, 64));
         assertThat(input.positionReads).hasValue(0);
         assertThat(input.sequentialReads).hasValue(2);
     }

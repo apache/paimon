@@ -43,6 +43,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -81,18 +82,20 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     private final DataType fieldType;
     private final ExecutorService executor;
     private final String expectedIndexType;
+    private final boolean multiVector;
+    private final long totalRowCount;
 
     private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
     private volatile SeekableInputStream openStream;
-    private MultiVectorIndexRows parents;
+    private int emptyDimension;
 
     public NativeVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
             ExecutorService executor) {
-        this(fileReader, ioMetas, fieldType, executor, null);
+        this(fileReader, ioMetas, fieldType, executor, null, -1);
     }
 
     NativeVectorGlobalIndexReader(
@@ -101,12 +104,24 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
             DataType fieldType,
             ExecutorService executor,
             String expectedIndexType) {
+        this(fileReader, ioMetas, fieldType, executor, expectedIndexType, -1);
+    }
+
+    NativeVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            DataType fieldType,
+            ExecutorService executor,
+            String expectedIndexType,
+            long totalRowCount) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
         this.expectedIndexType = expectedIndexType;
+        this.multiVector = VectorIndexUtils.isMultiVector(fieldType);
+        this.totalRowCount = totalRowCount;
     }
 
     boolean hasJointLayout() throws IOException {
@@ -126,9 +141,8 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     private Optional<ScoredGlobalIndexResult> searchShard(VectorSearch query) {
         try {
             ensureLoaded();
-            if (parents != null) {
-                return Optional.ofNullable(
-                        searchParents(query, childFilter(query.includeRowIds())));
+            if (multiVector) {
+                return Optional.ofNullable(searchRows(query));
             }
             return Optional.ofNullable(
                     search(query, false, SearchScope.of(query.includeRowIds(), query.limit())));
@@ -162,12 +176,11 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         }
         try {
             ensureLoaded();
-            if (parents != null) {
-                RoaringNavigableMap64 children = childFilter(batch.includeRowIds());
+            if (multiVector) {
                 List<Optional<ScoredGlobalIndexResult>> results =
                         new ArrayList<>(batch.vectorCount());
                 for (int i = 0; i < batch.vectorCount(); i++) {
-                    results.add(Optional.ofNullable(searchParents(batch.forIndex(i), children)));
+                    results.add(Optional.ofNullable(searchRows(batch.forIndex(i))));
                 }
                 return results;
             }
@@ -260,18 +273,21 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 : found.orElse(null);
     }
 
-    private RoaringNavigableMap64 childFilter(RoaringNavigableMap64 rows) {
-        return rows == null ? null : parents.childrenOf(rows);
-    }
-
-    private ScoredGlobalIndexResult searchParents(
-            VectorSearch query, RoaringNavigableMap64 children) throws IOException {
+    private ScoredGlobalIndexResult searchRows(VectorSearch query) throws IOException {
         validateSearchVector(query.vector());
-        RoaringNavigableMap64 remaining = children;
-        long available = remaining == null ? parents.childCount() : remaining.getLongCardinality();
+        if (vectorReader == null) {
+            return null;
+        }
+
+        RoaringNavigableMap64 remaining = query.includeRowIds();
+        long vectors = nativeMeta.totalVectors();
+        int requested = (int) Math.min(query.limit(), vectors);
+        if (remaining != null) {
+            requested = (int) Math.min(requested, remaining.getLongCardinality());
+        }
         Map<Long, Float> scores = new HashMap<>();
-        while (available > 0 && scores.size() < query.limit()) {
-            int requested = (int) Math.min(query.limit() - scores.size(), available);
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        while (requested > 0) {
             VectorSearchParams params = searchParams(query.options(), requested);
             VectorSearchResult found =
                     remaining == null
@@ -282,39 +298,41 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
             int hits = 0;
             for (int i = 0; i < ids.length; i++) {
                 if (ids[i] >= 0) {
-                    long parent = parents.parent(ids[i]);
-                    scores.merge(parent, 1.0f - distances[i], Math::max);
+                    rows.add(ids[i]);
+                    scores.merge(ids[i], 1.0f - distances[i], Math::max);
                     hits++;
                 }
             }
-            if (scores.size() >= query.limit() || hits < requested) {
+            if (scores.size() >= query.limit() || hits < requested || hits == vectors) {
                 break;
             }
-            // A long document can occupy an entire response. Exclude all of its children
-            // before continuing so the next native request stays bounded by the parent limit.
-            if (remaining == children) {
+            // A full Roaring range needs a container per 65536 row IDs. For an unknown range
+            // or one with fewer vectors than containers, widen the unfiltered search instead.
+            if (remaining == null && (totalRowCount < 0 || (totalRowCount >>> 16) > vectors)) {
+                int next = (int) Math.min(Math.min(vectors, Integer.MAX_VALUE), 2L * requested);
+                if (next == requested) {
+                    break;
+                }
+                requested = next;
+                continue;
+            }
+            // Excluding a matching row skips all its vectors in the next search.
+            if (remaining == query.includeRowIds()) {
                 remaining = new RoaringNavigableMap64();
-                if (children == null) {
-                    remaining.addRange(new Range(0, available - 1));
+                if (query.includeRowIds() == null) {
+                    remaining.addRange(new Range(0, totalRowCount - 1));
                 } else {
-                    remaining.or(children);
+                    remaining.or(query.includeRowIds());
                 }
             }
-            RoaringNavigableMap64 matchedChildren = new RoaringNavigableMap64();
-            for (long id : ids) {
-                if (id >= 0 && !matchedChildren.contains(id)) {
-                    matchedChildren.addRange(parents.siblings(id));
-                }
-            }
-            remaining.andNot(matchedChildren);
-            available = remaining.getLongCardinality();
+            remaining.andNot(rows);
+            requested =
+                    (int) Math.min(query.limit() - scores.size(), remaining.getLongCardinality());
         }
         if (scores.isEmpty()) {
             return null;
         }
-        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        scores.keySet().forEach(rows::add);
-        return ScoredGlobalIndexResult.create(rows, scores::get);
+        return ScoredGlobalIndexResult.create(rows, scores::get).topK(query.limit());
     }
 
     private static boolean incomplete(Optional<ScoredGlobalIndexResult> found, int limit) {
@@ -486,14 +504,14 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         } else if (fieldType instanceof ArrayType) {
             validFieldType = ((ArrayType) fieldType).getElementType() instanceof FloatType;
         }
-        if (!validFieldType && parents == null) {
+        if (!validFieldType && !multiVector) {
             throw new IllegalArgumentException(
                     "Vector index requires VectorType<FLOAT> or ArrayType<FLOAT>, but field type is: "
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
-        int dimension = parents == null ? nativeMeta.dimension() : parents.dimension();
-        if (parents != null) {
+        int dimension = nativeMeta == null ? emptyDimension : nativeMeta.dimension();
+        if (multiVector) {
             VectorIndexUtils.validateQuery(new float[][] {(float[]) vector});
         }
         if (queryDim != dimension) {
@@ -511,23 +529,21 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     VectorIndexReader reader = null;
                     try {
-                        if (VectorIndexUtils.isMultiVector(fieldType)) {
-                            parents = MultiVectorIndexRows.read(in, ioMeta.fileSize());
-                            if (parents.childCount() == 0) {
-                                openStream = in;
-                                return;
+                        if (multiVector && ioMeta.fileSize() == 2 * Integer.BYTES) {
+                            DataInputStream empty = new DataInputStream(in);
+                            int magic = empty.readInt();
+                            emptyDimension = empty.readInt();
+                            if (magic != NativeVectorGlobalIndexWriter.EMPTY_MULTIVECTOR_MAGIC
+                                    || emptyDimension <= 0) {
+                                throw new IOException("Invalid empty multivector shard.");
                             }
+                            openStream = in;
+                            return;
                         }
-                        long offset = parents == null ? 0 : parents.sizeInBytes();
-                        VectorIndexInput input = new SeekableStreamVectorIndexInput(in, offset);
-                        reader = new VectorIndexReader(input);
+                        reader = new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
                         nativeMeta = reader.metadata();
-                        if (parents != null
-                                && (parents.dimension() != nativeMeta.dimension()
-                                        || parents.childCount() != nativeMeta.totalVectors()
-                                        || !"cosine".equals(nativeMeta.metric()))) {
-                            throw new IOException(
-                                    "Multivector header disagrees with native index metadata.");
+                        if (multiVector && !"cosine".equals(nativeMeta.metric())) {
+                            throw new IOException("Multivector index requires cosine similarity.");
                         }
                         if (expectedIndexType != null
                                 && !expectedIndexType.equals(
@@ -596,15 +612,9 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     static class SeekableStreamVectorIndexInput implements VectorIndexInput {
 
         private final SeekableInputStream input;
-        private final long baseOffset;
 
         SeekableStreamVectorIndexInput(SeekableInputStream input) {
-            this(input, 0);
-        }
-
-        SeekableStreamVectorIndexInput(SeekableInputStream input, long baseOffset) {
             this.input = input;
-            this.baseOffset = baseOffset;
         }
 
         @Override
@@ -634,9 +644,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 throws IOException {
             List<FileRange> ranges = new ArrayList<>(positions.length);
             for (int i = 0; i < positions.length; i++) {
-                ranges.add(
-                        FileRange.createFileRange(
-                                Math.addExact(baseOffset, positions[i]), buffers[i]));
+                ranges.add(FileRange.createFileRange(positions[i], buffers[i]));
             }
 
             VectoredReadUtils.ReadOptions options =
@@ -654,7 +662,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
 
         private void preadSequential(long[] positions, byte[][] buffers) throws IOException {
             for (int i = 0; i < positions.length; i++) {
-                input.seek(Math.addExact(baseOffset, positions[i]));
+                input.seek(positions[i]);
                 readFully(input, buffers[i]);
             }
         }

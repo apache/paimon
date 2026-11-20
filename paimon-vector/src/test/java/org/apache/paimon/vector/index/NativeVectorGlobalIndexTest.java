@@ -20,17 +20,19 @@ package org.apache.paimon.vector.index;
 
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericArray;
-import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
+import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
@@ -49,9 +51,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -158,7 +158,7 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
-    public void testCorruptMultiVectorMappingIsRejected() throws Exception {
+    public void testNativeMultiVectorFileStoresRowIds() throws Exception {
         Assumptions.assumeTrue(isNativeAvailable());
         DataType type = new ArrayType(new VectorType(2, new FloatType()));
         Options options = new Options();
@@ -167,38 +167,52 @@ public class NativeVectorGlobalIndexTest {
                 NativeVectorGlobalIndexerFactory.nativeOptions(
                         type, options, "ivf-flat", fieldName);
         float[] q = {1f, 0f};
+        Object x = BinaryVector.fromPrimitiveArray(q);
+        Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
+        long rowId = (1L << 32) + 7;
         List<ResultEntry> files;
         try (NativeVectorGlobalIndexWriter writer =
                 new NativeVectorGlobalIndexWriter(
                         createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
-            writer.write(new GenericArray(new Object[] {BinaryVector.fromPrimitiveArray(q)}), 5);
+            writer.write(new GenericArray(new Object[] {y, null, x, x}), rowId);
+            writer.write(new GenericArray(new Object[] {y}), 19);
+            writer.write(
+                    new GenericArray(
+                            new Object[] {BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f})}),
+                    42);
             files = writer.finish();
         }
-        List<GlobalIndexIOMeta> metas = toIOMetas(files, indexPath);
-        byte[] original = Files.readAllBytes(tempDir.resolve(files.get(0).fileName()));
-        for (boolean emptyMapping : new boolean[] {true, false}) {
-            byte[] corrupt = original.clone();
-            ByteBuffer header = ByteBuffer.wrap(corrupt);
-            if (emptyMapping) {
-                header.putInt(8, 0); // parent count
-            } else {
-                header.putLong(20, 2); // exclusive child end for the sole parent
-            }
-            try (NativeVectorGlobalIndexReader reader =
-                    new NativeVectorGlobalIndexReader(
-                            ignored -> new ByteArraySeekableStream(corrupt),
-                            metas,
-                            type,
-                            executor)) {
-                assertThatThrownBy(
-                                () ->
-                                        reader.visitVectorSearch(new VectorSearch(q, 1, fieldName))
-                                                .get())
-                        .hasRootCauseMessage(
-                                emptyMapping
-                                        ? "Empty multivector mapping has an unexpected index payload."
-                                        : "Multivector header disagrees with native index metadata.");
-            }
+        GlobalIndexIOMeta meta = toIOMetas(files, indexPath).get(0);
+        try (SeekableInputStream in = createFileReader(indexPath).getInputStream(meta);
+                VectorIndexReader reader =
+                        new VectorIndexReader(
+                                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
+                                        in))) {
+            assertThat(reader.metadata().totalVectors()).isEqualTo(5);
+            assertThat(reader.search(q, VectorSearchParams.automatic(5)).ids())
+                    .containsExactlyInAnyOrder(rowId, rowId, rowId, 19L, 42L);
+        }
+        try (GlobalIndexReader reader =
+                new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
+                        .createReader(
+                                createFileReader(indexPath),
+                                Collections.singletonList(meta),
+                                rowId + 1,
+                                null,
+                                executor)) {
+            ScoredGlobalIndexResult hits =
+                    reader.visitVectorSearch(new VectorSearch(q, 2, fieldName)).get().get();
+            assertThat(hits.results().toArray(2)).containsExactly(19, rowId);
+            assertThat(hits.scoreGetter().score(rowId)).isEqualTo(1f);
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(rowId);
+            ScoredGlobalIndexResult filtered =
+                    reader.visitVectorSearch(
+                                    new VectorSearch(q, 2, fieldName).withIncludeRowIds(filter))
+                            .get()
+                            .get();
+            assertThat(filtered.results().toArray(2)).containsExactly(rowId);
+            assertThat(filtered.scoreGetter().score(rowId)).isEqualTo(1f);
         }
     }
 
@@ -230,16 +244,28 @@ public class NativeVectorGlobalIndexTest {
                 List<ResultEntry> files = writer.finish();
                 assertThat(files).hasSize(1);
                 assertThat(files.get(0).rowCount()).isEqualTo(empty ? 2 : 5);
-                try (NativeVectorGlobalIndexReader reader =
-                        new NativeVectorGlobalIndexReader(
-                                createFileReader(indexPath),
-                                toIOMetas(files, indexPath),
-                                type,
-                                executor)) {
+                try (GlobalIndexReader reader =
+                        new NativeVectorGlobalIndexer(type, nativeOptions, kind)
+                                .createReader(
+                                        createFileReader(indexPath),
+                                        toIOMetas(files, indexPath),
+                                        24,
+                                        null,
+                                        executor)) {
                     Optional<ScoredGlobalIndexResult> hits =
                             reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
                     if (empty) {
                         assertThat(hits).isEmpty();
+                        assertThatThrownBy(
+                                        () ->
+                                                reader.visitVectorSearch(
+                                                                new VectorSearch(
+                                                                        new float[] {1f},
+                                                                        1,
+                                                                        fieldName))
+                                                        .get())
+                                .hasRootCauseMessage(
+                                        "Query vector dimension mismatch: index expects 2, but got 1");
                     } else {
                         assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
                         RoaringNavigableMap64 filter = new RoaringNavigableMap64();
@@ -253,6 +279,23 @@ public class NativeVectorGlobalIndexTest {
                         assertThat(filtered.results().toArray(1)).containsExactly(5);
                         assertThat(filtered.scoreGetter().score(5))
                                 .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
+                        filter.add(23);
+                        filter.add(19); // Null list inside the range.
+                        List<Optional<ScoredGlobalIndexResult>> batch =
+                                reader.visitBatchVectorSearch(
+                                                new BatchVectorSearch(
+                                                                new float[][] {q, {0f, 1f}},
+                                                                3,
+                                                                fieldName)
+                                                        .withIncludeRowIds(filter))
+                                        .get();
+                        assertThat(batch).hasSize(2);
+                        for (Optional<ScoredGlobalIndexResult> result : batch) {
+                            assertThat(result.get().results().toArray(3)).containsExactly(5, 23);
+                        }
+                        assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
+                        assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
+                        assertThat(filter.toArray(3)).containsExactly(5, 19, 23);
                     }
                 }
             }

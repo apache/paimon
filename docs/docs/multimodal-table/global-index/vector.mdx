@@ -386,8 +386,9 @@ CALL sys.vector_search(
 
 For a matrix query, Paimon retrieves candidate rows for each query vector and scores the
 union against their complete lists from the query snapshot. Candidate retrieval is approximate.
-When several child hits belong to the same row, the reader can request more hits to collect
-distinct candidate rows before applying the post-filter.
+Each indexed vector carries the row ID of its source list. When several matches share that
+ID, the reader keeps their highest score and can request more distinct candidate rows
+before applying the post-filter.
 By default, it requests up to four times the final limit per query vector per shard.
 Set `refine_factor` to select that multiplier for any of the five indexes. Uncovered rows
 included by the search mode are scored with the same MaxSim formula. Java exposes matrix queries through

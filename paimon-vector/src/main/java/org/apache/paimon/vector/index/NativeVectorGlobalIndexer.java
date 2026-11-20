@@ -90,7 +90,7 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
                     fileReader, files, fieldType, executor, identifier);
         }
         return new NativeVectorGlobalIndexReader(
-                fileReader, files, fieldType, executor, identifier);
+                fileReader, files, fieldType, executor, identifier, totalRowCount);
     }
 
     @Override
