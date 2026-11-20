@@ -284,6 +284,29 @@ class PredictionTest(unittest.TestCase):
         self.assertEqual("retry-1", sent.idempotency_token)
         raw.new_read_builder.assert_not_called()
 
+    def test_table_submit_rejects_stream_scan_mode(self):
+        for table_options, request_options in (
+                ({"stream-scan-mode": "file-monitor"}, None),
+                ({}, {"stream-scan-mode": "file-monitor"}),
+        ):
+            with self.subTest(
+                    table_options=table_options,
+                    request_options=request_options):
+                raw = Mock(spec=FileStoreTable)
+                raw.options = CoreOptions(Options(table_options))
+                raw.identifier = Identifier.create("quality", "clips")
+                catalog = Mock()
+                table = MultimodalTable(catalog, "quality.clips", raw)
+
+                with self.assertRaisesRegex(ValueError, "stream-scan-mode"):
+                    table.predict(
+                        model="quality.qwen_vl",
+                        inputs={"video": "content"},
+                        instructions="Classify",
+                        options=request_options,
+                    )
+                catalog.submit_prediction.assert_not_called()
+
     def test_table_queries_return_metadata_and_cancel_returns_waiter(self):
         raw = Mock(spec=FileStoreTable)
         raw.identifier = Identifier.create("quality", "clips")

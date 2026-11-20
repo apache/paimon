@@ -142,15 +142,20 @@ class MultimodalTable:
         table_options = self.raw_table.options.options.to_map()
         allowed = {"scan.snapshot-id", "scan.tag-name"}
         prediction_options = dict(options or {})
+
+        def unsupported_scan_option(key):
+            return key not in allowed and (
+                key.startswith("scan.")
+                or key.startswith("incremental-")
+                or key == "stream-scan-mode")
+
         unsupported = [
             key for key in table_options
-            if (key.startswith("scan.") or key.startswith("incremental-"))
-            and key not in allowed
+            if unsupported_scan_option(key)
         ]
         unsupported.extend([
             key for key in prediction_options
-            if (key.startswith("scan.") or key.startswith("incremental-"))
-            and key not in allowed
+            if unsupported_scan_option(key)
         ])
         if unsupported:
             raise ValueError(

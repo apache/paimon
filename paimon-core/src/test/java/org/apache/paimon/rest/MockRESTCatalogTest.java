@@ -97,6 +97,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -398,22 +399,45 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Test
-    void testPredictionRejectsRowFilteringScanOptions() throws Exception {
+    void testPredictionRejectsUnsupportedScanOptions() throws Exception {
         PredictionFixture fixture = createPredictionFixture("prediction_scan_options", "id", 2);
-        PredictionSpec spec =
-                new PredictionSpec(
-                        "restricted-scan-option",
-                        fixture.model,
-                        Collections.singletonMap("text", "content"),
-                        Collections.singletonList("id"),
-                        "Echo the input",
-                        null,
-                        Collections.singletonMap(CoreOptions.SCAN_BUCKET.key(), "0"),
-                        "restricted-scan-option-token");
+        for (Map.Entry<String, String> option :
+                Arrays.asList(
+                        new AbstractMap.SimpleEntry<>(CoreOptions.SCAN_BUCKET.key(), "0"),
+                        new AbstractMap.SimpleEntry<>(
+                                CoreOptions.STREAM_SCAN_MODE.key(), "file-monitor"))) {
+            PredictionSpec spec =
+                    new PredictionSpec(
+                            "restricted-" + option.getKey(),
+                            fixture.model,
+                            Collections.singletonMap("text", "content"),
+                            Collections.singletonList("id"),
+                            "Echo the input",
+                            null,
+                            Collections.singletonMap(option.getKey(), option.getValue()),
+                            "restricted-" + option.getKey() + "-token");
 
-        assertThatThrownBy(() -> catalog.submitPrediction(fixture.source, spec))
+            assertThatThrownBy(() -> catalog.submitPrediction(fixture.source, spec))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining(option.getKey());
+        }
+
+        PredictionFixture configured =
+                createPredictionFixture(
+                        "prediction_stream_scan_mode",
+                        "id",
+                        1,
+                        Collections.singletonMap(
+                                CoreOptions.STREAM_SCAN_MODE.key(), "file-monitor"));
+        assertThatThrownBy(
+                        () ->
+                                catalog.submitPrediction(
+                                        configured.source,
+                                        configured.spec(
+                                                "configured-stream-scan-mode",
+                                                "configured-stream-scan-mode-token")))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining(CoreOptions.SCAN_BUCKET.key());
+                .hasMessageContaining(CoreOptions.STREAM_SCAN_MODE.key());
     }
 
     @Test
@@ -451,18 +475,23 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
     private PredictionFixture createPredictionFixture(
             String database, String primaryKey, int buckets) throws Exception {
+        return createPredictionFixture(database, primaryKey, buckets, Collections.emptyMap());
+    }
+
+    private PredictionFixture createPredictionFixture(
+            String database, String primaryKey, int buckets, Map<String, String> tableOptions)
+            throws Exception {
         Identifier source = Identifier.create(database, "clips");
         Identifier model = Identifier.create(database, "echo_model");
         catalog.createDatabase(database, false);
-        catalog.createTable(
-                source,
+        Schema.Builder schema =
                 Schema.newBuilder()
                         .column(primaryKey, DataTypes.INT())
                         .column("content", DataTypes.STRING())
                         .primaryKey(primaryKey)
-                        .option(CoreOptions.BUCKET.key(), Integer.toString(buckets))
-                        .build(),
-                false);
+                        .option(CoreOptions.BUCKET.key(), Integer.toString(buckets));
+        tableOptions.forEach(schema::option);
+        catalog.createTable(source, schema.build(), false);
         commitRows(
                 (FileStoreTable) catalog.getTable(source),
                 GenericRow.of(1, BinaryString.fromString("first")),

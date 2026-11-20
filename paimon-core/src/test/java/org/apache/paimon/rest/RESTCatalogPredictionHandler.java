@@ -486,7 +486,9 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
     private static void collectUnsupportedScanOptions(
             Map<String, String> options, List<String> unsupported) {
         for (String key : options.keySet()) {
-            if ((key.startsWith("scan.") || key.startsWith("incremental-"))
+            if ((key.startsWith("scan.")
+                            || key.startsWith("incremental-")
+                            || CoreOptions.STREAM_SCAN_MODE.key().equals(key))
                     && !CoreOptions.SCAN_SNAPSHOT_ID.key().equals(key)
                     && !CoreOptions.SCAN_TAG_NAME.key().equals(key)
                     && !unsupported.contains(key)) {
