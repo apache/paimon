@@ -991,41 +991,48 @@ def test_update_columns_by_row_id_checks_current_branch_schema_and_keeps_dynamic
 
 
 @pytest.mark.parametrize("method", ["batch", "predicate"])
-def test_row_id_updates_reject_branch_copy_with_same_schema_id_and_different_field_ids(frames, method):
+def test_row_id_updates_reject_recreated_branch_with_same_schema_id_and_different_field_ids(frames, method):
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.schema.schema_change import Move, SchemaChange
 
     connection = pmm.MultimodalConnection(frames.catalog)
     frames.catalog.create_tag(frames.identifier, "base", _snapshot(frames))
     frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
-    frames.catalog.alter_table(frames.identifier, [SchemaChange.set_option("read.batch-size", "3")])
     identifier = frames.identifier + "$branch_dev"
+    frames.catalog.alter_table(identifier, [SchemaChange.set_option("read.batch-size", "3")])
+    stale = connection.get_table(identifier)
+
+    frames.catalog.drop_branch(frames.identifier, "dev")
+    frames.catalog.create_branch(frames.identifier, "dev", tag_name="base")
     frames.catalog.alter_table(identifier, [
         SchemaChange.drop_column("label"),
         SchemaChange.add_column("label", AtomicType("STRING"), move=Move.before("label", "image"))])
-    copied = connection.get_table(frames.identifier).copy({"branch": "dev"})
     current = connection.get_table(identifier)
-    assert copied.raw_table.table_schema.id == current.raw_table.table_schema.id
-    assert copied.raw_table.field_names == current.raw_table.field_names
-    assert [field.type for field in copied.raw_table.fields] == [field.type for field in current.raw_table.fields]
-    assert copied.raw_table.field_dict["label"].id != current.raw_table.field_dict["label"].id
+    assert stale.raw_table.table_schema.id == current.raw_table.table_schema.id
+    assert stale.raw_table.field_names == current.raw_table.field_names
+    assert [field.type for field in stale.raw_table.fields] == [field.type for field in current.raw_table.fields]
+    assert stale.raw_table.field_dict["label"].id != current.raw_table.field_dict["label"].id
     snapshot, files = _snapshot(current), set(_files(current))
     with patch("pypaimon.table.file_store_table.FileStoreTable.new_batch_write_builder",
                side_effect=AssertionError("must not stage files")):
         with pytest.raises(ValueError, match="schema has changed.*Reopen"):
             if method == "batch":
-                copied.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+                stale.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
             else:
-                copied.update("_ROW_ID = 0", {"label": "new"})
+                stale.update("_ROW_ID = 0", {"label": "new"})
     assert _snapshot(current) == snapshot
     assert set(_files(current)) == files
     assert current.scan().select(["label"]).to_list() == [{"label": None}] * 5
+
+    copied = connection.get_table(frames.identifier).copy({"branch": "dev"})
+    assert copied.raw_table.fields == current.raw_table.fields
     if method == "batch":
-        current.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
+        copied.update_columns_by_row_id(pa.table({"_ROW_ID": [0], "label": ["new"]}), columns=["label"])
     else:
-        current.update("_ROW_ID = 0", {"label": "new"})
+        copied.update("_ROW_ID = 0", {"label": "new"})
     assert _rows(connection.get_table(identifier), ["id", "label"]) == [
         {"id": i, "label": "new" if i == 0 else None} for i in range(5)]
+    assert connection.get_table(frames.identifier).scan().select(["label"]).to_list() == [{"label": "old"}] * 5
 
 
 def test_business_predicate_with_row_id_string_literal_does_not_check_schema(frames):

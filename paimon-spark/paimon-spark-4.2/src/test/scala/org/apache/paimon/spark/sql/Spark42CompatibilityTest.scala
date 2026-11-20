@@ -31,7 +31,10 @@ import org.apache.spark.sql.test.SharedSparkSession
 import java.nio.file.Files
 import java.util.Collections
 
-/** Exercise the APIs whose signatures changed in Spark 4.2 using real Paimon files. */
+/**
+ * Exercise the APIs whose signatures changed in Spark 4.2 using real Paimon files. The Spark 4.3
+ * connector compiles and runs this suite too.
+ */
 class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
   private val warehouse = Files.createTempDirectory("paimon-spark42-").toFile
   private lazy val server = {
@@ -54,6 +57,8 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     .set("spark.sql.catalog.paimon.token", "test-token")
     .set("spark.sql.defaultCatalog", "paimon")
     .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+    // Spark 4.3 dual-runs the single-pass resolver in tests, and it cannot resolve Paimon views.
+    .set("spark.sql.analyzer.singlePassResolver.dualRunWithLegacy", "false")
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
@@ -83,6 +88,27 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       checkAnswer(sql("SELECT * FROM t"), Seq(Row(3, "c", "x"), Row(4, "d", "y")))
       sql("CREATE TABLE copied TBLPROPERTIES ('file.format'='avro') AS SELECT * FROM t")
       checkAnswer(sql("SELECT * FROM copied"), sql("SELECT * FROM t"))
+    }
+  }
+
+  test("create or replace table as select") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, label STRING) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (1, 'old')")
+      sql(
+        "CREATE OR REPLACE TABLE t TBLPROPERTIES ('file.format'='avro') " +
+          "AS SELECT 2 AS id, 'new' AS label")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(2, "new")))
+    }
+  }
+
+  test("replace table with a column list") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, label STRING) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (1, 'old')")
+      sql("CREATE OR REPLACE TABLE t (id INT, score DOUBLE) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (2, 0.5)")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(2, 0.5)))
     }
   }
 

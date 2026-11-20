@@ -38,7 +38,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -63,7 +62,19 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
             DataField vectorColumn,
             float[] vector,
             @Nullable Map<String, String> options) {
-        super(table, partitionFilter, filter, limit, vectorColumn, vector, options);
+        this(table, partitionFilter, filter, limit, vectorColumn, vector, options, null);
+    }
+
+    public SparkDataEvolutionVectorRead(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            @Nullable Map<String, String> options,
+            @Nullable float[][] queryMatrix) {
+        super(table, partitionFilter, filter, limit, vectorColumn, vector, options, queryMatrix);
     }
 
     @Override
@@ -99,11 +110,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         List<List<SerializedSplit>> splitGroups = splitGroups(serializedSplits, parallelism);
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
-                    GlobalIndexer taskGlobalIndexer =
-                            GlobalIndexer.create(
-                                    indexType,
-                                    Collections.singletonList(vectorColumn),
-                                    table.coreOptions().toConfiguration());
+                    GlobalIndexer taskGlobalIndexer = createGlobalIndexer(indexType);
                     IndexPathFactory indexPathFactory =
                             table.store().pathFactory().globalIndexFileFactory();
 
@@ -134,8 +141,12 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                             results.add(next.get());
                         }
                     }
+                    ScoredGlobalIndexResult merged = mergeIndexedCandidates(results);
                     ScoredGlobalIndexResult result =
-                            ScoredGlobalIndexResult.merge(results).topK(searchLimit);
+                            queryMatrix == null
+                                    ? merged.topK(searchLimit)
+                                    : maybeRerankIndexedResult(
+                                            merged, indexType, taskGlobalIndexer, vector);
                     if (result.results().isEmpty()) {
                         return null;
                     }
@@ -149,6 +160,9 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
         List<byte[]> remoteResults = mapInSpark(splitGroups, task, splitGroups.size());
 
+        if (queryMatrix != null) {
+            return mergeRemoteResults(remoteResults);
+        }
         return maybeRerankIndexedResult(
                 mergeRemoteResults(remoteResults, searchLimit), indexType, globalIndexer, vector);
     }

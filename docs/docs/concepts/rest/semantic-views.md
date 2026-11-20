@@ -28,7 +28,7 @@ preserves the original document text. Servers validate the model formats, syntax
 and features they support; consumers provide query execution.
 
 Registration alone does not grant access to source data or guarantee engine support.
-The Spark 4.2 connector supports the [Ossie query profile](#spark-42-ossie-queries) below.
+The Spark 4.2 and 4.3 connectors support the [Ossie query profile](#spark-42-ossie-queries) below.
 This implementation supplies Java clients, wire models, and the
 [Catalog OpenAPI contract](/rest-catalog-open-api.yaml). REST server providers must implement
 persistence, validation, authorization, and the atomic operations described below.
@@ -168,12 +168,13 @@ Client-side invalid input throws `IllegalArgumentException` before HTTP. An unsu
 never falls back to SQL views, labels, or table options. Materialization, rename, and per-measure
 or per-field REST resources are outside this version.
 
-## Spark 4.2 Ossie queries
+## Spark 4.2 and 4.3 Ossie queries {#spark-42-ossie-queries}
 
-The `paimon-spark-4.2_2.13` connector can query an `ossie-yaml` definition through the configured
-Paimon REST Catalog. Enable `PaimonSparkSessionExtensions` as described in the
-[Spark installation guide](../../spark/installation.mdx). The REST server must implement semantic
-view management; the connector does not provide production REST persistence or validation.
+The `paimon-spark-4.2_2.13` and `paimon-spark-4.3_2.13` connectors can query an `ossie-yaml`
+definition through the configured Paimon REST Catalog. Enable `PaimonSparkSessionExtensions` as
+described in the [Spark installation guide](../../spark/installation.mdx). The REST server must
+implement semantic view management; the connector does not provide production REST persistence or
+validation.
 
 Register a definition whose content is a flat Ossie document, for example:
 
@@ -223,13 +224,16 @@ This experimental execution profile supports:
 - Portable `expression.sql` or an `OSSIE_SQL_2026` dialect expression; arithmetic, comparisons,
   boolean logic, `CASE`, `IN`, numeric/string/boolean/date casts, `SUM`, `COUNT` (including
   distinct), `AVG`, `MIN`, `MAX`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `CEILING`, `COALESCE`,
-  and `DATE_TRUNC`.
+  `DATE_TRUNC`, and `EXTRACT`.
 - `DATE_TRUNC(unit, input)` requires a case-insensitive string literal for the unit. The supported
   units are `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, and `second`. Weeks
   start on Monday. The result is `TIMESTAMP_LTZ`. Spark uses the session time zone to truncate
   `TIMESTAMP_LTZ` values and implicitly convert `DATE` values and timestamp strings to
   `TIMESTAMP_LTZ`. A `NULL` input returns `NULL`. `TIMESTAMP_NTZ` inputs are rejected during
   analysis.
+- `EXTRACT(unit FROM date_expr)` supports `YEAR`, `MONTH`, and `DAY` (day of month),
+  case-insensitively. It returns an integer and propagates `NULL`. Spark applies its
+  built-in date input coercion.
 
 Other expressions, relationships, multiple datasets, external joins, streaming reads and writes
 are rejected. SQL Semantic View DDL and SQL discovery are not added; use the management API to
@@ -237,8 +241,9 @@ register and list definitions. Ordinary tables and SQL views retain their existi
 Source table authorization is required independently of permission to read the semantic definition.
 When using a CTE, evaluate measures inside its definition (for example,
 `WITH m AS (SELECT MEASURE(revenue) AS revenue FROM paimon.sales.order_metrics) SELECT revenue FROM m`).
-Forwarding raw measure columns through a CTE or temporary view is not supported by Spark 4.2's
-Metric View resolver; evaluate measures inside the defining query block before reusing its results.
+Forwarding raw measure columns through a CTE or temporary view is not supported by the Metric View
+resolver of Spark 4.2 and 4.3; evaluate measures inside the defining query block before reusing its
+results.
 
 The bundled schema is pinned to Ossie commit
 [`2692b1cc4708fdcf6a91e597ca928a9bc9d0da60`](https://github.com/apache/ossie/tree/2692b1cc4708fdcf6a91e597ca928a9bc9d0da60).

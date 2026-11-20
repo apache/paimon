@@ -54,7 +54,7 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
           Some(null, FunctionIdentifier(funName), true)
         // Spark 4.2 keeps extension functions in the session's builtin namespace.
         case Seq(name)
-            if org.apache.spark.SPARK_VERSION.startsWith("4.2.") &&
+            if org.apache.spark.SPARK_VERSION >= "4.2" &&
               catalogManager.v1SessionCatalog.lookupBuiltinOrTempFunction(name).isDefined =>
           None
         case CatalogAndIdentifier(v1FunctionCatalog: SupportV1Function, ident)

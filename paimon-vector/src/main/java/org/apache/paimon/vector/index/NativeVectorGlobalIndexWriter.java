@@ -25,6 +25,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexMetadata;
@@ -82,6 +83,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private final int dim;
     private final double trainSampleRatio;
     private final boolean centroidShard;
+    private final InternalArray.ElementGetter childGetter;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -127,9 +129,19 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         this.centroidShard = centroidShard;
         this.fileWriter = fileWriter;
         this.identifier = identifier;
-        validateFieldType(fieldType);
+        boolean multiVector = VectorIndexUtils.isMultiVector(fieldType);
+        if (multiVector) {
+            NativeVectorGlobalIndexerFactory.validateMultiVectorOptions(
+                    centroidShard, options.get("metric"));
+        }
+        DataType childType = multiVector ? ((ArrayType) fieldType).getElementType() : fieldType;
+        childGetter = multiVector ? InternalArray.createElementGetter(childType) : null;
+        validateFieldType(childType);
         this.nativeOptions = options;
-        this.dim = Integer.parseInt(options.get("dimension"));
+        this.dim =
+                multiVector
+                        ? NativeVectorGlobalIndexerFactory.dimension(fieldType, options, identifier)
+                        : Integer.parseInt(options.get("dimension"));
         if (Double.isNaN(trainSampleRatio)
                 || Double.isInfinite(trainSampleRatio)
                 || trainSampleRatio <= 0
@@ -192,15 +204,38 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             rowCount++;
             return;
         }
+        if (childGetter != null) {
+            InternalArray children = (InternalArray) fieldData;
+            try {
+                for (int i = 0; i < children.size(); i++) {
+                    if (!children.isNullAt(i)) {
+                        writeVector(childGetter.getElementOrNull(children, i), rowId);
+                    }
+                }
+            } catch (RuntimeException e) {
+                // A partially written list cannot be published.
+                close();
+                throw e;
+            }
+        } else {
+            writeVector(fieldData, rowId);
+        }
+        rowCount++;
+    }
 
-        if (centroidShard && rowId < 0) {
+    private void writeVector(Object fieldData, long rowId) {
+        if ((centroidShard || childGetter != null) && rowId < 0) {
             throw new IllegalArgumentException(
-                    "Centroid shards require nonnegative relative row IDs.");
+                    "Vector index labels require nonnegative relative row IDs.");
         }
         if (spillBuffer == null) {
             openSpillFile();
         }
         float[] src = materializeAndValidate(fieldData, rowId);
+        if (childGetter != null) {
+            NativeVectorGlobalIndexer.normalizeCosine(src, vectorBuf);
+            src = vectorBuf;
+        }
 
         if (spillBuffer.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
@@ -215,7 +250,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         for (int i = 0; i < dim; i++) {
             spillBuffer.putFloat(src[i]);
         }
-        rowCount++;
         count++;
     }
 
@@ -387,6 +421,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private VectorIndexTraining trainFromTempFile() throws IOException {
         Map<String, String> options = trainingOptions(nativeOptions, count);
+        options.put("dimension", String.valueOf(dim));
         if (centroidShard) {
             options.put("expected-vector-count", Long.toString(count));
             String nlist = options.get("nlist");

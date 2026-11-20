@@ -32,6 +32,10 @@ A branch maintains a separate table history. Creating a branch without a tag
 copies the current schema into an empty branch. To include existing data, create
 the branch from a retained tag.
 
+Use `table.copy({'branch': 'dev'})` to read the latest state of `dev` with that
+branch's current schema. When you also select a snapshot or tag, the read uses
+the schema recorded for that snapshot or tag.
+
 :::info
 
 PyPaimon provides two implementations of `BranchManager`:
