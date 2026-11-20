@@ -84,3 +84,12 @@ chosen recovery point before executing it. Coordinate this for each Paimon table
 
 [Resume the job from the matching savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#resuming-from-savepoints).
 Verify that checkpoints complete and new Paimon snapshots appear before resuming dependent work.
+
+## Version compatibility
+
+The checkpoint committable format now includes delete-ordering guard metadata. Checkpoints and
+savepoints written by this version cannot be restored with an older Paimon version, including
+jobs without guard capture. New clients can restore supported older checkpoint formats.
+
+Upgrade job coordinators and workers together. For a release rollback, retain a pre-upgrade
+savepoint and its matching table recovery point.
