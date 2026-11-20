@@ -30,9 +30,9 @@ import org.apache.paimon.view.SemanticViewDefinition
 
 import okhttp3.mockwebserver.{Dispatcher, MockResponse, RecordedRequest}
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
 import org.apache.spark.sql.test.SharedSparkSession
-import org.apache.spark.sql.types.TimestampType
+import org.apache.spark.sql.types.{IntegerType, TimestampType}
 
 import java.nio.file.Files
 import java.time.Instant
@@ -117,6 +117,102 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
         "SELECT MEASURE(revenue), MEASURE(orders) " +
           "FROM paimon.sales.order_metrics WHERE region = 'missing'"),
       Seq(Row(null, 0L)))
+  }
+
+  test("group Ossie measures by integer EXTRACT dimensions") {
+    spark.sql(
+      "CREATE TABLE paimon.sales.extract_orders (order_date DATE, amount BIGINT) " +
+        "TBLPROPERTIES ('bucket' = '-1', 'file.format' = 'avro')")
+    spark.sql("""INSERT INTO paimon.sales.extract_orders VALUES
+                |  (DATE '2025-05-10', 5),
+                |  (DATE '2026-05-10', 10),
+                |  (DATE '2026-05-31', 20),
+                |  (DATE '2026-06-01', 7),
+                |  (NULL, 3)""".stripMargin)
+    register("""version: 0.3.0.dev0
+               |name: order_metrics
+               |datasets:
+               |  - name: orders
+               |    source: extract_orders
+               |    fields:
+               |      - name: order_year
+               |        expression:
+               |          sql: ExTrAcT(YeAr FROM "ORDER_DATE")
+               |      - name: order_month
+               |        expression:
+               |          sql: EXTRACT(MONTH FROM COALESCE(order_date, NULL))
+               |      - name: order_day
+               |        expression:
+               |          sql: EXTRACT(DAY FROM order_date)
+               |    metrics:
+               |      - name: revenue
+               |        expression:
+               |          sql: SUM(source.amount)
+               |      - name: latest_order_year
+               |        expression:
+               |          sql: MAX(EXTRACT(YEAR FROM source.order_date))
+               |""".stripMargin)
+
+    val expected = Seq(
+      "order_year" -> Seq(Row(2025, 5L), Row(2026, 37L), Row(null, 3L)),
+      "order_month" -> Seq(Row(5, 35L), Row(6, 7L), Row(null, 3L)),
+      "order_day" -> Seq(Row(1, 7L), Row(10, 15L), Row(31, 20L), Row(null, 3L))
+    )
+    expected.foreach {
+      case (dimension, rows) =>
+        val result = spark.sql(
+          s"SELECT $dimension, MEASURE(revenue) AS revenue " +
+            s"FROM paimon.sales.order_metrics GROUP BY $dimension")
+        assert(result.schema(dimension).dataType == IntegerType)
+        checkAnswer(result, rows)
+    }
+    checkAnswer(
+      spark.sql("SELECT MEASURE(latest_order_year) FROM paimon.sales.order_metrics"),
+      Row(2026))
+  }
+
+  test("reject unsupported Ossie date extraction syntax and inputs") {
+    val date = "DATE '2026-06-01'"
+    val query = "SELECT region FROM paimon.sales.order_metrics"
+    Seq(
+      s"EXTRACT(QUARTER FROM $date)" -> "Unsupported Ossie EXTRACT unit: QUARTER",
+      s"EXTRACT(Y FROM $date)" -> "Unsupported Ossie EXTRACT unit: Y",
+      s"extract('year', $date)" -> "Ossie EXTRACT expects EXTRACT(unit FROM input)",
+      s"DATE_PART('year', $date)" -> "Unsupported OSSIE_SQL_2026 function: DATE_PART",
+      s"YEAR($date)" -> "Unsupported OSSIE_SQL_2026 function: YEAR"
+    ).foreach {
+      case (expression, message) =>
+        register(model.replace("sql: region_code", s"sql: $expression"))
+        val error = intercept[IllegalArgumentException] {
+          spark.sql(query).schema
+        }
+        assert(error.getMessage.contains(message), error.toString)
+    }
+
+    register(model.replace("sql: region_code", "sql: EXTRACT(DAY FROM INTERVAL '2' DAY)"))
+    val error = intercept[AnalysisException] {
+      spark.sql(query).schema
+    }
+    assert(error.getCondition == "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE", error.toString)
+  }
+
+  test("resolve Ossie EXTRACT to the Spark builtin regardless of the SQL path") {
+    val session = spark.newSession()
+    session.conf.set("spark.sql.path.enabled", "true")
+    session.sql("CREATE FUNCTION spark_catalog.default.year(d DATE) RETURNS INT RETURN -1")
+    try {
+      session.sql("SET PATH = spark_catalog.default, system.builtin")
+      val date = "DATE '2026-06-01'"
+      checkAnswer(session.sql(s"SELECT year($date)"), Row(-1))
+
+      register(model.replace("sql: region_code", s"sql: EXTRACT(YEAR FROM $date)"))
+      checkAnswer(
+        session.sql(
+          "SELECT region, MEASURE(gross) FROM paimon.sales.order_metrics GROUP BY region"),
+        Row(2026, BigDecimal(280)))
+    } finally {
+      session.sql("DROP FUNCTION spark_catalog.default.year")
+    }
   }
 
   test("group Ossie measures by DATE_TRUNC and preserve Spark timestamp semantics") {
