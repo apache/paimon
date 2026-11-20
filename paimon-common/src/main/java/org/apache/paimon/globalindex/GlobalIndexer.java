@@ -64,7 +64,13 @@ public interface GlobalIndexer {
             String column = indexFields.get(0).name();
             resolved =
                     CoreOptions.isVectorIndexType(type)
-                            ? VectorIndexOptions.resolve(options, type, column).options()
+                            ? VectorIndexOptions.resolve(
+                                            options,
+                                            type,
+                                            column,
+                                            !VectorIndexUtils.isMultiVector(
+                                                    indexFields.get(0).type()))
+                                    .options()
                             : new CoreOptions(options).globalIndexOptions(type, column);
         }
         return resolved;

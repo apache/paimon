@@ -25,6 +25,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexMetadata;
@@ -82,6 +83,8 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private final int dim;
     private final double trainSampleRatio;
     private final boolean centroidShard;
+    private final MultiVectorIndexRows parents;
+    private final InternalArray.ElementGetter childGetter;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -127,8 +130,22 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         this.centroidShard = centroidShard;
         this.fileWriter = fileWriter;
         this.identifier = identifier;
-        validateFieldType(fieldType);
+        boolean multiVector = VectorIndexUtils.isMultiVector(fieldType);
+        if (multiVector) {
+            NativeVectorGlobalIndexerFactory.validateMultiVectorOptions(
+                    centroidShard, options.get("metric"));
+        }
+        parents = multiVector ? new MultiVectorIndexRows() : null;
+        DataType childType = multiVector ? ((ArrayType) fieldType).getElementType() : fieldType;
+        childGetter = multiVector ? InternalArray.createElementGetter(childType) : null;
+        validateFieldType(childType);
         this.nativeOptions = options;
+        if (multiVector && !options.containsKey("dimension")) {
+            throw new IllegalArgumentException(
+                    "An ARRAY<ARRAY<FLOAT>> index requires an explicit "
+                            + identifier
+                            + ".dimension.");
+        }
         this.dim = Integer.parseInt(options.get("dimension"));
         if (Double.isNaN(trainSampleRatio)
                 || Double.isInfinite(trainSampleRatio)
@@ -192,7 +209,30 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             rowCount++;
             return;
         }
+        if (parents != null) {
+            InternalArray children = (InternalArray) fieldData;
+            long start = count;
+            try {
+                for (int i = 0; i < children.size(); i++) {
+                    if (!children.isNullAt(i)) {
+                        writeVector(childGetter.getElementOrNull(children, i), count);
+                    }
+                }
+            } catch (RuntimeException e) {
+                // Children already appended for this row must never be assigned to another parent.
+                close();
+                throw e;
+            }
+            if (count > start) {
+                parents.append(rowId, count);
+            }
+        } else {
+            writeVector(fieldData, rowId);
+        }
+        rowCount++;
+    }
 
+    private void writeVector(Object fieldData, long rowId) {
         if (centroidShard && rowId < 0) {
             throw new IllegalArgumentException(
                     "Centroid shards require nonnegative relative row IDs.");
@@ -215,7 +255,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         for (int i = 0; i < dim; i++) {
             spillBuffer.putFloat(src[i]);
         }
-        rowCount++;
         count++;
     }
 
@@ -273,6 +312,13 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
         try {
             if (count == 0) {
+                if (parents != null) {
+                    String name = fileWriter.newFileName(fileNamePrefix());
+                    try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
+                        parents.write(out, dim);
+                    }
+                    return Collections.singletonList(new ResultEntry(name, rowCount, null));
+                }
                 if (!centroidShard) {
                     return Collections.emptyList();
                 }
@@ -327,6 +373,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                             ? new byte[64]
                             : null;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+                if (parents != null) {
+                    parents.write(out, dim);
+                }
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;

@@ -311,15 +311,15 @@ result = (
 ```
 
 Exact scalar global-index answers pre-filter the vector search. If scalar indexes cannot
-evaluate the predicate, each shard runs ANN once and checks only its candidates against the
+evaluate the predicate, each shard retrieves ANN candidates and checks them against the
 filter columns of the same pinned snapshot. The coordinator merges the filtered results;
 it does not perform a full-table scalar scan or a raw scan to fill missing matches.
 
 `vector-index.post-filter.candidates-factor` is a positive integer, defaulting to `10`.
 The candidate count is `max(original Top-K * factor, required reranking limit)`, capped by
 the shard size and the backend integer limit. For example, Top-K 10 normally requests 100
-candidates. Batch execution may split large inputs into memory-bounded chunks; every query
-still runs ANN once. Post-filtering may return fewer than Top-K rows, including zero even
+candidates. Batch execution may split large inputs into memory-bounded chunks. On single-vector
+columns, each query runs ANN once per shard. Post-filtering may return fewer than Top-K rows, including zero even
 when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
 work for more candidates. Post-filtering does not retry or scan raw data to fill Top-K.
 Raw work outside vector coverage still follows the configured index search modes. When a
@@ -344,6 +344,44 @@ A search selects top-K row IDs; reading those rows through a regular table scan
 does not imply score order. See [Read Scored Results](./manage-indexes#read-scored-results)
 for SQL ordering and Java/Python score access.
 
+### Search a List of Vectors
+
+On a Data Evolution table, Spark SQL and Java can search a column containing multiple
+embeddings per row. The native `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`
+indexes support these columns with range sharding and cosine similarity.
+The column can be `ARRAY<VECTOR<FLOAT, d>>` or `ARRAY<ARRAY<FLOAT>>`. For the latter,
+specify the inner dimension when building the index. Each row can contain a different
+number of vectors. You can build an independent index for each such column.
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.documents', index_column => 'chunks', index_type => 'ivf-flat',
+    options => 'ivf-flat.dimension=2,ivf-flat.distance.metric=cosine'
+);
+
+SELECT id, __paimon_search_score
+FROM vector_search('db.documents', 'chunks', array(array(1.0f, 0.0f), array(0.0f, 1.0f)), 10)
+ORDER BY __paimon_search_score DESC, id;
+```
+
+A single query vector ranks rows by their best matching embedding. A query matrix
+uses MaxSim to rank rows. For every query vector, take the highest cosine similarity
+among a row's embeddings, then sum those similarities. Each row can occupy one
+place in the result. Null embeddings are skipped. A row with no embeddings has no score.
+Query matrices require at least one vector, fixed inner dimensions and finite coordinates.
+Spark SQL accepts a matrix in an uncorrelated `vector_search` call. A correlated
+`LATERAL vector_search` call takes one query vector per outer row.
+
+For a matrix query, Paimon retrieves candidate rows for each query vector and scores the
+union against their complete lists from the query snapshot. Candidate retrieval is approximate.
+When several child hits belong to the same row, the reader can request more hits to collect
+distinct candidate rows before applying the post-filter.
+By default, it requests up to four times the final limit per query vector per shard.
+Set `refine_factor` to select that multiplier for any of the five indexes. Uncovered rows
+included by the search mode are scored with the same MaxSim formula. Java exposes matrix queries through
+`newVectorSearchBuilder().withMultiVector(float[][])`. For independent top-K results
+per vector, use `newBatchVectorSearchBuilder().withVectors(float[][])`.
+
 ## Search Options
 
 Search-time options are passed with each vector search request:
@@ -353,8 +391,8 @@ Search-time options are passed with each vector search request:
 | `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
 | `centroid.nprobe` | Automatic | Number of centroid shards to search per row-ID range. Paimon chooses this width when omitted. Within each selected shard, `ivf.nprobe` controls the IVF lists to search and `diskann.l_search` controls the DiskANN graph search width. |
 | `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
-| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
-| `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
+| `refine_factor` | List columns use `4` for a matrix query and `1` for a single query vector. Disabled for single-vector columns. | Retrieves `top_k * refine_factor` candidates per query vector and reranks them with the original vectors stored in the Paimon table. For single-vector columns it is most useful with compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq`. |
+| `ivf_pq.batch_table_reuse` | `auto` | Distance-table reuse for native batched IVF-PQ searches on single-vector columns. Accepts `auto`, `on`, or `off`. |
 | `ivf_pq.batch_table_reuse.max_bytes` | 512 MiB | Positive long integer limiting the memory used by IVF-PQ batch distance-table reuse. Search falls back to direct table construction when the reusable tables exceed the budget. |
 | `diskann.l_search` | Automatic | paimon-vindex DiskANN graph candidate width. The automatic value uses calibration when available, otherwise `max(100, 2 * top_k)`. |
 
@@ -368,9 +406,11 @@ reduce Recall@K compared with uncapped automatic search. Progressive expansion o
 fewer than `top_k` valid results are returned; if the capped initial search already fills `top_k`,
 probing stops.
 
-`ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
-spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector
-rerank for the indexed candidates; leaving it unset skips the rerank stage.
+`refine_factor` also accepts the alias `rerank_factor` and hyphenated spellings such as
+`refine-factor`. The four IVF indexes also accept `ivf.refine_factor`. Setting `refine_factor=1`
+still performs the raw-vector rerank for the indexed candidates. Single-vector columns skip
+reranking when the option is unset.
+List columns always score candidate rows against their complete embedding lists.
 
 ## Build Options
 
@@ -380,8 +420,8 @@ Build options for native vector indexes:
 |---|---|---|
 | `<index-type>.sharding` | `range` | Use `centroid` to train an outer router for each row-ID range when building a Spark Data Evolution index. |
 | `<index-type>.centroid.nlist` | Automatic | Number of outer centroids per contiguous row-ID range with centroid sharding. |
-| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT, n>` columns. |
-| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.dimension` | `128` for `ARRAY<FLOAT>` | Required for `ARRAY<ARRAY<FLOAT>>`. Columns with a fixed-size vector type supply their own dimension. |
+| `<index-type>.distance.metric` | `inner_product` for single-vector columns, `cosine` for lists | Single-vector columns support `l2`, `cosine`, and `inner_product`. List columns support `cosine`. |
 | `<index-type>.ivf.coarse-assignment` | `auto` | Build-time list assignment for all IVF types. `auto` uses Vamana when `dimension × nlist ≥ 1,000,000` and exact assignment otherwise; `exact` always uses exact assignment. |
 | `<index-type>.ivf.train.max-points-per-centroid` | `256` | Positive coarse K-means training limit for all IVF types: at most `nlist × value` vectors. |
 | `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |

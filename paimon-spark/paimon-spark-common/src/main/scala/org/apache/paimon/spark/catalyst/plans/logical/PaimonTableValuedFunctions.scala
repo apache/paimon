@@ -38,6 +38,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, LeafNode, LogicalPla
 import org.apache.spark.sql.catalyst.util.MapData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.{ArrayType, DoubleType, FloatType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -473,7 +474,7 @@ case class IncrementalToAutoTag(override val args: Seq[Expression])
  * Usage: vector_search(table_name, column_name, query_vector, limit[, options])
  *   - table_name: the Paimon table to search
  *   - column_name: the vector column name
- *   - query_vector: array of floats representing the query vector
+ *   - query_vector: a single vector, or a matrix of query vectors for a multivector column
  *   - limit: the number of top results to return
  *   - options: optional options as a map or semicolon-separated key-value string
  *
@@ -503,7 +504,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
         s"Column $columnName does not exist in table ${innerTable.name()}"
       )
     }
-    val queryVector = extractQueryVector(argsWithoutTable(1))
+    val query = argsWithoutTable(1)
     val limit = parsePositiveLimit(argsWithoutTable(2).eval())
     val options: Map[String, String] =
       if (argsWithoutTable.size == 4) {
@@ -511,7 +512,26 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
-    new VectorSearch(queryVector, limit, columnName, options.asJava)
+    query.dataType match {
+      case ArrayType(ArrayType(elementType, _), _)
+          if elementType == FloatType || elementType == DoubleType =>
+        val rows = query.eval().asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+        require(rows != null, "Query matrix cannot be null")
+        val vectors = Array.tabulate(rows.numElements()) {
+          i =>
+            require(!rows.isNullAt(i), "Query vectors cannot be null")
+            val child = rows.getArray(i)
+            Array.tabulate(child.numElements()) {
+              j =>
+                require(!child.isNullAt(j), "Query coordinates cannot be null")
+                if (elementType == FloatType) child.getFloat(j) else child.getDouble(j).toFloat
+            }
+        }
+        VectorSearch.multiVector(vectors, limit, columnName, options.asJava)
+      case ArrayType(_: ArrayType, _) =>
+        throw new IllegalArgumentException("A query matrix requires FLOAT or DOUBLE coordinates.")
+      case _ => new VectorSearch(extractQueryVector(query), limit, columnName, options.asJava)
+    }
   }
 
   def extractQueryVector(expr: Expression): Array[Float] = {
@@ -629,10 +649,17 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
+    val query = argsWithoutTable(1)
+    query.dataType match {
+      case ArrayType(_: ArrayType, _) =>
+        throw new UnsupportedOperationException(
+          "LATERAL vector_search requires a single query vector per outer row.")
+      case _ =>
+    }
     DynamicVectorSearchRelation(
       innerTable,
       columnName,
-      argsWithoutTable(1),
+      query,
       limit,
       options,
       toAttributes(SparkTypeUtils.fromPaimonRowType(innerTable.rowType())))

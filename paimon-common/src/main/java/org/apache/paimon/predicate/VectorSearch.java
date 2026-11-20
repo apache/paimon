@@ -18,6 +18,7 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
@@ -38,6 +39,7 @@ public class VectorSearch implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final float[] vector;
+    @Nullable private final float[][] multiVector;
     private final String fieldName;
     private final int limit;
     private final Map<String, String> options;
@@ -49,7 +51,16 @@ public class VectorSearch implements Serializable {
     }
 
     public VectorSearch(float[] vector, int limit, String fieldName, Map<String, String> options) {
-        if (vector == null) {
+        this(vector, null, limit, fieldName, options);
+    }
+
+    private VectorSearch(
+            float[] vector,
+            @Nullable float[][] multiVector,
+            int limit,
+            String fieldName,
+            Map<String, String> options) {
+        if (vector == null && multiVector == null) {
             throw new IllegalArgumentException("Search vector cannot be null");
         }
         if (limit <= 0) {
@@ -59,6 +70,7 @@ public class VectorSearch implements Serializable {
             throw new IllegalArgumentException("Field name cannot be null or empty");
         }
         this.vector = vector;
+        this.multiVector = multiVector;
         this.limit = limit;
         this.fieldName = fieldName;
         this.options =
@@ -67,7 +79,21 @@ public class VectorSearch implements Serializable {
                         : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
+    public static VectorSearch multiVector(
+            float[][] vectors, int limit, String fieldName, Map<String, String> options) {
+        VectorIndexUtils.validateQuery(vectors);
+        return new VectorSearch(null, vectors, limit, fieldName, options);
+    }
+
+    @Nullable
+    public float[][] multiVector() {
+        return multiVector;
+    }
+
     public float[] vector() {
+        if (multiVector != null) {
+            throw new IllegalStateException("Use multiVector() for a query matrix.");
+        }
         return vector;
     }
 
@@ -94,7 +120,8 @@ public class VectorSearch implements Serializable {
 
     public VectorSearch offsetRange(long from, long to) {
         if (includeRowIds != null) {
-            VectorSearch target = new VectorSearch(vector, limit, fieldName, options());
+            VectorSearch target =
+                    new VectorSearch(vector, multiVector, limit, fieldName, options());
             target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
             return target;
         }

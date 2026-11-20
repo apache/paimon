@@ -78,6 +78,24 @@ public class NativeVectorGlobalIndexerFactoryTest {
     }
 
     @Test
+    void multiVectorIndexesRequireRangeShardingAndCosine() {
+        String kind = "diskann";
+        List<DataField> fields =
+                Collections.singletonList(
+                        new DataField(0, "chunks", new ArrayType(new ArrayType(new FloatType()))));
+        Options options = new Options();
+        options.setString("diskann.sharding", "centroid");
+        assertThatThrownBy(() -> GlobalIndexer.create(kind, fields, options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("range sharding");
+        options.setString("diskann.sharding", "range");
+        options.setString("diskann.metric", "l2");
+        assertThatThrownBy(() -> GlobalIndexer.create(kind, fields, options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cosine");
+    }
+
+    @Test
     void diskAnnCentroidUsesTheIvfRouterTrainingOption() throws Exception {
         float[] values = new float[256];
         for (int i = 0; i < values.length; i++) {

@@ -21,7 +21,9 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VectorType;
@@ -69,10 +71,28 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 fieldName,
                 true);
         nativeOptions.put("index.type", identifier.replace('-', '_'));
-        nativeOptions.put(
-                "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
-        nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
+        boolean multiVector = VectorIndexUtils.isMultiVector(fieldType);
+        DataType vectorType = multiVector ? ((ArrayType) fieldType).getElementType() : fieldType;
+        if (!multiVector
+                || vectorType instanceof VectorType
+                || nativeOptions.containsKey("dimension")) {
+            nativeOptions.put(
+                    "dimension", String.valueOf(dimension(vectorType, nativeOptions, identifier)));
+        }
+        if (multiVector) {
+            nativeOptions.putIfAbsent("metric", "cosine");
+            validateMultiVectorOptions(centroid, nativeOptions.get("metric"));
+        } else {
+            nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
+        }
         return nativeOptions;
+    }
+
+    static void validateMultiVectorOptions(boolean centroid, String metric) {
+        if (centroid || !"cosine".equals(metric)) {
+            throw new IllegalArgumentException(
+                    "Multivector indexes require range sharding and cosine similarity.");
+        }
     }
 
     static double trainSampleRatio(Options tableOptions, String identifier, String fieldName) {

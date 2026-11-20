@@ -18,6 +18,9 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -46,7 +49,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -112,6 +117,147 @@ public class NativeVectorGlobalIndexTest {
     }
 
     // =================== Tests that do NOT need native library =====================
+
+    @Test
+    public void testMultiVectorArrayRequiresExplicitBuildDimension() {
+        DataType type = new ArrayType(new ArrayType(new FloatType()));
+        String kind = "ivf-flat";
+        Map<String, String> options =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, new Options(), kind, fieldName);
+        assertThatThrownBy(
+                        () ->
+                                new NativeVectorGlobalIndexWriter(
+                                        createFileWriter(indexPath), type, options, kind))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.dimension");
+    }
+
+    @Test
+    public void testIncompleteMultiVectorRowCannotBePublished() {
+        DataType type = new ArrayType(new ArrayType(new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.dimension", 2);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            GenericArray invalidRow =
+                    new GenericArray(
+                            new Object[] {
+                                new GenericArray(new float[] {1f, 0f}),
+                                new GenericArray(new float[] {1f})
+                            });
+            assertThatThrownBy(() -> writer.write(invalidRow, 7))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("dimension mismatch");
+            assertThatThrownBy(writer::finish).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    public void testCorruptMultiVectorMappingIsRejected() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 1);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        float[] q = {1f, 0f};
+        List<ResultEntry> files;
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            writer.write(new GenericArray(new Object[] {BinaryVector.fromPrimitiveArray(q)}), 5);
+            files = writer.finish();
+        }
+        List<GlobalIndexIOMeta> metas = toIOMetas(files, indexPath);
+        byte[] original = Files.readAllBytes(tempDir.resolve(files.get(0).fileName()));
+        for (boolean emptyMapping : new boolean[] {true, false}) {
+            byte[] corrupt = original.clone();
+            ByteBuffer header = ByteBuffer.wrap(corrupt);
+            if (emptyMapping) {
+                header.putInt(8, 0); // parent count
+            } else {
+                header.putLong(20, 2); // exclusive child end for the sole parent
+            }
+            try (NativeVectorGlobalIndexReader reader =
+                    new NativeVectorGlobalIndexReader(
+                            ignored -> new ByteArraySeekableStream(corrupt),
+                            metas,
+                            type,
+                            executor)) {
+                assertThatThrownBy(
+                                () ->
+                                        reader.visitVectorSearch(new VectorSearch(q, 1, fieldName))
+                                                .get())
+                        .hasRootCauseMessage(
+                                emptyMapping
+                                        ? "Empty multivector mapping has an unexpected index payload."
+                                        : "Multivector header disagrees with native index metadata.");
+            }
+        }
+    }
+
+    @Test
+    public void testMultiVectorParentFilterAndEmptyRange() throws Exception {
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        String kind = "ivf-flat";
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 1);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(type, options, kind, fieldName);
+        assertThat(nativeOptions.get("dimension")).isEqualTo("2");
+        float[] q = {1f, 0f};
+        for (boolean empty : new boolean[] {true, false}) {
+            try (NativeVectorGlobalIndexWriter writer =
+                    new NativeVectorGlobalIndexWriter(
+                            createFileWriter(indexPath), type, nativeOptions, kind)) {
+                writer.write(null, 7);
+                writer.write(new GenericArray(new Object[] {null}), 19);
+                if (!empty) {
+                    Assumptions.assumeTrue(isNativeAvailable());
+                    Object x = BinaryVector.fromPrimitiveArray(q);
+                    Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
+                    Object opposite = BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f});
+                    writer.write(new GenericArray(new Object[] {x, x, x, null}), 23);
+                    writer.write(new GenericArray(new Object[] {y, y, y}), 5);
+                    writer.write(new GenericArray(new Object[] {opposite}), 11);
+                }
+                List<ResultEntry> files = writer.finish();
+                assertThat(files).hasSize(1);
+                assertThat(files.get(0).rowCount()).isEqualTo(empty ? 2 : 5);
+                try (NativeVectorGlobalIndexReader reader =
+                        new NativeVectorGlobalIndexReader(
+                                createFileReader(indexPath),
+                                toIOMetas(files, indexPath),
+                                type,
+                                executor)) {
+                    Optional<ScoredGlobalIndexResult> hits =
+                            reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
+                    if (empty) {
+                        assertThat(hits).isEmpty();
+                    } else {
+                        assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
+                        RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+                        filter.add(5);
+                        ScoredGlobalIndexResult filtered =
+                                reader.visitVectorSearch(
+                                                new VectorSearch(q, 1, fieldName)
+                                                        .withIncludeRowIds(filter))
+                                        .get()
+                                        .get();
+                        assertThat(filtered.results().toArray(1)).containsExactly(5);
+                        assertThat(filtered.scoreGetter().score(5))
+                                .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     public void testDimensionMismatch() {
