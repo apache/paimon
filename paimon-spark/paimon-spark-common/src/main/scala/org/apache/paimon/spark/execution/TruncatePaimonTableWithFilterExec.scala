@@ -18,15 +18,18 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.{CoreOptions, Snapshot}
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.options.Options
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.{FileStoreTable, Table}
-import org.apache.paimon.utils.InternalRowPartitionComputer
+import org.apache.paimon.table.sink.{BatchTableCommit, CommitMessage}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 
-import java.util.{Collections => JCollections}
+import java.util.{Collections => JCollections, List => JList}
 
 import scala.collection.JavaConverters._
 
@@ -36,37 +39,54 @@ case class TruncatePaimonTableWithFilterExec(
   extends PaimonLeafV2CommandExec {
 
   override def run(): Seq[InternalRow] = {
-    val commit = table.newBatchWriteBuilder().newCommit()
+    partitionPredicate match {
+      case Some(p) =>
+        table match {
+          case fileStoreTable: FileStoreTable =>
+            val matchedPartitions =
+              fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions()
+            if (matchedPartitions.isEmpty) {
+              withCommit(table)(_.commit(JCollections.emptyList()))
+            } else {
+              truncateMatchedPartitions(fileStoreTable, matchedPartitions)
+            }
+          case _ =>
+            throw new UnsupportedOperationException("Unsupported truncate table")
+        }
+      case _ =>
+        withCommit(table)(_.truncateTable())
+    }
+    Nil
+  }
+
+  /**
+   * Removes the data of the matched partitions by their stored values: an empty static overwrite. A
+   * spec rebuilt from a stored value does not always parse back to it, such as a blank string,
+   * whose name is the default partition name.
+   */
+  private def truncateMatchedPartitions(
+      fileStoreTable: FileStoreTable,
+      partitions: JList[BinaryRow]): Unit = {
+    val target =
+      fileStoreTable.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> "false").asJava)
+    val commit = target.newCommit(CoreOptions.createCommitUser(new Options(target.options())))
     try {
-      partitionPredicate match {
-        case Some(p) =>
-          table match {
-            case fileStoreTable: FileStoreTable =>
-              val matchedPartitions =
-                fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions().asScala
-              if (matchedPartitions.nonEmpty) {
-                val partitionComputer = new InternalRowPartitionComputer(
-                  fileStoreTable.coreOptions().partitionDefaultName(),
-                  fileStoreTable.schema().logicalPartitionType(),
-                  fileStoreTable.partitionKeys.asScala.toArray,
-                  fileStoreTable.coreOptions().legacyPartitionName()
-                )
-                val dropPartitions =
-                  matchedPartitions.map(partitionComputer.generatePartValues(_).asScala.asJava)
-                commit.truncatePartitions(dropPartitions.asJava)
-              } else {
-                commit.commit(JCollections.emptyList())
-              }
-            case _ =>
-              throw new UnsupportedOperationException("Unsupported truncate table")
-          }
-        case _ =>
-          commit.truncateTable()
-      }
+      commit
+        .withOperation(Snapshot.Operation.TRUNCATE)
+        .withOverwriteStaticPartitions(partitions)
+        .commit(JCollections.emptyList[CommitMessage]())
     } finally {
       commit.close()
     }
-    Nil
+  }
+
+  private def withCommit(table: Table)(operation: BatchTableCommit => Unit): Unit = {
+    val commit = table.newBatchWriteBuilder().newCommit()
+    try {
+      operation(commit)
+    } finally {
+      commit.close()
+    }
   }
 
   override def output: Seq[Attribute] = Nil
