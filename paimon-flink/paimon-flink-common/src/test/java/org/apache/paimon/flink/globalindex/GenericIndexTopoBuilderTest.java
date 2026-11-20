@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -48,6 +49,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
@@ -286,6 +288,7 @@ class GenericIndexTopoBuilderTest {
                                 readType,
                                 options.toConfiguration(),
                                 null))) {
+            harness.setup(new CommittableTypeInfo().createSerializer(new ExecutionConfig()));
             harness.open();
             for (int i = 0; i < 6; i++) {
                 IndexedSplit split =
