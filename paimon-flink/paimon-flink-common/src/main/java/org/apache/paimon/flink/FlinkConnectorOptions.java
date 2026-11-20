@@ -216,7 +216,11 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, flink sink will use managed memory for merge tree; otherwise, "
-                                    + "it will create an independent memory allocator.");
+                                    + "it will create an independent memory allocator. "
+                                    + "This option selects the allocator and declares the managed memory weight. "
+                                    + "For append-only table, rows are buffered in managed memory only when "
+                                    + "'write-buffer-for-append' is also set to true; otherwise rows are written "
+                                    + "directly to the file format writers and the managed memory stays unused.");
 
     public static final ConfigOption<Boolean> SCAN_REMOVE_NORMALIZE =
             key("scan.remove-normalize")
