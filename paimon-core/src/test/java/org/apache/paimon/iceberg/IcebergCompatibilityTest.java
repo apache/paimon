@@ -674,6 +674,46 @@ public class IcebergCompatibilityTest {
         commit.close();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"format-version\": 2, \"snapshots\": [", "{}"})
+    public void testExpireAllBeforeSkipsUnreadableMetadata(String content) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        long latest = table.latestSnapshot().get().id();
+
+        // v(latest - 1) is retained by previous-versions-max = 1, but its file was cut short or
+        // names no snapshots. A from-scratch rebuild walks every older version to clean up, and
+        // that must not fail on it, here or in any later rebuild.
+        table.fileIO().overwriteFileUtf8(pathFactory.toMetadataPath(latest - 1), content);
+        table.fileIO().deleteQuietly(pathFactory.toMetadataPath(latest));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        Path rebuiltMetadataPath = pathFactory.toMetadataPath(table.latestSnapshot().get().id());
+        assertThat(table.fileIO().exists(rebuiltMetadataPath)).isTrue();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
     @Test
     public void testCommitAfterRollbackDoesNotDuplicateSchemas() throws Exception {
         RowType rowType =
