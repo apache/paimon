@@ -25,6 +25,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
 
+import javax.annotation.Nullable;
+
+import java.util.Arrays;
+
 /** Materialization at the portable vector index boundary. */
 public final class VectorIndexUtils {
     private VectorIndexUtils() {}
@@ -61,17 +65,36 @@ public final class VectorIndexUtils {
         }
     }
 
+    public static float[][] copyAndValidateQuery(float[][] vectors) {
+        float[][] copy = copyQuery(vectors);
+        validateQuery(copy);
+        return copy;
+    }
+
+    @Nullable
+    public static float[][] copyQuery(@Nullable float[][] vectors) {
+        return vectors == null
+                ? null
+                : Arrays.stream(vectors)
+                        .map(vector -> vector == null ? null : vector.clone())
+                        .toArray(float[][]::new);
+    }
+
     public static void validateQuery(ArrayType columnType, float[][] vectors) {
         validateQuery(vectors);
+        validateQueryDimension(columnType, vectors[0].length);
+    }
+
+    public static void validateQueryDimension(ArrayType columnType, int queryDimension) {
         DataType child = columnType.getElementType();
         if (child instanceof VectorType) {
             int dimension = ((VectorType) child).getLength();
-            if (vectors[0].length != dimension) {
+            if (queryDimension != dimension) {
                 throw new IllegalArgumentException(
                         "Query vector dimension mismatch: expected "
                                 + dimension
                                 + ", got "
-                                + vectors[0].length);
+                                + queryDimension);
             }
         }
     }

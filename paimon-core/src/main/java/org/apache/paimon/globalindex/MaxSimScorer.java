@@ -35,13 +35,13 @@ public final class MaxSimScorer {
     private final double[] maxima;
 
     public MaxSimScorer(ArrayType column, float[][] queries) {
-        VectorIndexUtils.validateQuery(column, queries);
+        this.queries = VectorIndexUtils.copyAndValidateQuery(queries);
+        VectorIndexUtils.validateQueryDimension(column, this.queries[0].length);
         this.childGetter = InternalArray.createElementGetter(column.getElementType());
-        this.queries = queries;
         this.queryNorms = new double[queries.length];
         this.maxima = new double[queries.length];
         for (int i = 0; i < queries.length; i++) {
-            queryNorms[i] = norm(queries[i]);
+            queryNorms[i] = norm(this.queries[i]);
         }
     }
 

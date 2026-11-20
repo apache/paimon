@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -35,6 +36,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -46,6 +48,7 @@ import org.apache.paimon.table.source.IndexVectorSearchSplit;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.client.program.ClusterClient;
@@ -131,13 +134,25 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMultiVectorIndexRejectsNonCosineMetricOnEmptyTable() {
+    public void testMultiVectorIndexValidatesBuildOptionsOnEmptyTable() {
         createMultiVectorTable();
+        assertThatThrownBy(() -> buildMultiVectorIndex("ivf-flat", "ivf-flat.metric=cosine"))
+                .hasStackTraceContaining("requires an explicit ivf-flat.dimension");
+        sql("ALTER TABLE DOCS SET ('ivf-flat.distance.metric'='cosine')");
         for (String metric : Arrays.asList("l2", "inner_product")) {
             assertThatThrownBy(() -> buildMultiVectorIndex("ivf-flat", "ivf-flat.metric=" + metric))
                     .hasStackTraceContaining(
                             "require cosine similarity, got metric '" + metric + "'");
         }
+        sql(
+                "ALTER TABLE DOCS SET ('fields.vec.index-options'="
+                        + "'{\"dimension\":4,\"sharding\":\"centroid\",\"metric\":\"l2\"}')");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("INSERT INTO DOCS VALUES (1, ARRAY[ARRAY[1,0]])");
+        buildMultiVectorIndex(
+                "ivf-flat", "ivf-flat.dimension=2;ivf-flat.sharding=range;ivf-flat.metric=cosine");
+        assertThat(search("DOCS", "[[1,0]]", 1, "id", null))
+                .containsExactly(Row.of("{\"id\":\"1\"}"));
     }
 
     @Test
@@ -147,6 +162,29 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                 .hasStackTraceContaining("matrix coordinates must be numbers");
         assertThatThrownBy(() -> search("DOCS", "[[1,0],[1]]", 1, "id", null))
                 .hasStackTraceContaining("dimensions must match");
+    }
+
+    @Test
+    public void testQueryDimensionOnEmptyFixedSizeList() throws Exception {
+        flinkCatalog()
+                .catalog()
+                .createTable(
+                        Identifier.create("default", "docs"),
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column(
+                                        "vec",
+                                        DataTypes.ARRAY(DataTypes.VECTOR(2, DataTypes.FLOAT())))
+                                .option("bucket", "-1")
+                                .option("row-tracking.enabled", "true")
+                                .option("data-evolution.enabled", "true")
+                                .build(),
+                        false);
+        assertThat(search("docs", "[[1,0]]", 1, "id", null)).isEmpty();
+        for (String query : Arrays.asList("[[1,0,0]]", "1,0,0")) {
+            assertThatThrownBy(() -> search("docs", query, 1, "id", null))
+                    .hasStackTraceContaining("Query vector dimension mismatch: expected 2, got 3");
+        }
     }
 
     private void createMultiVectorTable() {

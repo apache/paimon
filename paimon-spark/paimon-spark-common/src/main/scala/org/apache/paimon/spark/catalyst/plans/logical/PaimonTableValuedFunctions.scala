@@ -32,7 +32,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeSet, CreateArray, CreateMap, CreateNamedStruct, Expression, ExpressionInfo, ExprId, Literal, OuterReference}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeSet, CreateArray, CreateMap, CreateNamedStruct, Expression, ExpressionInfo, ExprId, Literal, OuterReference, Unevaluable}
 import org.apache.spark.sql.catalyst.plans.{Inner, JoinType}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LeafNode, LogicalPlan, Project, SubqueryAlias, UnaryNode}
 import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
@@ -526,6 +526,10 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     query.dataType match {
       case ArrayType(ArrayType(elementType, _), _)
           if elementType == FloatType || elementType == DoubleType =>
+        require(
+          query.deterministic && !query.exists(_.isInstanceOf[Unevaluable]),
+          "Query matrix must be a deterministic expression that Spark can evaluate during analysis."
+        )
         val rows = query.eval().asInstanceOf[ArrayData]
         require(rows != null, "Query matrix cannot be null")
         val vectors = Array.tabulate(rows.numElements()) {

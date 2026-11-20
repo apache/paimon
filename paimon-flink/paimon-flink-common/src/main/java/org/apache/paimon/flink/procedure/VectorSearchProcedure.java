@@ -38,6 +38,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.VectorRead;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
@@ -167,12 +168,12 @@ public class VectorSearchProcedure extends ProcedureBase {
             builder.withPartitionFilter(partitionFilter);
         }
 
-        VectorScan scan = builder.newVectorScan();
+        VectorRead vectorRead = builder.newVectorRead();
         if (snapshot == null) {
             return new String[0];
         }
-        VectorScan.Plan vectorPlan = scan.scan();
-        GlobalIndexResult result = builder.newVectorRead().read(vectorPlan);
+        VectorScan.Plan vectorPlan = builder.newVectorScan().scan();
+        GlobalIndexResult result = vectorRead.read(vectorPlan);
 
         ReadBuilder readBuilder = fileStoreTable.newReadBuilder();
         if (filter != null) {

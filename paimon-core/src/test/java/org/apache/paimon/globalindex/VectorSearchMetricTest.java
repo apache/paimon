@@ -55,6 +55,16 @@ class VectorSearchMetricTest {
     }
 
     @Test
+    void testMaxSimKeepsQueryCoordinatesAndNormTogether() {
+        float[][] queries = {{1f, 0f}};
+        MaxSimScorer scorer =
+                new MaxSimScorer(new ArrayType(new ArrayType(new FloatType())), queries);
+        queries[0][0] = 3f;
+        GenericArray row = new GenericArray(new Object[] {new GenericArray(new float[] {1f, 0f})});
+        assertThat(scorer.score(row)).isEqualTo(1f);
+    }
+
+    @Test
     void testNormalizeAndSupportedMetrics() {
         assertThat(VectorSearchMetric.normalize("INNER-PRODUCT")).isEqualTo("inner_product");
         assertThat(VectorSearchMetric.isSupported("L2")).isTrue();

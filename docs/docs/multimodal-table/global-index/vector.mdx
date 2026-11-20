@@ -372,7 +372,8 @@ among a row's embeddings, then sum those similarities. Each row can occupy one
 place in the result. Null embeddings are skipped. A row with no embeddings has no score.
 A range with no embeddings produces no index file.
 Query matrices require at least one vector, fixed inner dimensions and finite coordinates.
-Spark SQL accepts a matrix in an uncorrelated `vector_search` call. A correlated
+Spark SQL accepts a deterministic matrix expression that it can evaluate during analysis,
+such as a nested array literal, in an uncorrelated `vector_search` call. A correlated
 `LATERAL vector_search` call takes one query vector per outer row.
 In Flink SQL, pass the matrix as a JSON string to the search procedure. The procedure
 executes matrix queries locally even when `vector-search.distribute.enabled` is enabled.

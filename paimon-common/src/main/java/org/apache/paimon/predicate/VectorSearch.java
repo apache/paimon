@@ -81,13 +81,13 @@ public class VectorSearch implements Serializable {
 
     public static VectorSearch multiVector(
             float[][] vectors, int limit, String fieldName, Map<String, String> options) {
-        VectorIndexUtils.validateQuery(vectors);
-        return new VectorSearch(null, vectors, limit, fieldName, options);
+        return new VectorSearch(
+                null, VectorIndexUtils.copyAndValidateQuery(vectors), limit, fieldName, options);
     }
 
     @Nullable
     public float[][] multiVector() {
-        return multiVector;
+        return VectorIndexUtils.copyQuery(multiVector);
     }
 
     public float[] vector() {

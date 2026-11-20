@@ -194,6 +194,54 @@ class VectorIndexOptionsTest {
                 .isEqualTo(resolved.toMap());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "fields.embedding.distance.metric,cosine,ivf-pq.metric,L2,l2",
+        "ivf-pq.distance.metric,L2,metric,COSINE,cosine",
+        "fields.embedding.index-options,'{\"metric\":\"cosine\"}',ivf-pq.metric,L2,l2",
+        "ivf-pq.metric,L2,fields.embedding.index-options,'{\"metric\":\"COSINE\"}',cosine"
+    })
+    void testProcedureMetricOverridesTableAliases(
+            String tableKey,
+            String tableValue,
+            String procedureKey,
+            String procedureValue,
+            String expected) {
+        Options input =
+                new Options(
+                        Collections.singletonMap(tableKey, tableValue),
+                        Collections.singletonMap(procedureKey, procedureValue));
+        Options resolved =
+                VectorIndexOptions.resolveConfigured(input, "ivf-pq", "embedding").options();
+        assertMetric(resolved, expected);
+        assertMetric(
+                VectorIndexOptions.resolveConfigured(resolved, "ivf-pq", "embedding").options(),
+                expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"index-options", "pk-vector.index.options"})
+    void testProcedureOverridesFieldJsonBuildOptions(String jsonKey) {
+        Map<String, String> overrides = new HashMap<>();
+        overrides.put("ivf-flat.dimension", "2");
+        overrides.put("ivf-flat.sharding", "range");
+        Options input =
+                new Options(
+                        Collections.singletonMap(
+                                "fields.v." + jsonKey,
+                                "{\"dimension\":4,\"sharding\":\"centroid\"}"),
+                        overrides);
+        Options resolved = VectorIndexOptions.resolveConfigured(input, "ivf-flat", "v").options();
+        assertThat(resolved.dynamicOptions()).isEqualTo(overrides);
+        assertThat(resolved.get("ivf-flat.dimension")).isEqualTo("2");
+        assertThat(resolved.get("ivf-flat.sharding")).isEqualTo("range");
+        assertThat(
+                        VectorIndexOptions.resolveConfigured(resolved, "ivf-flat", "v")
+                                .options()
+                                .toMap())
+                .isEqualTo(resolved.toMap());
+    }
+
     @Test
     void testReaderKeepsUnspecifiedMetricAndWriterUsesDefault() {
         Options input =

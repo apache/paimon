@@ -90,6 +90,17 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
           .analyzed
       }
       assert(integers.getMessage.contains("FLOAT or DOUBLE coordinates"))
+
+      Seq("(SELECT array(array(1f, 0f)))", "array(array(rand(), 0D))").foreach {
+        query =>
+          val error = intercept[IllegalArgumentException] {
+            spark
+              .sql(s"SELECT id FROM vector_search('T', 'chunks', $query, 1)")
+              .queryExecution
+              .analyzed
+          }
+          assert(error.getMessage.contains("Spark can evaluate during analysis"))
+      }
     }
   }
 
@@ -156,6 +167,7 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
           .toSeq
 
       val exact = query(matrix, 3)
+      assert(query("transform(array(0, 1), i -> array(1f - i, 0f + i))", 3) == exact)
       assert(exact.map(_._1) == Seq(3, 1, 2))
       assert(math.abs(exact.head._2 - math.sqrt(2)) < 1e-5)
       spark

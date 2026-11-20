@@ -138,13 +138,10 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         childGetter = multiVector ? InternalArray.createElementGetter(childType) : null;
         validateFieldType(childType);
         this.nativeOptions = options;
-        if (multiVector && !options.containsKey("dimension")) {
-            throw new IllegalArgumentException(
-                    "An ARRAY<ARRAY<FLOAT>> index requires an explicit "
-                            + identifier
-                            + ".dimension.");
-        }
-        this.dim = Integer.parseInt(options.get("dimension"));
+        this.dim =
+                multiVector
+                        ? NativeVectorGlobalIndexerFactory.dimension(fieldType, options, identifier)
+                        : Integer.parseInt(options.get("dimension"));
         if (Double.isNaN(trainSampleRatio)
                 || Double.isInfinite(trainSampleRatio)
                 || trainSampleRatio <= 0
@@ -424,6 +421,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
     private VectorIndexTraining trainFromTempFile() throws IOException {
         Map<String, String> options = trainingOptions(nativeOptions, count);
+        options.put("dimension", String.valueOf(dim));
         if (centroidShard) {
             options.put("expected-vector-count", Long.toString(count));
             String nlist = options.get("nlist");

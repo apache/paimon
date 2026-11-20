@@ -119,9 +119,8 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withMultiVector(float[][] vectors) {
-        VectorIndexUtils.validateQuery(vectors);
-        this.multiVector = vectors;
-        this.vector = vectors[0];
+        this.multiVector = VectorIndexUtils.copyAndValidateQuery(vectors);
+        this.vector = multiVector[0];
         return this;
     }
 

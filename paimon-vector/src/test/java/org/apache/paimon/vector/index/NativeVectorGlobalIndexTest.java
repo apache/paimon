@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
 import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorSearchParams;
+import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
@@ -52,6 +53,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -123,9 +126,7 @@ public class NativeVectorGlobalIndexTest {
     public void testMultiVectorArrayRequiresExplicitBuildDimension() {
         DataType type = new ArrayType(new ArrayType(new FloatType()));
         String kind = "ivf-flat";
-        Map<String, String> options =
-                NativeVectorGlobalIndexerFactory.nativeOptions(
-                        type, new Options(), kind, fieldName);
+        Map<String, String> options = Collections.singletonMap("metric", "cosine");
         assertThatThrownBy(
                         () ->
                                 new NativeVectorGlobalIndexWriter(
@@ -162,11 +163,10 @@ public class NativeVectorGlobalIndexTest {
     public void testNativeMultiVectorFileStoresRowIds() throws Exception {
         Assumptions.assumeTrue(isNativeAvailable());
         DataType type = new ArrayType(new VectorType(2, new FloatType()));
-        Options options = new Options();
-        options.setInteger("ivf-flat.nlist", 1);
-        Map<String, String> nativeOptions =
-                NativeVectorGlobalIndexerFactory.nativeOptions(
-                        type, options, "ivf-flat", fieldName);
+        Map<String, String> nativeOptions = new HashMap<>();
+        nativeOptions.put("index.type", "ivf_flat");
+        nativeOptions.put("metric", "cosine");
+        nativeOptions.put("nlist", "1");
         float[] q = {1f, 0f};
         Object x = BinaryVector.fromPrimitiveArray(q);
         Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
@@ -279,6 +279,71 @@ public class NativeVectorGlobalIndexTest {
                     assertThat(query).containsExactly(queryScale, 0f);
                 }
             }
+        }
+    }
+
+    @Test
+    public void testMultiVectorSearchWidensDuplicateHeavyPages() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 16);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        List<ResultEntry> files;
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            for (int row = 0; row < 64; row++) {
+                double angle = row / 64.0;
+                Object[] children = new Object[32];
+                Arrays.fill(
+                        children,
+                        BinaryVector.fromPrimitiveArray(
+                                new float[] {(float) Math.cos(angle), (float) Math.sin(angle)}));
+                writer.write(new GenericArray(children), row);
+            }
+            files = writer.finish();
+        }
+
+        List<Integer> widths = new ArrayList<>();
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(
+                        createFileReader(indexPath),
+                        toIOMetas(files, indexPath),
+                        type,
+                        executor,
+                        "ivf-flat",
+                        64) {
+                    @Override
+                    VectorSearchResult searchVector(
+                            float[] vector, VectorSearchParams params, byte[] filter) {
+                        widths.add(params.topK());
+                        return super.searchVector(vector, params, filter);
+                    }
+                }) {
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            long[] expected = new long[16];
+            for (int i = 0; i < expected.length; i++) {
+                expected[i] = 4 * i;
+                filter.add(expected[i]);
+            }
+            ScoredGlobalIndexResult result =
+                    reader.visitVectorSearch(
+                                    new VectorSearch(
+                                                    new float[] {1, 0},
+                                                    expected.length,
+                                                    fieldName,
+                                                    Collections.singletonMap(
+                                                            "ivf.max_initial_filter_expansion_factor",
+                                                            "1"))
+                                            .withIncludeRowIds(filter))
+                            .get()
+                            .get();
+            assertThat(result.results().toArray(expected.length)).containsExactly(expected);
+            assertThat(widths.get(0)).isEqualTo(expected.length);
+            assertThat(widths.size()).isLessThanOrEqualTo(8);
         }
     }
 

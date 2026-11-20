@@ -43,6 +43,8 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -66,6 +68,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexReader {
 
     static final int JOINT_INNER_PROBES = 16;
+    // 64K native hits occupy 768 KiB of row IDs and distances before JNI copies.
+    private static final int MAX_RETRY_HITS = 64 * 1024;
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
     private static final String MAX_INITIAL_FILTER_EXPANSION_FACTOR_PARAMETER =
@@ -250,17 +254,11 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         if (scope.effectiveK == 0) {
             return null;
         }
+        Map<String, String> options =
+                shardOptions(vectorSearch.options(), joint && scope.filterBytes == null);
         VectorSearchResult result =
-                scope.filterBytes != null
-                        ? vectorReader.search(
-                                queryVector,
-                                searchParams(vectorSearch.options(), scope.effectiveK),
-                                scope.filterBytes)
-                        : vectorReader.search(
-                                queryVector,
-                                searchParams(
-                                        shardOptions(vectorSearch.options(), joint),
-                                        scope.effectiveK));
+                searchVector(
+                        queryVector, searchParams(options, scope.effectiveK), scope.filterBytes);
 
         Optional<ScoredGlobalIndexResult> found =
                 buildScoredResult(result.ids(), result.distances(), metric);
@@ -286,12 +284,10 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         while (requested > 0) {
             VectorSearchParams params = searchParams(query.options(), requested);
-            VectorSearchResult found =
-                    filter == null
-                            ? vectorReader.search(normalized, params)
-                            : vectorReader.search(normalized, params, filter);
+            VectorSearchResult found = searchVector(normalized, params, filter);
             long[] ids = found.ids();
             float[] distances = found.distances();
+            int previousRows = scores.size();
             int hits = 0;
             for (int i = 0; i < ids.length; i++) {
                 if (ids[i] >= 0) {
@@ -300,7 +296,13 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                     hits++;
                 }
             }
-            if (scores.size() >= query.limit() || hits < requested || hits == vectors) {
+            // Automatic IVF may stop probing once it has as many hits as allowed row IDs.
+            // Those hits can still include several embeddings from the same row.
+            long expected =
+                    remaining == null
+                            ? requested
+                            : Math.min(requested, remaining.getLongCardinality());
+            if (scores.size() >= query.limit() || hits < expected || hits == vectors) {
                 break;
             }
             // A full Roaring range needs a container per 65536 row IDs. For an unknown range
@@ -323,16 +325,29 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 }
             }
             remaining.andNot(rows);
-            requested =
-                    (int) Math.min(query.limit() - scores.size(), remaining.getLongCardinality());
-            if (requested > 0) {
-                filter = remaining.serialize();
+            long missing = Math.min(query.limit() - scores.size(), remaining.getLongCardinality());
+            int added = scores.size() - previousRows;
+            if (missing == 0 || added == 0) {
+                break;
             }
+            // Native top-K counts embeddings. Estimate the next page from the distinct rows
+            // in this one, growing at most twofold and bounding temporary result arrays.
+            long estimate = missing == 1 ? 1 : (missing * hits + added - 1) / added;
+            long cap = Math.min(vectors, Math.max(query.limit(), MAX_RETRY_HITS));
+            requested = (int) Math.min(estimate, Math.min(2L * requested, cap));
+            filter = remaining.serialize();
         }
         if (scores.isEmpty()) {
             return null;
         }
         return ScoredGlobalIndexResult.create(rows, scores::get).topK(query.limit());
+    }
+
+    VectorSearchResult searchVector(
+            float[] vector, VectorSearchParams params, @Nullable byte[] filter) {
+        return filter == null
+                ? vectorReader.search(vector, params)
+                : vectorReader.search(vector, params, filter);
     }
 
     private static boolean incomplete(Optional<ScoredGlobalIndexResult> found, int limit) {

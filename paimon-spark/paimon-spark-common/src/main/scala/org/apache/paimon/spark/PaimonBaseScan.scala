@@ -223,10 +223,11 @@ object PaimonBaseScan {
       .withVectorColumn(vectorSearch.fieldName())
       .withLimit(vectorSearch.limit())
       .withOptions(vectorSearch.options())
-    if (vectorSearch.multiVector() == null) {
+    val matrix = vectorSearch.multiVector()
+    if (matrix == null) {
       vectorBuilder.withVector(vectorSearch.vector())
     } else {
-      vectorBuilder.withMultiVector(vectorSearch.multiVector())
+      vectorBuilder.withMultiVector(matrix)
     }
     if (pushedPartitionFilters.nonEmpty) {
       vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))

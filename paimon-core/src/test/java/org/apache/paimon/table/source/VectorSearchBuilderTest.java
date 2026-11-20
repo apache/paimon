@@ -913,6 +913,44 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testMultiVectorReaderKeepsQueryWhenInputIsReused() throws Exception {
+        Identifier id = identifier("reused_multi_vector_query");
+        catalog.createTable(
+                id,
+                Schema.newBuilder()
+                        .column("chunks", DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.FLOAT())))
+                        .option("bucket", "-1")
+                        .option("row-tracking.enabled", "true")
+                        .option("data-evolution.enabled", "true")
+                        .option("vector-index.search-mode", "detail")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(id);
+        write(
+                table,
+                GenericRow.of(
+                        new GenericArray(new Object[] {new GenericArray(new float[] {1, 0})})),
+                GenericRow.of(
+                        new GenericArray(new Object[] {new GenericArray(new float[] {0, 1})})));
+        float[][] input = {{1, 0}, {1, 0}};
+        VectorSearchBuilder search =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("chunks")
+                        .withLimit(1)
+                        .withMultiVector(input);
+        VectorRead original = search.newVectorRead();
+        VectorScan.Plan plan = search.newVectorScan().scan();
+        input[0][0] = 0;
+        input[0][1] = 1;
+        input[1] = new float[] {0, 1};
+        assertThat(search.withMultiVector(input).newVectorRead().read(plan).results())
+                .containsExactly(1L);
+        ScoredGlobalIndexResult first = (ScoredGlobalIndexResult) original.read(plan);
+        assertThat(first.results()).containsExactly(0L);
+        assertThat(first.scoreGetter().score(0)).isEqualTo(2f);
+    }
+
+    @Test
     public void testTypedMultiVectorValidatesQueryDimensionsOnEmptyTable() throws Exception {
         Identifier id = identifier("empty_multi_vector");
         catalog.createTable(
