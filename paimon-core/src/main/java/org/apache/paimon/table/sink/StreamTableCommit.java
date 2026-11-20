@@ -71,7 +71,7 @@ public interface StreamTableCommit extends TableCommit {
      *
      * @param commitIdentifiersAndMessages a map containing all {@link CommitMessage}s in question.
      *     The key is the {@code commitIdentifier}.
-     * @return number of {@code List<CommitMessage>} committed.
+     * @return number of {@code List<CommitMessage>} committed that published at least one snapshot.
      */
     int filterAndCommit(Map<Long, List<CommitMessage>> commitIdentifiersAndMessages);
 }

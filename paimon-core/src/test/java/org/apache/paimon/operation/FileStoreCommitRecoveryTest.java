@@ -581,7 +581,7 @@ public class FileStoreCommitRecoveryTest {
                 assertThat(
                                 freshCommit.filterAndCommit(
                                         Collections.singletonMap(2L, pendingMessages)))
-                        .isEqualTo(1);
+                        .isZero();
             }
             assertThat(table.snapshotManager().latestSnapshotId())
                     .isEqualTo(snapshotAfterConcurrent);
@@ -977,7 +977,10 @@ public class FileStoreCommitRecoveryTest {
         // Two fresh restorations both skip the compact phase instead of failing.
         for (int attempt = 0; attempt < 2; attempt++) {
             try (TableCommitImpl freshCommit = table.newCommit("writer")) {
-                freshCommit.filterAndCommit(Collections.singletonMap(2L, pendingMessages));
+                assertThat(
+                                freshCommit.filterAndCommit(
+                                        Collections.singletonMap(2L, pendingMessages)))
+                        .isZero();
             }
             assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(appendSnapshot);
             assertThat(table.snapshotManager().latestSnapshot().commitKind())
@@ -1036,7 +1039,10 @@ public class FileStoreCommitRecoveryTest {
 
         for (int attempt = 0; attempt < 2; attempt++) {
             try (TableCommitImpl freshCommit = table.newCommit("writer")) {
-                freshCommit.filterAndCommit(Collections.singletonMap(2L, legacyMessages));
+                assertThat(
+                                freshCommit.filterAndCommit(
+                                        Collections.singletonMap(2L, legacyMessages)))
+                        .isZero();
             }
             assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(appendSnapshot);
             assertThat(table.snapshotManager().latestSnapshot().commitKind())
