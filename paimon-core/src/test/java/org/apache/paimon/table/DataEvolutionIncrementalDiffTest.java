@@ -234,6 +234,59 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
     }
 
     @Test
+    void testDisjointUpdatesKeepExactRangesAcrossPackedGroups() throws Exception {
+        FileStoreTable table = create();
+        for (int start = 0; start < 9; start += 3) {
+            write(
+                    table,
+                    row(start, "untouched", "old"),
+                    row(start + 1, "untouched", "old"),
+                    row(start + 2, "untouched", "old"));
+        }
+        update(
+                table,
+                new String[] {"f2"},
+                0,
+                GenericRow.of(text("new")),
+                GenericRow.of(text("new")),
+                GenericRow.of(text("new")));
+        update(
+                table,
+                new String[] {"f2"},
+                6,
+                GenericRow.of(text("new")),
+                GenericRow.of(text("new")),
+                GenericRow.of(text("new")));
+        List<Split> splits = diff(table, "3,5").newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(((IndexedSplit) splits.get(0)).rowRanges())
+                .containsExactly(new Range(0, 2), new Range(6, 8));
+        assertThat(collect(diff(table, "3,5")))
+                .containsExactlyInAnyOrder(
+                        row(0, "untouched", "new"),
+                        row(1, "untouched", "new"),
+                        row(2, "untouched", "new"),
+                        row(6, "untouched", "new"),
+                        row(7, "untouched", "new"),
+                        row(8, "untouched", "new"));
+        assertThat(
+                        collect(
+                                diff(table, "3,5")
+                                        .withRowRanges(Collections.singletonList(new Range(1, 7)))))
+                .containsExactlyInAnyOrder(
+                        row(1, "untouched", "new"),
+                        row(2, "untouched", "new"),
+                        row(6, "untouched", "new"),
+                        row(7, "untouched", "new"));
+        assertThat(
+                        collect(
+                                diff(table, "3,5")
+                                        .withRowRanges(
+                                                Arrays.asList(new Range(1, 1), new Range(7, 7)))))
+                .containsExactlyInAnyOrder(row(1, "untouched", "new"), row(7, "untouched", "new"));
+    }
+
+    @Test
     void testDeletedRequestedRowDoesNotReturnAnUnrequestedLiveRow() throws Exception {
         FileStoreTable table = create();
         write(table, row(100, "a", "old"), row(200, "b", "old"));

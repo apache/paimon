@@ -679,7 +679,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             FileStoreScan.Plan afterPlan,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> selected = new HashMap<>();
-        Map<Pair<BinaryRow, Integer>, List<Range>> changedRanges = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> changedRanges = new HashMap<>();
         RangeHelper<ManifestEntry> ranges =
                 new RangeHelper<>(entry -> entry.file().nonNullRowIdRange());
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> part : afterFiles.entrySet()) {
@@ -709,7 +709,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .put(bucket.getKey(), dependencies);
                     changedRanges.put(
                             Pair.of(part.getKey(), bucket.getKey()),
-                            Range.sortAndMergeOverlap(addedRanges));
+                            RowRangeIndex.create(addedRanges));
                 }
             }
         }
@@ -721,12 +721,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             split.dataFiles().stream()
                                     .map(DataFileMeta::nonNullRowIdRange)
                                     .collect(Collectors.toList()));
-            List<Range> selectedRanges =
-                    Range.and(
-                            splitRanges,
-                            changedRanges.get(Pair.of(split.partition(), split.bucket())));
-            if (rowRangeIndex != null) {
-                selectedRanges = Range.and(selectedRanges, rowRangeIndex.ranges());
+            RowRangeIndex changed = changedRanges.get(Pair.of(split.partition(), split.bucket()));
+            List<Range> selectedRanges = new ArrayList<>();
+            for (Range splitRange : splitRanges) {
+                for (Range range : changed.intersectedRanges(splitRange.from, splitRange.to)) {
+                    if (rowRangeIndex == null) {
+                        selectedRanges.add(range);
+                    } else {
+                        selectedRanges.addAll(
+                                rowRangeIndex.intersectedRanges(range.from, range.to));
+                    }
+                }
             }
             if (!selectedRanges.isEmpty()) {
                 splits.add(new IndexedSplit(split, selectedRanges, null));
