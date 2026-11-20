@@ -17,6 +17,7 @@
 
 import errno
 import logging
+import os
 import socket
 import threading
 from typing import Dict, List
@@ -125,7 +126,8 @@ class CachePolicyFileIO(FileIO):
             file_io_factory):
         self._path = path
         self.properties = catalog_options
-        self._origin_file_io = origin_file_io
+        self._origin_delegate = origin_file_io
+        self._process_id = os.getpid()
         self._cache_options = cache_options
         self._file_io_factory = file_io_factory
         self._cache_file_io = None
@@ -180,10 +182,31 @@ class CachePolicyFileIO(FileIO):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self._process_id = os.getpid()
         self._cache_file_io_lock = threading.RLock()
         self._initialize_filesystem()
 
+    def _ensure_process(self):
+        if self._process_id != os.getpid():
+            # A fork does not run __setstate__. The thread holding the inherited
+            # lock may not exist in the child; rebuild its backends lazily too.
+            self._cache_file_io_lock = threading.RLock()
+            self._cache_file_io = None
+            self._origin_delegate = None
+            self._process_id = os.getpid()
+
+    @property
+    def _origin_file_io(self):
+        self._ensure_process()
+        if self._origin_delegate is None:
+            with self._cache_file_io_lock:
+                if self._origin_delegate is None:
+                    self._origin_delegate = self._file_io_factory(
+                        self._path, self._origin_options(self.properties))
+        return self._origin_delegate
+
     def _get_cache_file_io(self, path, operation) -> FileIO:
+        self._ensure_process()
         if self._cache_file_io is None:
             with self._cache_file_io_lock:
                 if self._cache_unavailable:
@@ -210,6 +233,7 @@ class CachePolicyFileIO(FileIO):
         return self._cache_file_io
 
     def _disable_cache(self, path, operation, error):
+        self._ensure_process()
         with self._cache_file_io_lock:
             if not self._cache_unavailable:
                 self._cache_unavailable = True
@@ -301,6 +325,7 @@ class CachePolicyFileIO(FileIO):
         )
 
     def _file_io_for(self, path: str, operation: str) -> FileIO:
+        self._ensure_process()
         use_cache = self._should_use_cache(path, operation)
         self._log_route(path, operation, use_cache)
         if use_cache:
@@ -359,7 +384,12 @@ class CachePolicyFileIO(FileIO):
         return self._execute(path, "meta", lambda io: io.is_dir(path))
 
     def to_filesystem_path(self, path: str) -> str:
-        return self._origin_file_io.to_filesystem_path(path)
+        # The policy filesystem needs the URI scheme/authority to resolve each
+        # routed delegate, which may use a different physical path convention.
+        return path
+
+    def for_path(self, path: str, operation: str):
+        return self._file_io_for(path, operation).for_path(path, operation)
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._origin_file_io_for(
@@ -416,21 +446,26 @@ class _CachePolicyFileSystemHandler(FileSystemHandler):
         self._file_io = file_io
 
     def _execute(self, path, operation, action):
-        return self._file_io._execute(path, operation, lambda io: action(io.filesystem))
+        def apply(io):
+            backend = io.for_path(path, operation)
+            return action(backend.filesystem, backend.to_filesystem_path(path))
+        return self._file_io._execute(path, operation, apply)
 
-    @property
-    def _origin_filesystem(self):
-        return self._file_io._origin_file_io.filesystem
+    def _origin_execute(self, path, operation, action):
+        origin = self._file_io._origin_file_io_for(path, operation).for_path(path, operation)
+        return action(origin.filesystem, origin.to_filesystem_path(path))
 
-    def _origin_filesystem_for(self, path: str, operation: str):
-        self._file_io._log_route(path, operation, False)
-        return self._origin_filesystem
+    @staticmethod
+    def _logical_info(info, path):
+        if isinstance(info, pafs.FileInfo):
+            return pafs.FileInfo(path, info.type, mtime_ns=info.mtime_ns, size=info.size)
+        return info
 
     def get_type_name(self) -> str:
         return "cache-policy"
 
     def normalize_path(self, path: str) -> str:
-        return self._origin_filesystem.normalize_path(path)
+        return path
 
     def get_file_info(self, paths) -> list:
         paths = list(paths)
@@ -439,58 +474,69 @@ class _CachePolicyFileSystemHandler(FileSystemHandler):
         for index, path in enumerate(paths):
             use_cache = self._file_io._should_use_cache(path, "meta")
             self._file_io._log_route(path, "meta", use_cache)
-            grouped.setdefault(use_cache, []).append((index, path))
+            parsed = urlparse(path)
+            grouped.setdefault((use_cache, parsed.scheme, parsed.netloc), []).append((index, path))
 
-        for use_cache, indexed_paths in grouped.items():
+        for (use_cache, _, _), indexed_paths in grouped.items():
             grouped_paths = [path for _, path in indexed_paths]
+
+            def get_infos(io):
+                backend = io.for_path(grouped_paths[0], "meta")
+                return backend.filesystem.get_file_info(
+                    [backend.to_filesystem_path(path) for path in grouped_paths])
             if use_cache:
-                infos = self._execute(
-                    grouped_paths[0], "meta", lambda fs: fs.get_file_info(grouped_paths))
+                infos = self._file_io._execute(grouped_paths[0], "meta", get_infos)
             else:
-                infos = self._origin_filesystem.get_file_info(grouped_paths)
-            for (index, _), info in zip(indexed_paths, infos):
-                result[index] = info
+                infos = get_infos(self._file_io._origin_file_io)
+            for (index, path), info in zip(indexed_paths, infos):
+                result[index] = self._logical_info(info, path)
         return result
 
     def get_file_info_selector(self, selector: pafs.FileSelector) -> list:
-        return self._origin_filesystem_for(
-            selector.base_dir, "list").get_file_info(selector)
+        def get_infos(fs, backend_path):
+            backend_selector = pafs.FileSelector(
+                backend_path, recursive=selector.recursive, allow_not_found=selector.allow_not_found)
+            infos = fs.get_file_info(backend_selector)
+            return [self._logical_info(
+                info, selector.base_dir.rstrip("/") + "/" + info.path[len(backend_path.rstrip("/")):].lstrip("/"))
+                for info in infos]
+        return self._origin_execute(selector.base_dir, "list", get_infos)
 
     def create_dir(self, path: str, recursive: bool):
-        return self._origin_filesystem_for(
-            path, "mkdirs").create_dir(path, recursive=recursive)
+        return self._origin_execute(path, "mkdirs", lambda fs, p: fs.create_dir(p, recursive=recursive))
 
     def delete_dir(self, path: str):
-        return self._origin_filesystem_for(path, "delete").delete_dir(path)
+        return self._origin_execute(path, "delete", lambda fs, p: fs.delete_dir(p))
 
     def delete_dir_contents(self, path: str, missing_dir_ok: bool = False):
-        return self._origin_filesystem_for(path, "delete").delete_dir_contents(
-            path, missing_dir_ok=missing_dir_ok)
+        return self._origin_execute(
+            path, "delete", lambda fs, p: fs.delete_dir_contents(p, missing_dir_ok=missing_dir_ok))
 
     def delete_root_dir_contents(self):
-        return self._origin_filesystem_for(
-            "/", "delete").delete_dir_contents(
-            "/", accept_root_dir=True)
+        return self._origin_execute(
+            self._file_io._path, "delete", lambda fs, p: fs.delete_dir_contents("/", accept_root_dir=True))
 
     def delete_file(self, path: str):
-        return self._origin_filesystem_for(path, "delete").delete_file(path)
+        return self._origin_execute(path, "delete", lambda fs, p: fs.delete_file(p))
 
     def move(self, src: str, dest: str):
-        return self._origin_filesystem_for(src, "rename").move(src, dest)
+        origin = self._file_io._origin_file_io_for(src, "rename").for_path(src, "rename")
+        return origin.filesystem.move(origin.to_filesystem_path(src), origin.to_filesystem_path(dest))
 
     def copy_file(self, src: str, dest: str):
-        return self._origin_filesystem_for(src, "copy").copy_file(src, dest)
+        origin = self._file_io._origin_file_io_for(src, "copy").for_path(src, "copy")
+        return origin.filesystem.copy_file(origin.to_filesystem_path(src), origin.to_filesystem_path(dest))
 
     def open_input_stream(self, path: str):
-        return self._execute(path, "read", lambda fs: fs.open_input_stream(path))
+        return self._execute(path, "read", lambda fs, p: fs.open_input_stream(p))
 
     def open_input_file(self, path: str):
-        return self._execute(path, "read", lambda fs: fs.open_input_file(path))
+        return self._execute(path, "read", lambda fs, p: fs.open_input_file(p))
 
     def open_output_stream(self, path: str, metadata):
         kwargs = {} if metadata is None else {"metadata": metadata}
-        return self._execute(path, "write", lambda fs: fs.open_output_stream(path, **kwargs))
+        return self._execute(path, "write", lambda fs, p: fs.open_output_stream(p, **kwargs))
 
     def open_append_stream(self, path: str, metadata):
         kwargs = {} if metadata is None else {"metadata": metadata}
-        return self._execute(path, "write", lambda fs: fs.open_append_stream(path, **kwargs))
+        return self._execute(path, "write", lambda fs, p: fs.open_append_stream(p, **kwargs))

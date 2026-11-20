@@ -130,6 +130,9 @@ class RESTTokenFileIO(FileIO):
     def file_io(self) -> FileIO:
         return self._file_io_with_token()[0]
 
+    def for_path(self, path: str, operation: str):
+        return self.file_io().for_path(path, operation)
+
     def _file_io_with_token(self, minimum_validity_millis: int = 0):
         with self._token_lock:
             if minimum_validity_millis:

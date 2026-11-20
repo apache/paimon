@@ -159,6 +159,11 @@ cache delegate 在第一次命中缓存操作时惰性创建，并对该操作�
 写入途中失败仍报错，并在确认是连接故障时屏蔽后续缓存操作。调用方仍需处理这种写入
 失败。此机制不新增客户端参数，仍按服务端下发的 policy 和 origin endpoint 工作。
 Java `HadoopOptionsProvider` 与 Python Arrow filesystem adapter 使用同一套路径和操作规则。
+Python 的 Vortex reader/writer 通过 `FileIO.for_path(path, operation)` 获取具体后端的
+原生存储参数，同样遵守操作、路径白名单及缓存故障屏蔽状态。Arrow adapter 保留逻辑 URI，
+每次操作先解析 `ResolvingFileIO`，再按选中的具体后端转换物理路径。
+fork 后首次使用包装层时会重建锁及两个端点的进程内后端，避免继承其他线程持有的锁；
+已经屏蔽缓存的状态继续保留。
 
 ## 服务端下发示例
 

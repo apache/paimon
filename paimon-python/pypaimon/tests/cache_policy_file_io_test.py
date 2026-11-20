@@ -17,8 +17,11 @@
 
 import os
 import pickle
+import signal
 import socket
 import tempfile
+import threading
+import types
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
@@ -194,6 +197,127 @@ def _options(**overrides):
 
 
 class CachePolicyFileIOTest(unittest.TestCase):
+
+    def test_vortex_native_options_follow_operation_path_and_disabled_state(self):
+        from pypaimon.filesystem.vortex_utils import to_vortex_specified
+
+        path = TABLE_ROOT + "/bucket-0/data-a.vortex"
+        for policy, operation, expected in (
+                ("meta", "read", "origin-endpoint"),
+                ("read", "write", "origin-endpoint"),
+                ("read", "read", "cache-endpoint"),
+                ("write", "write", "cache-endpoint")):
+            io = CachePolicyFileIO.create(
+                TABLE_ROOT, _options(**{"io-cache.policy": policy}), _RecordingFactory())
+            _, storage = to_vortex_specified(io, path, operation)
+            self.assertIn(expected, storage["endpoint"])
+
+        factory = _RecordingFactory()
+        io = CachePolicyFileIO.create(
+            TABLE_ROOT, _options(**{CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "bucket-1"}), factory)
+        self.assertIn("origin-endpoint", to_vortex_specified(io, path)[1]["endpoint"])
+        self.assertEqual(1, len(factory.calls))
+
+        io = CachePolicyFileIO.create(TABLE_ROOT, _options(), factory)
+        io.new_input_stream(path)
+        with patch.object(factory.calls[-1][2], "new_input_stream", side_effect=ConnectionRefusedError("refused")), \
+                self.assertLogs("pypaimon.filesystem.cache_policy_file_io", level="WARNING"):
+            io.new_input_stream(path)
+        for operation in ("read", "write"):
+            self.assertIn("origin-endpoint", to_vortex_specified(io, path, operation)[1]["endpoint"])
+
+    def test_vortex_writer_selects_write_options(self):
+        from unittest.mock import MagicMock
+        from pypaimon.execution.python.write.format_file_writer import write_vortex_file
+
+        fake = types.ModuleType("vortex")
+        fake.array = MagicMock(return_value="array")
+        fake.store = types.SimpleNamespace(from_url=MagicMock())
+        io = CachePolicyFileIO.create(
+            TABLE_ROOT, _options(**{"io-cache.policy": "read"}), _RecordingFactory())
+        with patch.dict("sys.modules", {"vortex": fake}):
+            write_vortex_file(io, TABLE_ROOT + "/bucket-0/data-a.vortex", [])
+        self.assertIn("origin-endpoint", fake.store.from_url.call_args.kwargs["endpoint"])
+        fake.store.from_url.return_value.write.assert_called_once_with("array")
+
+    def test_arrow_format_reader_with_resolving_delegates(self):
+        import pyarrow as pa
+        import pyarrow.orc as orc
+        import pyarrow.parquet as pq
+        from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.schema.data_types import DataField, AtomicType
+
+        data = pa.table({"id": pa.array([1, 2, 3], type=pa.int64())})
+        with tempfile.TemporaryDirectory() as root:
+            for fmt, write in (("parquet", pq.write_table), ("orc", orc.write_table)):
+                path = os.path.join(root, "bucket-0", "data-a." + fmt)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                write(data, path)
+                for policy in ("meta", "read"):
+                    options = _options(**{
+                        "resolving-file-io.enabled": "true", "io-cache.policy": policy})
+                    uri = "file://" + path
+                    with self.subTest(format=fmt, policy=policy):
+                        io = CachePolicyFileIO.create("file://" + root, options)
+                        reader = FormatPyArrowReader(io, fmt, uri, [DataField(0, "id", AtomicType("BIGINT"))], None)
+                        try:
+                            batches = []
+                            while True:
+                                batch = reader.read_arrow_batch()
+                                if batch is None:
+                                    break
+                                batches.append(batch)
+                            self.assertEqual(data.to_pylist(), pa.Table.from_batches(batches).to_pylist())
+                            info = io.filesystem.get_file_info([uri])[0]
+                            self.assertEqual(uri, info.path)
+                            self.assertEqual(pafs.FileType.File, info.type)
+                            selector = pafs.FileSelector("file://" + os.path.dirname(path))
+                            self.assertIn(uri, [entry.path for entry in io.filesystem.get_file_info(selector)])
+                        finally:
+                            reader.close()
+                            io.close()
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires fork")
+    def test_fork_during_cache_initialization_recreates_lock_and_backends(self):
+        parent_pid = os.getpid()
+        entered, release = threading.Event(), threading.Event()
+        factory = _RecordingFactory()
+
+        def blocking_factory(path, options):
+            if os.getpid() == parent_pid and options.get(OssOptions.OSS_ENDPOINT) == "cache-endpoint":
+                entered.set()
+                if not release.wait(10):
+                    raise RuntimeError("parent initialization was not released")
+            return factory(path, options)
+
+        io = CachePolicyFileIO.create(TABLE_ROOT, _options(), blocking_factory)
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        key = ("cache-policy-fork", "test")
+        RESTTokenFileIO._FILE_IO_CACHE[key] = io
+        self.addCleanup(RESTTokenFileIO._FILE_IO_CACHE.pop, key, None)
+        origin = io._origin_file_io
+        worker = threading.Thread(target=io.new_input_stream, args=(DATA_PATH,))
+        worker.start()
+        self.assertTrue(entered.wait(5))
+        child = os.fork()
+        if child == 0:
+            signal.alarm(8)
+            try:
+                retained = RESTTokenFileIO._FILE_IO_CACHE[key]
+                self.assertIs(io, retained)
+                self.assertIn("cache-endpoint", retained.new_input_stream(DATA_PATH)[0])
+                self.assertIn("origin-endpoint", io.new_input_stream(LATEST_PATH)[0])
+                self.assertIsNot(origin, io._origin_file_io)
+                os._exit(0)
+            except BaseException:
+                os._exit(1)
+        release.set()
+        worker.join(5)
+        _, status = os.waitpid(child, 0)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(os.WIFEXITED(status), status)
+        self.assertEqual(0, os.WEXITSTATUS(status))
+        io.close()
 
     def test_transport_classifier_preserves_logical_errors(self):
         for error in (ConnectionRefusedError("refused"), socket.gaierror("DNS"),
