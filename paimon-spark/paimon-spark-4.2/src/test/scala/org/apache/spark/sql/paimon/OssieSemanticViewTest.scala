@@ -65,6 +65,8 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
     .set("spark.sql.catalog.paimon.token", "test-token")
     .set("spark.sql.catalog.paimon.cache-enabled", "false")
     .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+    // Spark 4.3 dual-runs the single-pass resolver in tests, and it cannot resolve Paimon views.
+    .set("spark.sql.analyzer.singlePassResolver.dualRunWithLegacy", "false")
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

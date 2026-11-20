@@ -69,6 +69,10 @@ case "$suite" in
         profiles=flink1,spark42
         modules=(org.apache.paimon:paimon-spark-4.2_2.13)
         ;;
+    spark43)
+        profiles=flink1,spark43
+        modules=(org.apache.paimon:paimon-spark-4.3_2.13)
+        ;;
     e2e-flink1)
         profiles=flink1,spark3,flink-1.20
         modules=(paimon-e2e-tests)
