@@ -517,6 +517,9 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
+    def for_path(self, path: str, operation: str):
+        return self._delegate.for_path(path, operation)
+
     def _is_cacheable(self, path: str):
         file_type = FileType.classify(path)
         return (self._cache is not None

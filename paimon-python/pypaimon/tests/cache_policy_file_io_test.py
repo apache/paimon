@@ -240,6 +240,16 @@ class CachePolicyFileIOTest(unittest.TestCase):
         self.assertIn("origin-endpoint", fake.store.from_url.call_args.kwargs["endpoint"])
         fake.store.from_url.return_value.write.assert_called_once_with("array")
 
+    def test_vortex_options_resolve_policy_inside_local_block_cache(self):
+        from pypaimon.filesystem.caching_file_io import CachingFileIO
+        from pypaimon.filesystem.vortex_utils import to_vortex_specified
+
+        policy = CachePolicyFileIO.create(
+            TABLE_ROOT, _options(**{"io-cache.policy": "meta"}), _RecordingFactory())
+        wrapped = CachingFileIO(policy, None)
+        self.assertIn("origin-endpoint", to_vortex_specified(
+            wrapped, TABLE_ROOT + "/bucket-0/data-a.vortex")[1]["endpoint"])
+
     def test_arrow_format_reader_with_resolving_delegates(self):
         import pyarrow as pa
         import pyarrow.orc as orc
