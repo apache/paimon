@@ -21,11 +21,14 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VectorType;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +58,18 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 : new NativeVectorGlobalIndexer(field.type(), nativeOptions, identifier, ratio);
     }
 
+    @Override
+    public GlobalIndexer createForRead(List<DataField> indexFields, Options tableOptions) {
+        if (indexFields.size() == 1 && VectorIndexUtils.isMultiVector(indexFields.get(0).type())) {
+            // List shards carry their dimension and metric in the native header.
+            return new NativeVectorGlobalIndexer(
+                    indexFields.get(0).type(),
+                    Collections.singletonMap("metric", "cosine"),
+                    identifier());
+        }
+        return GlobalIndexerFactory.super.createForRead(indexFields, tableOptions);
+    }
+
     static Map<String, String> nativeOptions(
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
         boolean centroid = CentroidVectorGlobalIndexer.centroidSharding(identifier, tableOptions);
@@ -69,10 +84,25 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 fieldName,
                 true);
         nativeOptions.put("index.type", identifier.replace('-', '_'));
+        if (VectorIndexUtils.isMultiVector(fieldType)) {
+            nativeOptions.putIfAbsent("metric", "cosine");
+            validateMultiVectorOptions(centroid, nativeOptions.get("metric"));
+        } else {
+            nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
+        }
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
-        nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
         return nativeOptions;
+    }
+
+    static void validateMultiVectorOptions(boolean centroid, String metric) {
+        if (centroid) {
+            throw new IllegalArgumentException("Multivector indexes require range sharding.");
+        }
+        if (!"cosine".equals(metric)) {
+            throw new IllegalArgumentException(
+                    "Multivector indexes require cosine similarity, got metric '" + metric + "'.");
+        }
     }
 
     static double trainSampleRatio(Options tableOptions, String identifier, String fieldName) {
@@ -296,8 +326,16 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
     }
 
-    private static int dimension(
-            DataType fieldType, Map<String, String> nativeOptions, String identifier) {
+    static int dimension(DataType fieldType, Map<String, String> nativeOptions, String identifier) {
+        if (VectorIndexUtils.isMultiVector(fieldType)) {
+            fieldType = ((ArrayType) fieldType).getElementType();
+            if (fieldType instanceof ArrayType && !nativeOptions.containsKey("dimension")) {
+                throw new IllegalArgumentException(
+                        "An ARRAY<ARRAY<FLOAT>> index requires an explicit "
+                                + identifier
+                                + ".dimension.");
+            }
+        }
         if (fieldType instanceof VectorType) {
             return ((VectorType) fieldType).getLength();
         }

@@ -21,13 +21,17 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.MaxSimScorer;
 import org.apache.paimon.globalindex.ScoreGetter;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.IntArrayList;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
@@ -38,6 +42,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,6 +70,9 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
             @Nullable Map<String, String> options) {
         super(table, partitionFilter, filter, limit, vectorColumn, options);
         this.vectors = vectors;
+        if (vectorColumn != null && VectorIndexUtils.isMultiVector(vectorColumn.type())) {
+            VectorIndexUtils.validateQuery((ArrayType) vectorColumn.type(), vectors);
+        }
     }
 
     @Override
@@ -132,7 +140,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
         ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
 
-        boolean refine = configuredRefineFactor(indexType) != 0;
+        boolean refine = requiresRefinement(indexType);
         // A refined group contributes only the rows that survive reranking. Until then its
         // duplicate tracking is independent of previous groups.
         RoaringNavigableMap64[] seen = refine ? overlapBitmaps(n, overlaps) : indexedRows;
@@ -233,7 +241,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
 
     protected ScoredGlobalIndexResult[] maybeRerankIndexedBatchResults(
             ScoredGlobalIndexResult[] results, String indexType, GlobalIndexer globalIndexer) {
-        if (configuredRefineFactor(indexType) == 0) {
+        if (!requiresRefinement(indexType)) {
             return results;
         }
 
@@ -250,6 +258,9 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
             return candidates;
         }
 
+        if (VectorIndexUtils.isMultiVector(vectorColumn.type())) {
+            return rerankMultiVectors(candidates, unionCandidates);
+        }
         Map<Long, float[]> rawVectors = readRawVectors(unionCandidates, false);
         String metric = rawSearchMetric(globalIndexer);
         ScoredGlobalIndexResult[] reranked = new ScoredGlobalIndexResult[n];
@@ -258,5 +269,41 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
                     scoreRawVectors(candidates[i].results(), rawVectors, vectors[i], metric, limit);
         }
         return reranked;
+    }
+
+    private boolean requiresRefinement(String indexType) {
+        return VectorIndexUtils.isMultiVector(vectorColumn.type())
+                || configuredRefineFactor(indexType) != 0;
+    }
+
+    private ScoredGlobalIndexResult[] rerankMultiVectors(
+            ScoredGlobalIndexResult[] candidates, RoaringNavigableMap64 union) {
+        Map<Long, IntArrayList> queriesByRow = new HashMap<>();
+        List<PriorityQueue<long[]>> heaps = new ArrayList<>(vectors.length);
+        for (int i = 0; i < vectors.length; i++) {
+            heaps.add(new PriorityQueue<>(WEAKEST_SCORE_FIRST));
+            for (long rowId : candidates[i].results()) {
+                queriesByRow.computeIfAbsent(rowId, ignored -> new IntArrayList(1)).add(i);
+            }
+        }
+        MaxSimScorer scorer = new MaxSimScorer((ArrayType) vectorColumn.type(), vectors);
+        double[] scores = new double[vectors.length];
+        readRawVectorRows(
+                union.toRangeList(),
+                union,
+                false,
+                (rowId, row, vectorIndex) -> {
+                    IntArrayList queries = queriesByRow.get(rowId);
+                    scorer.bestMatches(row.getArray(vectorIndex), queries, scores);
+                    for (int i = 0; i < queries.size(); i++) {
+                        if (scores[i] != Double.NEGATIVE_INFINITY) {
+                            offerScore(heaps.get(queries.get(i)), limit, rowId, (float) scores[i]);
+                        }
+                    }
+                });
+        for (int i = 0; i < vectors.length; i++) {
+            candidates[i] = scoredResult(heaps.get(i));
+        }
+        return candidates;
     }
 }

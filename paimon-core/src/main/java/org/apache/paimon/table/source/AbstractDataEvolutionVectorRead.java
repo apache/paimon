@@ -30,9 +30,11 @@ import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.MaxSimScorer;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -48,6 +50,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -94,6 +97,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final int limit;
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
+    @Nullable protected final float[][] queryMatrix;
     private final int candidatesFactor;
     // Serialized with Spark/Flink worker closures; reset for each new read.
     private boolean postFiltering;
@@ -119,6 +123,18 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             int limit,
             DataField vectorColumn,
             @Nullable Map<String, String> options) {
+        this(table, partitionFilter, filter, limit, vectorColumn, options, null);
+    }
+
+    protected AbstractDataEvolutionVectorRead(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            @Nullable Map<String, String> options,
+            @Nullable float[][] queryMatrix) {
+        this.queryMatrix = queryMatrix;
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
@@ -175,7 +191,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
-        return GlobalIndexer.create(
+        return GlobalIndexer.createForRead(
                 indexType,
                 Collections.singletonList(vectorColumn),
                 table.coreOptions().toConfiguration());
@@ -185,7 +201,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         if (meta.extraFieldIds() == null) {
             return createGlobalIndexer(indexType);
         }
-        return GlobalIndexer.create(
+        return GlobalIndexer.createForRead(
                 indexType,
                 meta.getIndexedFields(table.rowType()),
                 table.coreOptions().toConfiguration());
@@ -356,6 +372,26 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             int searchLimit,
             @Nullable RoaringNavigableMap64 includeRowIds,
             ExecutorService executor) {
+        if (queryMatrix != null) {
+            return evalBatch(
+                            globalIndexer,
+                            indexPathFactory,
+                            rowRangeStart,
+                            rowRangeEnd,
+                            vectorIndexFiles,
+                            queryMatrix,
+                            searchLimit,
+                            includeRowIds,
+                            executor)
+                    .thenApply(
+                            perToken -> {
+                                List<ScoredGlobalIndexResult> candidates = new ArrayList<>();
+                                for (Optional<ScoredGlobalIndexResult> hits : perToken) {
+                                    hits.ifPresent(candidates::add);
+                                }
+                                return Optional.of(mergeIndexedCandidates(candidates));
+                            });
+        }
         if (vectorIndexFiles.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
@@ -529,7 +565,22 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected int indexedSearchLimit(String indexType) {
-        return VectorSearchRefineOptions.searchLimit(limit, configuredRefineFactor(indexType));
+        int factor = configuredRefineFactor(indexType);
+        // Several moderately good token matches can outrank each token's individual winner.
+        return VectorSearchRefineOptions.searchLimit(
+                limit, queryMatrix != null && factor == 0 ? 4 : factor);
+    }
+
+    protected ScoredGlobalIndexResult mergeIndexedCandidates(List<ScoredGlobalIndexResult> hits) {
+        if (queryMatrix == null) {
+            return ScoredGlobalIndexResult.merge(hits);
+        }
+        // Only row IDs survive token retrieval. The full lists supply all MaxSim scores.
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (ScoredGlobalIndexResult hit : hits) {
+            rows.or(hit.results());
+        }
+        return ScoredGlobalIndexResult.create(rows, id -> 0f);
     }
 
     protected ScoredGlobalIndexResult maybeRerankIndexedResult(
@@ -537,7 +588,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             String indexType,
             @Nullable GlobalIndexer globalIndexer,
             float[] queryVector) {
-        if (configuredRefineFactor(indexType) == 0 || result.results().isEmpty()) {
+        if (queryMatrix != null && !result.results().isEmpty()) {
+            return readRawRefineSearch(result.results(), globalIndexer, queryVector);
+        }
+        if ((!VectorIndexUtils.isMultiVector(vectorColumn.type())
+                        && configuredRefineFactor(indexType) == 0)
+                || result.results().isEmpty()) {
             return result;
         }
         ScoredGlobalIndexResult candidates = result.topK(indexedSearchLimit(indexType));
@@ -625,31 +681,31 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             String metric,
             float[] queryVector,
             boolean includeFilter) {
-        RowType readType = rawSearchReadType(includeFilter);
         rawRowRanges = filteredRawRowRanges(rawRowRanges, preFilter);
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
-        TableScan.Plan plan =
-                newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
-        ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
-        int vectorIndex = readType.getFieldIndex(vectorColumn.name());
-        int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         PriorityQueue<long[]> topKHeap =
                 new PriorityQueue<>(Math.max(1, limit + 1), WEAKEST_SCORE_FIRST);
+        MaxSimScorer scorer =
+                VectorIndexUtils.isMultiVector(vectorColumn.type())
+                        ? new MaxSimScorer(
+                                (ArrayType) vectorColumn.type(),
+                                queryMatrix == null ? new float[][] {queryVector} : queryMatrix)
+                        : null;
 
-        try (RecordReader<InternalRow> reader =
-                readBuilder.newRead().executeFilter().createReader(plan)) {
-            reader.forEachRemaining(
-                    row -> {
-                        long rowId = row.getLong(rowIdIndex);
-                        if (scoreCandidates != null && !scoreCandidates.contains(rowId)) {
-                            return;
+        readRawVectorRows(
+                rawRowRanges,
+                scoreCandidates,
+                includeFilter,
+                (rowId, row, vectorIndex) -> {
+                    if (scorer != null) {
+                        float score = scorer.score(row.getArray(vectorIndex));
+                        if (score != Float.NEGATIVE_INFINITY) {
+                            offerScore(topKHeap, limit, rowId, score);
                         }
-                        if (row.isNullAt(vectorIndex)) {
-                            return;
-                        }
+                    } else {
                         float[] stored = getVector(row, vectorIndex);
                         checkVectorDimension(queryVector, stored);
                         offerScore(
@@ -657,11 +713,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                                 limit,
                                 rowId,
                                 VectorSearchMetric.computeScore(queryVector, stored, metric));
-                    });
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read raw vectors for vector search.", e);
-        }
-
+                    }
+                });
         return scoredResult(topKHeap);
     }
 
@@ -674,16 +727,32 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<Range> rawRowRanges,
             @Nullable RoaringNavigableMap64 candidates,
             boolean includeFilter) {
-        RowType readType = rawSearchReadType(includeFilter);
-        rawRowRanges = filteredRawRowRanges(rawRowRanges, null);
-        if (rawRowRanges.isEmpty()) {
-            return Collections.emptyMap();
-        }
+        Map<Long, float[]> rawVectors = new HashMap<>();
+        readRawVectorRows(
+                rawRowRanges,
+                candidates,
+                includeFilter,
+                (rowId, row, vectorIndex) -> rawVectors.put(rowId, getVector(row, vectorIndex)));
+        return rawVectors;
+    }
 
+    @FunctionalInterface
+    interface RawVectorConsumer {
+        void accept(long rowId, InternalRow row, int vectorIndex);
+    }
+
+    void readRawVectorRows(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 candidates,
+            boolean includeFilter,
+            RawVectorConsumer consumer) {
+        if (rawRowRanges.isEmpty()) {
+            return;
+        }
+        RowType readType = rawSearchReadType(includeFilter);
         TableScan.Plan plan =
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
         ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
-        Map<Long, float[]> rawVectors = new HashMap<>();
         int vectorIndex = readType.getFieldIndex(vectorColumn.name());
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
 
@@ -698,14 +767,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         if (row.isNullAt(vectorIndex)) {
                             return;
                         }
-                        float[] stored = getVector(row, vectorIndex);
-                        rawVectors.put(rowId, stored);
+                        consumer.accept(rowId, row, vectorIndex);
                     });
         } catch (IOException e) {
             throw new RuntimeException("Failed to read raw vectors for vector search.", e);
         }
-
-        return rawVectors;
     }
 
     private List<Range> filteredRawRowRanges(
@@ -871,6 +937,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected String rawSearchMetric(@Nullable GlobalIndexer globalIndexer) {
+        if (VectorIndexUtils.isMultiVector(vectorColumn.type())) {
+            return "cosine";
+        }
         String metric = null;
         if (globalIndexer != null) {
             if (!(globalIndexer instanceof VectorGlobalIndexer)) {
@@ -899,12 +968,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         if (options.containsKey(fieldPrefix + "index-options")) {
             CoreOptions configured = new CoreOptions(new Options(table.options(), options));
             VectorIndexOptions resolved =
-                    VectorIndexOptions.resolve(
-                            configured.toConfiguration(), null, vectorColumn.name(), false);
+                    VectorIndexOptions.resolveConfigured(
+                            configured.toConfiguration(), null, vectorColumn.name());
             if (resolved.type() == null) {
                 resolved =
-                        VectorIndexOptions.resolve(
-                                configured.toConfiguration(), "vector", vectorColumn.name(), false);
+                        VectorIndexOptions.resolveConfigured(
+                                configured.toConfiguration(), "vector", vectorColumn.name());
             }
             String configuredMetric = resolved.options().get(resolved.type() + ".metric");
             if (configuredMetric != null) {

@@ -72,6 +72,18 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
         this.trainSampleRatio = trainSampleRatio;
     }
 
+    /** Normalize nonzero vectors before native cosine computes their squared norm in float. */
+    static void normalizeCosine(float[] source, float[] target) {
+        double squared = 0;
+        for (float coordinate : source) {
+            squared += (double) coordinate * coordinate;
+        }
+        double scale = squared == 0 ? 1 : 1 / Math.sqrt(squared);
+        for (int i = 0; i < source.length; i++) {
+            target[i] = (float) (source[i] * scale);
+        }
+    }
+
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
         return new NativeVectorGlobalIndexWriter(
@@ -90,7 +102,7 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
                     fileReader, files, fieldType, executor, identifier);
         }
         return new NativeVectorGlobalIndexReader(
-                fileReader, files, fieldType, executor, identifier);
+                fileReader, files, fieldType, executor, identifier, totalRowCount);
     }
 
     @Override
