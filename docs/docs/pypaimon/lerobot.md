@@ -402,6 +402,36 @@ By default, imports copy the original videos. Set
 re-encoding (requires PyAV 14.2+), retaining decoding dependencies. Each clip is limited
 to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
+## Export a LeRobot Dataset
+
+Export one source Dataset from a three-table group to a local LeRobot directory.
+If the group contains multiple Datasets, select one by its `_datasets.id` UUID.
+Pass the same `tag_name` used for training to export a fixed snapshot.
+The destination directory must not exist.
+Pass the table-group prefix, or the actual Frames table name for a group
+created by `PaimonLeRobotWriter`.
+
+```python
+conn.export_to_lerobot("robot_data", "/data/export-v3", version="v3.0")
+conn.export_to_lerobot(
+    "robot_merged", "/data/export-v21", version="v2.1",
+    dataset_id="019a91e1-f035-79b9-b04b-44734dc2eb74",
+)
+# Use version="v2.0" for a LeRobot v2.0 consumer.
+```
+
+V3.0 keeps source-local indices and copies each encoded MP4 once, including
+videos shared by multiple Episodes. V2.0 and v2.1 write one Parquet and one MP4 per
+Episode and camera; RGB video export requires PyAV and re-encodes selected frames.
+V2 export rejects depth video and video with audio. V2.0 requires source-level
+statistics; v2.1 additionally writes per-Episode statistics.
+Both exports write source Dataset metadata and Episode statistics. The output
+can be opened with the matching LeRobot version.
+`meta/paimon_source.json` preserves the Paimon Dataset ID, optional name, and
+extra dataset text fields, which have no standard LeRobot metadata fields.
+Nullable `subtask_index` values are preserved; older LeRobot readers that
+reject null subtasks will also reject those source frames after export.
+
 ## Capture LeRobot frames directly into Paimon
 
 `PaimonLeRobotWriter` implements the write-side surface used by LeRobot's
