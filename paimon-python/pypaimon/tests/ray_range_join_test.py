@@ -424,7 +424,8 @@ class RayRangeJoinTest(unittest.TestCase):
     def test_footer_failure_degrades_to_unknown(self):
         schema = pa.schema([("k", pa.int64())])
         self._table("default.rj_footer_failure", schema, [
-            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)])
+            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)],
+            options={"metadata.stats-mode": "none"})
 
         with self.assertLogs(rjmod._LOG, level="WARNING"):
             with mock.patch("pyarrow.parquet.read_metadata",
