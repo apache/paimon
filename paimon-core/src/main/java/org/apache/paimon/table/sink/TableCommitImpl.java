@@ -54,7 +54,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -450,7 +450,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         // expire consumer first to avoid preventing snapshot expiration
         if (doExpire && consumerExpireTime != null) {
-            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
+            consumerManager.expire(Instant.now().minus(consumerExpireTime).toEpochMilli());
         }
 
         // snapshot expiration usually take the most time, so put it at the end
