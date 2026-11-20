@@ -140,7 +140,6 @@ class _RowIdUpdateFileWriter:
         file_name = '{}{}-0.parquet'.format(
             writer.options.data_file_prefix(), uuid.uuid4())
         file_path = writer._generate_file_path(file_name)
-        fields = []
         groups = self._row_groups(batches)
         file_writer = None
         try:
@@ -148,12 +147,11 @@ class _RowIdUpdateFileWriter:
                 if not batch.num_rows:
                     continue
                 if file_writer is None:
-                    if writer.options.metadata_stats_enabled():
-                        fields = PyarrowFieldParser.to_paimon_schema(batch.schema)
+                    stats = writer._value_stats_collector(PyarrowFieldParser.to_paimon_schema(batch.schema))
                     file_writer = SingleFileWriter(
                         writer.file_io, file_path, batch.schema, writer.file_format,
                         writer.compression, writer.zstd_level,
-                        fields, writer._get_column_stats,
+                        stats.fields, stats.collect_column,
                         parquet_options=writer.parquet_writer_options)
                 file_writer.write(batch, row_group_size=batch.num_rows)
                 del batch
@@ -166,8 +164,8 @@ class _RowIdUpdateFileWriter:
                 row_count=file_writer.row_count,
                 min_key=GenericRow([], []), max_key=GenericRow([], []),
                 key_stats=SimpleStats.empty_stats(),
-                value_stats=writer._collect_value_stats(
-                    None, fields, file_writer.column_stats),
+                value_stats=stats.finish(file_writer.column_stats),
+                value_stats_cols=stats.columns,
                 min_sequence_number=0, max_sequence_number=0,
             )
             writer._finish_data_file(meta)

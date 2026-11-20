@@ -191,6 +191,18 @@ write_builder = table.new_batch_write_builder().overwrite()
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
+### Manifest Column Statistics
+
+`metadata.stats-mode` defaults to `truncate(16)` for data files. It records null
+counts and min/max bounds, limiting string bounds to 16 Unicode code points and
+binary bounds to 16 bytes. Use `full` for untruncated bounds, `counts` for null
+counts alone, or `none` to disable value statistics. These options apply when
+writing new files. Primary-key bounds are recorded separately.
+
+Use `fields.<name>.stats-mode` to override the mode for an individual column.
+`metadata.stats-keep-first-n-columns` limits collection to the first N columns
+of each file, with explicit column overrides taking priority.
+
 ### Parquet Page Indexes
 
 Python Parquet writers write page indexes by default on PyArrow >= 13; older
