@@ -47,14 +47,11 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Bitmap sections for the scalar fields of one centroid shard. */
+/** Bitmap sections in the order of their manifest's extra field IDs. */
 public final class CentroidBitmapIndex {
 
-    private static final int MAGIC = 0x43424958; // CBIX
-    private static final int VERSION = 1;
     private static final int BITMAP = 1;
-    private static final int HEADER_LENGTH = Long.BYTES + 3 * Integer.BYTES;
-    private static final int ENTRY_HEADER_LENGTH = 2 * Long.BYTES + 2 * Integer.BYTES + Byte.BYTES;
+    private static final int ENTRY_HEADER_LENGTH = Byte.BYTES + Long.BYTES + Integer.BYTES;
 
     private CentroidBitmapIndex() {}
 
@@ -64,18 +61,15 @@ public final class CentroidBitmapIndex {
 
     private static ByteBuffer metadataPayload(byte[] metadata) {
         checkArgument(
-                metadata != null && metadata.length >= HEADER_LENGTH,
+                metadata != null && metadata.length >= Long.BYTES,
                 "Truncated centroid bitmap metadata.");
-        ByteBuffer payload = ByteBuffer.wrap(metadata);
-        checkArgument(
-                payload.getInt() == MAGIC && payload.getInt() == VERSION,
-                "Unsupported centroid bitmap metadata.");
-        return payload;
+        return ByteBuffer.wrap(metadata);
     }
 
     public static RoaringNavigableMap64 match(
             GlobalIndexFileReader files,
             GlobalIndexIOMeta bitmap,
+            int[] extraFieldIds,
             RowType rowType,
             RowType buildType,
             List<LeafPredicate> predicates)
@@ -83,7 +77,7 @@ public final class CentroidBitmapIndex {
         checkArgument(!predicates.isEmpty(), "Centroid bitmap lookup requires a predicate.");
         ByteBuffer metadata = metadataPayload(bitmap.metadata());
         metadata.getLong(); // build schema ID
-        Map<Integer, Section> sections = readDirectory(metadata, bitmap.fileSize());
+        Map<Integer, Section> sections = readDirectory(metadata, extraFieldIds, bitmap.fileSize());
         try (SeekableInputStream input = files.getInputStream(bitmap)) {
             RoaringNavigableMap64 result = null;
             for (LeafPredicate predicate : predicates) {
@@ -125,22 +119,21 @@ public final class CentroidBitmapIndex {
         }
     }
 
-    private static Map<Integer, Section> readDirectory(ByteBuffer directory, long sectionsLength) {
-        int fieldCount = directory.getInt();
+    private static Map<Integer, Section> readDirectory(
+            ByteBuffer directory, int[] extraFieldIds, long sectionsLength) {
+        int fieldCount = extraFieldIds.length;
         checkArgument(
                 fieldCount > 0 && fieldCount <= directory.remaining() / ENTRY_HEADER_LENGTH,
                 "Invalid centroid bitmap field count.");
         Map<Integer, Section> sections = new HashMap<>();
-        long end = 0;
+        long offset = 0;
         for (int i = 0; i < fieldCount; i++) {
-            int fieldId = directory.getInt();
+            int fieldId = extraFieldIds[i];
             int indexType = Byte.toUnsignedInt(directory.get());
-            long offset = directory.getLong();
             long length = directory.getLong();
             int metaLength = directory.getInt();
             checkArgument(
-                    offset == end
-                            && length > 0
+                    length > 0
                             && length <= sectionsLength - offset
                             && metaLength >= 0
                             && metaLength
@@ -154,10 +147,10 @@ public final class CentroidBitmapIndex {
                     sections.put(fieldId, new Section(indexType, offset, length, metadata)) == null,
                     "Duplicate centroid bitmap field %s.",
                     fieldId);
-            end = offset + length;
+            offset += length;
         }
         checkArgument(
-                end == sectionsLength && !directory.hasRemaining(),
+                offset == sectionsLength && !directory.hasRemaining(),
                 "Invalid centroid bitmap directory.");
         return sections;
     }
@@ -178,10 +171,7 @@ public final class CentroidBitmapIndex {
             this.name = files.newFileName("centroid-bitmap");
             this.fieldCount = fieldCount;
             this.rowCount = rowCount;
-            directory.writeInt(MAGIC);
-            directory.writeInt(VERSION);
             directory.writeLong(schemaId);
-            directory.writeInt(fieldCount);
             this.output = files.newOutputStream(name);
         }
 
@@ -214,9 +204,7 @@ public final class CentroidBitmapIndex {
             checkState(
                     section.rowCount() == rowCount,
                     "Centroid bitmap and vector row counts differ.");
-            directory.writeInt(field.id());
             directory.writeByte(BITMAP);
-            directory.writeLong(offset);
             directory.writeLong(output.getPos() - offset);
             directory.writeInt(section.meta().length);
             directory.write(section.meta());

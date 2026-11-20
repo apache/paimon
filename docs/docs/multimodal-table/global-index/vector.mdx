@@ -669,8 +669,10 @@ CALL sys.create_global_index(
 );
 ```
 
-Each populated centroid gets one additional scalar index file. Its manifest entry wraps each
-field's original Bitmap metadata together with its index type and byte range in the file.
+Each populated centroid gets one additional scalar index file. In `GlobalIndexMeta.indexMeta`, the
+centroid metadata wraps the build schema ID and one entry per `extraFieldIds` field, in the same
+order. Each entry stores the index type, section length, and original Bitmap metadata. The file
+stores the Bitmap sections consecutively, so the reader derives offsets from the section lengths.
 
 A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
 conjunctions of these predicates. It applies the exact matches before ranking and skips opening

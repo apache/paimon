@@ -64,7 +64,8 @@ final class CentroidBitmapFilter {
             return null;
         }
         GlobalIndexMeta meta = files.get(0).globalIndexMeta();
-        if (!CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
+        int[] extraFieldIds = meta.extraFieldIds();
+        if (!CentroidIndexMeta.hasScalarIndexes(meta.indexMeta()) || extraFieldIds == null) {
             return null;
         }
         RowType rowType = table.rowType();
@@ -86,8 +87,7 @@ final class CentroidBitmapFilter {
             }
             DataField field = rowType.getField(fieldRef.get().name());
             if (!field.type().equalsIgnoreNullable(fieldRef.get().type())
-                    || meta.extraFieldIds() == null
-                    || !Arrays.stream(meta.extraFieldIds()).anyMatch(id -> id == field.id())) {
+                    || Arrays.stream(extraFieldIds).noneMatch(id -> id == field.id())) {
                 return null;
             }
             predicates.add(leaf);
@@ -105,6 +105,9 @@ final class CentroidBitmapFilter {
                 checkState(router == null, "Multiple centroid routing models.");
                 router = entry;
             } else if (entry.scalarIndex()) {
+                checkState(
+                        Arrays.equals(extraFieldIds, file.globalIndexMeta().extraFieldIds()),
+                        "Mixed centroid bitmap fields.");
                 checkState(
                         bitmaps.put(entry.centroid(), entry) == null, "Duplicate centroid bitmap.");
                 long bitmapSchemaId = CentroidBitmapIndex.schemaId(entry.metadata());
@@ -148,6 +151,7 @@ final class CentroidBitmapFilter {
                 CentroidBitmapIndex.match(
                         file -> table.fileIO().newInputStream(file.filePath()),
                         bitmaps.get(centroid),
+                        extraFieldIds,
                         rowType,
                         buildType,
                         predicates);

@@ -50,6 +50,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -96,7 +97,6 @@ public class LazyFilteredBitmapIndexReaderTest {
         ResultEntry result;
         try (CentroidBitmapIndex.Writer writer =
                 new CentroidBitmapIndex.Writer(fileWriter, 9, 2, 2)) {
-            writer.writeColumn(dataField, new Options(), tags);
             writer.writeColumn(
                     state,
                     new Options(),
@@ -104,19 +104,35 @@ public class LazyFilteredBitmapIndexReaderTest {
                         column.write(1, 90);
                         column.write(null, 90_000);
                     });
+            writer.writeColumn(dataField, new Options(), tags);
             result = writer.finish();
         }
-        assertThat(result.meta()).containsSequence(originalMeta);
         assertThat(CentroidBitmapIndex.schemaId(result.meta())).isEqualTo(9L);
         Path path = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
+        ByteBuffer directory = ByteBuffer.wrap(result.meta());
+        directory.position(Long.BYTES);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        long stateLength = directory.getLong();
+        int stateMetaLength = directory.getInt();
+        directory.position(directory.position() + stateMetaLength);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        assertThat(directory.getLong()).isEqualTo(meta.fileSize() - stateLength);
+        assertThat(directory.getInt()).isEqualTo(originalMeta.length);
+        byte[] storedMeta = new byte[directory.remaining()];
+        directory.get(storedMeta);
+        assertThat(storedMeta).isEqualTo(originalMeta);
+
+        int[] extraFieldIds = {state.id(), dataField.id()};
         PredicateBuilder builder = new PredicateBuilder(fields);
         List<LeafPredicate> predicates =
                 Arrays.asList(
                         (LeafPredicate) builder.equal(0, BinaryString.fromString("red")),
                         (LeafPredicate) builder.isNull(1));
-        assertThat(CentroidBitmapIndex.match(fileReader, meta, fields, fields, predicates))
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader, meta, extraFieldIds, fields, fields, predicates))
                 .containsExactly(90_000L);
         GlobalIndexIOMeta incomplete =
                 new GlobalIndexIOMeta(path, meta.fileSize() - 1, 2, result.meta());
@@ -128,6 +144,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                                                     "Invalid manifest opened a file.");
                                         },
                                         incomplete,
+                                        extraFieldIds,
                                         fields,
                                         fields,
                                         predicates))
