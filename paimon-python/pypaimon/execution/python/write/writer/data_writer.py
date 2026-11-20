@@ -470,6 +470,7 @@ class DataWriter(ABC):
             level=0 if self.table.is_primary_key_table else None, changelog=is_changelog,
             table_mode='none' if (self.bucket == BucketMode.POSTPONE_BUCKET.value
                                   and self.file_format == CoreOptions.FILE_FORMAT_AVRO) else None,
+            file_format=self.changelog_file_format if is_changelog else self.file_format,
         )
 
     def _writes_changelog_before_merge(self):

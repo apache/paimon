@@ -73,8 +73,8 @@ class SingleFileWriter:
                 previous = self.column_stats.get(field.name)
                 if previous is not None:
                     current['null_counts'] += previous['null_counts']
-                    if previous.get('has_nan'):
-                        current['has_nan'] = True
+                    if previous.get('bounds_unavailable'):
+                        current['bounds_unavailable'] = True
                     for key, choose in (
                             ('min_values', min), ('max_values', max)):
                         values = [

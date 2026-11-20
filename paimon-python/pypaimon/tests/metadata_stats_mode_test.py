@@ -15,6 +15,7 @@
 # under the License.
 
 import math
+from datetime import datetime
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -25,25 +26,31 @@ from pypaimon.execution.python.write.table_update_by_row_id import _RowIdUpdateF
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.schema.data_types import AtomicType, DataField, VectorType
 from pypaimon.table.row.generic_row import GenericRowDeserializer
 
 
 pytestmark = pytest.mark.python_write
 
 
-def _write(tmp_path, data, options, primary_keys=None):
+def _write(tmp_path, data, options, primary_keys=None, write_columns=None, fields=None):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('db', False)
     name = 'db.stats'
-    catalog.create_table(name, Schema.from_pyarrow_schema(
-        data.schema, primary_keys=primary_keys or [], options={
-            'file.format': 'parquet', 'write.native.enabled': 'false',
-            'commit.native.enabled': 'false', **options,
-        }), False)
+    options = {'file.format': 'parquet', 'write.native.enabled': 'false',
+               'commit.native.enabled': 'false', **options}
+    if fields is None:
+        schema = Schema.from_pyarrow_schema(data.schema, primary_keys=primary_keys or [], options=options)
+    else:
+        schema = Schema(fields, primary_keys=primary_keys or [], options=options)
+    catalog.create_table(name, schema, False)
     table = catalog.get_table(name)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
+        if write_columns is not None:
+            writer.with_write_type(write_columns)
+            data = data.select(write_columns)
         writer.write_arrow(data)
         commit.commit(writer.prepare_commit())
     finally:
@@ -193,3 +200,97 @@ def test_parquet_footer_falls_back_to_arrow_for_incomplete_or_ambiguous_bounds(t
     assert maximum == [long_value, None, 0.0, 9, None]
     assert math.copysign(1.0, minimum[2]) == 1.0
     assert file.value_stats.null_counts == [0, 0, 1, 0, 0]
+
+
+@pytest.mark.parametrize('level_options', [
+    {'metadata.stats-mode.per.level.0': 'counts'},
+    {'metadata.stats-mode.per.level': '0:"counts",1:full',
+     'metadata.stats-mode.per.level.0': 'none'},
+    {'metadata.stats-mode.per.level': "'0:''counts'''"},
+])
+def test_primary_key_value_stats_accept_java_level_map_options(tmp_path, level_options):
+    table = _write(tmp_path, pa.table({'id': [1, 2], 'v': ['alpha', None]}), {
+        'bucket': '1', 'metadata.stats-mode': 'full', **level_options,
+    }, primary_keys=['id'])
+    file, = _files(table)
+    assert _bounds(file.value_stats) == ([None, None], [None, None])
+    assert file.value_stats.null_counts == [0, 1]
+
+
+def test_composite_file_stats_follow_write_column_order(tmp_path):
+    table = _write(tmp_path, pa.table({
+        'id': pa.array([1, 2], type=pa.int32()), 'name': ['a', 'b'],
+        'embedding': pa.array([[1.0] * 4, [2.0] * 4], type=pa.list_(pa.float32(), 4)),
+    }), {
+        'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'vector.file.format': 'parquet', 'metadata.stats-keep-first-n-columns': '1',
+    }, write_columns=['name', 'id'])
+    file, = _files(table)
+    assert file.write_cols == ['name', 'id']
+    assert file.value_stats_cols == ['name']
+    assert _bounds(file.value_stats) == (['a'], ['b'])
+
+
+@pytest.mark.parametrize('data_type, value', [
+    (pa.date32(), -719200),
+    (pa.timestamp('ms'), 253402300800000),
+    pytest.param(pa.timestamp('ns'), -(1 << 63), marks=pytest.mark.skipif(
+        int(pa.__version__.split('.')[0]) < 14, reason='Parquet ns storage requires PyArrow >= 14')),
+])
+def test_manifest_stats_do_not_block_valid_arrow_temporal_values(tmp_path, data_type, value):
+    table = _write(tmp_path, pa.table({'v': pa.array([value, None], type=data_type)}), {
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+    })
+    file, = _files(table)
+    assert _bounds(file.value_stats) == ([None], [None])
+    assert file.value_stats.null_counts == [1]
+    builder = table.new_read_builder()
+    data = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+    storage_type = pa.int32() if pa.types.is_date32(data_type) else pa.int64()
+    assert data.column('v').cast(storage_type).to_pylist() == [value, None]
+
+
+def test_row_id_update_drops_bounds_when_a_row_group_cannot_supply_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 1)
+    data_type = pa.timestamp('ms')
+    table = _write(tmp_path, pa.table({'v': pa.array([0, 0], type=data_type)}), {
+        'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+    })
+    first = _files(table)[0].first_row_id
+    builder = table.new_batch_write_builder()
+    commit = builder.new_commit()
+    try:
+        update = builder.new_update().new_update_by_row_id()
+        messages = update.update_columns(pa.table({
+            '_ROW_ID': [first, first + 1],
+            'v': pa.array([253402300800000, 0], type=data_type),
+        }), ['v'])
+        commit.commit(messages)
+    finally:
+        commit.close()
+    file, = _files(table)
+    assert _bounds(file.value_stats) == ([None], [None])
+    assert file.value_stats.null_counts == [0]
+
+
+@pytest.mark.parametrize('dedicated_vector', [False, True])
+def test_row_file_stats_do_not_prune_written_submicrosecond_timestamps(tmp_path, dedicated_vector):
+    timestamp_ns = 1735689600000000000
+    data = pa.table({
+        'v': pa.array([timestamp_ns + 999, None], type=pa.timestamp('ns')),
+    })
+    options = {'file.format': 'row', 'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'}
+    fields = None
+    if dedicated_vector:
+        data = data.append_column('embedding', pa.array([[1.0] * 4, [2.0] * 4], type=pa.list_(pa.float32(), 4)))
+        fields = [DataField(0, 'v', AtomicType('TIMESTAMP(09)')),
+                  DataField(1, 'embedding', VectorType(True, AtomicType('FLOAT'), 4))]
+        options.update({'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+                        'vector.file.format': 'parquet'})
+    table = _write(tmp_path, data, options, fields=fields)
+    file, = [f for f in _files(table) if f.file_name.endswith('.row')]
+    assert file.value_stats.null_counts == [1]
+    builder = table.new_read_builder().with_projection(['v'])
+    builder.with_filter(builder.new_predicate_builder().equal('v', datetime(2025, 1, 1)))
+    data = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+    assert data.column('v').cast(pa.int64()).to_pylist() == [timestamp_ns]

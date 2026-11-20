@@ -22,14 +22,42 @@ import pyarrow.compute as pc
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
 from pypaimon.table.row.generic_row import GenericRow
 
 
 _DENSE_STORE = ConfigOptions.key('metadata.stats-dense-store').boolean_type().default_value(True)
 _KEEP_FIRST = ConfigOptions.key('metadata.stats-keep-first-n-columns').int_type().default_value(-1)
-_PER_LEVEL = ConfigOptions.key('metadata.stats-mode.per.level').string_type().no_default_value()
+_PER_LEVEL = 'metadata.stats-mode.per.level'
 _CHANGELOG_MODE = ConfigOptions.key('changelog-file.stats-mode').string_type().no_default_value()
 _TRUNCATE = re.compile(r'truncate\(([0-9]+)\)')
+
+
+def _unquote_map_token(value):
+    value = str(value).strip()
+    if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+        quote = value[0]
+        inner = value[1:-1]
+        if quote not in inner.replace(quote * 2, ''):
+            return inner.replace(quote * 2, quote)
+    return value
+
+
+def _mode_at_level(options, level):
+    mode_map = options.get(_PER_LEVEL)
+    if mode_map is None:
+        prefix = _PER_LEVEL + '.'
+        entries = ((key[len(prefix):], value) for key, value in options.items() if key.startswith(prefix))
+    elif isinstance(mode_map, dict):
+        entries = mode_map.items()
+    else:
+        # Stats modes and level numbers contain neither commas nor colons.
+        entries = (_unquote_map_token(entry).split(':', 1) for entry in mode_map.split(',') if entry.strip())
+    result = None
+    for key, mode in entries:
+        if int(_unquote_map_token(key)) == level:
+            result = _unquote_map_token(mode)
+    return result
 
 
 def _parse_mode(value):
@@ -115,7 +143,7 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
         return stats
     if pa.types.is_floating(column.type) and pc.any(pc.is_nan(column)).as_py():
         # Arrow min_max and the Parquet footer can both ignore NaN.
-        stats['has_nan'] = True
+        stats['bounds_unavailable'] = True
         return stats
     if parquet_bounds is not None:
         file_bounds = parquet_bounds.bounds(name, column.type)
@@ -124,10 +152,16 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
             return stats
     try:
         min_max = pc.min_max(column)
-    except pa.ArrowNotImplementedError:
+        minimum, maximum = min_max['min'].as_py(), min_max['max'].as_py()
+    except (pa.ArrowNotImplementedError, OverflowError):
+        # Some Arrow dates and timestamps fall outside Python's datetime range.
+        stats['bounds_unavailable'] = True
         return stats
-    stats['min_values'] = min_max['min'].as_py()
-    stats['max_values'] = min_max['max'].as_py()
+    if pa.types.is_timestamp(column.type) and (minimum != minimum or maximum != maximum):
+        # pandas treats the minimum signed i64 timestamp as NaT.
+        stats['bounds_unavailable'] = True
+        return stats
+    stats['min_values'], stats['max_values'] = minimum, maximum
     return stats
 
 
@@ -145,21 +179,19 @@ class ValueStatsCollector:
     """Resolve Java's value stats policy for the columns of one file."""
 
     def __init__(self, options, fields, manifest_fields, *, level=None, changelog=False,
-                 table_mode=None):
+                 table_mode=None, file_format=None):
         options = options.options
+        raw_options = options.to_map()
         mode = table_mode if table_mode is not None else options.get(CoreOptions.METADATA_STATS_MODE)
         if level is not None:
-            for entry in (options.get(_PER_LEVEL) or '').split(','):
-                if entry.strip():
-                    entry_level, entry_mode = entry.split(':', 1)
-                    if int(entry_level) == level:
-                        mode = entry_mode.strip()
+            level_mode = _mode_at_level(raw_options, level)
+            if level_mode is not None:
+                mode = level_mode
         if changelog:
             mode = options.get(_CHANGELOG_MODE, mode)
         default_mode = _parse_mode(mode)
         keep_first = options.get(_KEEP_FIRST)
         dense = options.get(_DENSE_STORE)
-        raw_options = options.to_map()
         self.fields = []
         self.modes = {}
         for index, field in enumerate(fields):
@@ -170,6 +202,12 @@ class ValueStatsCollector:
                 field_mode = ('none', None)
             else:
                 field_mode = default_mode
+            if (file_format == CoreOptions.FILE_FORMAT_ROW and field_mode[0] in ('full', 'truncate')
+                    and isinstance(field.type, AtomicType)
+                    and field.type.type.upper().startswith('TIMESTAMP')
+                    and PyarrowFieldParser.from_paimon_type(field.type).unit == 'ns'):
+                # The Python ROW encoder stores timestamp values at microsecond precision.
+                field_mode = ('counts', None)
             self.modes[field.name] = field_mode
             if field_mode[0] != 'none':
                 self.fields.append(field)
@@ -202,7 +240,7 @@ class ValueStatsCollector:
                 continue
             column = stats[field.name]
             minimum, maximum = column['min_values'], column['max_values']
-            if mode == 'counts' or column.get('has_nan'):
+            if mode == 'counts' or column.get('bounds_unavailable'):
                 minimum, maximum = None, None
             elif mode == 'truncate':
                 minimum, maximum = _truncate_bounds(minimum, maximum, length)

@@ -145,7 +145,8 @@ class CompositeDataWriter(DataWriter):
         try:
             if self.file_format == CoreOptions.FILE_FORMAT_BLOB:
                 raise ValueError(f"Unsupported file format: {self.file_format}")
-            stats = self._value_stats_collector(self.normal_columns)
+            stats_fields = self.table.table_schema.data_file_fields(data.schema.names)
+            stats = self._value_stats_collector(stats_fields)
             shredding_stats, parquet_metadata = self._write_file(file_path, data, self.file_format, stats)
 
             is_external_path = self.external_path_provider is not None
