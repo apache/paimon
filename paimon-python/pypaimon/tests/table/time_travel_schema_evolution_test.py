@@ -229,8 +229,25 @@ class TestTimeTravelSchemaEvolution:
         switched = main.copy({'branch': 'dev'})
         assert switched.fields == direct.fields
         assert switched.table_schema.options['path'] == direct.table_schema.options['path']
-        assert switched.catalog_environment.uuid == direct.catalog_environment.uuid
-        assert switched.catalog_environment.rest_table_response == direct.catalog_environment.rest_table_response
+        assert switched.file_io is main.file_io
+        assert switched.catalog_environment.identifier == direct.identifier
+        assert switched.catalog_environment.uuid is None
+        assert switched.catalog_environment.rest_table_response == main.catalog_environment.rest_table_response
+
+    def test_branch_copy_rejects_relocated_rest_table(self, native_rest_catalog):
+        catalog = native_rest_catalog
+        name = 'default.relocated'
+        fields = [DataField(0, 'id', AtomicType('INT'))]
+        catalog.create_table(name, Schema(fields=fields), False)
+        catalog.create_branch(name, 'dev')
+        dev = catalog.get_table(name + '$branch_dev')
+
+        catalog.drop_table(name)
+        location = (self.root / 'replacement').as_uri()
+        catalog.create_table(name, Schema(fields=fields, options={'path': location}), False)
+        assert catalog.get_table(name).table_path == location
+        with pytest.raises(ValueError, match='different table location'):
+            dev.copy({'branch': 'main'})
 
     def test_commit_retry_refreshes_snapshot_schema(self, monkeypatch):
         original = self._create([DataField(0, 'id', AtomicType('INT'))])

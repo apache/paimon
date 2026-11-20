@@ -462,7 +462,6 @@ class FileStoreTable(Table):
 
         env = table.catalog_environment
         if env.rest_table_response is not None:
-            # A REST-loaded table also carries catalog-supplied options and FileIO.
             from pypaimon.api.api_response import ErrorResponse
             from pypaimon.catalog.catalog_exception import TableNotExistException
 
@@ -471,19 +470,27 @@ class FileStoreTable(Table):
                 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
                 loader = RESTCatalogLoader(env.catalog_context())
             try:
-                target = loader.load().get_table(table.identifier)
+                schema = loader.load().load_table_metadata(table.identifier).schema
             except TableNotExistException as exc:
                 if getattr(exc.__cause__, 'resource_type', None) != ErrorResponse.RESOURCE_TYPE_BRANCH:
                     raise
                 # The copy can carry a branch identifier before that branch exists.
                 return table
+            location = schema.options.get(CoreOptions.PATH.key())
+            if location != table.table_path:
+                from pypaimon.common.file_io import _is_local_path
+                from pypaimon.filesystem.local_file_io import LocalFileIO
+
+                if not (location and _is_local_path(location) and _is_local_path(table.table_path)
+                        and LocalFileIO._to_file(location) == LocalFileIO._to_file(table.table_path)):
+                    raise ValueError("REST resolved a different table location. Reopen the table.")
         else:
             schema = table.schema_manager.latest()
             if schema is None:
                 return table
-            target = FileStoreTable(table.file_io, table.identifier, table.table_path, schema, env)
 
-        # Reapply explicit overrides and removals to the target branch's stored options.
+        # Refresh the schema while retaining the copy's FileIO and catalog binding.
+        target = FileStoreTable(table.file_io, table.identifier, table.table_path, schema, env)
         return target._copy(table._applied_dynamic_options, resolve_time_travel=True)
 
     def copy_without_time_travel(self, options: dict) -> 'FileStoreTable':
