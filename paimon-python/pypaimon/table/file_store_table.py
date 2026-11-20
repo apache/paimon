@@ -452,7 +452,39 @@ class FileStoreTable(Table):
         )
 
     def copy(self, options: dict) -> 'FileStoreTable':
-        return self._copy(options, resolve_time_travel=True)
+        table = self._copy(options, resolve_time_travel=True)
+        if table.identifier == self.identifier:
+            return table
+
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        if any(key in table.table_schema.options for key in SCAN_KEYS):
+            return table
+
+        env = table.catalog_environment
+        if env.rest_table_response is not None:
+            # A REST-loaded table also carries catalog-supplied options and FileIO.
+            from pypaimon.api.api_response import ErrorResponse
+            from pypaimon.catalog.catalog_exception import TableNotExistException
+
+            loader = env.catalog_loader
+            if loader is None:
+                from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+                loader = RESTCatalogLoader(env.catalog_context())
+            try:
+                target = loader.load().get_table(table.identifier)
+            except TableNotExistException as exc:
+                if getattr(exc.__cause__, 'resource_type', None) != ErrorResponse.RESOURCE_TYPE_BRANCH:
+                    raise
+                # The copy can carry a branch identifier before that branch exists.
+                return table
+        else:
+            schema = table.schema_manager.latest()
+            if schema is None:
+                return table
+            target = FileStoreTable(table.file_io, table.identifier, table.table_path, schema, env)
+
+        # Reapply explicit overrides and removals to the target branch's stored options.
+        return target._copy(table._applied_dynamic_options, resolve_time_travel=True)
 
     def copy_without_time_travel(self, options: dict) -> 'FileStoreTable':
         """Copy this table while preserving its already resolved schema."""
