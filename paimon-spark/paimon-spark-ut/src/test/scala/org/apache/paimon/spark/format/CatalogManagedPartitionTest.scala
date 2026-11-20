@@ -22,6 +22,10 @@ import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
+import org.apache.spark.sql.connector.read.SupportsReportStatistics
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import java.util.Collections
 
 class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
 
@@ -68,6 +72,34 @@ class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("unfiltered Format Table statistics do not list catalog-managed partitions") {
+    val tableName = "catalog_partition_unfiltered_stats"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (id INT, dt STRING) USING CSV " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon', " +
+          "'metastore.partitioned-table'='true') PARTITIONED BY (dt)")
+
+      val catalog = spark.sessionState.catalogManager.catalog("paimon").asInstanceOf[SparkCatalog]
+      val table = catalog
+        .loadTable(SparkIdentifier.of(Array(dbName0), tableName))
+        .asInstanceOf[PaimonFormatTable]
+      val scan = table
+        .newScanBuilder(new CaseInsensitiveStringMap(Collections.emptyMap[String, String]()))
+        .build()
+        .asInstanceOf[SupportsReportStatistics]
+
+      restCatalogServer.setPartitionListingSupported(false)
+      try {
+        val stats = scan.estimateStatistics()
+        assert(!stats.numRows().isPresent)
+        assert(!stats.sizeInBytes().isPresent)
+      } finally {
+        restCatalogServer.setPartitionListingSupported(true)
+      }
+    }
+  }
+
   test("catalog-managed Format Table sends partition predicate to REST filtered listing") {
     val tableName = "catalog_partition_filter_pushdown"
     withTable(tableName) {
@@ -83,11 +115,12 @@ class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
              |""".stripMargin)
 
       clearFilteredListingRequests()
-      checkAnswer(
-        sql(s"SELECT id FROM $tableName WHERE year = 2025 AND month > 10 ORDER BY id"),
-        Seq(Row(3), Row(4)))
+      val query = s"SELECT id FROM $tableName WHERE year = 2025 AND month > 10 ORDER BY id"
+      checkAnswer(sql(query), Seq(Row(3), Row(4)))
 
       assert(filteredListingWasRequested, "the filtered listing endpoint was not called")
+      val stats = getScan(query).asInstanceOf[SupportsReportStatistics].estimateStatistics()
+      assert(stats.sizeInBytes().isPresent)
     }
   }
 }
