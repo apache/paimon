@@ -968,12 +968,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         if (options.containsKey(fieldPrefix + "index-options")) {
             CoreOptions configured = new CoreOptions(new Options(table.options(), options));
             VectorIndexOptions resolved =
-                    VectorIndexOptions.resolve(
-                            configured.toConfiguration(), null, vectorColumn.name(), false);
+                    VectorIndexOptions.resolveConfigured(
+                            configured.toConfiguration(), null, vectorColumn.name());
             if (resolved.type() == null) {
                 resolved =
-                        VectorIndexOptions.resolve(
-                                configured.toConfiguration(), "vector", vectorColumn.name(), false);
+                        VectorIndexOptions.resolveConfigured(
+                                configured.toConfiguration(), "vector", vectorColumn.name());
             }
             String configuredMetric = resolved.options().get(resolved.type() + ".metric");
             if (configuredMetric != null) {

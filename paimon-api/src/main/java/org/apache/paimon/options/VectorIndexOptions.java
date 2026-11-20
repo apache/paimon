@@ -55,6 +55,7 @@ public final class VectorIndexOptions implements Serializable {
         return options;
     }
 
+    /** Returns the normalized metric, defaulting to inner product for single-vector searches. */
     public String metric() {
         return metric;
     }
@@ -110,14 +111,20 @@ public final class VectorIndexOptions implements Serializable {
         return type == null ? null : type.toLowerCase(Locale.ROOT).trim();
     }
 
+    /** Resolves single-vector options, including the default metric for a known index type. */
     public static VectorIndexOptions resolve(
             Options options, @Nullable String type, String column) {
-        return resolve(options, type, column, true);
+        VectorIndexOptions resolved = resolveConfigured(options, type, column);
+        if (resolved.type != null && resolved.options.get(resolved.type + ".metric") == null) {
+            metricAliases(resolved.type, column)
+                    .forEach(key -> resolved.options.setString(key, resolved.metric));
+        }
+        return resolved;
     }
 
-    /** Retains an unspecified metric when readers must obtain it from persisted index metadata. */
-    public static VectorIndexOptions resolve(
-            Options options, @Nullable String type, String column, boolean defaultMetric) {
+    /** Keeps metric aliases absent from {@link #options()} when no metric was configured. */
+    public static VectorIndexOptions resolveConfigured(
+            Options options, @Nullable String type, String column) {
         if (type == null) {
             CoreOptions core = new CoreOptions(options);
             List<String> declared =
@@ -140,12 +147,7 @@ public final class VectorIndexOptions implements Serializable {
         }
         String prefix = type + ".";
         String fieldPrefix = "fields." + column + ".";
-        List<String> aliases =
-                Arrays.asList(
-                        fieldPrefix + "distance.metric",
-                        fieldPrefix + "metric",
-                        prefix + "distance.metric",
-                        prefix + "metric");
+        List<String> aliases = metricAliases(type, column);
         String metric = null;
         for (String key :
                 Arrays.asList(
@@ -172,11 +174,20 @@ public final class VectorIndexOptions implements Serializable {
                 break;
             }
         }
-        if (metric != null || defaultMetric) {
-            String normalized = normalizeMetric(metric);
+        String normalized = normalizeMetric(metric);
+        if (metric != null) {
             aliases.forEach(key -> resolved.setString(key, normalized));
         }
-        return new VectorIndexOptions(type, resolved, normalizeMetric(metric));
+        return new VectorIndexOptions(type, resolved, normalized);
+    }
+
+    private static List<String> metricAliases(String type, String column) {
+        String fieldPrefix = "fields." + column + ".";
+        return Arrays.asList(
+                fieldPrefix + "distance.metric",
+                fieldPrefix + "metric",
+                type + ".distance.metric",
+                type + ".metric");
     }
 
     private static String normalizeMetric(@Nullable String metric) {

@@ -349,8 +349,8 @@ public class DataEvolutionVectorScan implements VectorScan {
 
     @Nullable
     private String configuredVectorIndexType() {
-        return VectorIndexOptions.resolve(
-                        new Options(table.options(), options), null, vectorColumn.name(), false)
+        return VectorIndexOptions.resolveConfigured(
+                        new Options(table.options(), options), null, vectorColumn.name())
                 .type();
     }
 

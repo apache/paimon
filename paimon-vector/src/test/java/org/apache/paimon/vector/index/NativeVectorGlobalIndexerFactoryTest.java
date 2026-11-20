@@ -89,10 +89,12 @@ public class NativeVectorGlobalIndexerFactoryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("range sharding");
         options.setString("diskann.sharding", "range");
-        options.setString("diskann.metric", "l2");
-        assertThatThrownBy(() -> GlobalIndexer.create(kind, fields, options))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("cosine");
+        for (String metric : new String[] {"l2", "inner_product"}) {
+            options.setString("diskann.metric", metric);
+            assertThatThrownBy(() -> GlobalIndexer.create(kind, fields, options))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("cosine");
+        }
     }
 
     @Test

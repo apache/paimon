@@ -58,21 +58,18 @@ public interface GlobalIndexer {
 
     /** Resolve the same field and procedure options for build planning and plugin creation. */
     static Options resolveOptions(String type, List<DataField> indexFields, Options options) {
-        Options resolved = options;
-        if (!indexFields.isEmpty()) {
-            // The leading field owns the index; remaining fields are indexed payload columns.
-            String column = indexFields.get(0).name();
-            resolved =
-                    CoreOptions.isVectorIndexType(type)
-                            ? VectorIndexOptions.resolve(
-                                            options,
-                                            type,
-                                            column,
-                                            !VectorIndexUtils.isMultiVector(
-                                                    indexFields.get(0).type()))
-                                    .options()
-                            : new CoreOptions(options).globalIndexOptions(type, column);
+        if (indexFields.isEmpty()) {
+            return options;
         }
-        return resolved;
+        // The leading field owns the index; remaining fields are indexed payload columns.
+        DataField field = indexFields.get(0);
+        if (CoreOptions.isVectorIndexType(type)) {
+            VectorIndexOptions resolved =
+                    VectorIndexUtils.isMultiVector(field.type())
+                            ? VectorIndexOptions.resolveConfigured(options, type, field.name())
+                            : VectorIndexOptions.resolve(options, type, field.name());
+            return resolved.options();
+        }
+        return new CoreOptions(options).globalIndexOptions(type, field.name());
     }
 }
