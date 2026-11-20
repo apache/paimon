@@ -34,11 +34,13 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.operation.ManifestFileMergerTestUtils;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
@@ -718,9 +720,32 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .collect(Collectors.toList()));
     }
 
+    @Test
+    public void testScanManifestsForSparsePartitions() {
+        RowType type = RowType.of(new IntType(), new IntType(), new IntType());
+        manifestFile = createManifestFileForPartitionType(type);
+        ManifestEntry first = makeMultiPartEntry(true, "first", 1, 13, 0);
+        ManifestEntry last = makeMultiPartEntry(true, "last", 19, 13, 1);
+        ManifestFileMeta a = makeManifest(first, makeMultiPartEntry(true, "a", 1, 14, 0));
+        ManifestFileMeta b = makeManifest(last, makeMultiPartEntry(true, "b", 19, 14, 1));
+        ManifestFileMeta gap =
+                makeManifest(
+                        makeMultiPartEntry(true, "c", 9, 13, 0),
+                        makeMultiPartEntry(true, "d", 11, 14, 1));
+        Snapshot snapshot = mock(Snapshot.class);
+        ManifestList.Factory lists = mock(ManifestList.Factory.class, RETURNS_DEEP_STUBS);
+        when(lists.create().readDataManifests(snapshot)).thenReturn(Arrays.asList(a, gap, b));
+        ManifestsReader.Result result =
+                new ManifestsReader(type, "default", null, lists)
+                        .withPartitionFilter(Arrays.asList(first.partition(), last.partition()))
+                        .read(snapshot, ScanMode.ALL);
+        assertThat(result.filteredManifests).containsExactly(a, b);
+    }
+
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testFullCompactionWithSparseOverwritePartitions(boolean optimizeMerge) {
+    @CsvSource({"true,false", "false,false", "true,true"})
+    public void testFullCompactionWithSparseOverwritePartitions(
+            boolean optimizeMerge, boolean sort) {
         CountingReadFileIO io = new CountingReadFileIO();
         RowType type = RowType.of(new IntType(), new IntType(), new IntType());
         manifestFile = createManifestFileForPartitionType(type, io);
@@ -752,6 +777,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         options.set("manifest.full-compaction-threshold-size", "1 b");
         options.set("manifest.target-file-size", "1 b");
         options.set("manifest.merge-optimize.enabled", Boolean.toString(optimizeMerge));
+        options.set("manifest-sort.enabled", Boolean.toString(sort));
+        // Keep the test focused on partition overlap, independent of discretionary run rewrites.
+        options.set("manifest-sort.max-rewrite-size", "1 b");
         io.resetReadCounts();
         List<ManifestFileMeta> output =
                 ManifestFileMerger.merge(input, manifestFile, type, new CoreOptions(options));

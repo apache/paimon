@@ -153,8 +153,7 @@ final class ManifestFileBlockMerger {
             if (deletes.isEmpty()) {
                 predicate = PartitionPredicate.ALWAYS_FALSE;
             } else if (partitionType.getFieldCount() > 0) {
-                predicate =
-                        PartitionPredicate.fromMultiple(partitionType, deletes.partitions(), true);
+                predicate = PartitionPredicate.fromMultiple(partitionType, deletes.partitions());
             } else {
                 predicate = PartitionPredicate.ALWAYS_TRUE;
             }

@@ -105,22 +105,12 @@ public interface PartitionPredicate extends Serializable {
     /** Create {@link PartitionPredicate} from multiple partitions. */
     @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, Set<BinaryRow> partitions) {
-        return fromMultiple(partitionType, partitions, false);
-    }
-
-    /**
-     * Optionally check individual partition tuples after their combined bounds pass. Full
-     * compaction uses this to avoid opening base manifests for sparse DELETE partitions.
-     */
-    @Nullable
-    static PartitionPredicate fromMultiple(
-            RowType partitionType, Set<BinaryRow> partitions, boolean checkPartitionTuples) {
         if (partitionType.getFieldCount() == 0 || partitions.isEmpty()) {
             return null;
         }
 
         return new MultiplePartitionPredicate(
-                new RowDataToObjectArrayConverter(partitionType), partitions, checkPartitionTuples);
+                new RowDataToObjectArrayConverter(partitionType), partitions);
     }
 
     /** Creates {@link PartitionPredicate} that combines multiple predicates using logical AND. */
@@ -233,19 +223,15 @@ public interface PartitionPredicate extends Serializable {
         private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
-        @Nullable private final Object[][] tuples;
+        @Nullable private final Object[][] partitionValues;
         @Nullable private final RowDataToObjectArrayConverter converter;
 
         private MultiplePartitionPredicate(
-                RowDataToObjectArrayConverter converter,
-                Set<BinaryRow> partitions,
-                boolean checkPartitionTuples) {
+                RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
-            this.tuples =
-                    checkPartitionTuples && partitions.size() > 1
-                            ? new Object[partitions.size()][]
-                            : null;
-            this.converter = tuples == null ? null : converter;
+            // For a single partition the combined bounds already describe its field values.
+            this.partitionValues = partitions.size() > 1 ? new Object[partitions.size()][] : null;
+            this.converter = partitionValues == null ? null : converter;
             RowType partitionType = converter.rowType();
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
@@ -260,8 +246,8 @@ public interface PartitionPredicate extends Serializable {
             int index = 0;
             for (BinaryRow part : partitions) {
                 Object[] fields = converter.convert(part);
-                if (tuples != null) {
-                    tuples[index++] = fields;
+                if (partitionValues != null) {
+                    partitionValues[index++] = fields;
                 }
                 for (int i = 0; i < fields.length; i++) {
                     collectors[i].collect(fields[i], serializers[i]);
@@ -310,7 +296,7 @@ public interface PartitionPredicate extends Serializable {
                     return false;
                 }
             }
-            if (tuples == null || rowCount <= 0) {
+            if (partitionValues == null || rowCount <= 0) {
                 return true;
             }
             Object[] lower = converter.convert(minValues);
@@ -322,18 +308,20 @@ public interface PartitionPredicate extends Serializable {
                                 ? -1
                                 : nullCounts.getLong(i);
             }
-            for (Object[] tuple : tuples) {
-                if (mayContainTuple(tuple, lower, upper, nulls, rowCount)) {
+            // At least one requested partition must match on every field for the manifest to
+            // matter.
+            for (Object[] partition : partitionValues) {
+                if (mayContainPartition(partition, lower, upper, nulls, rowCount)) {
                     return true;
                 }
             }
             return false;
         }
 
-        private boolean mayContainTuple(
-                Object[] tuple, Object[] lower, Object[] upper, long[] nulls, long rowCount) {
+        private boolean mayContainPartition(
+                Object[] partition, Object[] lower, Object[] upper, long[] nulls, long rowCount) {
             for (int i = 0; i < fieldNum; i++) {
-                Object value = tuple[i];
+                Object value = partition[i];
                 if (value == null) {
                     if (nulls[i] == 0) {
                         return false;

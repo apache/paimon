@@ -127,7 +127,7 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testTupleStatisticsOnRangesAndNulls() throws Exception {
+    public void testPartitionValuesAgainstRangeAndNullStatistics() throws Exception {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         BinaryRow nullPartition = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(nullPartition);
@@ -138,12 +138,8 @@ public class PartitionPredicateTest {
                 InstantiationUtil.clone(
                         PartitionPredicate.fromMultiple(
                                 type,
-                                new HashSet<>(
-                                        Arrays.asList(
-                                                createPart(1, 100),
-                                                createPart(19, 5),
-                                                nullPartition)),
-                                true));
+                                Arrays.asList(
+                                        createPart(1, 100), createPart(19, 5), nullPartition)));
         GenericRow lower = GenericRow.of(1, 5);
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
@@ -164,8 +160,8 @@ public class PartitionPredicateTest {
         }
         assertThat(predicate.test(10, lower, upper, BinaryArray.fromLongArray(new Long[0])))
                 .isTrue();
-        // Without date bounds, the second tuple could match. With all-null dates only
-        // the null tuple can match, and its event lies outside [5, 8].
+        // Without date bounds, the second partition could match. With all-null dates only
+        // the null partition can match, and its event lies outside [5, 8].
         lower = GenericRow.of(null, 5);
         upper = GenericRow.of(null, 8);
         assertThat(
@@ -179,14 +175,14 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testTupleRangesAgainstPartitionSet() {
+    public void testManifestRangesAgainstPartitionSet() {
         Set<BinaryRow> partitions = new HashSet<>();
         for (int day = 0; day < 40; day++) {
             partitions.add(createPart(day, day % 7));
         }
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(
-                        DataTypes.ROW(DataTypes.INT(), DataTypes.INT()), partitions, true);
+                        DataTypes.ROW(DataTypes.INT(), DataTypes.INT()), partitions);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
         for (int day = 0; day < 40; day++) {
             for (int event = 0; event < 7; event++) {
