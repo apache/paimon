@@ -18,7 +18,6 @@
 from typing import Sequence, Set, Tuple
 
 from pypaimon.common.options.core_options import GlobalIndexColumnUpdateAction
-from pypaimon.utils.range import Range
 
 
 def scan_global_index_entries(table, snapshot):
@@ -87,41 +86,6 @@ def _updated_columns_for_commit(table, messages):
                 columns.update(written)
                 partitions.add(message.partition)
     return columns, partitions
-
-
-def check_retained_centroid_scalar_indexes(table, snapshot, updates, index_deletes):
-    """Protect exact shard filters against updates at every publication attempt."""
-    if snapshot is None or not snapshot.index_manifest or not updates:
-        return
-
-    by_partition = {}
-    for entry in updates:
-        by_partition.setdefault(tuple(entry.partition.values), []).append(entry.file)
-    deleted = {_index_identity(entry) for entry in index_deletes if entry.kind == 1}
-    current = table.table_schema
-    schemas = {current.id: current}
-    for entry in scan_global_index_entries(table, snapshot):
-        meta = entry.index_file.global_index_meta
-        if not meta.is_centroid_scalar_router() or _index_identity(entry) in deleted:
-            continue
-        indexed_fields = {meta.index_field_id, *(meta.extra_field_ids or [])}
-        indexed_range = Range(meta.row_range_start, meta.row_range_end)
-        for file in by_partition.get(tuple(entry.partition.values), ()):
-            if not file.non_null_row_id_range().overlaps(indexed_range):
-                continue
-            if file.schema_id not in schemas:
-                schema = table.schema_manager.get_schema(file.schema_id)
-                if schema is None:
-                    raise ValueError('Cannot resolve update file schema %s' % file.schema_id)
-                schemas[file.schema_id] = schema
-            written = {
-                field.id for field in schemas[file.schema_id].data_file_fields(file.write_cols)
-            }
-            if indexed_fields.intersection(written):
-                raise RuntimeError(
-                    "Update affects an active centroid index with Bitmap fields. "
-                    "Drop the index or use DROP_PARTITION_INDEX before updating."
-                )
 
 
 def apply_global_index_update_action(

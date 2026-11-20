@@ -23,7 +23,6 @@ from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.globalindex.global_index_meta import has_centroid_scalar_index
 
 
 def build_native_global_index(builder, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
@@ -45,9 +44,6 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
         return None
     from pypaimon_rust.datafusion import GlobalIndexBuildBuilder
     if not GlobalIndexBuildBuilder.supports_index_type(builder._index_type):
-        return None
-    if (builder._index_type in VINDEX_IDENTIFIERS and table.options.data_evolution_enabled()
-            and has_centroid_scalar_index(table, builder._index_type, builder._index_columns[0], partition_filter)):
         return None
     # Keep build parameters separate from schema defaults: alias precedence is
     # resolved within each source, then explicit build parameters win.

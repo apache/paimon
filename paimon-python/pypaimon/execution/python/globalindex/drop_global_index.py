@@ -38,9 +38,7 @@ def build_global_index_drop(self, partition_filter):
         global_meta = index_file.global_index_meta
         if index_file.index_type.lower().strip() != self._index_type or global_meta is None:
             return False
-        if (_indexed_field_ids(global_meta) != target_field_ids
-                and not (global_meta.has_centroid_scalar_indexes()
-                         and target_field_ids == [global_meta.index_field_id])):
+        if _indexed_field_ids(global_meta) != target_field_ids:
             return False
         return partition_filter is None or partition_filter.test(entry.partition)
 
