@@ -48,10 +48,8 @@ public abstract class LeafBinaryFunction extends LeafFunction {
             Object max,
             Long nullCount,
             List<Object> literals) {
-        if (nullCount != null) {
-            if (rowCount == nullCount || literals.get(0) == null) {
-                return false;
-            }
+        if ((nullCount != null && rowCount == nullCount) || literals.get(0) == null) {
+            return false;
         }
         return test(type, rowCount, min, max, nullCount, literals.get(0));
     }

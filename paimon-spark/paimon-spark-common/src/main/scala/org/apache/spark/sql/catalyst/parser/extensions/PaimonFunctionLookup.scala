@@ -52,6 +52,11 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
           None
         case Seq(funName) if isSparkTmpFunc(FunctionIdentifier(funName)) =>
           Some(null, FunctionIdentifier(funName), true)
+        // Spark 4.2 keeps extension functions in the session's builtin namespace.
+        case Seq(name)
+            if org.apache.spark.SPARK_VERSION.startsWith("4.2.") &&
+              catalogManager.v1SessionCatalog.lookupBuiltinOrTempFunction(name).isDefined =>
+          None
         case CatalogAndIdentifier(v1FunctionCatalog: SupportV1Function, ident)
             if v1FunctionCatalog.v1FunctionEnabled() =>
           Some(
@@ -77,7 +82,14 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
   }
 
   def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
-    catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent)
+    val catalog = catalogManager.v1SessionCatalog
+    val method = catalog.getClass.getMethods.find(_.getName == "isBuiltinFunction").get
+    val argument = if (method.getParameterTypes.head == classOf[String]) {
+      funcIdent.funcName
+    } else {
+      funcIdent
+    }
+    method.invoke(catalog, argument).asInstanceOf[Boolean]
   }
 
   def isSparkTmpFunc(funcIdent: FunctionIdentifier): Boolean = {

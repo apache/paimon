@@ -45,6 +45,8 @@ To compact a table. Arguments:
 - `where` (optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.
 
 - `partition_idle_time` (optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.
+  For Data Evolution tables, batch compaction selects partitions whose latest data file in the planning snapshot is at least this old.
+  The filter applies together with `partitions` or `where`. File selection follows the table's Data Evolution compaction options.
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 
@@ -137,6 +139,7 @@ To compact databases. Arguments:
 - `tableOptions`: additional dynamic options of the table.
 
 - `partition_idle_time`: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.
+  For Data Evolution tables, batch compaction selects partitions whose latest data file in the planning snapshot is at least this old.
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 
@@ -320,6 +323,52 @@ CALL [catalog.]sys.rescale(
 ```sql
 CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08');
 ```
+
+## sort_data_evolution
+
+Sort a Data Evolution append table in batch mode. Pass `range` as a string of the form
+`'[start, end]'` with two inclusive, nonnegative BIGINT bounds.
+The optional `where` expression selects partitions. Every live file that intersects
+the selection must fit entirely inside the range. A partial file group fails the job
+before writing.
+Query the [`$row_ranges` system table](../../concepts/system-tables#row-ranges-table)
+to find complete ranges for a partition. The procedure requires `query-auth.enabled = false`
+because it reads and rewrites the underlying physical files.
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+
+CALL sys.sort_data_evolution(
+    `table` => 'default.samples',
+    `range` => '[0,99999]',
+    order_by => 'tenant_id,event_time',
+    `where` => 'dt = 20261119');
+
+-- Flink 1.18 positional calls
+CALL sys.sort_data_evolution('default.samples', '[0,99999]', 'tenant_id,event_time');
+CALL sys.sort_data_evolution('default.samples', '[0,99999]', 'tenant_id,event_time', 'dt = 20261119');
+```
+
+Each selected partition is sorted independently by the listed top-level fields
+in ascending order, with nulls first and the old row ID as a tie-breaker.
+The writer applies deletion vectors and rewrites all current column values together,
+including managed BLOBs and dedicated vectors. Surviving rows receive new row IDs
+and the sort snapshot's ID as their `_SEQUENCE_NUMBER`.
+Update downstream references to the old row IDs. The commit removes each global index file
+whose row-ID range overlaps a rewritten input file group in the same partition. Disjoint
+index files remain usable. Rebuild missing index coverage for the new row IDs and any
+unchanged rows covered by a removed index file. A selection with no matching rows or files
+to process is successful. With `table.dml-sync` enabled the call waits and returns `Success`.
+In asynchronous mode it returns the Flink job ID.
+
+Flink range-partitions the selected rows by table partition, sort fields and old row ID.
+Multiple subtasks can sort and write parts of one table partition. Set
+`unaware-bucket.compaction.parallelism` to control the number of subtasks. The default
+uses the execution environment's parallelism, or 1 if it is unspecified. At parallelism 1, one
+subtask sorts and writes all selected partitions. Each subtask spills to TaskManager temporary
+directories as needed. Managed BLOBs travel through the shuffle as descriptors.
+New row IDs follow shuffle-range order.
 
 ## materialize_deletion_vectors
 

@@ -45,6 +45,9 @@ import org.apache.spark.util.{Utils => SparkUtils}
 object PaimonUtils {
 
   /**
+   * Create a new [[DataFrame]] from the planned input, so writer-side transformations do not
+   * reanalyze optimized logical plans containing dynamic pruning subqueries.
+   *
    * In the streaming write case, An "Queries with streaming sources must be executed with
    * writeStream.start()" error will occur if we transform [[DataFrame]] first and then use it.
    *
@@ -62,6 +65,18 @@ object PaimonUtils {
 
   def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
     SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
+  }
+
+  /** Runs failure cleanup on interruption too, preserving the original exception. */
+  def withFailureCleanup[T](block: => T)(cleanup: => Unit): T = {
+    SparkUtils.tryWithSafeFinallyAndFailureCallbacks(block)(catchBlock = cleanup)
+  }
+
+  /** Creates a command-local disk cache, retaining AQE; the caller must invoke its cleanup. */
+  def createDiskCachedDataset(
+      sparkSession: SparkSession,
+      logicalPlan: LogicalPlan): (Dataset[Row], () => Unit) = {
+    SparkShimLoader.shim.classicApi.createDiskCachedDataset(sparkSession, logicalPlan)
   }
 
   /**

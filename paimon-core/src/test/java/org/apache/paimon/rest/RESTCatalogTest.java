@@ -6013,7 +6013,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "TOPSECRET", "o1");
         maskConstant(identifier, "secret");
 
-        for (String suffix : Arrays.asList("files", "file_key_ranges", "binlog", "statistics")) {
+        for (String suffix :
+                Arrays.asList("files", "file_key_ranges", "row_ranges", "binlog", "statistics")) {
             Identifier sysId =
                     Identifier.create(
                             identifier.getDatabaseName(),

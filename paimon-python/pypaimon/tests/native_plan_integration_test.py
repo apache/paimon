@@ -80,12 +80,20 @@ class NativePlanIntegrationTest(unittest.TestCase):
         w.close()
         c.close()
 
+    def _python_table(self, name):
+        return self.cat.get_table('default.%s' % name).copy({
+            'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+        })
+
     def _plan_and_read(self, name, native):
-        t = self.cat.get_table('default.%s' % name)
+        t = self._python_table(name)
         if native:
             t = t.copy({'scan.native-plan.enabled': 'true'})
         rb = t.new_read_builder()
-        plan = rb.new_scan().plan()
+        scan = rb.new_scan()
+        plan = scan.plan()
+        if not native:
+            self.assertFalse(scan._execution._is_native)
         rows = rb.new_read().to_arrow(plan.splits()).to_pylist()
         return plan.snapshot_id, sorted(rows, key=lambda r: r['k'])
 
@@ -725,7 +733,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         def read(native, shard=None, slice_=None, limit=None):
             table = self.cat.get_table('default.interleaved_t').copy(
-                {'scan.native-plan.enabled': str(native).lower()})
+                {'scan.native-plan.enabled': str(native).lower(), 'read.native.enabled': 'false'})
             builder = table.new_read_builder()
             if limit is not None:
                 builder.with_limit(limit)
@@ -1362,7 +1370,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         for k in range(1, 4):
             self._write('filter_t', [{'k': k, 'v': 'v%d' % k}])
 
-        table = self.cat.get_table('default.filter_t')
+        table = self._python_table('filter_t')
         normal_builder = table.new_read_builder()
         predicate = normal_builder.new_predicate_builder().equal('k', 2)
         normal_builder.with_filter(predicate)
@@ -1389,7 +1397,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         for k in range(1, 4):
             self._write('limit_t', [{'k': k, 'v': 'v%d' % k}])
 
-        table = self.cat.get_table('default.limit_t')
+        table = self._python_table('limit_t')
         normal = table.new_read_builder().with_limit(1).new_scan().plan()
         native_builder = table.copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().with_limit(1)
@@ -1408,7 +1416,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('travel_t', [{'k': 2, 'v': 'b'}])
         options = {'scan.snapshot-id': '1'}
 
-        normal_table = self.cat.get_table('default.travel_t').copy(options)
+        normal_table = self._python_table('travel_t').copy(options)
         normal_builder = normal_table.new_read_builder()
         normal_plan = normal_builder.new_scan().plan()
         normal_rows = normal_builder.new_read().to_arrow(
@@ -1431,7 +1439,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('split_t', [{'k': 1, 'v': 'a'}])
         self._write('split_t', [{'k': 2, 'v': 'b'}])
         options = {'source.split.target-size': '1b'}
-        normal_table = self.cat.get_table('default.split_t').copy(options)
+        normal_table = self._python_table('split_t').copy(options)
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
@@ -1451,7 +1459,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('open_cost_t', [{'k': 1, 'v': 'a'}])
         self._write('open_cost_t', [{'k': 2, 'v': 'b'}])
         self._write('open_cost_t', [{'k': 3, 'v': 'c'}])
-        base_table = self.cat.get_table('default.open_cost_t')
+        base_table = self._python_table('open_cost_t')
         normal_table = base_table.copy({'source.split.open-file-cost': '64mb'})
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
@@ -1477,7 +1485,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             'source.split.target-size': None,
             'source.split.open-file-cost': None,
         }
-        normal_table = self.cat.get_table('default.split_reset_t').copy(reset_options)
+        normal_table = self._python_table('split_reset_t').copy(reset_options)
         native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
 
         normal = normal_table.new_read_builder().new_scan().plan()
@@ -1525,7 +1533,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.cat.create_table(
             'default.ex_t', Schema.from_pyarrow_schema(self.schema), False)
         self._write('ex_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
-        normal = self.cat.get_table('default.ex_t').new_read_builder().explain()
+        normal = self._python_table('ex_t').new_read_builder().explain()
         native = self.cat.get_table('default.ex_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
         self.assertFalse(normal.native_planned)
@@ -1569,7 +1577,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
     def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(
             'default.empty_t', Schema.from_pyarrow_schema(self.schema), False)
-        normal = self.cat.get_table('default.empty_t').new_read_builder().explain()
+        normal = self._python_table('empty_t').new_read_builder().explain()
         native = self.cat.get_table('default.empty_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
 

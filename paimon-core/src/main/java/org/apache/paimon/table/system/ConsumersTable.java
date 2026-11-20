@@ -53,6 +53,8 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -180,6 +182,7 @@ public class ConsumersTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private RowType readType;
+        @Nullable private Predicate rowFilter;
         private final List<String> consumerIds = new ArrayList<>();
 
         public ConsumersRead(FileIO fileIO) {
@@ -188,6 +191,7 @@ public class ConsumersTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            this.rowFilter = LeafPredicateExtractor.rowFilterForTransforms(predicate);
             if (predicate == null) {
                 return this;
             }
@@ -255,6 +259,9 @@ public class ConsumersTable implements ReadonlyTable {
             }
             Iterator<InternalRow> rows =
                     Iterators.transform(consumers.entrySet().iterator(), this::toRow);
+            if (rowFilter != null) {
+                rows = Iterators.filter(rows, rowFilter::test);
+            }
             if (readType != null) {
                 rows =
                         Iterators.transform(

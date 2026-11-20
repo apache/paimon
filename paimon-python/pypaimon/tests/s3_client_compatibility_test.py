@@ -257,10 +257,10 @@ class S3ClientCompatibilityTest(unittest.TestCase):
             self.assertNotIn(
                 "AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
 
-    def test_worker_recomputes_pyarrow_version(self):
+    def test_worker_recomputes_pyarrow_version(self) -> None:
         state = self._new_file_io().__getstate__()
         state.update({
-            "_pyarrow_gte_8": False,
+            "_pyarrow_gte_10": False,
             "_pyarrow_gte_16": False,
             "_oss_bucket_in_endpoint": True,
         })
@@ -270,7 +270,7 @@ class S3ClientCompatibilityTest(unittest.TestCase):
             restored.__setstate__(state)
 
         version = parse(pyarrow.__version__)
-        self.assertEqual(version >= parse("8.0.0"), restored._pyarrow_gte_8)
+        self.assertEqual(version >= parse("10.0.0"), restored._pyarrow_gte_10)
         self.assertEqual(version >= parse("16.0.0"), restored._pyarrow_gte_16)
         self.assertEqual(version < parse("16.0.0"), restored._oss_bucket_in_endpoint)
 

@@ -310,9 +310,24 @@ result = (
 )
 ```
 
-The scalar filter is evaluated with matching scalar global indexes before vector search. Build a
-BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
-so vector search can restrict the candidate row ids before running ANN search.
+Exact scalar global-index answers pre-filter the vector search. If scalar indexes cannot
+evaluate the predicate, each shard runs ANN once and checks only its candidates against the
+filter columns of the same pinned snapshot. The coordinator merges the filtered results;
+it does not perform a full-table scalar scan or a raw scan to fill missing matches.
+
+`vector-index.post-filter.candidates-factor` is a positive integer, defaulting to `10`.
+The candidate count is `max(original Top-K * factor, required reranking limit)`, capped by
+the shard size and the backend integer limit. For example, Top-K 10 normally requests 100
+candidates. Batch execution may split large inputs into memory-bounded chunks; every query
+still runs ANN once. Post-filtering may return fewer than Top-K rows, including zero even
+when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
+work for more candidates. Post-filtering does not retry or scan raw data to fill Top-K.
+Raw work outside vector coverage still follows the configured index search modes. When a
+scalar index can evaluate the predicate but covers only some rows, scalar `full`/`detail`
+modes also plan raw scans for its uncovered rows.
+
+Build a BTree index for frequently used metadata filters, such as `category`, `tenant_id`,
+or `event_time`, to restrict candidate row IDs before ANN.
 
 An index answer that is only a candidate set — `contains`, ends-with or `LIKE` on a BTree index,
 or a conjunction with a member no index can evaluate — is never ranked as if it matched, because
@@ -336,6 +351,7 @@ Search-time options are passed with each vector search request:
 | Option | Default | Description |
 |---|---|---|
 | `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
+| `centroid.nprobe` | Automatic | Number of centroid shards to search per row-ID range. Paimon chooses this width when omitted. Within each selected shard, `ivf.nprobe` controls the IVF lists to search and `diskann.l_search` controls the DiskANN graph search width. |
 | `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
 | `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
 | `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
@@ -358,10 +374,12 @@ rerank for the indexed candidates; leaving it unset skips the rerank stage.
 
 ## Build Options
 
-Supported paimon-vindex options:
+Build options for native vector indexes:
 
 | Option | Default | Description |
 |---|---|---|
+| `<index-type>.sharding` | `range` | Use `centroid` to train an outer router for each row-ID range when building a Spark Data Evolution index. |
+| `<index-type>.centroid.nlist` | Automatic | Number of outer centroids per contiguous row-ID range with centroid sharding. |
 | `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT, n>` columns. |
 | `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
 | `<index-type>.ivf.coarse-assignment` | `auto` | Build-time list assignment for all IVF types. `auto` uses Vamana when `dimension × nlist ≥ 1,000,000` and exact assignment otherwise; `exact` always uses exact assignment. |
@@ -447,6 +465,139 @@ CALL sys.create_global_index(
 
 Pass the same option keys to Python's `create_global_index(..., options={...})`.
 Use full 768-dimensional query vectors when searching either of these indexes.
+
+## Centroid-Based Sharding in Spark
+
+Spark supports centroid-based sharding for `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`
+and `diskann` on Data Evolution append tables. Set `<index-type>.sharding=centroid`
+when building the index. The default is `range`. Each contiguous source row-ID range in a
+partition gets one routing model and one shard file per centroid. The table must enable row tracking and
+Data Evolution, have no primary key, and use `bucket=-1`.
+
+For the 768-dimensional example table above, this call builds a cosine IVF-PQ index on one
+`dt` partition. The `options` apply to this build.
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-pq',
+    partitions => 'dt="2026-11-17"',
+    options => 'ivf-pq.sharding=centroid,ivf-pq.dimension=768,ivf-pq.distance.metric=cosine,ivf-pq.centroid.nlist=256'
+);
+```
+
+The build records the layout in the manifest. A query reads the layout for each row-ID
+range, including after a restart or a change to the build options. For raw fallback, set
+the column's distance metric on the table, for example with `fields.embedding.metric`.
+
+A centroid build pins one snapshot. Spark map tasks count non-null vectors in their input
+splits. Using those counts and the configured training ratio, the driver plans
+the exact row ordinals that the outer IVF-FLAT trainer would retain. Each
+map task reads its own splits and shuffles selected vectors by reservoir slot.
+Within each contiguous range, one task trains a router on those vectors in the original
+training order. Spark broadcasts that router and shuffles the range's vectors by centroid.
+Independent ranges can build concurrently within the global build parallelism budget. A range
+containing only null vectors records its coverage with one empty router entry. Queries skip it.
+One call atomically replaces the
+selected partitions' previous routers and shards of the requested type.
+
+Queries load each selected range's routing model, select centroids with `centroid.nprobe`,
+and open their shard files. Inside each selected shard, `ivf.nprobe` controls how many
+local IVF lists to search. For DiskANN, `diskann.l_search` controls the graph search.
+For inner product, automatic routing searches every outer shard. A high-norm vector in a distant
+shard can have the largest inner product. Set an explicit outer width to trade recall for fewer
+shard reads. For cosine and L2, Paimon chooses the initial width per row-ID range. The minimum is three for a four-centroid
+router, four for an eight-centroid router, and eight otherwise, capped at the number of centroids.
+Paimon budgets at least one sixteenth of the shards and four candidate rows per requested result
+using the average shard size. A row-ID filter scales the initial width by the inverse of its
+selectivity, up to all shards. If there are fewer than top-K results, automatic routing can
+probe additional shards. Set `centroid.nprobe` explicitly to use a fixed outer width.
+
+For unfiltered L2 queries on centroid-sharded `ivf-flat` and `ivf-pq`, Paimon can choose both
+widths together. With 64 outer centers, an automatic outer width of eight, and top-K from 10
+through 100, it checks the four nearest shard descriptors in the manifest. If all four have 64 local lists and at
+least 16 × top-K vectors each, it searches those four shards with 16 local probes each.
+Other layouts use independent automatic widths. Setting either probe width explicitly, or
+setting `ivf.max_initial_filter_expansion_factor`, also selects independent sizing.
+Both single and batched searches open each selected shard once per probe round, including
+when queries in the same batch use different widths. For older descriptors without the local
+list count, the reader checks the native header and computes the candidate sets for the
+possible widths during the same open. This preserves the original search results.
+
+The trained outer centers live in the routing model file. In the manifest, each
+centroid index entry uses a Paimon Core envelope in `GlobalIndexMeta.indexMeta`.
+For a shard, this descriptor identifies the model and centroid and wraps the local
+index writer’s metadata. The local reader receives those original bytes.
+
+The router and its shards share one `GlobalIndexMeta.rowRange`, as with BTree. Each shard stores
+`rowId - rowRange.from`. The reader translates table row-ID filters into that range and adds
+the range start back to matching IDs. Gaps belonging to other partitions remain eligible for raw search in
+`vector-index.search-mode=detail` or `chunk`. The default `fast` mode searches
+only indexed rows.
+Exact refinement of centroid index candidates uses the metric recorded at build time.
+For raw fallback, set the column’s metric in the table properties so unindexed rows use the
+same distance as the index. For the example above, use `fields.embedding.metric=cosine`.
+You can also set `fields.embedding.dimension=768` there to reuse the dimension in later builds.
+Batch queries share each selected shard across the queries routed to it.
+
+For all four IVF types, Spark shuffles vectors by their assigned routing centroid.
+Each populated shard trains an independent IVF index on the vectors it receives.
+For IVF-PQ, this gives each shard its own inner centroids and PQ codebook. The outer
+`<index-type>.centroid.nlist` sets the number of shard slots per contiguous range. The optional
+`<index-type>.nlist` sets the number of IVF lists per shard and
+defaults to automatic sizing from that shard's vector count.
+
+For example, build with
+`ivf-pq.sharding=centroid,ivf-pq.centroid.nlist=64,ivf-pq.nlist=32`.
+A query with `map('centroid.nprobe','4','ivf.nprobe','8')` selects four centroids per range
+and searches eight local lists in each populated shard. Both levels
+support automatic probe sizing. Empty local shards have a manifest row count
+of zero and queries skip them.
+
+DiskANN uses the same outer router as IVF. Each populated centroid uses the
+ordinary DiskANN trainer, writer and reader. The shard trains its PQ codebook
+and builds its graph from the rows it receives. DiskANN’s seed and memory budget
+apply to this local build. The outer sample and coarse centers use the same
+IVF-FLAT training options as the IVF shard types. An empty shard uses an
+eight-byte `PCEMPTY1` marker with manifest row count zero. Queries skip that file. Empty slots remain in the complete
+generation so centroid identifiers stay stable.
+
+For example, use `index_type => 'diskann'` and
+`options => 'diskann.sharding=centroid,diskann.centroid.nlist=64'`, then query with
+`map('centroid.nprobe','8','diskann.l_search','64')`. Persist
+`diskann.dimension` and `diskann.metric` on the table for raw fallback.
+
+If a concurrent write or compaction replaces indexed vectors within a source range,
+the commit fails and the build must be retried. Updates to other columns and appends
+outside the source ranges can proceed. When row IDs are reassigned, a whole range that moves by a constant offset can
+reuse its router and shards with the updated manifest range.
+
+This build mode and its reader currently require the Java/Spark implementation
+and a matching native library with centroid model APIs. Install the vector plugin on jobs that build or search these indexes. Paimon Core recognizes
+routers and shards during manifest processing without loading the vector plugin.
+If you wrote indexes with pre-release centroid-specific index names, drop them with the
+previous build and rebuild them using the ordinary index type and the sharding option. Older readers and Python index
+builders do not support this layout; drop the centroid index before downgrading
+or rebuilding it through those clients. The model file and each populated shard carry
+training metadata, so measure model-loading cost and total index size alongside
+recall, latency, and the number of opened files.
+
+For quantized IVF indexes, each range or centroid shard fits its own codebooks
+or bounds. Compare performance at a common recall target
+using separate calibration and validation queries. To measure the effect of
+quantization alone, probe every outer centroid and every local list. If it remains below the target,
+increasing `centroid.nprobe` alone cannot remove quantization error. For IVF-RQ,
+calibrate `rq.bits`; for DiskANN, calibrate both outer probes and local graph
+search width. A shared routing model does not guarantee equal recall.
+
+Calibrate `ivf-pq.centroid.nlist` and `ivf-pq.pq.m` together with the query probe width.
+Increasing `centroid.nlist` creates more centroid files, each populated file carrying its own
+local model. Increasing `pq.m` uses more encoded bytes per vector;
+for the current 8-bit PQ codes, `pq.m=64` uses twice the code bytes of
+`pq.m=32`. OPQ and larger training limits are also workload-dependent choices,
+not recall guarantees. Record the resolved build options, total index size,
+query file reads, and achieved recall when comparing configurations.
 
 ## Per-Field Options
 

@@ -535,7 +535,8 @@ class MultimodalTable:
         from pypaimon.multimodal.columns import merge_columns
         return merge_columns(self, data, on=on)
 
-    def add_columns(self, schema, *, inputs=None, fn=None, batch_size=1024):
+    def add_columns(self, schema, *, inputs=None, fn=None, batch_size=1024, execution="local",
+                    concurrency=None, ray_remote_args=None):
         """Add nullable columns, optionally computing their values in batches.
 
         ``schema`` declares new columns. If supplied, ``fn`` receives an
@@ -547,12 +548,17 @@ class MultimodalTable:
 
         Outputs are grouped by the original file row-ID ranges before being
         written. Untouched columns, including media, retain their files.
-        Schema publication precedes computation; failures leave new columns
-        visible as NULL. Requires a current full-table view and a single
-        writer. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`.
+        With ``execution="ray"``, ``fn`` is required. Task definition and
+        static resource checks run before schema publication. See
+        :meth:`compute_columns` for Ray execution options and requirements.
+        Schema publication precedes task submission and computation. If
+        submission or computation fails before the data commit, the new
+        columns remain visible as NULL. Requires a current full-table view and
+        a single writer. Returns :class:`pypaimon.multimodal.ColumnUpdateResult`.
         """
         from pypaimon.multimodal.columns import add_columns
-        return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size)
+        return add_columns(self, schema, inputs=inputs, fn=fn, batch_size=batch_size,
+                           execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def update_columns_by_row_id(self, data, *, columns):
         """Update existing columns from one local Arrow table containing ``_ROW_ID``.
@@ -596,6 +602,7 @@ class MultimodalTable:
         Execution requires a current full-table view and a single writer.
         With ``execution="ray"``, workers use the Python shard updater on
         disjoint file groups, then the driver commits once after all succeed.
+        Task definition and static resource checks run before planning the update.
         ``concurrency`` bounds the number of shards (default 4) and
         ``ray_remote_args`` configures Ray task resources. Workers must be able
         to serialize and run ``fn`` and access the table storage.

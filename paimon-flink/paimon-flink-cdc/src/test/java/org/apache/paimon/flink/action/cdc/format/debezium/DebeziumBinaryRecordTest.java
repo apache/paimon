@@ -24,8 +24,11 @@ import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.Expression;
+import org.apache.paimon.flink.action.cdc.PrefixedMetadataConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlRecordParser;
+import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcRecordUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -50,11 +53,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Arra
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.util.ListCollector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.ByteBuffer;
@@ -66,6 +71,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Binary values must survive Debezium parsing, key projection and table writes. */
@@ -91,6 +97,162 @@ class DebeziumBinaryRecordTest {
     @ValueSource(strings = {"json", "mysql"})
     void testComputedColumnsKeepTextSemantics(String format) throws Exception {
         assertComputedColumns((bytes, computed) -> parse(format, bytes, computed));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"mysql", "postgres"})
+    void testComputedColumnsReferenceSourceMetadata(String format) throws Exception {
+        CdcMetadataConverter[] metadata = {
+            new PrefixedMetadataConverter(
+                    new CdcMetadataConverter.DatabaseNameConverter(), "__source_"),
+            new PrefixedMetadataConverter(
+                    new CdcMetadataConverter.TableNameConverter(), "__source_")
+        };
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Arrays.asList(
+                                "source_db=substring(__source_database_name,0)",
+                                "source_table=substring(__source_table_name,0)"),
+                        Collections.emptyList(),
+                        metadata,
+                        true);
+        FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> parser =
+                format.equals("mysql")
+                        ? new MySqlRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                metadata)
+                        : new PostgresRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                metadata);
+        CdcRecord record =
+                collectRecord(
+                                parser,
+                                jsonValue(ByteBuffer.wrap(new byte[] {0, (byte) 0xff})).toString())
+                        .toRichCdcRecord()
+                        .toCdcRecord();
+
+        assertThat(record.data())
+                .containsEntry("source_db", "test")
+                .containsEntry("source_table", "binary_table");
+        assertThat(record.base64EncodedFields()).containsExactly("payload");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "json,true,value", "json,false,value", "json,true,null", "json,false,null",
+        "json,true,missing", "json,false,missing", "mysql,true,value", "mysql,false,value",
+        "mysql,true,null", "mysql,false,null", "mysql,true,missing", "mysql,false,missing",
+        "postgres,true,value", "postgres,false,value", "postgres,true,null", "postgres,false,null",
+        "postgres,true,missing", "postgres,false,missing"
+    })
+    void testBinarySourceFieldWithMetadataName(
+            String format, boolean caseSensitive, String sourceValue) throws Exception {
+        CdcMetadataConverter metadata =
+                format.equals("json")
+                        ? new KafkaMetadataConverter.TopicConverter()
+                        : new CdcMetadataConverter.TableNameConverter();
+        String sourceName =
+                caseSensitive
+                        ? metadata.columnName()
+                        : metadata.columnName().toUpperCase(java.util.Locale.ROOT);
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Collections.singletonList("s=substring(" + metadata.columnName() + ",0)"),
+                        Collections.singletonList(new DataField(0, sourceName, DataTypes.BYTES())),
+                        new CdcMetadataConverter[] {metadata},
+                        caseSensitive);
+        ObjectNode value =
+                (ObjectNode)
+                        jsonValue(
+                                sourceValue.equals("value")
+                                        ? ByteBuffer.wrap(
+                                                "source-value".getBytes(StandardCharsets.UTF_8))
+                                        : null);
+        ((ObjectNode) value.get("schema").get("fields").get(0).get("fields").get(0))
+                .put("field", sourceName);
+        ObjectNode after = (ObjectNode) value.get("payload").get("after");
+        JsonNode binaryValue = after.remove("payload");
+        if (!sourceValue.equals("missing")) {
+            after.set(sourceName, binaryValue);
+        }
+        CdcMetadataConverter[] converters = {metadata};
+        FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> parser;
+        switch (format) {
+            case "mysql":
+                parser =
+                        new MySqlRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                converters);
+                break;
+            case "postgres":
+                parser =
+                        new PostgresRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                converters);
+                break;
+            default:
+                parser =
+                        new DebeziumJsonRecordParser(TypeMapping.defaultMapping(), columns)
+                                .withMetadataConverters(converters);
+        }
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
+        parser.flatMap(
+                new CdcSourceRecord(
+                        "wire-topic", null, format.equals("json") ? value : value.toString()),
+                new ListCollector<>(records));
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).toRichCdcRecord().toCdcRecord().data())
+                .containsEntry("s", sourceValue.equals("value") ? "source-value" : null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"json", "mysql", "postgres"})
+    void testComputedColumnReplacingBinarySourceField(String format) throws Exception {
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Arrays.asList("payload=substring(id,0)", "s=substring(payload,0)"),
+                        Arrays.asList(
+                                new DataField(0, "payload", DataTypes.BYTES()),
+                                new DataField(1, "id", DataTypes.INT())));
+        FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> parser;
+        switch (format) {
+            case "mysql":
+                parser =
+                        new MySqlRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                new CdcMetadataConverter[0]);
+                break;
+            case "postgres":
+                parser =
+                        new PostgresRecordParser(
+                                new Configuration(),
+                                columns,
+                                TypeMapping.defaultMapping(),
+                                new CdcMetadataConverter[0]);
+                break;
+            default:
+                parser = new DebeziumJsonRecordParser(TypeMapping.defaultMapping(), columns);
+        }
+        JsonNode value =
+                jsonValue(ByteBuffer.wrap("source-value".getBytes(StandardCharsets.UTF_8)));
+        CdcRecord record =
+                collectRecord(parser, format.equals("json") ? value : value.toString())
+                        .toRichCdcRecord()
+                        .toCdcRecord();
+
+        assertThat(record.data()).containsEntry("payload", "1").containsEntry("s", "1");
+        assertThat(record.base64EncodedFields()).isEmpty();
     }
 
     @Test

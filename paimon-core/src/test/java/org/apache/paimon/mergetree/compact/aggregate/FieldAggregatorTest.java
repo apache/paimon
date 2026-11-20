@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -28,6 +29,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
@@ -2140,6 +2142,47 @@ public class FieldAggregatorTest {
     private InternalRow row(
             Object k0, Object k1, String v, Object seq, org.apache.paimon.data.Timestamp ts) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v), seq, ts);
+    }
+
+    @Test
+    public void testFieldCollectAggDistinctNestedMapsInBinaryForm() {
+        // The write buffer stores rows in binary form, so the inputs reach the aggregator as
+        // binary arrays. Maps with the same entries in another order are one value and must not
+        // take a count-limit slot.
+        DataType elementType = DataTypes.ARRAY(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        ArrayType arrayType = DataTypes.ARRAY(elementType);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                arrayType,
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.distinct", "true",
+                                                "fields.fieldName.count-limit", "2")),
+                                "fieldName");
+        Map<Object, Object> a = new LinkedHashMap<>();
+        a.put(1, 10);
+        a.put(2, 20);
+        Map<Object, Object> b = new LinkedHashMap<>();
+        b.put(2, 20);
+        b.put(1, 10);
+        Map<Object, Object> c = Collections.singletonMap(3, 30);
+        InternalArraySerializer serializer = new InternalArraySerializer(elementType);
+        Object accumulator = null;
+        for (Map<Object, Object> map : Arrays.asList(a, b, c)) {
+            GenericArray element = new GenericArray(new Object[] {new GenericMap(map)});
+            BinaryArray input =
+                    serializer.toBinaryArray(new GenericArray(new Object[] {element})).copy();
+            accumulator = agg.agg(accumulator, input);
+        }
+        InternalArray result = (InternalArray) accumulator;
+        assertThat(result.size()).isEqualTo(2);
+        InternalMap first = result.getArray(0).getMap(0);
+        assertThat(first.size()).isEqualTo(2);
+        assertThat(first.keyArray().getInt(0)).isEqualTo(1);
+        InternalMap last = result.getArray(1).getMap(0);
+        assertThat(last.size()).isEqualTo(1);
+        assertThat(last.keyArray().getInt(0)).isEqualTo(3);
     }
 
     @Test

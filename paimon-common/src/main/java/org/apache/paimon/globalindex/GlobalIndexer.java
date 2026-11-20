@@ -52,6 +52,12 @@ public interface GlobalIndexer {
             ExecutorService executor);
 
     static GlobalIndexer create(String type, List<DataField> indexFields, Options options) {
+        return GlobalIndexerFactoryUtils.load(type)
+                .create(indexFields, resolveOptions(type, indexFields, options));
+    }
+
+    /** Resolve the same field and procedure options for build planning and plugin creation. */
+    static Options resolveOptions(String type, List<DataField> indexFields, Options options) {
         Options resolved = options;
         if (!indexFields.isEmpty()) {
             // The leading field owns the index; remaining fields are indexed payload columns.
@@ -61,6 +67,6 @@ public interface GlobalIndexer {
                             ? VectorIndexOptions.resolve(options, type, column).options()
                             : new CoreOptions(options).globalIndexOptions(type, column);
         }
-        return GlobalIndexerFactoryUtils.load(type).create(indexFields, resolved);
+        return resolved;
     }
 }

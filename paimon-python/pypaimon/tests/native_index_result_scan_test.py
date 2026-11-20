@@ -152,10 +152,14 @@ def test_exposed_python_splits_and_pickled_results_use_current_metadata(source):
 def test_empty_native_pk_search_preserves_java_snapshot_zero(source, rest_catalog):
     catalog, _ = rest_catalog
     schema = source[0].table_schema
+    options = {key: value for key, value in schema.options.items()
+               if key not in ('path', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt')}
     catalog.create_table('default.empty_text', Schema(
-        schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+        schema.fields, schema.partition_keys, schema.primary_keys, options), False)
     table = catalog.get_table('default.empty_text').copy({
         'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
+    assert table.table_path != source[0].table_path
+    assert table.snapshot_manager().get_latest_snapshot() is None
     result = text._builder(table).execute_local()
     assert result.snapshot_id == 0
     with patch.object(FileScanner, 'scan', side_effect=AssertionError('Python scan ran')):

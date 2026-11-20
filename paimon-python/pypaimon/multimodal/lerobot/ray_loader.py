@@ -197,7 +197,7 @@ def _prepare_sources_ray(table, plans, source_options, batch_size, parallelism):
                 "subtask_indices": plan["metadata"]["subtask_indices"],
             })
             mapping_ref = ray.put({key: plan[key] for key in (
-                "dataset_index", "frame_offset", "episode_offset",
+                "dataset_id", "frame_offset", "episode_offset",
                 "task_index", "subtask_index") if key in plan})
             for group in _task_groups(plan["info"], plan["dataset"]._episodes,
                                       plan["videos"], parallelism):

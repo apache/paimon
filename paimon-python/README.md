@@ -10,6 +10,13 @@ This PyPi package contains the Python APIs for using Paimon.
 
 Pypaimon requires Python 3.6+.
 
+On Python 3.10+, `pip install pypaimon` also installs `pypaimon-rust>=0.5.0`.
+Native split planning, reads, writes, updates and commits are enabled by default
+for supported operations. Older Python versions and unsupported operations use
+Python execution. To select Python execution explicitly, set
+`scan.native-plan.enabled`, `read.native.enabled`, `write.native.enabled` and
+`commit.native.enabled` to `false` in the table options.
+
 # Build
 
 Run from `paimon-python/` with pip supporting dependency groups.
@@ -127,7 +134,7 @@ commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
 # Multimodal column enrichment
 
-Multimodal Data Evolution tables provide local column-enrichment methods:
+Multimodal Data Evolution tables provide column-enrichment methods:
 
 ```python
 # labels is a typed Arrow table containing sample_id and the columns to fill.
@@ -158,7 +165,13 @@ Outputs must have the declared/existing types. A fixed-size Arrow list declares
 a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
 
 These methods require a current full-table view and a single writer during the
-operation. They do not provide distributed execution or automatic retries.
+operation. `add_columns` with `fn` and `compute_columns` support `execution="ray"`
+with `pypaimon[ray]` installed. `concurrency` caps the number of shards and
+`ray_remote_args` configures task resources. The driver commits the backfill
+after all workers succeed. For `add_columns`, task definition and static
+resource checks run before schema publication. Ray can still reject placement
+group constraints during submission, and workers can fail during execution.
+There are no automatic retries.
 `compute_columns` requires existing, non-partition output columns and never
 changes the schema. It uses the table's output types and nullability. Every call
 computes all visible rows, including rows with existing values. Use `replace_video`
@@ -170,8 +183,8 @@ Function calls have at most
 `merge_columns` materializes the source as an Arrow table and delegates target
 matching and updates to the standard MERGE backend. Supported routes use native
 MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
-`add_columns` and `compute_columns` can use the native shard reader and writer;
-their `fn` runs in Python.
+Local `add_columns` and `compute_columns` can use the native shard reader and
+writer; their `fn` runs in Python.
 
 `update_columns_by_row_id(data, *, columns)` accepts one Arrow Table and requires
 an explicit output column name or sequence of names. The input must contain
@@ -233,8 +246,8 @@ Native planning, reading, writing and committing remain available for table data
 
 # Native write and commit
 
-PyPaimon can write Arrow batches through the optional `pypaimon-rust` runtime.
-Enable it on a table independently of native commit:
+PyPaimon writes Arrow batches through `pypaimon-rust` by default on Python 3.10+.
+Native writes and commits can be configured independently:
 
 ```python
 native_table = table.copy({"write.native.enabled": "true",
@@ -392,12 +405,13 @@ uncommitted and will never be submitted. Never call it after a commit with an
 unknown outcome: publication may have succeeded before its response failed.
 Internal failure paths preserve prepared files instead of calling commit abort.
 
-Both native options are disabled by default.
+Both native options are enabled by default.
 
 # Native commit
 
-PyPaimon can submit append and batch overwrite commits through the optional
-`pypaimon-rust` runtime. Enable it independently of native planning and reading:
+PyPaimon can submit append and batch overwrite commits through
+`pypaimon-rust`, installed by default on Python 3.10+. Native commit is enabled
+by default and configured independently of native planning and reading:
 
 ```python
 native_table = table.copy({"commit.native.enabled": "true"})
@@ -441,22 +455,24 @@ not installed, commits use Python. The current native route supports main-branch
 tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
 standard FileIO. Truncate, REST/catalog-managed publication, custom
 FileIO/environments, commit callbacks, and snapshot properties use Python.
-Data-evolution updates that need Python's row-id conflict rewriting also retain
-the Python path. Compact increments remain unsupported by both committers.
+With Native 0.5.0, Data Evolution commits containing retained row-ID files use
+Python publication to validate written field IDs against the schema of each
+snapshot attempt. Native write and update preparation remain available.
+Compact increments remain unsupported by both committers.
 
 Fallback is limited to runtime availability, table construction and message
 conversion before a native mutation starts. A native commit error propagates;
 the adapter neither retries it through Python nor aborts files, since the
-snapshot may already have been published. The option is disabled by default.
+snapshot may already have been published. The option is enabled by default.
 
 # Native scan planning
 
-PyPaimon can plan splits with the optional `pypaimon-rust` package. Planning and
-reading are independently selectable, so native plans can still use the Python
-reader:
+PyPaimon plans splits with `pypaimon-rust` by default on Python 3.10+.
+Planning and reading are independently selectable, so native plans can still
+use the Python reader:
 
 ```python
-native_table = table.copy({"scan.native-plan.enabled": "true"})
+native_table = table.copy({"read.native.enabled": "false"})
 builder = native_table.new_read_builder()
 plan = builder.new_scan().plan()
 rows = builder.new_read().to_arrow(plan.splits())
@@ -650,7 +666,8 @@ Continuous streaming delegates planning and resume state to Rust core.
 retaining scan filters and limits and requiring unrestricted query authorization.
 Writer restore, overwrite and index construction use this entrypoint and delegate
 planning to Rust core when Native planning is enabled.
-Native planning remains optional and is disabled by default.
+Native planning is enabled by default; set `scan.native-plan.enabled=false`
+and `read.native.enabled=false` to select Python planning and reading.
 
 Binary partition keys use UTF-8 text and normal partition escaping in both
 `partition.legacy-name` modes, matching Java. This makes repeated writes to the

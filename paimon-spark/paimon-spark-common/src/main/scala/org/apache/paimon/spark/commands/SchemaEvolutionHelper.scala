@@ -31,7 +31,7 @@ import org.apache.spark.sql.{DataFrame, PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.TableCatalog
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, NullType, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -99,8 +99,7 @@ private[spark] object SchemaEvolutionHelper {
       table: FileStoreTable,
       dataSchema: StructType,
       flags: SchemaEvolutionFlags): Option[TableSchema] = {
-    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
-    val dataRowType = SparkTypeUtils.toPaimonType(filtered).asInstanceOf[RowType]
+    val dataRowType = toDataRowType(table, dataSchema, flags.caseSensitive)
     val current = table.schema()
     val merged =
       SchemaMergingUtils.mergeSchemas(
@@ -122,12 +121,71 @@ private[spark] object SchemaEvolutionHelper {
       dataSchema: StructType,
       sparkSession: SparkSession,
       options: Options = new Options()): Boolean = {
-    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
     val flags = readFlags(sparkSession, options)
-    val dataRowType = SparkTypeUtils.toPaimonType(filtered).asInstanceOf[RowType]
+    val dataRowType = toDataRowType(table, dataSchema, flags.caseSensitive)
     table
       .store()
       .mergeSchema(dataRowType, flags.typeWidening, flags.allowExplicitCast, flags.caseSensitive)
+  }
+
+  private def toDataRowType(
+      table: FileStoreTable,
+      dataSchema: StructType,
+      caseSensitive: Boolean): RowType = {
+    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
+    val target = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
+    val resolved = resolveNullTypes(filtered, Some(target), Nil, caseSensitive)
+    SparkTypeUtils.toPaimonType(resolved).asInstanceOf[RowType]
+  }
+
+  /**
+   * NULL and empty collections have no concrete leaf type. Resolve only those leaves against the
+   * target before converting to Paimon types, preserving typed siblings for schema evolution.
+   */
+  private def resolveNullTypes(
+      source: DataType,
+      target: Option[DataType],
+      path: Seq[String],
+      caseSensitive: Boolean): DataType = source match {
+    case NullType =>
+      target.getOrElse {
+        val fieldPath = path.map(name => s"`${name.replace("`", "``")}`").mkString(".")
+        throw new UnsupportedOperationException(
+          s"Cannot infer the type of field $fieldPath from NULL during schema evolution. " +
+            "Use CAST to specify a concrete type for NULL or the empty collection.")
+      }
+    case struct: StructType =>
+      val targetFields = target.collect { case s: StructType => s.fields.toSeq }.getOrElse(Nil)
+      StructType(struct.fields.map {
+        field =>
+          val targetField = targetFields.find(
+            f => if (caseSensitive) f.name == field.name else f.name.equalsIgnoreCase(field.name))
+          field.copy(dataType = resolveNullTypes(
+            field.dataType,
+            targetField.map(_.dataType),
+            path :+ field.name,
+            caseSensitive))
+      })
+    case array: ArrayType =>
+      array.copy(elementType = resolveNullTypes(
+        array.elementType,
+        target.collect { case a: ArrayType => a.elementType },
+        path :+ "element",
+        caseSensitive))
+    case map: MapType =>
+      map.copy(
+        keyType = resolveNullTypes(
+          map.keyType,
+          target.collect { case m: MapType => m.keyType },
+          path :+ "key",
+          caseSensitive),
+        valueType = resolveNullTypes(
+          map.valueType,
+          target.collect { case m: MapType => m.valueType },
+          path :+ "value",
+          caseSensitive)
+      )
+    case other => other
   }
 
   /**

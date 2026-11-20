@@ -183,6 +183,12 @@ public class NativeVectorGlobalIndexTest {
 
     @Test
     public void testTrainingVectorCountUsesConfiguredSampleRatio() {
+        assertThat(NativeVectorGlobalIndexWriter.trainingCandidateCount(10000000000L, 0.6))
+                .isEqualTo(6000000000L);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.sampleIndex(
+                                5999999999L, 10000000000L, 6000000000L))
+                .isEqualTo(9999999998L);
         assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 1.0))
                 .isEqualTo(10_000);
         assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 0.25))

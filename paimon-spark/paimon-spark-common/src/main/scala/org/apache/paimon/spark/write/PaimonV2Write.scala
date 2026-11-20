@@ -28,7 +28,7 @@ import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.connector.distributions.Distribution
+import org.apache.spark.sql.connector.distributions.{Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.write._
@@ -52,7 +52,11 @@ class PaimonV2Write(
   private val writeRequirement = PaimonWriteRequirement(table)
 
   override def requiredDistribution(): Distribution = {
-    val distribution = writeRequirement.distribution
+    val distribution = if (PaimonWriteRequirement.requiresQueryPreparation) {
+      Distributions.unspecified()
+    } else {
+      writeRequirement.distribution
+    }
     logInfo(s"Requesting $distribution as write distribution for table ${table.name()}")
     distribution
   }

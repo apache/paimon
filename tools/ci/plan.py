@@ -34,6 +34,7 @@ SUITES = [
     ("spark3", "Spark 3 / Scala 2.12", 8, "2.12", 90),
     ("spark3", "Spark 3 / Scala 2.13", 8, "2.13", 90),
     ("spark4", "Spark 4 / Scala 2.13", 17, "2.13", 90),
+    ("spark42", "Spark 4.2 / Scala 2.13", 17, "2.13", 90),
     ("e2e-flink1", "E2E / Flink 1 and Spark interoperability", 8, "2.12", 60),
     ("e2e-flink2", "E2E / Flink 2", 11, "2.12", 60),
     ("iceberg", "Iceberg GA / JDK 17", 17, "2.12", 60),
@@ -45,7 +46,7 @@ ALL_JAVA = {suite[0] for suite in SUITES}
 REST_SPECS = {"docs/static/rest-catalog-open-api.yaml", "docs/static/rest-management-open-api.yaml"}
 OPENAPI_V4_ACTIONS = "paimon-api/src/main/java/org/apache/paimon/rest/auth/DLFOpenApiActions.java"
 FLINK = {"flink1-common", "flink1-connectors", "flink2"}
-SPARK = {"spark3", "spark4"}
+SPARK = {"spark3", "spark4", "spark42"}
 E2E = {"e2e-flink1", "e2e-flink2"}
 
 

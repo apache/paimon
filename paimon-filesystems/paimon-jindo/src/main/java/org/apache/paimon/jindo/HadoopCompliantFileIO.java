@@ -31,6 +31,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import com.aliyun.jindodata.types.JindoHadoopFileStatus;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.io.IOUtils;
@@ -173,16 +174,45 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        FileStatus[] statuses = new FileStatus[0];
-        org.apache.hadoop.fs.FileStatus[] hadoopStatuses =
-                getFileSystem(hadoopPath, false).listStatus(hadoopPath);
-        if (hadoopStatuses != null) {
-            statuses = new FileStatus[hadoopStatuses.length];
-            for (int i = 0; i < hadoopStatuses.length; i++) {
-                statuses[i] = new HadoopFileStatus(hadoopStatuses[i]);
-            }
+        JindoHadoopSystem fs = getFileSystem(hadoopPath, false);
+        org.apache.hadoop.fs.FileStatus[] entries = fs.listStatus(hadoopPath);
+        if (entries == null) {
+            return new FileStatus[0];
+        }
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
+        FileStatus[] statuses = new FileStatus[entries.length];
+        for (int i = 0; i < entries.length; i++) {
+            statuses[i] = new HadoopFileStatus(entries[i], directory);
         }
         return statuses;
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        JindoHadoopSystem fs = getFileSystem(hadoopPath, false);
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> entries =
+                fs.listStatusIterator(hadoopPath);
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return entries.hasNext();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                return new HadoopFileStatus(entries.next(), directory);
+            }
+        };
+    }
+
+    private static org.apache.hadoop.fs.Path listingDirectory(
+            JindoHadoopSystem fs, org.apache.hadoop.fs.Path path) {
+        // Jindo rebuilds even fully qualified paths with the Hadoop Path component constructor.
+        URI fsUri = fs.getUri();
+        String directory = fs.makeQualified(path).toUri().getPath();
+        return new org.apache.hadoop.fs.Path(fsUri.getScheme(), fsUri.getAuthority(), directory);
     }
 
     @Override
@@ -466,9 +496,31 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     private static class HadoopFileStatus implements FileStatus {
 
         private final org.apache.hadoop.fs.FileStatus status;
+        @Nullable private final org.apache.hadoop.fs.Path listedDirectory;
 
         private HadoopFileStatus(org.apache.hadoop.fs.FileStatus status) {
+            this(status, null);
+        }
+
+        private HadoopFileStatus(
+                org.apache.hadoop.fs.FileStatus status,
+                @Nullable org.apache.hadoop.fs.Path listedDirectory) {
             this.status = status;
+            this.listedDirectory = listedDirectory;
+        }
+
+        @Nullable
+        @Override
+        public String getStorageClass() {
+            // Listing a single file can return a basic status with a default storage class.
+            if (listedDirectory != null
+                    && status instanceof JindoHadoopFileStatus
+                    && status.isFile()
+                    && listedDirectory.equals(status.getPath().getParent())) {
+                String storageClass = ((JindoHadoopFileStatus) status).getStorageClassName();
+                return "Unknown".equals(storageClass) ? null : storageClass;
+            }
+            return null;
         }
 
         @Override

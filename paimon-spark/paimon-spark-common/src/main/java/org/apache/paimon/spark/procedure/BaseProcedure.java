@@ -90,6 +90,24 @@ abstract class BaseProcedure implements Procedure {
         return result;
     }
 
+    /** A post-commit callback can fail after the table has already changed. */
+    protected <T> T modifySparkTableRefreshingCacheOnFailure(
+            Identifier ident, Function<SparkTable, T> func) {
+        SparkTable table = loadSparkTable(ident);
+        try {
+            T result = func.apply(table);
+            refreshSparkCache(ident, table);
+            return result;
+        } catch (RuntimeException failure) {
+            try {
+                refreshSparkCache(ident, table);
+            } catch (RuntimeException refreshError) {
+                failure.addSuppressed(refreshError);
+            }
+            throw failure;
+        }
+    }
+
     protected SparkTable loadSparkTable(Identifier ident) {
         try {
             Table table = tableCatalog.loadTable(ident);

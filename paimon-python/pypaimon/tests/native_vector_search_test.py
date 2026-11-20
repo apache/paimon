@@ -136,9 +136,13 @@ def test_empty_search_keeps_batch_arity(vector_table, rest_catalog, empty):
     if empty == 'table':
         catalog, _ = rest_catalog
         schema = vector_table.table_schema
+        options = {key: value for key, value in schema.options.items()
+                   if key not in ('path', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt')}
         catalog.create_table('default.empty_vectors', Schema(
-            schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+            schema.fields, schema.partition_keys, schema.primary_keys, options), False)
         native = catalog.get_table('default.empty_vectors').copy({'read.native.enabled': 'true'})
+        assert native.table_path != vector_table.table_path
+        assert native.snapshot_manager().get_latest_snapshot() is None
     predicate = native.new_read_builder().new_predicate_builder()
     builder = (native.new_batch_vector_search_builder().with_vector_column('embedding')
                .with_query_vectors([[1, 0], [0, 1]]).with_limit(2))
@@ -180,13 +184,17 @@ def pk_vector_table(rest_catalog, golden_catalog):
     catalog, server = rest_catalog
     golden = golden_catalog.get_table('default.test_pk_vector_golden')
     schema = golden.table_schema
+    options = {key: value for key, value in schema.options.items() if key != 'path'}
     catalog.create_table('default.pk_vectors', Schema(
-        schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+        schema.fields, schema.partition_keys, schema.primary_keys, options), False)
     source = Path(golden.table_path)
     destination = Path(server.data_path) / server.warehouse / 'default' / 'pk_vectors'
     for directory in ('bucket-0', 'index', 'manifest', 'snapshot'):
         shutil.copytree(str(source / directory), str(destination / directory))
-    return catalog.get_table('default.pk_vectors')
+    table = catalog.get_table('default.pk_vectors')
+    assert table.table_path == destination.as_uri()
+    assert table.catalog_environment.catalog_loader is not None
+    return table
 
 
 @pytest.mark.parametrize('filtered', [False, True])

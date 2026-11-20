@@ -137,6 +137,30 @@ public interface FileIO extends Serializable, Closeable {
     FileStatus[] listStatus(Path path) throws IOException;
 
     /**
+     * Iterates over the direct files and subdirectories of a directory. The default implementation
+     * uses {@link #listStatus(Path)}. File systems with paginated listings can fetch entries on
+     * demand.
+     */
+    default RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        FileStatus[] statuses = listStatus(path);
+        if (statuses == null) {
+            throw new IOException("No listing returned for " + path);
+        }
+        Iterator<FileStatus> entries = Arrays.asList(statuses).iterator();
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() {
+                return entries.hasNext();
+            }
+
+            @Override
+            public FileStatus next() {
+                return entries.next();
+            }
+        };
+    }
+
+    /**
      * List the statuses of the files in the given path if the path is a directory.
      *
      * @param path given path

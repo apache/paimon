@@ -20,15 +20,11 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.StringUtils;
 
@@ -46,7 +42,6 @@ import org.apache.spark.sql.types.StructType;
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -153,7 +148,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
         if (snapshot == null) {
             return;
         }
-        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+        Function<Snapshot, DataEvolutionRewriteExecutor.PlanResult> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
                             deletionFilesPerBatch == null
@@ -164,7 +159,8 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                                             partitionPredicate,
                                             planningSnapshot,
                                             deletionFilesPerBatch);
-                    return coordinator.plan();
+                    return new DataEvolutionRewriteExecutor.PlanResult(
+                            coordinator.plan(), coordinator.isScanFinished());
                 };
         DataEvolutionRewriteExecutor.execute(
                 table,
@@ -172,21 +168,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                 taskPlanner,
                 javaSparkContext,
                 sparkSession,
-                new DataEvolutionRewriteExecutor.CommitConfigurer() {
-                    @Override
-                    public void configure(TableCommitImpl commit) {
-                        commit.materializeDvRowIdCheck();
-                    }
-
-                    @Override
-                    public void prepareMessages(
-                            Snapshot planningSnapshot, List<CommitMessage> messages) {
-                        messages.replaceAll(
-                                message ->
-                                        ((CommitMessageImpl) message)
-                                                .withCheckFromSnapshot(planningSnapshot.id()));
-                    }
-                });
+                DataEvolutionRewriteExecutor.MATERIALIZE_DV_COMMIT);
     }
 
     private boolean blank(InternalRow args, int index) {

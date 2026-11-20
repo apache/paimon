@@ -32,7 +32,7 @@ suitable for event attributes, model output, tool parameters, and other data tha
 frequently to model every field as a table column.
 
 Paimon stores `VARIANT` with the
-[Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding),
+[Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding.md),
 instead of storing its JSON text. The data is parsed when it is converted to `VARIANT`, and queries
 can extract a path as a requested SQL type.
 

@@ -288,6 +288,7 @@ collator = pm.VideoFrameCollator(
     decode_fn=decode_frame,
     output_column="frame",
     max_open_videos=4,
+    decode_parallelism=4,
 )
 
 loader = DataLoader(
@@ -339,3 +340,8 @@ for batch in loader:
 Install `pypaimon[torch,video]` for the PyAV path, or install TorchCodec
 separately. Omit `video_backend` to select an available decoder. The decoder
 and range cache stay local to each DataLoader worker.
+
+Set `decode_parallelism` to decode distinct videos concurrently within a batch.
+It defaults to `1`; callbacks sharing mutable state must be thread-safe before
+increasing it. Concurrency is capped by `max_open_videos`, and input row order
+is preserved. Decoder creation remains sequential.

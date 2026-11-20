@@ -66,7 +66,13 @@ class BTreeTopNIndexFileSelector {
         List<IndexFileMeta> selected = new ArrayList<>();
         List<RankedIndexFile> rankedFiles = new ArrayList<>();
         for (IndexFileMeta file : files) {
-            rankedFiles.add(selector.rank(file));
+            RankedIndexFile ranked = selector.rank(file);
+            if (ranked == null) {
+                // A legacy file may contain empty keys as well as nulls. Without exact bounds,
+                // ranking it could exclude a file containing the actual TopN value.
+                return files;
+            }
+            rankedFiles.add(ranked);
         }
 
         rankedFiles.sort(selector::compare);
@@ -84,6 +90,7 @@ class BTreeTopNIndexFileSelector {
         return selected;
     }
 
+    @Nullable
     private RankedIndexFile rank(IndexFileMeta file) {
         GlobalIndexMeta globalIndex =
                 checkNotNull(
@@ -96,6 +103,9 @@ class BTreeTopNIndexFileSelector {
                         "BTree index file '%s' is missing sorted metadata.",
                         file.fileName());
         SortedIndexFileMeta sortedMeta = SortedIndexFileMeta.deserialize(indexMeta);
+        if (sortedMeta.hasAmbiguousNullBounds()) {
+            return null;
+        }
         byte[] firstKey = sortedMeta.firstKey();
         byte[] lastKey = sortedMeta.lastKey();
         boolean hasNonNulls = lastKey != null;

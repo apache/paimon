@@ -32,26 +32,39 @@ class _ShardError(RuntimeError):
         super().__init__(phase, error)
 
 
-def validate_ray_options(concurrency, ray_remote_args):
+def create_ray_column_worker(concurrency, ray_remote_args):
     concurrency = 4 if concurrency is None else concurrency
     if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
         raise ValueError("concurrency must be a positive integer.")
-    options = dict(ray_remote_args or {})
+    options = {} if ray_remote_args is None else dict(ray_remote_args)
     if "num_returns" in options:
-        raise ValueError("compute_columns manages num_returns; omit it from ray_remote_args.")
+        raise ValueError("Ray column computation manages num_returns; omit it from ray_remote_args.")
     if options.get("max_retries", 0) != 0 or options.get("retry_exceptions", False):
         raise ValueError("Ray column computation requires max_retries=0 and retry_exceptions=False.")
     options.update(max_retries=0, retry_exceptions=False)
     try:
-        import ray  # noqa: F401
+        import ray
     except ModuleNotFoundError as error:
         if error.name != "ray":
             raise
         raise ImportError("Ray column computation requires pypaimon[ray].") from error
-    return concurrency, options
+    # Defining the task validates its options and applies Ray's GPU worker exit policy.
+    worker = ray.remote(**options)(_prepare_shard)
+
+    # Ray defers these resource checks until task submission.
+    resources = options.get("resources") or {}
+    reserved = {"bundle", "memory", "object_store_memory"}.intersection(resources)
+    if reserved:
+        raise ValueError("Ray reserves resource names %s in ray_remote_args['resources']." % sorted(reserved))
+    for name, quantity in resources.items():
+        if not isinstance(quantity, (int, float)):
+            raise ValueError("Ray resource quantities must be integers or floats.")
+        if quantity > 0 and (not isinstance(name, str) or not name.isascii()):
+            raise ValueError("Ray resource names must be ASCII strings.")
+    return concurrency, worker
 
 
-def prepare_ray_column_update(operation, table, commit_user, inputs, schema, fn, batch_size, concurrency, remote_args):
+def prepare_ray_column_update(operation, table, commit_user, inputs, schema, fn, batch_size, concurrency, worker):
     import ray
     from ray.exceptions import RayTaskError
 
@@ -62,8 +75,6 @@ def prepare_ray_column_update(operation, table, commit_user, inputs, schema, fn,
         return [], 0
 
     context = ray.put((plan.table, commit_user, inputs, schema, fn, batch_size))
-    # Ray sets the default GPU worker exit policy when registering the function.
-    worker = ray.remote(**remote_args)(_prepare_shard)
     pending = []
     try:
         try:

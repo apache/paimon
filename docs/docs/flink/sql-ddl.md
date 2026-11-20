@@ -123,7 +123,7 @@ You can set location in the properties of table/database by the config of `locat
 
 By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite, MySQL, postgres, etc.
 
-Currently, lock configuration is only supported for MySQL and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
+Currently, lock configuration is only supported for MySQL, PostgreSQL, and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
 
 Paimon JDBC Catalog in Flink needs to correctly add the corresponding jar package for connecting to the database. You should first download JDBC  connector bundled jar and add it to classpath. such as MySQL, postgres
 

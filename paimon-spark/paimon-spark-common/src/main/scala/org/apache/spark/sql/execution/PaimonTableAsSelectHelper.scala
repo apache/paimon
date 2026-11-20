@@ -164,10 +164,11 @@ object PaimonTableAsSelectHelper {
     }
   }
 
-  def supportsCatalog(catalog: SparkBaseCatalog, tableSpec: TableSpec): Boolean = catalog match {
+  // Spark 3.2 does not define TableSpec, so keep it out of this shared entry point.
+  def supportsCatalog(catalog: SparkBaseCatalog, provider: String): Boolean = catalog match {
     case _: SparkCatalog => true
     case _: SparkGenericCatalog =>
-      tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME))
+      SparkBaseCatalog.usePaimon(provider)
     case _ => false
   }
 

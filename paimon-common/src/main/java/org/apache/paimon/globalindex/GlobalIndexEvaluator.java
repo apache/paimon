@@ -19,8 +19,11 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.GeometryIntersectsTransform;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.IsNaN;
@@ -144,14 +147,23 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     private CompletableFuture<Optional<Evaluation>> visitLeafAsync(LeafPredicate predicate) {
-        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+        LeafPredicate lookup = indexLookup(predicate);
+        Optional<FieldRef> fieldRefOptional = lookup.fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
         FieldRef fieldRef = fieldRefOptional.get();
         return visitFieldAsync(
-                fieldRef,
-                reader -> predicate.function().visit(reader, fieldRef, predicate.literals()));
+                fieldRef, reader -> lookup.function().visit(reader, fieldRef, lookup.literals()));
+    }
+
+    static LeafPredicate indexLookup(LeafPredicate leaf) {
+        if (leaf.transform() instanceof GeometryIntersectsTransform
+                && leaf.function() instanceof Equal
+                && Boolean.TRUE.equals(leaf.literals().get(0))) {
+            return ((GeometryIntersectsTransform) leaf.transform()).envelopeFilter().orElse(leaf);
+        }
+        return leaf;
     }
 
     private CompletableFuture<Optional<Evaluation>> visitFieldAsync(
@@ -417,6 +429,7 @@ public class GlobalIndexEvaluator implements Closeable {
         return function instanceof LeafBinaryFunction
                 || function instanceof LeafNAryFunction
                 || function instanceof LeafTernaryFunction
+                || function instanceof BBoxIntersects
                 || function instanceof IsNaN;
     }
 

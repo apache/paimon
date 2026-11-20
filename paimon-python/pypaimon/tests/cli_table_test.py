@@ -20,7 +20,11 @@ import os
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
+from datetime import date, datetime
+from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -29,9 +33,19 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
 from pypaimon.common.json_util import JSON
+from pypaimon.data.timestamp import Timestamp
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import DataField
+from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow
 
 
 class CliTableTest(unittest.TestCase):
@@ -132,6 +146,56 @@ class CliTableTest(unittest.TestCase):
             table.file_io.try_to_write_atomic(manager.latest_file, str(max(s.id for s in snapshots)))
         return identifier, table
 
+    def _create_schema_table(self):
+        """Create schema history whose snapshots reference different field definitions."""
+        identifier, table = self._create_snapshot_table(
+            snapshots=[self._snapshot(4, schema_id=0), self._snapshot(5, schema_id=2),
+                       self._snapshot(6, schema_id=10)], suffix='schemas')
+        definitions = [
+            {'id': 0, 'name': 'id', 'type': 'BIGINT NOT NULL', 'description': 'Identifier'},
+            {'id': 1, 'name': 'region', 'type': 'STRING'},
+            {'id': 2, 'name': 'profile', 'type': {'type': 'ROW', 'fields': [
+                {'id': 3, 'name': 'city', 'type': 'STRING', 'description': '城市'}]}},
+            {'id': 4, 'name': 'age', 'type': 'INT'},
+        ]
+        for schema_id, field_count in ((10, 4), (0, 2), (2, 3)):
+            schema = TableSchema.from_schema(schema_id, Schema(
+                fields=[DataField.from_dict(f) for f in definitions[:field_count]],
+                partition_keys=['region'], options={'bucket': '-1', 'custom': '值'},
+                comment='Schema {}'.format(schema_id)))
+            schema.time_millis = 1700000000123 + schema_id
+            with open(table.schema_manager._to_schema_path(schema_id), 'w') as f:
+                f.write(JSON.to_json(schema))
+        return identifier, table
+
+    def _create_manifest_table(self, primary_keys=None, options=None, suffix='manifests'):
+        """Write real Avro metadata without creating the referenced data files."""
+        identifier, table = self._create_snapshot_table(
+            snapshots=[self._snapshot(1), self._snapshot(2, changelog_manifest_list='change-2')],
+            primary_keys=primary_keys, options=options, suffix=suffix)
+        empty = GenericRow([], [])
+        key = GenericRow([7] if primary_keys else [], table.trimmed_primary_keys_fields)
+        stats = SimpleStats(GenericRow([7], table.fields), GenericRow([8], table.fields), [0])
+        entry = ManifestEntry(0, empty, 0, table.total_buckets, DataFileMeta(
+            file_name='data-test.parquet', file_size=1024, row_count=2,
+            min_key=key, max_key=key, key_stats=SimpleStats(key, key, [0] if primary_keys else []),
+            value_stats=stats, min_sequence_number=9007199254740993, max_sequence_number=9007199254740994,
+            schema_id=0, level=0, extra_files=[], creation_time=Timestamp.from_epoch_millis(1700000000123),
+            file_source=0))
+        file_manager = ManifestFileManager(table)
+        table.file_io.mkdirs(file_manager.manifest_path)
+        metas = []
+        for name in ('manifest-base', 'manifest-delta', 'manifest-change'):
+            file_manager.write(name, [entry])
+            metas.append(ManifestFileMeta(
+                name, os.path.getsize(os.path.join(file_manager.manifest_path, name)), 1, 0,
+                SimpleStats(empty, empty, []), 0))
+        manager = ManifestListManager(table)
+        for name, files in (('base-1', [metas[0]]), ('delta-1', []),
+                            ('base-2', [metas[0]]), ('delta-2', [metas[1]]), ('change-2', [metas[2]])):
+            manager.write(name, files)
+        return identifier, table, entry
+
     def _run_table_command(self, *argv, config=None):
         """Run a table command and capture stdout, stderr and the exit code."""
         out, err = StringIO(), StringIO()
@@ -144,8 +208,8 @@ class CliTableTest(unittest.TestCase):
                     code = e.code
         return out.getvalue(), err.getvalue(), code
 
-    def _run_table_command_success(self, *argv):
-        out, err, code = self._run_table_command(*argv)
+    def _run_table_command_success(self, *argv, config=None):
+        out, err, code = self._run_table_command(*argv, config=config)
         self.assertEqual(0, code, err)
         self.assertEqual('', err)
         return out
@@ -269,6 +333,205 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('name', field_names)
                 self.assertIn('age', field_names)
                 self.assertIn('city', field_names)
+
+                self.assertEqual({'fields', 'partitionKeys', 'primaryKeys', 'options', 'comment'}, set(schema_json))
+                expected = JSON.to_json(self.catalog.get_table('test_db.users').table_schema.to_schema(), indent=2)
+                self.assertEqual(expected + '\n', output)
+
+    def test_cli_table_get_schema_versions(self):
+        identifier, _ = self._create_schema_table()
+        cases = [((), ['id', 'region', 'profile', 'age']),
+                 (('--schema-id', '0'), ['id', 'region']),
+                 (('--schema-id', '2', '-f', 'json'), ['id', 'region', 'profile']),
+                 (('--snapshot-id', '4'), ['id', 'region']),
+                 (('--snapshot-id', '5'), ['id', 'region', 'profile'])]
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('latest snapshot lookup')):
+            for options, field_names in cases:
+                with self.subTest(options=options):
+                    output = self._run_table_command_success('get', identifier, *options)
+                    schema = json.loads(output)
+                    self.assertEqual({'fields', 'partitionKeys', 'primaryKeys', 'options', 'comment'}, set(schema))
+                    self.assertEqual(field_names, [f['name'] for f in schema['fields']])
+                    self.assertEqual(field_names, [f.name for f in JSON.from_json(output, Schema).fields])
+
+    def test_cli_table_list_schemas_json(self):
+        identifier, _ = self._create_schema_table()
+        output = self._run_table_command_success('list-schemas', identifier)
+        schemas = json.loads(output)
+        self.assertEqual([0, 2, 10], [s['id'] for s in schemas])
+        self.assertEqual([2, 3, 4], [len(s['fields']) for s in schemas])
+        self.assertEqual([1, 3, 4], [s['highestFieldId'] for s in schemas])
+        self.assertEqual(3, schemas[1]['version'])
+        self.assertEqual(1700000000125, schemas[1]['timeMillis'])
+        self.assertEqual(['region'], schemas[1]['partitionKeys'])
+        self.assertEqual([], schemas[1]['primaryKeys'])
+        self.assertEqual({'bucket': '-1', 'custom': '值'}, schemas[1]['options'])
+        self.assertEqual('Schema 2', schemas[1]['comment'])
+        self.assertEqual({'id': 0, 'name': 'id', 'type': 'BIGINT NOT NULL', 'description': 'Identifier'},
+                         schemas[1]['fields'][0])
+        profile = schemas[1]['fields'][2]
+        self.assertEqual(2, profile['id'])
+        self.assertTrue(profile['type']['nullable'])
+        self.assertEqual([{'id': 3, 'name': 'city', 'type': 'STRING', 'description': '城市'}],
+                         profile['type']['fields'])
+        self.assertIn('城市', output)
+        self.assertEqual(schemas, json.loads(self._run_table_command_success('list-schemas', identifier, '-f', 'json')))
+
+    def test_cli_table_schemas_format_table(self):
+        identifier, _ = self._create_schema_table()
+        for command in ('get', 'list-schemas'):
+            with self.subTest(command=command):
+                output = self._run_table_command_success(command, identifier, '--format', 'table')
+                for value in ('id', 'region', 'profile', 'city', 'BIGINT NOT NULL', 'Identifier', 'Schema 10', '值'):
+                    self.assertIn(value, output)
+                if command == 'list-schemas':
+                    self.assertEqual(['schema_id', 'fields', 'partition_keys', 'primary_keys',
+                                      'options', 'comment', 'update_time'], output.splitlines()[0].split())
+                    self.assertIn('2023-11-14T22:13:20.125Z', output)
+                    self.assertIn('{"bucket":"-1","custom":"值"}', output)
+                    self.assertIn('{"id":3,"name":"city","type":"STRING","description":"城市"}', output)
+        output = self._run_table_command_success('list-schemas', 'test_db.users', '--format', 'table')
+        self.assertRegex(output, r'-\s+\d{4}-\d{2}-\d{2}')
+
+    def test_cli_table_list_schemas_limit(self):
+        identifier, table = self._create_schema_table()
+        schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '-l', '2'))
+        self.assertEqual([0, 2], [s['id'] for s in schemas])
+        # The manager must stop before reading an unselected, corrupt schema.
+        with open(table.schema_manager._to_schema_path(5), 'w') as f:
+            f.write('{invalid json')
+        schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '-l', '2'))
+        self.assertEqual([0, 2], [s['id'] for s in schemas])
+
+    def test_cli_table_list_schemas_skips_missing(self):
+        identifier, _ = self._create_schema_table()
+        original = SchemaManager.get_schema
+
+        def disappearing_read(manager, schema_id):
+            return None if schema_id == 0 else original(manager, schema_id)
+
+        with patch.object(SchemaManager, 'get_schema', autospec=True, side_effect=disappearing_read):
+            schemas = json.loads(self._run_table_command_success('list-schemas', identifier, '--limit', '1'))
+        self.assertEqual([2], [s['id'] for s in schemas])
+
+    def test_cli_table_schemas_without_snapshots(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[], suffix='schemas')
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('snapshot lookup')):
+            self.assertEqual([0], [s['id'] for s in json.loads(
+                self._run_table_command_success('list-schemas', identifier))])
+            schema = json.loads(self._run_table_command_success('get', identifier, '--schema-id', '0'))
+        self.assertEqual(['id'], [f['name'] for f in schema['fields']])
+
+    def test_cli_table_list_schemas_empty(self):
+        table = self.catalog.get_table('test_db.users')
+        with patch('pypaimon.cli.cli_table._open_schema_table', return_value=table):
+            with patch.object(table.schema_manager, '_list_versioned_files', return_value=[]):
+                self.assertEqual([], json.loads(self._run_table_command_success('list-schemas', 'test_db.users')))
+                self.assertIn('No schemas', self._run_table_command_success(
+                    'list-schemas', 'test_db.users', '-f', 'table'))
+
+    def test_cli_table_get_missing_schema_or_snapshot(self):
+        identifier, table = self._create_schema_table()
+        os.remove(table.schema_manager._to_schema_path(2))
+        for option, value, target in (('--schema-id', '7', '7'), ('--snapshot-id', '99', '99'),
+                                      ('--snapshot-id', '5', '2')):
+            with self.subTest(option=option, value=value):
+                out, err, code = self._run_table_command('get', identifier, option, value)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(identifier, err)
+                self.assertIn(target, err)
+
+    def test_cli_table_schema_invalid_selectors(self):
+        for command, option, values in (('get', '--schema-id', ('-1', 'bad')),
+                                        ('get', '--snapshot-id', ('0', '-1', 'bad')),
+                                        ('list-schemas', '--limit', ('0', '-1', 'bad'))):
+            for value in values:
+                with self.subTest(command=command, option=option, value=value):
+                    out, err, code = self._run_table_command(command, 'test_db.users', option, value)
+                    self.assertEqual(('', 2), (out, code))
+                    self.assertIn(option, err)
+        out, err, code = self._run_table_command('get', 'test_db.users', '--schema-id', '0', '--snapshot-id', '1')
+        self.assertEqual(('', 2), (out, code))
+        self.assertIn('not allowed with argument', err)
+
+    def test_cli_table_get_snapshot_without_schema_id(self):
+        identifier, table = self._create_schema_table()
+        snapshot = json.loads(JSON.to_json(self._snapshot(5, schema_id=None)))
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                if missing:
+                    del snapshot['schemaId']
+                with open(table.snapshot_manager().get_snapshot_path(5), 'w') as f:
+                    json.dump(snapshot, f)
+                out, err, code = self._run_table_command('get', identifier, '--snapshot-id', '5')
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('5', err)
+                self.assertIn('schema', err.lower())
+
+    def test_cli_table_schemas_invalid_target(self):
+        for command in ('get', 'list-schemas'):
+            identifiers = ('db', '.t', 'db.', 'db.t.extra', 'test_db.missing_schema_table', 'test_db.users$schemas')
+            for identifier in identifiers:
+                with self.subTest(command=command, identifier=identifier):
+                    out, err, code = self._run_table_command(command, identifier)
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+            out, err, code = self._run_table_command(
+                command, 'test_db.users', config=os.path.join(self.tempdir, 'missing.yaml'))
+            self.assertEqual(('', 1), (out, code))
+            self.assertIn('missing.yaml', err)
+
+    def test_cli_table_schemas_corrupt_metadata(self):
+        identifier, table = self._create_schema_table()
+        cases = [(table.schema_manager._to_schema_path(2),
+                  [('get', '--schema-id', '2'), ('get', '--snapshot-id', '5'), ('list-schemas',)]),
+                 (table.snapshot_manager().get_snapshot_path(5), [('get', '--snapshot-id', '5')])]
+        for path, commands in cases:
+            with open(path) as f:
+                original = f.read()
+            with open(path, 'w') as f:
+                f.write('{invalid json')
+            for command in commands:
+                with self.subTest(path=path, command=command):
+                    out, err, code = self._run_table_command(command[0], identifier, *command[1:])
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+            with open(path, 'w') as f:
+                f.write(original)
+
+    def test_cli_table_schemas_permission_error(self):
+        identifier, table = self._create_schema_table()
+        file_io = table.file_io
+        original = type(file_io).read_file_utf8
+
+        def denied_read(io, path):
+            if path.endswith('/schema-2'):
+                raise PermissionError('access denied')
+            return original(io, path)
+
+        with patch.object(type(file_io), 'read_file_utf8', autospec=True, side_effect=denied_read):
+            for command in (('get', '--schema-id', '2'), ('get', '--snapshot-id', '5'), ('list-schemas',)):
+                with self.subTest(command=command):
+                    out, err, code = self._run_table_command(command[0], identifier, *command[1:])
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn(identifier, err)
+
+    def test_cli_table_schemas_table_modes(self):
+        modes = [('append', [], {'bucket': '-1'}),
+                 ('primary_key', ['id'], {'bucket': '1'}),
+                 ('data_evolution', [], {'bucket': '-1', 'row-tracking.enabled': 'true',
+                                         'data-evolution.enabled': 'true'})]
+        for name, primary_keys, options in modes:
+            with self.subTest(mode=name):
+                identifier, _ = self._create_snapshot_table(
+                    snapshots=[], primary_keys=primary_keys, options=options, suffix=name)
+                schemas = json.loads(self._run_table_command_success('list-schemas', identifier))
+                self.assertEqual([0], [s['id'] for s in schemas])
+                self.assertEqual(primary_keys, schemas[0]['primaryKeys'])
+                self.assertEqual(options, schemas[0]['options'])
+                schema = json.loads(self._run_table_command_success('get', identifier, '--schema-id', '0'))
+                self.assertEqual(primary_keys, schema['primaryKeys'])
+                self.assertEqual(options, schema['options'])
 
     def test_cli_table_snapshot_basic(self):
         """Test basic table snapshot via CLI."""
@@ -453,6 +716,538 @@ class CliTableTest(unittest.TestCase):
                     self.assertEqual(3, snapshot['nextRowId'])
                 listed = json.loads(self._run_table_command_success('list-snapshots', identifier, '-f', 'json'))
                 self.assertEqual([1], [s['id'] for s in listed])
+
+    def test_cli_table_list_manifests(self):
+        identifier, table, _ = self._create_manifest_table()
+        manager = ManifestListManager(table)
+        meta = manager.read('base-2')[0]
+        manager.write('base-2', [replace(meta, min_row_id=9007199254740993, max_row_id=9007199254740994),
+                                 replace(meta, file_name='manifest-null')])
+        latest = table.snapshot_manager().get_latest_snapshot()
+        with patch.object(SnapshotManager, 'get_latest_snapshot',
+                          side_effect=[latest, AssertionError('resolved twice')]), \
+                patch.object(ManifestFileManager, 'read', side_effect=AssertionError('manifest entries read')):
+            result = json.loads(self._run_table_command_success('list-manifests', identifier, '-f', 'json'))
+        self.assertEqual((identifier, 2), (result['table'], result['snapshot_id']))
+        self.assertEqual([('base', 'base-2'), ('base', 'base-2'), ('delta', 'delta-2'), ('changelog', 'change-2')],
+                         [(m['type'], m['manifest_list']) for m in result['manifests']])
+        self.assertEqual([9007199254740993, None, None, None], [m['min_row_id'] for m in result['manifests']])
+        for options, snapshot_id, names in (
+                (('--type', 'delta'), 2, ['manifest-delta']),
+                (('--snapshot-id', '1'), 1, ['manifest-base']),
+                (('--snapshot-id', '1', '--type', 'changelog'), 1, []),
+                (('-l', '1'), 2, ['manifest-base'])):
+            with self.subTest(options=options):
+                result = json.loads(self._run_table_command_success(
+                    'list-manifests', identifier, *options, '-f', 'json'))
+                self.assertEqual(snapshot_id, result['snapshot_id'])
+                self.assertEqual(names, [m['file_name'] for m in result['manifests']])
+        output = self._run_table_command_success('list-manifests', identifier, '--limit', '3')
+        header = next(line.split() for line in output.splitlines() if 'num_added_files' in line)
+        self.assertEqual(['file_name', 'file_size', 'num_added_files', 'num_deleted_files', 'schema_id',
+                          'min_partition_stats', 'max_partition_stats', 'min_row_id', 'max_row_id'], header)
+        rows = [line.split() for line in output.splitlines() if line.lstrip().startswith('manifest-')]
+        self.assertEqual(['manifest-base', 'manifest-null', 'manifest-delta'], [row[0] for row in rows])
+        self.assertEqual(['{}', '{}', '9007199254740993', '9007199254740994'], rows[0][-4:])
+        self.assertEqual(['-', '-'], rows[1][-2:])
+
+    def test_cli_table_list_manifests_empty_and_missing_snapshot(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[])
+        result = json.loads(self._run_table_command_success('list-manifests', identifier, '-f', 'json'))
+        self.assertEqual({'table': identifier, 'snapshot_id': None, 'manifests': []}, result)
+        self.assertIn('No manifests', self._run_table_command_success('list-manifests', identifier))
+        out, err, code = self._run_table_command('list-manifests', identifier, '--snapshot-id', '99')
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('Snapshot 99 not found', err)
+
+    def test_cli_table_manifest_preserves_raw_entries_and_formats(self):
+        identifier, table, entry = self._create_manifest_table()
+        extra = dict(first_row_id=9007199254740993, write_cols=['id'], write_cols_sequences=[9007199254740994],
+                     extra_files=['file.index'], embedded_index=b'\x00\xff', delete_row_count=1, file_source=1,
+                     external_path='s3://warehouse/external/data-test.parquet')
+        # This file is absent from all snapshot manifest lists; its data file does not exist.
+        deleted = replace(entry, kind=1, file=replace(entry.file, **extra))
+        ManifestFileManager(table).write('manifest-retained', [entry, deleted])
+        root = Path(table.table_path)
+        before = {path: path.read_bytes() for path in root.rglob('*') if path.is_file()}
+        args = ('manifest', identifier, '--file', 'manifest-retained')
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('snapshot read')):
+            result = json.loads(self._run_table_command_success(*args))
+        self.assertEqual((identifier, 'manifest-retained', table.table_path + '/manifest/manifest-retained'),
+                         (result['table'], result['manifest_file'], result['manifest_path']))
+        self.assertEqual([('ADD', {}, 0), ('DELETE', {}, 0)],
+                         [(e['kind'], e['partition'], e['bucket']) for e in result['entries']])
+        file = result['entries'][0]['file']
+        expected = dict(file_name='data-test.parquet', file_format='parquet', file_size=1024, row_count=2,
+                        schema_id=0, min_sequence_number=9007199254740993, first_row_id=None, file_source='APPEND',
+                        creation_time='2023-11-14T22:13:20.123000',
+                        file_path=table.table_path + '/bucket-0/data-test.parquet')
+        self.assertEqual(expected, {key: file[key] for key in expected})
+        file = result['entries'][1]['file']
+        expected = dict(extra, file_source='COMPACT', embedded_index={'encoding': 'base64', 'data': 'AP8='},
+                        file_path=extra['external_path'])
+        self.assertEqual(expected, {key: file[key] for key in expected})
+        output = self._run_table_command_success(*args, '-f', 'table')
+        rows = dict(line.split(None, 1) for line in output.splitlines()[1:])
+        self.assertEqual(['table', 'manifest_file', 'manifest_path', 'entries'], list(rows))
+        self.assertEqual(result, dict(rows, entries=json.loads(rows['entries'])))
+        self.assertEqual(before, {path: path.read_bytes() for path in root.rglob('*') if path.is_file()})
+
+    def test_cli_table_manifest_historical_schema(self):
+        identifier, table, entry = self._create_manifest_table(primary_keys=['id'], options={'bucket': '1'})
+        renamed = [DataField.from_dict({'id': 0, 'name': 'renamed_id', 'type': 'INT NOT NULL'}),
+                   DataField.from_dict({'id': 1, 'name': 'new_column', 'type': 'STRING'})]
+        schema = TableSchema.from_schema(1, Schema(
+            fields=renamed, primary_keys=['renamed_id'], options={'bucket': '1'}))
+        with open(table.schema_manager._to_schema_path(1), 'w') as f:
+            f.write(JSON.to_json(schema))
+        meta = replace(entry.file, value_stats=replace(entry.file.value_stats, null_counts=None),
+                       value_stats_cols=['id'])
+        ManifestFileManager(table).write('manifest-old', [replace(entry, file=meta)])
+        result = json.loads(self._run_table_command_success('manifest', identifier, '--file', 'manifest-old'))
+        file = result['entries'][0]['file']
+        self.assertEqual((0, ['id'], {'id': 7}, {'id': 7}),
+                         (file['schema_id'], file['value_stats_cols'], file['min_key'], file['max_key']))
+        self.assertEqual({'min_values': {'id': 7}, 'max_values': {'id': 7}, 'null_counts': {'id': 0}},
+                         file['key_stats'])
+        self.assertEqual({'min_values': {'id': 7}, 'max_values': {'id': 8}, 'null_counts': None}, file['value_stats'])
+
+    def test_cli_table_manifest_typed_stats_and_partition(self):
+        identifier = 'test_db.typed_manifest'
+        definitions = [('pt', 'DATE'), ('amount', 'DECIMAL(30, 9)'), ('payload', 'BYTES'), ('at', 'TIMESTAMP(6)'),
+                       ('nan', 'DOUBLE'), ('positive', 'DOUBLE'), ('negative', 'DOUBLE')]
+        fields = [DataField.from_dict({'id': i, 'name': name, 'type': type_name})
+                  for i, (name, type_name) in enumerate(definitions)]
+        self.catalog.create_table(identifier, Schema(fields=fields, partition_keys=['pt']), False)
+        table = self.catalog.get_table(identifier)
+        empty = GenericRow([], [])
+        values = [date(2026, 11, 13), Decimal('123456789012345678.123456789'), b'\x00\xff',
+                  datetime(2026, 11, 13, 1, 2, 3, 123456), float('nan'), float('inf'), float('-inf')]
+        stats = SimpleStats(GenericRow(values, fields), GenericRow(values, fields), [0, None, 0, 0])
+        entry = ManifestEntry(0, GenericRow(values[:1], table.partition_keys_fields), 0, -1, DataFileMeta(
+            'typed.parquet', 100, 1, empty, empty, SimpleStats(empty, empty, []), stats, 0, 0, 0, 0, []))
+        manager = ManifestFileManager(table)
+        table.file_io.mkdirs(manager.manifest_path)
+        manager.write('manifest-typed', [entry])
+        result = json.loads(self._run_table_command_success('manifest', identifier, '--file', 'manifest-typed'))
+        self.assertEqual({'pt': '2026-11-13'}, result['entries'][0]['partition'])
+        stats = result['entries'][0]['file']['value_stats']
+        expected = {'pt': '2026-11-13', 'amount': '123456789012345678.123456789',
+                    'payload': {'encoding': 'base64', 'data': 'AP8='}, 'at': '2026-11-13T01:02:03.123456',
+                    'nan': 'NaN', 'positive': 'Infinity', 'negative': '-Infinity'}
+        self.assertEqual(expected, stats['min_values'])
+        self.assertEqual(expected, stats['max_values'])
+        self.assertEqual(
+            {'pt': 0, 'amount': None, 'payload': 0, 'at': 0, 'nan': None, 'positive': None, 'negative': None},
+            stats['null_counts'])
+
+    def test_cli_table_manifest_empty_entries_and_stats(self):
+        identifier, table, entry = self._create_manifest_table()
+        manager = ManifestFileManager(table)
+        manager.write('manifest-empty', [])
+        # Dedicated vector files can store an empty row while retaining schema field definitions.
+        meta = replace(entry.file, value_stats=SimpleStats.empty_stats(), value_stats_cols=None)
+        manager.write('manifest-empty-stats', [replace(entry, file=meta)])
+        for name, count in (('manifest-empty', 0), ('manifest-empty-stats', 1)):
+            with self.subTest(file=name):
+                args = ('manifest', identifier, '--file', name)
+                result = json.loads(self._run_table_command_success(*args, '--format', 'json'))
+                self.assertEqual(count, len(result['entries']))
+                if count:
+                    self.assertEqual({'min_values': {}, 'max_values': {}, 'null_counts': {'id': None}},
+                                     result['entries'][0]['file']['value_stats'])
+                output = self._run_table_command_success(*args, '--format', 'table')
+                rows = dict(line.split(None, 1) for line in output.splitlines()[1:])
+                self.assertEqual(result['entries'], json.loads(rows['entries']))
+
+    def test_cli_table_manifest_invalid_arguments(self):
+        cases = [('manifest', 'test_db.users'), ('manifest', 'test_db.users', '--file', 'manifest-test', '-f', 'csv')]
+        cases.extend(('list-manifests', 'test_db.users', option, value)
+                     for option, value in (('--snapshot-id', '0'), ('--limit', '-1'), ('--type', 'invalid')))
+        for args in cases:
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command(*args)
+                self.assertEqual(('', 2), (out, code))
+                self.assertIn('error:', err)
+        for name in ('../manifest-test', 'dir\\manifest-test', '..', '', '\x00'):
+            with self.subTest(file=name):
+                out, err, code = self._run_table_command('manifest', 'test_db.users', '--file', name)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('file name', err.lower())
+
+    def test_cli_table_manifest_metadata_errors(self):
+        identifier, table, _ = self._create_manifest_table()
+        os.remove(os.path.join(table.table_path, 'manifest', 'base-2'))
+        with open(os.path.join(table.table_path, 'manifest', 'manifest-corrupt'), 'wb') as f:
+            f.write(b'not avro')
+        for args, message in (
+                (('list-manifests', identifier), 'Failed to list manifests'),
+                (('manifest', identifier, '--file', 'manifest-missing'), 'Failed to read manifest'),
+                (('manifest', identifier, '--file', 'manifest-corrupt'), 'Failed to read manifest'),
+                (('list-manifests', identifier + '$snapshots'), 'expected a FileStoreTable'),
+                (('manifest', identifier + '$snapshots', '--file', 'manifest-base'), 'expected a FileStoreTable')):
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command(*args)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(message, err)
+
+    def test_cli_table_list_files_live_snapshots_and_limits(self):
+        identifier, table, entry = self._create_manifest_table()
+        added = replace(entry, file=replace(entry.file, file_name='data-added.parquet',
+                                            delete_row_count=0, first_row_id=9007199254740993))
+        bucket = replace(added, bucket=1, file=replace(added.file, file_name='data-bucket.parquet', first_row_id=None))
+        ManifestFileManager(table).write('manifest-delta', [replace(entry, kind=1), added, bucket])
+        latest = table.snapshot_manager().get_latest_snapshot()
+        with patch.object(SnapshotManager, 'get_latest_snapshot',
+                          side_effect=[latest, AssertionError('resolved twice')]):
+            result = json.loads(self._run_table_command_success('list-files', identifier, '-f', 'json'))
+        self.assertEqual((identifier, 2), (result['table'], result['snapshot_id']))
+        files = result['files']
+        self.assertEqual(['data-added.parquet', 'data-bucket.parquet'],
+                         [os.path.basename(row['file_path']) for row in files])
+        expected = dict(snapshot_id=2, file_format='parquet', delete_row_count=0,
+                        creation_time='2023-11-14T22:13:20.123000', file_source='APPEND',
+                        first_row_id=9007199254740993, write_cols=None)
+        self.assertEqual(expected, {key: files[0][key] for key in expected})
+        self.assertEqual([2, 2], [row['snapshot_id'] for row in files])
+        self.assertNotIn('deleteRowCount', files[0])
+        for options, names in ((('-l', '1'), ['data-added.parquet']),
+                               (('--bucket', '1', '-l', '1'), ['data-bucket.parquet']),
+                               (('--bucket', '9'), [])):
+            with self.subTest(options=options):
+                result = json.loads(self._run_table_command_success('list-files', identifier, *options, '-f', 'json'))
+                self.assertEqual(names, [os.path.basename(row['file_path']) for row in result['files']])
+                self.assertEqual(2, result['snapshot_id'])
+        with patch.object(SnapshotManager, 'get_latest_snapshot', side_effect=AssertionError('latest lookup')):
+            result = json.loads(self._run_table_command_success(
+                'list-files', identifier, '--snapshot-id', '1', '-f', 'json'))
+        self.assertEqual((1, 'data-test.parquet'),
+                         (result['snapshot_id'], os.path.basename(result['files'][0]['file_path'])))
+        output = self._run_table_command_success('list-files', identifier)
+        self.assertEqual(list(files[0]), output.splitlines()[0].split())
+        self.assertRegex(output, r'9007199254740993\s+-\n')
+        self.assertIn(files[0]['creation_time'], output)
+        self.assertRegex(output, r'\s-\s+-\s*$')
+
+    def test_cli_table_list_files_rejects_query_auth(self):
+        identifier, table = self._create_snapshot_table(snapshots=[], options={'query-auth.enabled': 'true'})
+        with patch.object(type(table), 'snapshot_manager', side_effect=AssertionError('snapshot accessed')) as manager:
+            out, err, code = self._run_table_command('list-files', identifier)
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('not supported on a query-auth table', err)
+        manager.assert_not_called()
+
+    def test_cli_table_list_files_snapshot_schema(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        identifier, _, _ = self._create_manifest_table()
+        for changes, current_min in (
+                ([SchemaChange.rename_column('id', 'renamed')], '{renamed=7}'),
+                ([SchemaChange.add_column('keep', AtomicType('INT')), SchemaChange.drop_column('renamed'),
+                  SchemaChange.add_column('id', AtomicType('INT'))], '{id=null, keep=null}')):
+            with self.subTest(current_min=current_min):
+                self.catalog.alter_table(identifier, changes)
+                history = json.loads(self._run_table_command_success(
+                    'list-files', identifier, '--snapshot-id', '1', '-f', 'json'))
+                file, = history['files']
+                self.assertEqual(('{id=7}', '{id=8}', '{id=0}'),
+                                 (file['min_value_stats'], file['max_value_stats'], file['null_value_counts']))
+
+                latest = json.loads(self._run_table_command_success('list-files', identifier, '-f', 'json'))
+                self.assertEqual(current_min, latest['files'][0]['min_value_stats'])
+
+    def test_cli_table_list_files_arrow6_compatibility(self):
+        from pypaimon.table.system.files_table import FilesTable
+
+        class Arrow6Table:
+            """Expose the Arrow 6 Table interface, which has no to_pylist method."""
+
+            def __init__(self, table):
+                self.table = table
+
+            def rename_columns(self, names):
+                return Arrow6Table(self.table.rename_columns(names))
+
+            def __getattr__(self, name):
+                if name == 'to_pylist':
+                    raise AttributeError('Arrow 6 Table has no to_pylist')
+                return getattr(self.table, name)
+
+        identifier, _, _ = self._create_manifest_table()
+        build = FilesTable._build_arrow_table
+        with patch.object(FilesTable, '_build_arrow_table', lambda view: Arrow6Table(build(view))):
+            result = json.loads(self._run_table_command_success(
+                'list-files', identifier, '--snapshot-id', '1', '-f', 'json'))
+        self.assertEqual(1, len(result['files']))
+        self.assertEqual(9007199254740993, result['files'][0]['min_sequence_number'])
+
+    def test_cli_table_list_files_empty_and_errors(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[])
+        with patch.object(SnapshotManager, 'get_latest_snapshot',
+                          side_effect=[None, AssertionError('resolved twice')]):
+            result = json.loads(self._run_table_command_success('list-files', identifier, '-f', 'json'))
+        self.assertEqual(dict(table=identifier, snapshot_id=None, files=[]), result)
+        self.assertIn('No files found', self._run_table_command_success('list-files', identifier))
+        identifier, table, _ = self._create_manifest_table()
+        os.remove(os.path.join(table.table_path, 'manifest', 'manifest-base'))
+        for args, message in (((identifier, '--snapshot-id', '99'), 'Snapshot 99 not found'),
+                              ((identifier, '--snapshot-id', '1'), 'Failed to list files'),
+                              ((identifier + '$snapshots',), 'expected a FileStoreTable')):
+            with self.subTest(args=args):
+                out, err, code = self._run_table_command('list-files', *args)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(message, err)
+
+    def test_cli_table_file_rejects_query_auth(self):
+        identifier, _ = self._create_snapshot_table(snapshots=[], options={'query-auth.enabled': 'true'})
+        with patch('pypaimon.cli.cli_table._table_file_paths',
+                   side_effect=AssertionError('file path resolved')) as paths:
+            for table_name in (identifier, identifier + '$snapshots'):
+                with self.subTest(table=table_name):
+                    out, err, code = self._run_table_command('file', table_name, '--file', 'missing.parquet')
+                    self.assertEqual(('', 1), (out, code))
+                    self.assertIn('not supported on a query-auth table', err)
+        paths.assert_not_called()
+
+    def test_cli_table_file_parquet_metadata_and_formats(self):
+        import pyarrow.parquet as pq
+
+        identifier, table = self._create_snapshot_table(snapshots=[])
+        label = 'east\u2028west\u2029south'
+        path = Path(self.tempdir) / f'standalone file%2F#{label}.PARQUET'
+        schema = pa.schema([('id', pa.int64()), ('payload', pa.binary()), ('unknown', pa.int32()),
+                            ('label', pa.string())],
+                           metadata={b'author': b'test'})
+        data = pa.Table.from_pydict(dict(id=[9007199254740993, 9007199254740994],
+                                         payload=[b'\x00\xff', None], unknown=[None, None],
+                                         label=[label, 'north']), schema=schema)
+        pq.write_table(data, path, row_group_size=1, compression='zstd', write_statistics=['id', 'payload', 'label'])
+        with patch.object(type(table), 'snapshot_manager', side_effect=AssertionError('snapshot read')), \
+                patch.object(pq.ParquetFile, 'read', side_effect=AssertionError('data read')), \
+                patch.object(pq.ParquetFile, 'iter_batches', side_effect=AssertionError('data read')):
+            result = json.loads(self._run_table_command_success('file', identifier, '--file', str(path)))
+            output = self._run_table_command_success('file', identifier, '--file', str(path), '-f', 'table')
+            uri = json.loads(self._run_table_command_success('file', identifier, '--file', path.as_uri()))
+        self.assertEqual((identifier, str(path), 'parquet', path.stat().st_size),
+                         (result['table'], result['file_path'], result['file_format'], result['file_size_in_bytes']))
+        self.assertNotIn('snapshot_id', result)
+        metadata = result['metadata']
+        self.assertEqual((2, 4, 2), (metadata['num_rows'], metadata['num_columns'], metadata['num_row_groups']))
+        self.assertIn('id: int64', result['schema']['arrow'])
+        self.assertEqual(('id', 'INT64'),
+                         (result['schema']['parquet'][0]['path'], result['schema']['parquet'][0]['physical_type']))
+        columns = metadata['row_groups'][0]['columns']
+        self.assertEqual((9007199254740993, 'ZSTD'), (columns[0]['statistics']['min'], columns[0]['compression']))
+        self.assertEqual({'encoding': 'base64', 'data': 'AP8='}, columns[1]['statistics']['min'])
+        self.assertEqual(1, metadata['row_groups'][1]['columns'][1]['statistics']['null_count'])
+        self.assertIsNone(columns[2]['statistics'])
+        self.assertEqual(label, columns[3]['statistics']['min'])
+        self.assertNotIn('key_value_metadata', metadata)
+        lines = output.rstrip('\n').split('\n')
+        self.assertEqual(['Field', 'Value'], lines[0].split())
+        value_start = lines[0].index('Value')
+        rows = {}
+        field = None
+        for line in lines[1:]:
+            if line[:value_start].strip():
+                field = line[:value_start].strip()
+                rows[field] = line[value_start:]
+            else:
+                rows[field] += '\n' + line[value_start:]
+        self.assertTrue(rows['schema'].startswith('{\n'))
+        self.assertTrue(rows['metadata'].startswith('{\n'))
+        self.assertEqual(result, dict(rows, file_size_in_bytes=int(rows['file_size_in_bytes']),
+                                      schema=json.loads(rows['schema']), metadata=json.loads(rows['metadata'])))
+        self.assertEqual(dict(result, file_path=path.as_uri()), uri)
+
+    def test_cli_table_file_metadata_path_round_trip(self):
+        pa_schema = pa.schema([('id', pa.int32()), ('pt', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['pt'], options={'bucket': '-1'})
+        warehouse_uri = Path(self.warehouse).as_uri()
+        for index, warehouse in enumerate((self.warehouse, warehouse_uri,
+                                           warehouse_uri.replace('file:///', 'file://localhost/'))):
+            with self.subTest(warehouse=warehouse):
+                name = '{}_{}'.format(self._testMethodName, index)
+                identifier = 'test_db.' + name
+                # Write through the local catalog; URI handling is exercised by the CLI below.
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+                builder = table.new_batch_write_builder()
+                writer, commit = builder.new_write(), builder.new_commit()
+                try:
+                    writer.write_arrow(pa.Table.from_pydict(
+                        {'id': [1, 2, 3], 'pt': ['a/b', 'a%2Fb', 'a b?#']}, schema=pa_schema))
+                    commit.commit(writer.prepare_commit())
+                finally:
+                    writer.close()
+                    commit.close()
+                config = Path(self.tempdir) / ('file-path-{}.yaml'.format(index))
+                config.write_text('metastore: filesystem\nwarehouse: {}\n'.format(warehouse))
+                files = json.loads(self._run_table_command_success(
+                    'list-files', identifier, '-f', 'json', config=str(config)))['files']
+                self.assertEqual(3, len(files))
+                paths = {row['file_path'] for row in files}
+                self.assertTrue(any('/pt=a%2Fb/' in path for path in paths))
+                if index:
+                    self.assertTrue(all(path.startswith('file:') for path in paths))
+                manifests = json.loads(self._run_table_command_success(
+                    'list-manifests', identifier, '--type', 'delta', '-f', 'json', config=str(config)))
+                manifest_paths = set()
+                for manifest in manifests['manifests']:
+                    entries = json.loads(self._run_table_command_success(
+                        'manifest', identifier, '--file', manifest['file_name'], config=str(config)))['entries']
+                    manifest_paths.update(entry['file']['file_path'] for entry in entries)
+                self.assertEqual(paths, manifest_paths)
+                physical_files = list((Path(self.warehouse) / 'test_db.db' / name).rglob('*.parquet'))
+                for row in files:
+                    with self.subTest(file=row['file_path']):
+                        physical = next(path for path in physical_files
+                                        if row['file_path'].endswith(path.relative_to(self.warehouse).as_posix()))
+                        expected = json.loads(self._run_table_command_success(
+                            'file', identifier, '--file', str(physical), config=str(config)))
+                        self.assertEqual(row['record_count'], expected['metadata']['num_rows'])
+                        self.assertEqual(row['file_size_in_bytes'], expected['file_size_in_bytes'])
+                        for path in (row['file_path'], physical.as_uri()):
+                            actual = json.loads(self._run_table_command_success(
+                                'file', identifier, '--file', path, config=str(config)))
+                            self.assertEqual(dict(expected, file_path=path), actual)
+
+    def test_cli_table_file_literal_paths_and_encoded_uris(self):
+        import pyarrow.parquet as pq
+
+        literal = Path(self.tempdir) / 'literal%20file.parquet'
+        decoded = Path(self.tempdir) / 'literal file.parquet'
+        literal_only = Path(self.tempdir) / 'literal%2Fonly.parquet'
+        uri_only = Path(self.tempdir) / 'encoded only.parquet'
+        for path, rows in ((literal, [1]), (decoded, [2, 3]), (literal_only, [4]), (uri_only, [5, 6])):
+            pq.write_table(pa.table({'id': rows}), path)
+        linked_literal = Path(self.tempdir) / 'linked%20file.parquet'
+        linked_decoded = Path(self.tempdir) / 'linked file.parquet'
+        os.link(literal, linked_literal)
+        os.link(literal, linked_decoded)
+        for path, expected, rows in ((str(literal), literal, 1), (literal.as_uri(), literal, 1),
+                                     (str(decoded), decoded, 2), (linked_decoded.as_uri(), linked_literal, 1),
+                                     ('file:///' + literal_only.as_posix().lstrip('/'), literal_only, 1),
+                                     (uri_only.as_uri(), uri_only, 2),
+                                     (uri_only.as_uri().replace('file:', 'FILE:'), uri_only, 2),
+                                     (uri_only.as_uri().replace('file:', 'FiLe:'), uri_only, 2),
+                                     (uri_only.as_uri().replace('file:///', 'file:/'), uri_only, 2),
+                                     (uri_only.as_uri().replace('file:///', 'file://localhost/'), uri_only, 2)):
+            with self.subTest(path=path):
+                result = json.loads(self._run_table_command_success('file', 'test_db.users', '--file', path))
+                self.assertEqual(path, result['file_path'])
+                self.assertEqual(rows, result['metadata']['num_rows'])
+                self.assertEqual(expected.stat().st_size, result['file_size_in_bytes'])
+
+    def test_cli_table_file_uri_with_directory_candidate(self):
+        import pyarrow.parquet as pq
+
+        path = Path(self.tempdir) / 'day 1.parquet'
+        (path.parent / 'day%201.parquet').mkdir()
+        pq.write_table(pa.table({'id': [7, 9]}), path)
+
+        result = json.loads(self._run_table_command_success('file', 'test_db.users', '--file', path.as_uri()))
+        self.assertEqual(2, result['metadata']['num_rows'])
+
+    def test_cli_table_file_ambiguous_paths(self):
+        import pyarrow.parquet as pq
+
+        literal = Path(self.tempdir) / 'collision%20file.parquet'
+        decoded = Path(self.tempdir) / 'collision file.parquet'
+        for path, rows in ((literal, [1]), (decoded, [2, 3])):
+            pq.write_table(pa.table({'id': rows}), path)
+        table = self.catalog.get_table('test_db.users')
+        for prefix in ('file://localhost/', 'file:/', 'file:///',
+                       'FILE://localhost/', 'FILE:/', 'FILE:///',
+                       'FiLe://localhost/', 'FiLe:/', 'FiLe:///'):
+            with self.subTest(prefix=prefix):
+                uri = decoded.as_uri().replace('file:///', prefix)
+                with patch('pypaimon.cli.cli_table._open_schema_table', return_value=table), \
+                        patch.object(table.file_io, 'new_input_stream',
+                                     wraps=table.file_io.new_input_stream) as stream:
+                    out, err, code = self._run_table_command('file', 'test_db.users', '--file', uri)
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn('Ambiguous --file', err)
+                self.assertIn(literal.as_posix(), err)
+                self.assertIn(decoded.as_posix(), err)
+                self.assertIn('plain filesystem path', err)
+                stream.assert_not_called()
+
+    def test_cli_table_file_io_errors_do_not_retry_uri(self):
+        table = self.catalog.get_table('test_db.users')
+        path = Path(self.tempdir) / 'unreadable%20file.parquet'
+        path.write_bytes(b'not parquet')
+        for operation, error in (('get_file_status', PermissionError('access denied')),
+                                 ('new_input_stream', PermissionError('access denied')),
+                                 ('new_input_stream', FileNotFoundError('file disappeared'))):
+            with self.subTest(operation=operation, error=error):
+                with patch('pypaimon.cli.cli_table._open_schema_table', return_value=table), \
+                        patch.object(table.file_io, operation, side_effect=error) as call:
+                    out, err, code = self._run_table_command(
+                        'file', 'test_db.users', '--file', 'file:/' + path.as_posix().lstrip('/'))
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(str(error), err)
+                call.assert_called_once()
+                self.assertEqual(path, Path(call.call_args[0][0]))
+
+        uri = 'file:' + path.as_posix()
+        get_status = table.file_io.get_file_status
+
+        def deny_uri(candidate):
+            if candidate == uri:
+                raise PermissionError('cannot check URI candidate')
+            return get_status(candidate)
+
+        with patch('pypaimon.cli.cli_table._open_schema_table', return_value=table), \
+                patch.object(table.file_io, 'get_file_status', side_effect=deny_uri), \
+                patch.object(table.file_io, 'new_input_stream',
+                             wraps=table.file_io.new_input_stream) as stream:
+            out, err, code = self._run_table_command('file', 'test_db.users', '--file', uri)
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('cannot check URI candidate', err)
+        stream.assert_not_called()
+
+        missing = (Path(self.tempdir) / 'missing file.parquet').as_uri()
+        out, err, code = self._run_table_command('file', 'test_db.users', '--file', missing)
+        self.assertEqual(('', 1), (out, code))
+        self.assertIn('Failed to inspect file', err)
+        self.assertNotIn('Ambiguous --file', err)
+
+    def test_cli_table_file_empty_and_invalid_files(self):
+        import pyarrow.parquet as pq
+
+        path = Path(self.tempdir) / 'empty.parquet'
+        pq.write_table(pa.table({'id': pa.array([], type=pa.int64())}), path)
+        result = json.loads(self._run_table_command_success('file', 'test_db.users', '--file', str(path)))
+        self.assertEqual(0, result['metadata']['num_rows'])
+        renamed = Path(self.tempdir) / 'renamed.avro'
+        renamed.write_bytes(path.read_bytes())
+        corrupt = Path(self.tempdir) / 'corrupt.parquet'
+        corrupt.write_bytes(b'invalid footer')
+        for candidate, message in ((Path(self.tempdir) / 'missing.parquet', 'Failed to inspect file'),
+                                   (Path(self.tempdir), 'regular file'),
+                                   (renamed, 'Only Parquet'),
+                                   (corrupt, 'Failed to inspect file')):
+            with self.subTest(path=candidate):
+                out, err, code = self._run_table_command('file', 'test_db.users', '--file', str(candidate))
+                self.assertEqual(('', 1), (out, code))
+                self.assertIn(message, err)
+                if candidate == corrupt:
+                    self.assertNotIn('Unsupported file format', err)
+
+    def test_cli_table_files_invalid_arguments(self):
+        for command, args in (
+                ('list-files', ('--snapshot-id', '0')), ('list-files', ('--limit', '-1')),
+                ('list-files', ('--bucket', 'bad')), ('list-files', ('--partition', 'dt=2024-01-01')),
+                ('file', ()), ('file', ('--file', 'data.parquet', '--snapshot-id', '1')),
+                ('file', ('--file', 'data.parquet', '--limit', '1')),
+                ('file', ('--file', 'data.parquet', '--bucket', '0'))):
+            with self.subTest(command=command, args=args):
+                out, err, code = self._run_table_command(command, 'test_db.users', *args)
+                self.assertEqual(('', 2), (out, code))
+                option = args[2] if len(args) > 2 else args[0] if args else '--file'
+                self.assertIn(option, err)
 
     def test_cli_table_create_with_json_schema(self):
         """Test table create with JSON schema file."""
@@ -1794,13 +2589,12 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn("Invalid WHERE clause", mock_stderr.getvalue())
 
     def test_cli_table_rollback_to_snapshot(self):
-        """table rollback --snapshot restores an earlier snapshot."""
+        """table rollback restores an earlier snapshot with each accepted spelling."""
         pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
         schema = Schema.from_pyarrow_schema(pa_schema)
-        self.catalog.create_table('test_db.rollback_users', schema, True)
 
-        def _write(row_id, name):
-            table = self.catalog.get_table('test_db.rollback_users')
+        def _write(identifier, row_id, name):
+            table = self.catalog.get_table(identifier)
             wb = table.new_batch_write_builder()
             w = wb.new_write()
             c = wb.new_commit()
@@ -1810,28 +2604,23 @@ class CliTableTest(unittest.TestCase):
             w.close()
             c.close()
 
-        _write(1, 'a')   # snapshot 1
-        _write(2, 'b')   # snapshot 2
-
-        def _latest_id():
+        def _latest_id(identifier):
             fresh = CatalogFactory.create({'warehouse': self.warehouse})
-            return fresh.get_table(
-                'test_db.rollback_users').snapshot_manager().get_latest_snapshot().id
+            return fresh.get_table(identifier).snapshot_manager().get_latest_snapshot().id
 
-        self.assertEqual(_latest_id(), 2)
+        for option in ('--snapshot-id', '--snapshot', '--snap'):
+            with self.subTest(option=option):
+                identifier = 'test_db.rollback_' + option.lstrip('-').replace('-', '_')
+                self.catalog.create_table(identifier, schema, True)
+                _write(identifier, 1, 'a')   # snapshot 1
+                _write(identifier, 2, 'b')   # snapshot 2
+                self.assertEqual(_latest_id(identifier), 2)
 
-        with patch('sys.argv',
-                   ['paimon', '-c', self.config_file, 'table', 'rollback',
-                    'test_db.rollback_users', '--snapshot', '1']):
-            with patch('sys.stdout', new_callable=StringIO) as out:
-                try:
-                    main()
-                except SystemExit:
-                    pass
-        self.assertIn('Rolled back', out.getvalue())
+                out = self._run_table_command_success('rollback', identifier, option, '1')
+                self.assertIn('Rolled back', out)
 
-        # The latest snapshot is back to 1 (snapshot 2 was rolled back).
-        self.assertEqual(_latest_id(), 1)
+                # The latest snapshot is back to 1 (snapshot 2 was rolled back).
+                self.assertEqual(_latest_id(identifier), 1)
 
     def test_cli_table_rollback_requires_a_target(self):
         """table rollback without any target selector exits with an error."""

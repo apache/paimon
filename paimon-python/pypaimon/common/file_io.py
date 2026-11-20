@@ -65,7 +65,7 @@ def supports_pread(stream) -> bool:
     """Check if the stream supports position-based reads (thread-safe I/O)."""
     if hasattr(stream, 'read_at'):
         return True
-    if hasattr(stream, 'fileno'):
+    if callable(getattr(os, 'pread', None)) and hasattr(stream, 'fileno'):
         try:
             stream.fileno()
             return True

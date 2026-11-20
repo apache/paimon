@@ -62,7 +62,7 @@ object SQLFunctionConverter {
 
     val inputParams: JList[DataField] = inputParamText.filter(_.trim.nonEmpty) match {
       case Some(text) =>
-        val params = UserDefinedFunction.parseRoutineParam(text, parser)
+        val params = org.apache.spark.sql.paimon.shims.SQLFunctionCompat.parseParams(text, parser)
         params.fields.foreach(
           p => SQLFunctionTypes.requireNoCollation(funcIdent, s"parameter ${p.name}", p.dataType))
         SparkTypeUtils.toPaimonRowType(params).getFields
@@ -136,7 +136,7 @@ object SQLFunctionConverter {
       .map(_.toBoolean)
       .orElse(Some(function.isDeterministic))
 
-    val sqlFunction = SQLFunction(
+    val sqlFunction = org.apache.spark.sql.paimon.shims.SQLFunctionCompat.create(
       name = funcIdent,
       inputParam = inputParam,
       returnType = Left(returnType),
@@ -160,7 +160,8 @@ object SQLFunctionConverter {
       funcIdent: FunctionIdentifier,
       returnTypeText: String,
       parser: ParserInterface): SparkDataType =
-    SQLFunction.parseReturnTypeText(returnTypeText, isTableFunc = false, parser) match {
+    org.apache.spark.sql.paimon.shims.SQLFunctionCompat
+      .parseReturn(returnTypeText, isTableFunc = false, parser) match {
       case Some(Left(dataType)) => dataType
       case _ =>
         throw new UnsupportedOperationException(

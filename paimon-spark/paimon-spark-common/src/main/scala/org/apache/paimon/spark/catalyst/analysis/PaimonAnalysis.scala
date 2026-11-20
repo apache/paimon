@@ -19,13 +19,14 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{PaimonSparkTableBase, SparkSource, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsCommand, PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.spark.write.PaimonWriteRequirement
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.utils.GeneratedColumn
 
@@ -38,6 +39,7 @@ import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
@@ -47,28 +49,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     val withPaimonWrites = AnalysisHelper.allowInvokingTransformsInAnalyzer {
-      plan.transformDown {
-        // Keep fallback conversion before the generic V2 rewrite; otherwise an already-resolved
-        // query can remain as OverwritePartitionsDynamic until Spark's capability check rejects it.
-        case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
-          PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
-
-        case a: V2WriteCommand if PaimonFormatOutputResolver.isLegacyFormatWrite(a) =>
-          PaimonFormatOutputResolver.resolve(a)
-
-        case a @ PaimonV2WriteCommand(table)
-            if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
-          val options = Options.fromMap(writeOptions(a).asJava)
-          val mergeSchemaEnabled = SchemaEvolutionHelper.mergeSchemaEnabled(options)
-          val newQuery = resolvePaimonWrite(a, table, options, mergeSchemaEnabled)
-          if (newQuery ne a.query) {
-            // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
-            newQuery.setTagValue(PAIMON_WRITE_RESOLVED, ())
-            Compatibility.withNewQuery(a, newQuery)
-          } else {
-            a
-          }
-      }
+      plan.transformDown { case command: V2WriteCommand => resolveWrite(bindWriteOptions(command)) }
     }
 
     withPaimonWrites.resolveOperatorsDown {
@@ -103,6 +84,66 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         throw new UnsupportedOperationException(
           "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. " +
             "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, and ADD COLUMN instead.")
+    }
+  }
+
+  private def resolveWrite(command: V2WriteCommand): LogicalPlan = command match {
+    case a @ PaimonV2WriteCommand(relation)
+        if relation.catalog.isEmpty && relation.options.containsKey(SparkSource.CATALOG) =>
+      // The target table is not a child of V2WriteCommand. Bind it explicitly rather than
+      // relying on relation traversal. TableProvider.getTable does not pass its catalog to
+      // DataFrameWriter, but V2 distribution planning needs it to resolve the bucket function.
+      val catalog = session.sessionState.catalogManager
+        .catalog(relation.options.get(SparkSource.CATALOG))
+      a.withNewTable(
+        SparkShimLoader.shim.copyDataSourceV2Relation(
+          relation,
+          catalog,
+          SparkSource.tableIdentifier(relation.options.asCaseSensitiveMap())))
+
+    // Keep fallback conversion before the generic V2 rewrite; otherwise an already-resolved
+    // query can remain as OverwritePartitionsDynamic until Spark's capability check rejects it.
+    case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
+      PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
+
+    case a: V2WriteCommand if PaimonFormatOutputResolver.isLegacyFormatWrite(a) =>
+      PaimonFormatOutputResolver.resolve(a)
+
+    case a @ PaimonV2WriteCommand(table) if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
+      val options = Options.fromMap(writeOptions(a).asJava)
+      val mergeSchemaEnabled = SchemaEvolutionHelper.mergeSchemaEnabled(options)
+      val resolvedQuery = resolvePaimonWrite(a, table, options, mergeSchemaEnabled)
+      val sparkTable = table.table.asInstanceOf[SparkTable]
+      val newQuery = if (sparkTable.useV2Write) {
+        PaimonWriteRequirement.prepareQuery(
+          sparkTable.getTable.asInstanceOf[FileStoreTable],
+          resolvedQuery)
+      } else {
+        resolvedQuery
+      }
+      if (newQuery ne a.query) {
+        // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
+        newQuery.setTagValue(PAIMON_WRITE_RESOLVED, ())
+        Compatibility.withNewQuery(a, newQuery)
+      } else {
+        a
+      }
+    case _ => command
+  }
+
+  private def bindWriteOptions(command: V2WriteCommand): V2WriteCommand = {
+    command.table match {
+      case relation: DataSourceV2Relation
+          if relation.catalog.nonEmpty || relation.options.containsKey(SparkSource.CATALOG) =>
+        val table =
+          PaimonSparkTableBase.withWriteOptions(relation.table, writeOptions(command).asJava)
+        if (table eq relation.table) {
+          command
+        } else {
+          command.withNewTable(
+            SparkShimLoader.shim.copyDataSourceV2Relation(relation, table, relation.output))
+        }
+      case _ => command
     }
   }
 

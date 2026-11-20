@@ -23,8 +23,10 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -51,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -408,8 +411,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
         new CompactDatabaseAction(Collections.singletonMap("warehouse", warehouse))
                 .withDatabaseCompactMode("combined")
-                // Data Evolution uses the single-table compactor without idle-time filtering.
-                .withPartitionIdleTime(Duration.ofDays(1))
                 .withStreamExecutionEnvironment(env)
                 .build();
         env.execute();
@@ -420,6 +421,39 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             assertThat(getResult(table.newRead(), table.newScan().plan().splits(), table.rowType()))
                     .containsExactlyInAnyOrder("+I[1, 30]", "+I[2, 60]");
         }
+    }
+
+    @ParameterizedTest(name = "mode = {0}, useSql = {1}")
+    @CsvSource({"divided, false", "combined, false", "divided, true", "combined, true"})
+    @Timeout(120)
+    public void testDataEvolutionCompactWithPartitionIdleTime(String mode, boolean useSql)
+            throws Exception {
+        FileStoreTable idleTable = createDataEvolutionTable("idle_evolution");
+        FileStoreTable activeTable = createDataEvolutionTable("active_evolution");
+        writeDataEvolutionRecords(idleTable, true);
+        writeDataEvolutionRecords(activeTable, false);
+
+        if (useSql) {
+            executeSQL(
+                            String.format(
+                                    "CALL sys.compact_database(mode => '%s', partition_idle_time => '1 d')",
+                                    mode),
+                            false,
+                            true)
+                    .close();
+        } else {
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
+            new CompactDatabaseAction(Collections.singletonMap("warehouse", warehouse))
+                    .withDatabaseCompactMode(mode)
+                    .withPartitionIdleTime(Duration.ofDays(1))
+                    .withStreamExecutionEnvironment(env)
+                    .build();
+            env.execute();
+        }
+
+        checkLatestSnapshot(idleTable, 4, Snapshot.CommitKind.COMPACT);
+        checkLatestSnapshot(activeTable, 3, Snapshot.CommitKind.APPEND);
     }
 
     @ParameterizedTest
@@ -497,12 +531,20 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     }
 
     private void writeDataEvolutionRecords(FileStoreTable table) throws Exception {
+        writeDataEvolutionRecords(table, false);
+    }
+
+    private void writeDataEvolutionRecords(FileStoreTable table, boolean old) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
             write.write(rowData(1, 10));
             write.write(rowData(2, 20));
-            commit.commit(write.prepareCommit());
+            List<CommitMessage> messages = write.prepareCommit();
+            if (old) {
+                markFilesCreatedAtEpoch(messages);
+            }
+            commit.commit(messages);
         }
 
         for (int multiplier : new int[] {2, 3}) {
@@ -522,8 +564,27 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 assertThat(files).hasSize(1);
                 assertThat(files.get(0).writeCols()).containsExactly("v");
                 files.replaceAll(file -> file.assignFirstRowId(0L));
+                if (old) {
+                    markFilesCreatedAtEpoch(messages);
+                }
                 commit.commit(messages);
             }
+        }
+    }
+
+    private static void markFilesCreatedAtEpoch(List<CommitMessage> messages) {
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+        int creationTimeIndex = DataFileMeta.SCHEMA.getFieldIndex(DataFileMeta.CREATION_TIME);
+        for (CommitMessage message : messages) {
+            ((CommitMessageImpl) message)
+                    .newFilesIncrement()
+                    .newFiles()
+                    .replaceAll(
+                            file -> {
+                                GenericRow meta = (GenericRow) serializer.toRow(file);
+                                meta.setField(creationTimeIndex, Timestamp.fromEpochMillis(0));
+                                return serializer.fromRow(meta);
+                            });
         }
     }
 

@@ -168,6 +168,42 @@ public class AppendCompactCoordinatorTest {
     }
 
     @Test
+    public void testBatchCompactsFilesLeftOverByPacking() {
+        // 14 files of a third of the target size: packing fills 2 tasks of 6 files and leaves 2
+        // files, fewer than compaction.min.file-num
+        List<DataFileMeta> files =
+                generateNewFiles(
+                        14, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 3 + 1);
+
+        // streaming keeps the 2 files until they reach COMPACT_AGE
+        compactionCoordinator.notifyNewFiles(partition, files);
+        assertThat(compactionCoordinator.compactPlan()).hasSize(2);
+        assertThat(compactionCoordinator.listRestoredFiles()).hasSize(2);
+
+        // issue 5130: a batch job plans once, so it compacts the 2 files in a third task
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(appendOnlyFileStoreTable, false);
+        batchCoordinator.notifyNewFiles(partition, files);
+        List<AppendCompactTask> tasks = batchCoordinator.compactPlan();
+        assertThat(tasks).hasSize(3);
+        assertThat(tasks.get(2).compactBefore()).hasSize(2);
+        assertThat(tasks.stream().flatMap(task -> task.compactBefore().stream()))
+                .containsExactlyInAnyOrderElementsOf(files);
+        assertThat(batchCoordinator.subCoordinators).isEmpty();
+    }
+
+    @Test
+    public void testBatchKeepsSingleFile() {
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(appendOnlyFileStoreTable, false);
+        batchCoordinator.notifyNewFiles(partition, generateNewFiles(1, 0));
+
+        // compacting a single file alone does not reduce the file count
+        assertThat(batchCoordinator.compactPlan()).isEmpty();
+        assertThat(batchCoordinator.listRestoredFiles()).hasSize(1);
+    }
+
+    @Test
     public void testBatchScanEmptyTable() {
         compactionCoordinator = new AppendCompactCoordinator(appendOnlyFileStoreTable, false);
         assertThatThrownBy(() -> compactionCoordinator.scan())

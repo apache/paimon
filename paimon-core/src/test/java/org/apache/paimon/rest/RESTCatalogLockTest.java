@@ -19,8 +19,10 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.CommitLockResponse;
@@ -723,11 +725,46 @@ class RESTCatalogLockTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void optimisticScopeIsInheritedAndClearedBeforeRequiredAcquisition(boolean acquireDirectly)
+            throws Exception {
+        Lock publication =
+                new CatalogSnapshotCommit(mock(Catalog.class), identifier, "table-id", lock);
+        Callable<String> operation =
+                () ->
+                        publication.runWithLock(
+                                () -> {
+                                    publication.ensureValid();
+                                    return "published";
+                                });
+        if (acquireDirectly) {
+            try (AutoCloseable ignored = publication.acquire(AcquireMode.OPTIMISTIC_ALLOWED)) {
+                assertThat(operation.call()).isEqualTo("published");
+            }
+        } else {
+            assertThat(publication.runWithLock(operation, AcquireMode.OPTIMISTIC_ALLOWED))
+                    .isEqualTo("published");
+        }
+        verifyNoInteractions(api, renewer, workers);
+        assertThatThrownBy(publication::ensureValid).hasMessageContaining("No commit lease");
+
+        grant("morax-job", 60000);
+        assertThat(publication.runWithLock(operation)).isEqualTo("published");
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(future).cancel(false);
+    }
+
     @Test
     void nestedPublicationReusesLeaseAndRechecksValidity() throws Exception {
         grant("morax-job", 60000);
         Lock publication = Lock.reentrant(lock);
-        assertThat(publication.runWithLock(() -> publication.runWithLock(() -> "published")))
+        assertThat(
+                        publication.runWithLock(
+                                () ->
+                                        publication.runWithLock(
+                                                () -> "published", AcquireMode.OPTIMISTIC_ALLOWED),
+                                AcquireMode.REQUIRED))
                 .isEqualTo("published");
         verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
         verify(future).cancel(false);
@@ -739,7 +776,8 @@ class RESTCatalogLockTest {
                                             publication.runWithLock(
                                                     () -> {
                                                         throw new AssertionError();
-                                                    }))
+                                                    },
+                                                    AcquireMode.OPTIMISTIC_ALLOWED))
                             .hasMessageContaining("no longer usable");
                     return null;
                 });
@@ -754,8 +792,10 @@ class RESTCatalogLockTest {
         try (AutoCloseable second = lock.acquire()) {
             first.close();
             lock.ensureValid();
+            verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
         }
         verify(api, times(2)).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api, times(2)).releaseCommitLock(identifier, "table-id", "morax-job");
         verify(future, times(2)).cancel(false);
     }
 
@@ -792,6 +832,113 @@ class RESTCatalogLockTest {
 
     private <T> T run(Callable<T> callable) throws Exception {
         return lock.runWithLock(callable);
+    }
+
+    @Test
+    void emptyOperationReleasesWithoutPublishingASnapshot() throws Exception {
+        grant("morax-job", 60000);
+        Object result = run(() -> null);
+        assertThat(result).isNull();
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void everyCompletedScopeReleasesTheRemoteLease(boolean failOperation) throws Exception {
+        grant("morax-job", 60000);
+        RuntimeException failure = new RuntimeException("Compaction preparation failed");
+        if (failOperation) {
+            assertThatThrownBy(
+                            () ->
+                                    run(
+                                            () -> {
+                                                throw failure;
+                                            }))
+                    .isSameAs(failure);
+        } else {
+            assertThat(run(() -> "published")).isEqualTo("published");
+        }
+        verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @Test
+    void operationErrorStillReleasesRemoteLease() {
+        grant("morax-job", 60000);
+        AssertionError failure = new AssertionError("Preparation error");
+        assertThatThrownBy(
+                        () ->
+                                run(
+                                        () -> {
+                                            throw failure;
+                                        }))
+                .isSameAs(failure);
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void remoteReleaseFailurePreservesOperationOutcome(boolean failOperation) throws Exception {
+        grant("morax-job", 60000);
+        RuntimeException releaseFailure = new RuntimeException("Release unavailable");
+        RuntimeException operationFailure = new RuntimeException("Preparation failed");
+        doThrow(releaseFailure).when(api).releaseCommitLock(identifier, "table-id", "morax-job");
+        if (failOperation) {
+            assertThatThrownBy(
+                            () ->
+                                    run(
+                                            () -> {
+                                                throw operationFailure;
+                                            }))
+                    .isSameAs(operationFailure)
+                    .satisfies(
+                            error ->
+                                    assertThat(error.getSuppressed())
+                                            .containsExactly(releaseFailure));
+        } else {
+            assertThat(run(() -> "published")).isEqualTo("published");
+        }
+    }
+
+    @Test
+    void schedulerRejectionAfterGrantStillReleasesRemoteLease() {
+        grant("morax-job", 60000);
+        RejectedExecutionException failure = new RejectedExecutionException("Scheduler stopped");
+        when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
+                .thenThrow(failure);
+        assertThatThrownBy(() -> run(() -> "unused")).hasCause(failure);
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @Test
+    void uncertainAcquisitionStillAttemptsRemoteRelease() {
+        RuntimeException failure = new RuntimeException("Grant response lost");
+        when(api.acquireCommitLock(identifier, "table-id", "morax-job")).thenThrow(failure);
+        assertThatThrownBy(() -> run(() -> "unused")).hasCause(failure);
+        verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+        verifyNoInteractions(renewer);
+    }
+
+    @Test
+    void interruptedOwnerAttemptsReleaseAndRetainsInterruptStatus() throws Exception {
+        grant("morax-job", 60000);
+        doAnswer(
+                        invocation -> {
+                            assertThat(Thread.currentThread().isInterrupted()).isFalse();
+                            return null;
+                        })
+                .when(api)
+                .releaseCommitLock(identifier, "table-id", "morax-job");
+        AutoCloseable scope = lock.acquire();
+        Thread.currentThread().interrupt();
+        try {
+            scope.close();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            verify(api).releaseCommitLock(identifier, "table-id", "morax-job");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private void grant(String owner, long leaseMillis) {

@@ -198,19 +198,25 @@ case class PaimonStrategy(spark: SparkSession)
     case ShowCreateTable(ResolvedPaimonView(viewCatalog, ident), _, output) =>
       ShowCreatePaimonViewExec(output, viewCatalog, ident) :: Nil
 
-    case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
-      DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
-
-    case DescribeRelation(r: ResolvedTable, partitionSpec, isExtended, output) =>
-      (r.table, r.catalog) match {
-        case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
+    case d: DescribeRelation =>
+      d.relation match {
+        case ResolvedPaimonView(viewCatalog, ident) =>
+          DescribePaimonViewExec(d.output, viewCatalog, ident, d.isExtended) :: Nil
+        case r: ResolvedTable
+            if r.table.isInstanceOf[SparkTable] &&
+              r.catalog.isInstanceOf[SparkBaseCatalog] =>
+          // Spark 4.2 moved partition descriptions to a separate logical command.
+          val partitionSpec = d.getClass.getMethods
+            .find(_.getName == "partitionSpec")
+            .map(_.invoke(d).asInstanceOf[Map[String, String]])
+            .getOrElse(Map.empty)
           PaimonDescribeTableExec(
-            output,
-            sparkCatalog,
+            d.output,
+            r.catalog.asInstanceOf[SparkBaseCatalog],
             r.identifier,
-            sparkTable,
+            r.table.asInstanceOf[SparkTable],
             partitionSpec,
-            isExtended) :: Nil
+            d.isExtended) :: Nil
         case _ => Nil
       }
 

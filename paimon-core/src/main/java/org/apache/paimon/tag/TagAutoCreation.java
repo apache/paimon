@@ -168,7 +168,11 @@ public class TagAutoCreation {
         LOG.info("The next tag time is {}.", nextTag);
         if (nextTag == null
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
-            LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
+            // The first tag is created at once. Later tags are named from the delayed time checked
+            // above, otherwise a tag is created before its delay passes and the due one is skipped.
+            LocalDateTime thisTag =
+                    periodHandler.normalizeToPreviousTag(
+                            nextTag == null ? time : time.minus(delay));
             LOG.info("Create tag for snapshot {} with time {}.", snapshot.id(), thisTag);
             if (automaticCompletion && nextTag != null) {
                 thisTag = nextTag;

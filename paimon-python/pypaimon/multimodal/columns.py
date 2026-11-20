@@ -295,7 +295,8 @@ def update_columns_by_row_id(owner, data, *, columns):
         return operation.finish(source.num_rows, commit=commit, messages=messages)
 
 
-def add_columns(owner, schema, *, inputs, fn, batch_size):
+def add_columns(owner, schema, *, inputs, fn, batch_size,
+                execution="local", concurrency=None, ray_remote_args=None):
     if not isinstance(schema, pa.Schema):
         raise ValueError("schema must be a pyarrow.Schema.")
     _validate_names(schema.names, "Schema")
@@ -311,21 +312,21 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
     if fn is None:
         if inputs is not None:
             raise ValueError("inputs requires fn.")
+        if execution == "ray":
+            raise ValueError("execution='ray' requires fn.")
     else:
         inputs = _validate_inputs(raw, inputs, fn)
+    concurrency, ray_worker = _prepare_compute_worker(execution, concurrency, ray_remote_args)
     with _ColumnUpdate(owner, raw) as operation:
         operation.add_schema(fields)
         if fn is None:
             return operation.finish(0)
-        return _compute_columns(operation, pa.schema(fields), inputs, fn, batch_size)
+        return _compute_columns(operation, pa.schema(fields), inputs, fn, batch_size,
+                                concurrency=concurrency, ray_worker=ray_worker)
 
 
 def compute_columns(owner, columns, *, inputs, fn, batch_size,
                     execution="local", concurrency=None, ray_remote_args=None):
-    if execution not in ("local", "ray"):
-        raise ValueError("execution must be 'local' or 'ray'.")
-    if execution == "local" and (concurrency is not None or ray_remote_args is not None):
-        raise ValueError("Ray options require execution='ray'.")
     columns = [columns] if isinstance(columns, str) else list(columns)
     _validate_names(columns, "Output")
     _validate_batch_size(batch_size)
@@ -341,26 +342,34 @@ def compute_columns(owner, columns, *, inputs, fn, batch_size,
     inputs = _validate_inputs(raw, inputs, fn)
     target_schema = _target_schema(raw)
     schema = pa.schema([target_schema.field(name) for name in columns])
-    if execution == "ray":
-        from pypaimon.ray.compute_columns import validate_ray_options
-        concurrency, ray_remote_args = validate_ray_options(concurrency, ray_remote_args)
+    concurrency, ray_worker = _prepare_compute_worker(execution, concurrency, ray_remote_args)
     with _ColumnUpdate(owner, raw) as operation:
-        return _compute_columns(operation, schema, inputs, fn, batch_size, execution=execution,
-                                concurrency=concurrency, ray_remote_args=ray_remote_args)
+        return _compute_columns(operation, schema, inputs, fn, batch_size,
+                                concurrency=concurrency, ray_worker=ray_worker)
 
 
-def _compute_columns(operation, schema, inputs, fn, batch_size, *,
-                     execution="local", concurrency=None, ray_remote_args=None):
+def _prepare_compute_worker(execution, concurrency, ray_remote_args):
+    if execution == "local":
+        if concurrency is not None or ray_remote_args is not None:
+            raise ValueError("Ray options require execution='ray'.")
+        return None, None
+    if execution == "ray":
+        from pypaimon.ray.compute_columns import create_ray_column_worker
+        return create_ray_column_worker(concurrency, ray_remote_args)
+    raise ValueError("execution must be 'local' or 'ray'.")
+
+
+def _compute_columns(operation, schema, inputs, fn, batch_size, *, concurrency, ray_worker):
     operation.phase = "compute"
     options = {
         "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
     }
-    if execution == "ray":
+    if ray_worker is not None:
         options[CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()] = "full"
     table = operation.raw.copy_without_time_travel(options)._copy_with_snapshot(operation.snapshot)
     builder = table.new_batch_write_builder()
     commit = operation.keep(builder.new_commit())
-    if execution == "local":
+    if ray_worker is None:
         update = builder.new_update().with_update_type(schema.names)
         update.with_read_projection(inputs)
         shard = operation.keep(update.new_shard_updator(0, 1))
@@ -368,7 +377,7 @@ def _compute_columns(operation, schema, inputs, fn, batch_size, *,
     else:
         from pypaimon.ray.compute_columns import prepare_ray_column_update
         messages, updated_rows = prepare_ray_column_update(
-            operation, table, builder.commit_user, inputs, schema, fn, batch_size, concurrency, ray_remote_args)
+            operation, table, builder.commit_user, inputs, schema, fn, batch_size, concurrency, ray_worker)
     return operation.finish(updated_rows, commit=commit, messages=messages)
 
 

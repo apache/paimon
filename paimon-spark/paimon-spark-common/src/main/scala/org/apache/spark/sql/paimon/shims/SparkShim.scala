@@ -21,12 +21,13 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.function.{Function => PaimonFunction}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
@@ -37,7 +38,7 @@ import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
-import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Transform}
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
@@ -56,9 +57,19 @@ trait SparkShim {
 
   def classicApi: ClassicApi
 
+  def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit = {}
+
+  def spatialCandidate(
+      predicate: V2Expression,
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] = None
+
   def createSparkParser(delegate: ParserInterface): ParserInterface
 
   def createCustomResolution(spark: SparkSession): Rule[LogicalPlan]
+
+  // Spark 4 can invalidate metadata values when a row is updated. Spark 3 preserves them.
+  def resolveUpdateMetadata(assignments: Seq[Assignment]): Seq[Assignment] = assignments
 
   def createSparkInternalRow(rowType: RowType): SparkInternalRow
 
@@ -115,6 +126,12 @@ trait SparkShim {
       schemaOrColumns: Any,
       catalog: TableCatalog,
       ident: Identifier): Array[Column]
+
+  // Spark 4.1 added table constraints. Earlier versions have none to validate.
+  def validateTableConstraints(
+      tableSpec: TableSpec,
+      catalog: TableCatalog,
+      ident: Identifier): Unit = {}
 
   def copyTableSpec(
       tableSpec: TableSpec,
@@ -196,6 +213,11 @@ trait SparkShim {
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation
+
+  def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      catalog: CatalogPlugin,
+      identifier: Identifier): DataSourceV2Relation
 
   // Per-version shim: Spark 4.1 added a 5th `timeTravelSpec` parameter with a default. A 4-arg call
   // site compiled against 4.1 emits a `create$default$5()` lookup absent on 4.0.

@@ -62,11 +62,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -187,16 +185,6 @@ public class FileKeyRangesTable implements ReadonlyTable {
 
     private static class FileKeyRangesRead implements InnerTableRead {
 
-        private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
-
-        private static Set<String> scanPushdownFields() {
-            Set<String> fields = new HashSet<>();
-            fields.add("partition");
-            fields.add("bucket");
-            fields.add("level");
-            return Collections.unmodifiableSet(fields);
-        }
-
         private final SchemaManager schemaManager;
 
         private final FileStoreTable storeTable;
@@ -216,9 +204,7 @@ public class FileKeyRangesTable implements ReadonlyTable {
                 this.postFilter = null;
                 return this;
             }
-            List<Predicate> remaining =
-                    PredicateBuilder.excludePredicateWithFields(
-                            PredicateBuilder.splitAnd(predicate), SCAN_PUSHDOWN_FIELDS);
+            List<Predicate> remaining = FilesTable.scanResidualPredicates(predicate);
             this.postFilter = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
