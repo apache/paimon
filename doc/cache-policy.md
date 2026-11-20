@@ -143,7 +143,8 @@ cache delegate 在第一次命中缓存操作时惰性创建，并对该操作�
 
 初始化、探测或打开文件/查询元数据遇到可识别的连接错误时，该操作改用 origin，
 并输出一次 `WARN CACHE_POLICY_FALLBACK` 日志，包含操作、路径、两端 endpoint 和
-异常类型。此后同一个 FileIO 实例持续屏蔽 cache endpoint，所有操作使用 origin，
+异常类型，并完整打印异常堆栈及原因链。此后同一个 FileIO 实例持续屏蔽 cache endpoint，
+所有操作使用 origin，
 序列化也保留这一状态；新建 FileIO 实例才会重新尝试缓存。并发中已经开始的请求可能
 仍在使用 cache delegate，delegate 保留至 FileIO 关闭时统一清理。
 

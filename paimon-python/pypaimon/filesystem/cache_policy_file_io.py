@@ -219,7 +219,8 @@ class CachePolicyFileIO(FileIO):
                     "using origin for subsequent operations on this FileIO",
                     operation, self._cache_options.get(OssOptions.OSS_ENDPOINT),
                     self._origin_file_io.properties.get(OssOptions.OSS_ENDPOINT),
-                    path, type(error).__name__)
+                    path, type(error).__name__,
+                    exc_info=(type(error), error, error.__traceback__))
 
     def _execute(self, path, operation, action, retry=True):
         delegate = self._file_io_for(path, operation)

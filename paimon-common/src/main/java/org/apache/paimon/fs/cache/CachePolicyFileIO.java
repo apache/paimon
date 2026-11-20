@@ -194,7 +194,8 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
                     cacheContext.options().get("fs.oss.endpoint"),
                     originContext.options().get("fs.oss.endpoint"),
                     path,
-                    failure.getClass().getName());
+                    failure.getClass().getName(),
+                    failure);
         }
     }
 
