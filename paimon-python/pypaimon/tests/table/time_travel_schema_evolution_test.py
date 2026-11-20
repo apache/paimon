@@ -162,6 +162,93 @@ class TestTimeTravelSchemaEvolution:
             {'id': 2, 'payload': 'main', 'source': 'web'},
         ]
 
+    def test_branch_copy_reads_latest_schema(self):
+        self._create_branched_table([
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'count', AtomicType('INT')),
+        ], {'id': 1, 'count': 1})
+        self.catalog.alter_table('test.t', [
+            SchemaChange.add_column('source', AtomicType('STRING'))])
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.update_column_type('count', AtomicType('BIGINT'))])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        assert main.table_schema.id == dev.table_schema.id
+        self._write(dev, {'id': 2, 'count': 3000000000})
+
+        switched = main.copy({'branch': 'dev'})
+        assert sorted(self._read(switched), key=lambda row: row['id']) == [
+            {'id': 1, 'count': 1}, {'id': 2, 'count': 3000000000}]
+        assert switched.copy({'branch': None}).fields == main.fields
+
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.add_column('quality', AtomicType('STRING'))])
+        latest = main.copy({'branch': 'dev'})
+        assert latest.field_names == ['id', 'count', 'quality']
+        assert self._read(latest.copy({'scan.tag-name': 'base'})) == [{'id': 1, 'count': 1}]
+        row = {'id': 3, 'count': 4000000000, 'quality': 'verified'}
+        self._write(latest, row)
+        assert row in self._read(self.catalog.get_table('test.t$branch_dev'))
+        assert self._read(main) == [{'id': 1, 'count': 1, 'source': None}]
+
+    def test_branch_copy_applies_dynamic_options_to_branch_defaults(self):
+        main = self._create_branched_table([DataField(0, 'id', AtomicType('INT'))], {'id': 1})
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.set_option('file.compression', 'zstd'),
+            SchemaChange.set_option('read.batch-size', '17'),
+            SchemaChange.set_option('read.parallelism', '3')])
+
+        configured = main.copy({'read.batch-size': '7', 'read.parallelism': None})
+        switched = configured.copy({'branch': 'dev'})
+        assert switched.table_schema.options['file.compression'] == 'zstd'
+        assert switched.table_schema.options['read.batch-size'] == '7'
+        assert 'read.parallelism' not in switched.table_schema.options
+        assert main.table_schema.options['file.compression'] == 'none'
+
+    @pytest.mark.parametrize('external', [False, True])
+    def test_branch_copy_loads_rest_branch_metadata(self, native_rest_catalog, external):
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.schema.schema_manager import SchemaManager
+
+        catalog = native_rest_catalog
+        name = 'default.branch_copy'
+        fields = [DataField(0, 'id', AtomicType('INT'))]
+        options = {}
+        if external:
+            path = (self.root / 'warehouse' / 'default' / 'branch_copy').as_uri()
+            SchemaManager(FileIO.get(path), path).create_table(Schema(fields=fields))
+            options['path'] = path
+        catalog.create_table(name, Schema(fields=fields, options=options), False)
+        main = catalog.get_table(name)
+        assert main.copy({'branch': 'dev'}).current_branch() == 'dev'
+        catalog.create_branch(name, 'dev')
+        catalog.alter_table(name + '$branch_dev', [
+            SchemaChange.add_column('quality', AtomicType('STRING'))])
+
+        direct = catalog.get_table(name + '$branch_dev')
+        switched = main.copy({'branch': 'dev'})
+        assert switched.fields == direct.fields
+        assert switched.table_schema.options['path'] == direct.table_schema.options['path']
+        assert switched.file_io is main.file_io
+        assert switched.catalog_environment.identifier == direct.identifier
+        assert switched.catalog_environment.uuid is None
+        assert switched.catalog_environment.rest_table_response == main.catalog_environment.rest_table_response
+
+    def test_branch_copy_rejects_relocated_rest_table(self, native_rest_catalog):
+        catalog = native_rest_catalog
+        name = 'default.relocated'
+        fields = [DataField(0, 'id', AtomicType('INT'))]
+        catalog.create_table(name, Schema(fields=fields), False)
+        catalog.create_branch(name, 'dev')
+        dev = catalog.get_table(name + '$branch_dev')
+
+        catalog.drop_table(name)
+        location = (self.root / 'replacement').as_uri()
+        catalog.create_table(name, Schema(fields=fields, options={'path': location}), False)
+        assert catalog.get_table(name).table_path == location
+        with pytest.raises(ValueError, match='different table location'):
+            dev.copy({'branch': 'main'})
+
     def test_commit_retry_refreshes_snapshot_schema(self, monkeypatch):
         original = self._create([DataField(0, 'id', AtomicType('INT'))])
         self._write(original, {'id': 1})

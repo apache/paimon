@@ -24,6 +24,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -36,7 +38,9 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -1782,6 +1786,134 @@ class ConflictDetectionTest {
                         Snapshot.CommitKind.APPEND);
 
         assertThat(exception).isNotPresent();
+    }
+
+    @Test
+    void testCentroidIndexChecksContiguousSourceRange() {
+        byte[] meta =
+                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        IndexManifestEntry index = centroidRouter("first", 10, 19, 1, meta);
+        List<SimpleFileEntry> data =
+                Arrays.asList(
+                        createFileEntryWithRowId("a", ADD, 10L, 10L),
+                        createFileEntryWithRowId("b", ADD, 100L, 10L));
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
+                                        snapshot(1),
+                                        data,
+                                        Collections.emptyList(),
+                                        Collections.singletonList(index),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isNotPresent();
+        assertThat(
+                        createConflictDetection()
+                                .checkConflicts(
+                                        snapshot(1),
+                                        data.subList(1, 2),
+                                        Collections.emptyList(),
+                                        Collections.singletonList(index),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isPresent();
+
+        Snapshot concurrent = snapshot(2);
+        SnapshotManager snapshots = mock(SnapshotManager.class);
+        when(snapshots.snapshot(2)).thenReturn(concurrent);
+        CommitScanner scanner = mock(CommitScanner.class);
+        TableSchema schema =
+                TableSchema.create(
+                        0,
+                        new Schema.Builder()
+                                .column("label", new IntType())
+                                .column("v", new IntType())
+                                .build());
+        when(scanner.schema(0)).thenReturn(schema);
+        ManifestEntry updated = manifestEntry(ADD, "updated", 10L, new Range(10, 19));
+        when(updated.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+        when(updated.file().writeCols()).thenReturn(Collections.singletonList("v"));
+        when(scanner.readIncrementalEntries(
+                        concurrent, Collections.singletonList(BinaryRow.EMPTY_ROW)))
+                .thenReturn(Collections.singletonList(updated));
+        ConflictDetection detection =
+                createConflictDetection(scanner, true, false, false, snapshots);
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
+        when(updated.file().writeCols()).thenReturn(Collections.singletonList("label"));
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(index),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+        // A second router starts at snapshot 2. The change in its interval in that
+        // snapshot is already included in its training data. Both are active in snapshot 3.
+        IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
+        ManifestEntry appended = manifestEntry(ADD, "appended", 100L, new Range(100, 109));
+        when(appended.partition()).thenReturn(BinaryRow.EMPTY_ROW);
+        when(appended.file().writeCols()).thenReturn(null);
+        List<BinaryRow> partitions = Collections.singletonList(BinaryRow.EMPTY_ROW);
+        when(scanner.readIncrementalEntries(concurrent, partitions))
+                .thenReturn(Collections.singletonList(appended));
+        Snapshot latest = snapshot(3);
+        when(snapshots.snapshot(3)).thenReturn(latest);
+        assertThat(
+                        detection.checkConflicts(
+                                latest,
+                                data,
+                                Collections.emptyList(),
+                                Arrays.asList(index, second),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isNotPresent();
+        verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
+        verify(scanner).readIncrementalEntries(latest, partitions);
+
+        when(scanner.readIncrementalEntries(latest, partitions))
+                .thenReturn(Collections.singletonList(appended));
+        assertThat(
+                        detection.checkConflicts(
+                                latest,
+                                data,
+                                Collections.emptyList(),
+                                Arrays.asList(index, second),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
+    }
+
+    private IndexManifestEntry centroidRouter(
+            String name, long from, long to, long snapshot, byte[] meta) {
+        IndexFileMeta file =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        name,
+                        100,
+                        0,
+                        null,
+                        null,
+                        new GlobalIndexMeta(
+                                from,
+                                to,
+                                1,
+                                null,
+                                meta,
+                                new org.apache.paimon.index.DataEvolutionIndexSourceMeta(snapshot)
+                                        .serialize()));
+        return new IndexManifestEntry(ADD, BinaryRow.EMPTY_ROW, 0, file);
     }
 
     @Test

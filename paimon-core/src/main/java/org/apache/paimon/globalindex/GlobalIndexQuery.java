@@ -550,11 +550,12 @@ class GlobalIndexQuery {
                 supported = true;
                 continue;
             }
-            GlobalIndexer indexer = GlobalIndexer.create(group.type, group.indexFields(), options);
+            GlobalIndexer indexer =
+                    GlobalIndexer.createForRead(group.type, group.indexFields(), options);
             try (GlobalIndexReader reader =
                     indexer.createReader(
                             meta -> fileIO.newInputStream(meta.filePath()),
-                            group.files,
+                            group.readerFiles(),
                             group.range.count(),
                             splitRows.results().toRangeList(),
                             executor)) {
@@ -799,7 +800,31 @@ class GlobalIndexQuery {
             return "btree".equals(type) && !extraFields.isEmpty();
         }
 
+        private boolean routed() {
+            return !files.isEmpty() && CentroidIndexMeta.isWrapped(files.get(0).metadata());
+        }
+
+        private List<GlobalIndexIOMeta> readerFiles() {
+            if (!routed()) {
+                return files;
+            }
+            List<GlobalIndexIOMeta> decoded = new ArrayList<>(files.size());
+            for (GlobalIndexIOMeta file : files) {
+                decoded.add(
+                        CentroidIndexMeta.file(
+                                file.filePath(),
+                                file.fileSize(),
+                                file.rowCount(),
+                                file.metadata()));
+            }
+            return decoded;
+        }
+
         private IndexGroup selectFiles(Predicate predicate) {
+            // The outer router selects its shards together at read time.
+            if (routed()) {
+                return this;
+            }
             List<GlobalIndexIOMeta> selected =
                     GlobalIndexerFactoryUtils.selectFiles(type, indexFields(), predicate, files);
             // Retain the row range even when metadata proves there are no matching files.

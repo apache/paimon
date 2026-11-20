@@ -31,13 +31,16 @@ import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -83,6 +86,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -906,6 +913,78 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testMultiVectorReaderKeepsQueryWhenInputIsReused() throws Exception {
+        Identifier id = identifier("reused_multi_vector_query");
+        catalog.createTable(
+                id,
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column(
+                                                "chunks",
+                                                DataTypes.ARRAY(
+                                                        DataTypes.ARRAY(DataTypes.FLOAT()))))
+                        .option("vector-index.search-mode", "detail")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(id);
+        write(
+                table,
+                GenericRow.of(
+                        new GenericArray(new Object[] {new GenericArray(new float[] {1, 0})})),
+                GenericRow.of(
+                        new GenericArray(new Object[] {new GenericArray(new float[] {0, 1})})));
+        float[][] input = {{1, 0}, {1, 0}};
+        VectorSearchBuilder search =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("chunks")
+                        .withLimit(1)
+                        .withMultiVector(input);
+        VectorRead original = search.newVectorRead();
+        VectorScan.Plan plan = search.newVectorScan().scan();
+        input[0][0] = 0;
+        input[0][1] = 1;
+        input[1] = new float[] {0, 1};
+        assertThat(search.withMultiVector(input).newVectorRead().read(plan).results())
+                .containsExactly(1L);
+        ScoredGlobalIndexResult first = (ScoredGlobalIndexResult) original.read(plan);
+        assertThat(first.results()).containsExactly(0L);
+        assertThat(first.scoreGetter().score(0)).isEqualTo(2f);
+    }
+
+    @Test
+    public void testTypedMultiVectorValidatesQueryDimensionsOnEmptyTable() throws Exception {
+        Identifier id = identifier("empty_multi_vector");
+        catalog.createTable(
+                id,
+                Schema.newBuilder()
+                        .column("chunks", DataTypes.ARRAY(DataTypes.VECTOR(3, DataTypes.FLOAT())))
+                        .option("bucket", "-1")
+                        .option("row-tracking.enabled", "true")
+                        .option("data-evolution.enabled", "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(id);
+        float[][] wrong = {{1, 0}, {0, 1}};
+        VectorSearchBuilder search =
+                table.newVectorSearchBuilder().withVectorColumn("chunks").withLimit(1);
+        assertThatThrownBy(() -> search.withMultiVector(wrong).executeLocal())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expected 3, got 2");
+        assertThatThrownBy(() -> search.withVector(wrong[0]).executeLocal())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expected 3, got 2");
+        assertThatThrownBy(
+                        () ->
+                                table.newBatchVectorSearchBuilder()
+                                        .withVectorColumn("chunks")
+                                        .withLimit(1)
+                                        .withVectors(wrong)
+                                        .executeBatchLocal())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expected 3, got 2");
+    }
+
+    @Test
     public void testSharedVectorDeclarationKeepsDataEvolutionReads() throws Exception {
         catalog.createTable(
                 identifier("declared_vector"),
@@ -989,6 +1068,100 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(read.rawCandidates).containsExactly(0L, 1L, 2L);
         assertThat(reranked[0].results()).containsExactly(2L);
         assertThat(reranked[1].results()).containsExactly(2L);
+    }
+
+    @Test
+    public void testBatchReranksMultiVectorCandidatesInOneRawReadByDefault() throws Exception {
+        Identifier id = identifier("multi_vector_refine");
+        catalog.createTable(
+                id,
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column(
+                                                "chunks",
+                                                DataTypes.ARRAY(
+                                                        DataTypes.ARRAY(DataTypes.FLOAT()))))
+                        .build(),
+                false);
+        FileStoreTable table = getTable(id);
+        GenericArray x = new GenericArray(new float[] {1, 0});
+        GenericArray y = new GenericArray(new float[] {0, 1});
+        write(
+                table,
+                GenericRow.of(new GenericArray(new Object[] {x})),
+                GenericRow.of(new GenericArray(new Object[] {y})),
+                GenericRow.of(new GenericArray(new Object[] {x, y})));
+
+        AtomicInteger rawReads = new AtomicInteger();
+        DataEvolutionBatchVectorRead read =
+                new DataEvolutionBatchVectorRead(
+                        table,
+                        null,
+                        null,
+                        2,
+                        table.rowType().getField("chunks"),
+                        new float[][] {{1, 0}, {0, 1}},
+                        null) {
+                    @Override
+                    protected GlobalIndexer createGlobalIndexer(
+                            List<IndexVectorSearchSplit> splits) {
+                        return null;
+                    }
+
+                    @Override
+                    protected CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalBatch(
+                            GlobalIndexer indexer,
+                            IndexPathFactory paths,
+                            long from,
+                            long to,
+                            List<IndexFileMeta> files,
+                            float[][] queries,
+                            int k,
+                            RoaringNavigableMap64 included,
+                            ExecutorService executor) {
+                        // Row 2 is shared. Each other row is a candidate for only its *opposite*
+                        // query.
+                        return CompletableFuture.completedFuture(
+                                Arrays.asList(
+                                        Optional.of(
+                                                VectorSearchBuilderTest.scoredResult(0.5f, 1L, 2L)),
+                                        Optional.of(
+                                                VectorSearchBuilderTest.scoredResult(
+                                                        0.5f, 0L, 2L))));
+                    }
+
+                    @Override
+                    void readRawVectorRows(
+                            List<Range> ranges,
+                            RoaringNavigableMap64 candidates,
+                            boolean includeFilter,
+                            RawVectorConsumer consumer) {
+                        rawReads.incrementAndGet();
+                        assertThat(candidates).containsExactly(0L, 1L, 2L);
+                        super.readRawVectorRows(ranges, candidates, includeFilter, consumer);
+                    }
+                };
+        IndexFileMeta file =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "part",
+                        0,
+                        3,
+                        null,
+                        null,
+                        new GlobalIndexMeta(0, 2, 0, null, null));
+        IndexVectorSearchSplit split =
+                new IndexVectorSearchSplit(
+                        0, 2, Collections.singletonList(file), Collections.emptyList());
+        List<GlobalIndexResult> results = read.readBatch(() -> Collections.singletonList(split));
+        assertThat(rawReads.get()).isEqualTo(1);
+        for (int i = 0; i < results.size(); i++) {
+            ScoredGlobalIndexResult result = (ScoredGlobalIndexResult) results.get(i);
+            long opposite = 1 - i;
+            assertThat(result.results()).containsExactly(opposite, 2L);
+            assertThat(result.scoreGetter().score(opposite)).isZero();
+            assertThat(result.scoreGetter().score(2L)).isEqualTo(1f);
+        }
     }
 
     @Test
@@ -1629,6 +1802,21 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // field does not extend that coverage, so the tail remains eligible for a data fallback.
         buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
 
+        VectorScan.Plan unfiltered =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+        assertThat(indexVectorSearchSplits(unfiltered.splits()))
+                .singleElement()
+                .satisfies(
+                        split -> {
+                            assertThat(split.vectorIndexFiles()).hasSize(2);
+                            assertThat(split.scalarIndexFiles()).isEmpty();
+                        });
+
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
         GlobalIndexResult result =
                 table.newVectorSearchBuilder()
@@ -1816,6 +2004,100 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<Integer> ids1 = readIds(table, results.get(1));
         assertThat(ids1.size()).isLessThanOrEqualTo(3);
         assertThat(ids1).contains(4, 5);
+    }
+
+    @Test
+    public void testBatchConsumesSplitsIncrementallyAndPreservesFirstScore() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_THREAD_NUM.key(), "1"));
+        AtomicInteger scored = new AtomicInteger();
+        DataEvolutionBatchVectorRead read =
+                new DataEvolutionBatchVectorRead(
+                        table,
+                        null,
+                        null,
+                        1,
+                        table.rowType().getField(VECTOR_FIELD_NAME),
+                        new float[][] {{0, 0}},
+                        null) {
+                    @Override
+                    protected GlobalIndexer createGlobalIndexer(
+                            List<IndexVectorSearchSplit> splits) {
+                        return null;
+                    }
+
+                    @Override
+                    protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
+                        return "ivf-flat";
+                    }
+
+                    @Override
+                    protected CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalBatch(
+                            GlobalIndexer indexer,
+                            IndexPathFactory paths,
+                            long from,
+                            long to,
+                            List<IndexFileMeta> files,
+                            float[][] queries,
+                            int k,
+                            RoaringNavigableMap64 included,
+                            ExecutorService executor) {
+                        if (from == 1) {
+                            assertThat(scored.get()).isEqualTo(1);
+                        }
+                        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+                        rows.add(from);
+                        float score = from == 1 ? 10 : (to == 0 ? 5 : 100);
+                        return CompletableFuture.completedFuture(
+                                Collections.singletonList(
+                                        Optional.of(
+                                                ScoredGlobalIndexResult.create(
+                                                        rows,
+                                                        row -> {
+                                                            scored.incrementAndGet();
+                                                            return score;
+                                                        }))));
+                    }
+
+                    @Override
+                    protected ScoredGlobalIndexResult readRawSearch(
+                            List<Range> ranges,
+                            RoaringNavigableMap64 filter,
+                            GlobalIndexer indexer,
+                            float[] query) {
+                        return VectorSearchBuilderTest.scoredResult(200, 0L);
+                    }
+                };
+
+        List<VectorSearchSplit> splits = new ArrayList<>();
+        for (Range range : Arrays.asList(new Range(0, 0), new Range(1, 1), new Range(0, 2))) {
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            range.from,
+                            range.to,
+                            Collections.singletonList(
+                                    new IndexFileMeta(
+                                            "ivf-flat",
+                                            "part",
+                                            0,
+                                            1,
+                                            null,
+                                            null,
+                                            new GlobalIndexMeta(
+                                                    range.from, range.to, 0, null, null))),
+                            Collections.emptyList()));
+        }
+        splits.add(
+                new RawVectorSearchSplit(
+                        Collections.singletonList(new Range(0, 0)), Collections.emptyList(), null));
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult) read.readBatch(() -> splits).get(0);
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(result.scoreGetter().score(1L)).isEqualTo(10f);
     }
 
     @Test

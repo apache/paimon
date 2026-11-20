@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -171,22 +172,14 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
                         Options userOptions = createUserOptions(table, optionString);
 
-                        if (indexColumns.size() > 1) {
-                            // Fail fast before submitting the job: index types that do not support
-                            // multi-column throw from GlobalIndexerFactory#create, which happens
-                            // before any indexer side effect.
-                            try {
-                                GlobalIndexer.create(indexType, indexFields, userOptions);
-                            } catch (UnsupportedOperationException e) {
-                                throw new IllegalArgumentException(
-                                        String.format(
-                                                "Index type '%s' does not support multi-column index, got columns: %s",
-                                                indexType, indexColumns));
-                            }
-                        }
+                        GlobalIndexBuilderUtils.validateIndexFields(
+                                indexType, indexFields, userOptions);
 
                         GlobalIndexTopologyBuilder topoBuilder =
-                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                        indexType,
+                                        GlobalIndexer.resolveOptions(
+                                                indexType, indexFields, userOptions));
 
                         List<CommitMessage> indexResults =
                                 topoBuilder.buildIndex(

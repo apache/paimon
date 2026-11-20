@@ -120,6 +120,68 @@ class GlobalIndexQueryTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    @Test
+    void workerReceivesRoutedFilesAfterSplitSerialization() throws Exception {
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.FLOAT()));
+        ResultEntry router =
+                CentroidIndexMeta.router(new ResultEntry("router", 0, null), "model", 2);
+        ResultEntry shard =
+                CentroidIndexMeta.shard(new ResultEntry("shard", 3, new byte[] {42}), "model", 1);
+        List<IndexFileMeta> files = new ArrayList<>();
+        for (ResultEntry file : Arrays.asList(router, shard)) {
+            files.add(
+                    new IndexFileMeta(
+                            "ivf-pq",
+                            file.fileName(),
+                            100,
+                            file.rowCount(),
+                            new GlobalIndexMeta(0, 2, 0, null, file.meta()),
+                            null));
+        }
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        GlobalIndexQuery plan =
+                GlobalIndexQuery.create(
+                        rowType,
+                        new PredicateBuilder(rowType).isNotNull(0),
+                        files,
+                        paths,
+                        new Options());
+        IndexQuerySplit split =
+                new IndexQuerySplit(
+                        dataSplit(), plan, Collections.emptyMap(), Collections.emptyList());
+        IndexQuerySplit restored =
+                (IndexQuerySplit) SplitSerializer.deserialize(SplitSerializer.serialize(split));
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitIsNotNull(any()))
+                .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+        GlobalIndexer indexer = mock(GlobalIndexer.class);
+        when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            List<GlobalIndexIOMeta> selected = invocation.getArgument(1);
+                            assertThat(selected).hasSize(2);
+                            CentroidIndexFile model = (CentroidIndexFile) selected.get(0);
+                            CentroidIndexFile local = (CentroidIndexFile) selected.get(1);
+                            assertThat(model.nlist()).isEqualTo(2);
+                            assertThat(local.centroid()).isEqualTo(1);
+                            assertThat(local.metadata()).containsExactly(42);
+                            return reader;
+                        });
+        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
+        when(factory.createForRead(anyList(), any())).thenReturn(indexer);
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class)) {
+            factories.when(() -> GlobalIndexerFactoryUtils.load("ivf-pq")).thenReturn(factory);
+            assertThat(restored.evaluate(new LocalFileIO()).rowRanges())
+                    .containsExactly(new Range(0, 0));
+            verify(reader).visitIsNotNull(any());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
     void testPrunesSortedFilesBeforeSplitSerialization(String indexType) throws Exception {
@@ -206,7 +268,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
@@ -402,7 +464,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load(indexType)).thenReturn(factory);
@@ -472,7 +534,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
 
         RowType rowType = RowType.of(DataTypes.INT());
         GlobalIndexQuery plan =
@@ -547,7 +609,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         FileIO fileIO = mock(FileIO.class);
         List<Range> first = Collections.singletonList(new Range(110, 119));
         List<Range> second = Collections.singletonList(new Range(130, 139));

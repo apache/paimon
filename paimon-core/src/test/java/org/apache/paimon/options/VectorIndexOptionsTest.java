@@ -59,7 +59,7 @@ class VectorIndexOptionsTest {
         assertThat(values).isEqualTo(original);
 
         VectorIndexOptions persisted =
-                VectorIndexOptions.resolve(new Options(values), "ivf-flat", "embedding", false);
+                VectorIndexOptions.resolve(new Options(values), "ivf-flat", "embedding");
         assertThat(persisted.type()).isEqualTo("ivf-flat");
         assertThat(persisted.options().get("ivf-flat.nlist")).isEqualTo("64");
         assertThat(persisted.metric()).isEqualTo("cosine");
@@ -73,8 +73,7 @@ class VectorIndexOptionsTest {
         input.setString("fields.old.pk-vector.index.type", "ivf-pq");
         input.setString("fields.other_old.pk-vector.index.type", "diskann");
         assertThat(VectorIndexOptions.columns(input)).containsExactly("old", "other_old");
-        assertThat(VectorIndexOptions.resolve(input, null, "old", false).type())
-                .isEqualTo("ivf-pq");
+        assertThat(VectorIndexOptions.resolve(input, null, "old").type()).isEqualTo("ivf-pq");
         assertThat(new CoreOptions(input).vectorIndexColumns("ivf-pq")).containsExactly("old");
         assertThat(new CoreOptions(input).vectorIndexColumns("diskann"))
                 .containsExactly("other_old");
@@ -85,10 +84,8 @@ class VectorIndexOptionsTest {
         input.setString("global-index.diskann." + suffix, "video");
         assertThat(VectorIndexOptions.columns(input))
                 .containsExactly("video", "embedding", "other");
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).type())
-                .isEqualTo("ivf-pq");
-        assertThat(VectorIndexOptions.resolve(input, null, "video", false).type())
-                .isEqualTo("diskann");
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding").type()).isEqualTo("ivf-pq");
+        assertThat(VectorIndexOptions.resolve(input, null, "video").type()).isEqualTo("diskann");
         assertThat(new CoreOptions(input).vectorIndexColumns("ivf-pq"))
                 .containsExactly("embedding", "other");
         assertThat(new CoreOptions(input).vectorIndexColumns("diskann")).containsExactly("video");
@@ -106,14 +103,14 @@ class VectorIndexOptionsTest {
             })
     void testRemovedTypeAliasesAreIgnored(String key) {
         Options input = Options.fromMap(Collections.singletonMap(key, "ivf-pq"));
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).type()).isNull();
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).options().toMap())
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding").type()).isNull();
+        assertThat(VectorIndexOptions.resolveConfigured(input, null, "embedding").options().toMap())
                 .isEqualTo(input.toMap());
         input.setString("fields.embedding.pk-vector.index.type", "diskann");
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).type())
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding").type())
                 .isEqualTo("diskann");
         input.setString("global-index.ivf-flat.index-columns", "embedding");
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).type())
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding").type())
                 .isEqualTo("ivf-flat");
     }
 
@@ -124,13 +121,15 @@ class VectorIndexOptionsTest {
         values.put("ivf-pq.dimension", "768");
         values.put("fields.embedding.index-options", "{\"nlist\":64,\"metric\":\"COSINE\"}");
         Options input = new Options(values);
-        assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).type())
-                .isEqualTo("ivf-pq");
-        Options resolved = VectorIndexOptions.resolve(input, null, "embedding", false).options();
+        assertThat(VectorIndexOptions.resolve(input, null, "embedding").type()).isEqualTo("ivf-pq");
+        Options resolved = VectorIndexOptions.resolveConfigured(input, null, "embedding").options();
         assertMetric(resolved, "cosine");
         assertThat(resolved.get("ivf-pq.dimension")).isEqualTo("768");
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
-        assertThat(VectorIndexOptions.resolve(resolved, null, "embedding", false).options().toMap())
+        assertThat(
+                        VectorIndexOptions.resolveConfigured(resolved, null, "embedding")
+                                .options()
+                                .toMap())
                 .isEqualTo(resolved.toMap());
         assertThat(input.toMap()).isEqualTo(values);
     }
@@ -141,7 +140,7 @@ class VectorIndexOptionsTest {
         options.setString("global-index.ivf-pq.index-columns", "embedding");
         options.setString("global-index.diskann.index-column", "embedding");
         options.setString("index_type", "ivf-flat");
-        assertThat(VectorIndexOptions.resolve(options, null, "embedding", false).type()).isNull();
+        assertThat(VectorIndexOptions.resolve(options, null, "embedding").type()).isNull();
     }
 
     @ParameterizedTest
@@ -195,13 +194,61 @@ class VectorIndexOptionsTest {
                 .isEqualTo(resolved.toMap());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "fields.embedding.distance.metric,cosine,ivf-pq.metric,L2,l2",
+        "ivf-pq.distance.metric,L2,metric,COSINE,cosine",
+        "fields.embedding.index-options,'{\"metric\":\"cosine\"}',ivf-pq.metric,L2,l2",
+        "ivf-pq.metric,L2,fields.embedding.index-options,'{\"metric\":\"COSINE\"}',cosine"
+    })
+    void testProcedureMetricOverridesTableAliases(
+            String tableKey,
+            String tableValue,
+            String procedureKey,
+            String procedureValue,
+            String expected) {
+        Options input =
+                new Options(
+                        Collections.singletonMap(tableKey, tableValue),
+                        Collections.singletonMap(procedureKey, procedureValue));
+        Options resolved =
+                VectorIndexOptions.resolveConfigured(input, "ivf-pq", "embedding").options();
+        assertMetric(resolved, expected);
+        assertMetric(
+                VectorIndexOptions.resolveConfigured(resolved, "ivf-pq", "embedding").options(),
+                expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"index-options", "pk-vector.index.options"})
+    void testProcedureOverridesFieldJsonBuildOptions(String jsonKey) {
+        Map<String, String> overrides = new HashMap<>();
+        overrides.put("ivf-flat.dimension", "2");
+        overrides.put("ivf-flat.sharding", "range");
+        Options input =
+                new Options(
+                        Collections.singletonMap(
+                                "fields.v." + jsonKey,
+                                "{\"dimension\":4,\"sharding\":\"centroid\"}"),
+                        overrides);
+        Options resolved = VectorIndexOptions.resolveConfigured(input, "ivf-flat", "v").options();
+        assertThat(resolved.dynamicOptions()).isEqualTo(overrides);
+        assertThat(resolved.get("ivf-flat.dimension")).isEqualTo("2");
+        assertThat(resolved.get("ivf-flat.sharding")).isEqualTo("range");
+        assertThat(
+                        VectorIndexOptions.resolveConfigured(resolved, "ivf-flat", "v")
+                                .options()
+                                .toMap())
+                .isEqualTo(resolved.toMap());
+    }
+
     @Test
     void testReaderKeepsUnspecifiedMetricAndWriterUsesDefault() {
         Options input =
                 new Options(
                         Collections.singletonMap(
                                 "fields.embedding.index-options", "{\"nlist\":64}"));
-        Options read = VectorIndexOptions.resolve(input, "ivf-pq", "embedding", false).options();
+        Options read = VectorIndexOptions.resolveConfigured(input, "ivf-pq", "embedding").options();
         assertThat(read.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(read.get("ivf-pq.metric")).isNull();
         assertThat(read.get("fields.embedding.distance.metric")).isNull();

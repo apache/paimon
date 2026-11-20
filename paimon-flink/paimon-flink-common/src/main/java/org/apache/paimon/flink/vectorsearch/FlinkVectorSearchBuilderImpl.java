@@ -40,7 +40,10 @@ public class FlinkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 
     @Override
     public VectorRead newVectorRead() {
-        rejectUnderQueryAuth();
+        if (multiVector != null) {
+            return super.newVectorRead();
+        }
+        validateSearch();
         checkNotNull(vector, "vector must be set via withVector()");
         if (isPrimaryKeyVectorSearch()) {
             return new FlinkPrimaryKeyVectorRead(

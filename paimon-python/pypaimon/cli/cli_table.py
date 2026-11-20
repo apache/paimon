@@ -59,10 +59,15 @@ def cmd_table_read(args):
     database_name, table_name = parts
     
     # Get table
+    snapshot_id = args.snapshot_id
+    target = f"table '{table_identifier}'"
     try:
         table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            target += f" at snapshot {snapshot_id}"
+            _, table = _resolve_snapshot_view(table, snapshot_id)
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to get {target}: {e}", file=sys.stderr)
         sys.exit(1)
     
     # Build read pipeline
@@ -117,39 +122,45 @@ def cmd_table_read(args):
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read
-    scan = read_builder.new_scan()
-    plan = scan.plan()
-    splits = plan.splits()
+    try:
+        scan = read_builder.new_scan()
+        plan = scan.plan()
+        splits = plan.splits()
     
-    read = read_builder.new_read()
+        read = read_builder.new_read()
 
-    # Read splits incrementally, stopping early when limit is reached
-    if limit:
-        import pandas as pd
-        collected_rows = 0
-        table_list = []
-        for split in splits:
-            if collected_rows >= limit:
-                break
-            partial_df = read.to_pandas([split])
-            collected_rows += len(partial_df)
-            table_list.append(partial_df)
-        df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
-        if len(df) > limit:
-            df = df.head(limit)
-    else:
-        df = read.to_pandas(splits)
+        # Read splits incrementally, stopping early when limit is reached
+        if limit:
+            import pandas as pd
+            collected_rows = 0
+            table_list = []
+            for split in splits:
+                if collected_rows >= limit:
+                    break
+                partial_df = read.to_pandas([split])
+                collected_rows += len(partial_df)
+                table_list.append(partial_df)
+            df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
+            if len(df) > limit:
+                df = df.head(limit)
+        else:
+            df = read.to_pandas(splits)
 
-    # Drop extra columns that were added only for where-clause filtering
-    if extra_where_columns:
-        df = df.drop(columns=extra_where_columns, errors='ignore')
+        # Drop extra columns that were added only for where-clause filtering
+        if extra_where_columns:
+            df = df.drop(columns=extra_where_columns, errors='ignore')
 
-    output_format = getattr(args, 'format', 'table')
-    if output_format == 'json':
-        import json
-        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
-    else:
-        print(df.to_string(index=False))
+        output_format = getattr(args, 'format', 'table')
+        if output_format == 'json':
+            import json
+            print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+        else:
+            print(df.to_string(index=False))
+    except Exception as e:
+        if snapshot_id is None:
+            raise
+        print(f"Error: Failed to query {target}: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_table_explain(args):
@@ -159,6 +170,9 @@ def cmd_table_explain(args):
     Prints the scan plan (snapshot, pushed-down predicate / projection /
     limit, partition / bucket / file-stats pruning funnel and split-
     level signals) without reading any data files.
+
+    Args:
+        args: Parsed command line arguments.
     """
     from pypaimon.cli.cli import load_catalog_config, create_catalog
 
@@ -173,10 +187,15 @@ def cmd_table_explain(args):
         sys.exit(1)
     database_name, table_name = parts
 
+    snapshot_id = args.snapshot_id
+    target = f"table '{table_identifier}'"
     try:
         table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            target += f" at snapshot {snapshot_id}"
+            _, table = _resolve_snapshot_view(table, snapshot_id)
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to get {target}: {e}", file=sys.stderr)
         sys.exit(1)
 
     read_builder = table.new_read_builder()
@@ -214,7 +233,7 @@ def cmd_table_explain(args):
     try:
         result = read_builder.explain(verbose=verbose)
     except Exception as e:
-        print(f"Error: Failed to explain table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to explain {target}: {e}", file=sys.stderr)
         sys.exit(1)
 
     output_format = getattr(args, 'format', 'table')
@@ -613,26 +632,9 @@ def cmd_table_list_files(args):
             raise ValueError('File listing is not supported for this table type; expected a FileStoreTable.')
         if table.options.query_auth_enabled:
             raise NotImplementedError('Raw file metadata is not supported on a query-auth table.')
-        manager = table.snapshot_manager()
-        snapshot = (manager.get_latest_snapshot() if args.snapshot_id is None
-                    else manager.get_snapshot_by_id(args.snapshot_id))
-        if snapshot is None and args.snapshot_id is not None:
-            raise ValueError(f"Snapshot {args.snapshot_id} not found for table '{args.table}'.")
-
-        if args.snapshot_id is not None and snapshot.schema_id != table.table_schema.id:
-            if snapshot.schema_id is None:
-                raise ValueError(f"Snapshot {snapshot.id} does not contain a schema ID.")
-            schema = table.schema_manager.get_schema(snapshot.schema_id)
-            if schema is None:
-                raise ValueError(f"Schema {snapshot.schema_id} not found for snapshot {snapshot.id}.")
-            dynamic_options = getattr(table, '_applied_dynamic_options', {})
-            options = table._exclude_current_schema_field_options(schema, table.options.options, set(dynamic_options))
-            table = FileStoreTable(table.file_io, table.identifier, table.table_path,
-                                   schema.copy(new_options=options), table.catalog_environment)
-            table._applied_dynamic_options = dict(dynamic_options)
-
         # Pin the resolved snapshot, including an empty table, before reading its live files.
-        files = FilesTable(table._copy_with_snapshot(snapshot))._build_arrow_table()
+        snapshot, view = _resolve_snapshot_view(table, args.snapshot_id, for_query=False)
+        files = FilesTable(view)._build_arrow_table()
         if args.bucket is not None:
             import pyarrow.compute as pc
             files = files.filter(pc.equal(files.column('bucket'), args.bucket))
@@ -1303,6 +1305,49 @@ def _open_schema_table(args):
         sys.exit(1)
 
 
+def _resolve_snapshot_view(table, snapshot_id, *, for_query=True):
+    """Pin a file-store scan to one snapshot, using its schema when an ID was requested."""
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if not isinstance(table, FileStoreTable):
+        raise ValueError('Reading a snapshot requires a FileStoreTable.')
+    manager = table.snapshot_manager()
+    if snapshot_id is None:
+        snapshot = manager.get_latest_snapshot()
+        return snapshot, table._copy_with_snapshot(snapshot)
+
+    snapshot = manager.get_snapshot_by_id(snapshot_id)
+    if snapshot is None:
+        raise ValueError(f"Snapshot {snapshot_id} not found for table '{table.identifier.get_full_name()}'.")
+    dynamic_options = getattr(table, '_applied_dynamic_options', {})
+    layout_keys = {'partition.default-name', 'partition.legacy-name', 'data-file.path-directory'}
+    if snapshot.schema_id == table.table_schema.id and (not for_query or layout_keys.isdisjoint(dynamic_options)):
+        return snapshot, table._copy_with_snapshot(snapshot)
+    if snapshot.schema_id is None:
+        raise ValueError(f"Snapshot {snapshot.id} does not contain a schema ID.")
+
+    schema = table.schema_manager.get_schema(snapshot.schema_id)
+    if schema is None:
+        raise ValueError(f"Schema {snapshot.schema_id} not found for snapshot {snapshot.id}.")
+    options = table._exclude_current_schema_field_options(schema, table.options.options, set(dynamic_options))
+    if for_query:
+        # Use the snapshot's directory layout and honor explicit overrides of its merge options.
+        merge_keys = {'bucket', 'bucket-key', 'merge-engine', 'sequence.field', 'sequence.field.sort-order',
+                      'ignore-delete', 'changelog-producer', 'deletion-vectors.enabled',
+                      'deletion-vectors.merge-on-read'}
+        prefixes = ('fields.', 'aggregation.', 'partial-update.', 'deduplicate.', 'first-row.')
+        merge_keys.update(key for key in options.keys() | schema.options.keys() if key.startswith(prefixes))
+        for key in layout_keys | (merge_keys - dynamic_options.keys()):
+            if key in schema.options:
+                options[key] = schema.options[key]
+            else:
+                options.pop(key, None)
+    view = FileStoreTable(table.file_io, table.identifier, table.table_path,
+                          schema.copy(new_options=options), table.catalog_environment)
+    view._applied_dynamic_options = dict(dynamic_options)
+    return snapshot, view._copy_with_snapshot(snapshot)
+
+
 def _open_snapshot_manager(args):
     """Load a file-store table for the snapshot inspection commands."""
     from pypaimon.cli.cli import load_catalog_config, create_catalog
@@ -1458,6 +1503,12 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     read_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Read the table at this snapshot ID using its schema'
+    )
+    # Preserve --s as an abbreviation for --select alongside --snapshot-id.
+    read_parser.add_argument('--s', dest='select', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    read_parser.add_argument(
         '--select', '-s',
         type=str,
         default=None,
@@ -1495,6 +1546,11 @@ def add_table_subcommands(table_parser):
         'table',
         help='Table identifier in format: database.table'
     )
+    explain_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Explain the table scan at this snapshot ID using its schema'
+    )
+    explain_parser.add_argument('--s', dest='select', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     explain_parser.add_argument(
         '--select', '-s',
         type=str,

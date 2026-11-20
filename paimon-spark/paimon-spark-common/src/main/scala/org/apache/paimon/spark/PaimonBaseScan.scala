@@ -285,10 +285,15 @@ object PaimonBaseScan {
         table.newVectorSearchBuilder()
       }
     val vectorBuilder = vectorSearchBuilder
-      .withVector(vectorSearch.vector())
       .withVectorColumn(vectorSearch.fieldName())
       .withLimit(vectorSearch.limit())
       .withOptions(vectorSearch.options())
+    val matrix = vectorSearch.multiVector()
+    if (matrix == null) {
+      vectorBuilder.withVector(vectorSearch.vector())
+    } else {
+      vectorBuilder.withMultiVector(matrix)
+    }
     if (pushedPartitionFilters.nonEmpty) {
       vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }

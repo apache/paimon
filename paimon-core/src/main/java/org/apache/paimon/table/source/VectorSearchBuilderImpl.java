@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -52,6 +53,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected int limit;
     protected DataField vectorColumn;
     protected float[] vector;
+    @Nullable protected float[][] multiVector;
     protected Map<String, String> options = new HashMap<>();
     @Nullable private Snapshot pinnedSnapshot;
 
@@ -110,7 +112,15 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withVector(float[] vector) {
+        this.multiVector = null;
         this.vector = vector;
+        return this;
+    }
+
+    @Override
+    public VectorSearchBuilder withMultiVector(float[][] vectors) {
+        this.multiVector = VectorIndexUtils.copyAndValidateQuery(vectors);
+        this.vector = multiVector[0];
         return this;
     }
 
@@ -130,7 +140,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        rejectUnderQueryAuth();
+        validateSearch();
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
                     table, vectorColumn.id(), partitionFilter, filter, pinnedSnapshot);
@@ -141,13 +151,13 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
-        rejectUnderQueryAuth();
+        validateSearch();
         checkNotNull(vector, "vector must be set via withVector()");
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorRead(table, vectorColumn, vector, limit, options, filter);
         }
         return new DataEvolutionVectorRead(
-                table, partitionFilter, filter, limit, vectorColumn, vector, options);
+                table, partitionFilter, filter, limit, vectorColumn, vector, options, multiVector);
     }
 
     protected boolean isPrimaryKeyVectorSearch() {
@@ -160,6 +170,17 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
+    }
+
+    protected void validateSearch() {
+        rejectUnderQueryAuth();
+        if (multiVector != null
+                && (!table.coreOptions().dataEvolutionEnabled()
+                        || vectorColumn == null
+                        || !VectorIndexUtils.isMultiVector(vectorColumn.type()))) {
+            throw new IllegalArgumentException(
+                    "A query matrix requires a multivector column on a Data Evolution table.");
+        }
     }
 
     protected void rejectUnderQueryAuth() {

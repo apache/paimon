@@ -25,8 +25,10 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Vector parameter resolution shared by primary-key and Data Evolution indexes. */
@@ -55,6 +57,7 @@ public final class VectorIndexOptions implements Serializable {
         return options;
     }
 
+    /** Returns the normalized metric, defaulting to inner product for single-vector searches. */
     public String metric() {
         return metric;
     }
@@ -110,14 +113,20 @@ public final class VectorIndexOptions implements Serializable {
         return type == null ? null : type.toLowerCase(Locale.ROOT).trim();
     }
 
+    /** Resolves single-vector options, including the default metric for a known index type. */
     public static VectorIndexOptions resolve(
             Options options, @Nullable String type, String column) {
-        return resolve(options, type, column, true);
+        VectorIndexOptions resolved = resolveConfigured(options, type, column);
+        if (resolved.type != null && resolved.options.get(resolved.type + ".metric") == null) {
+            metricAliases(resolved.type, column)
+                    .forEach(key -> resolved.options.setString(key, resolved.metric));
+        }
+        return resolved;
     }
 
-    /** Retains an unspecified metric when readers must obtain it from persisted index metadata. */
-    public static VectorIndexOptions resolve(
-            Options options, @Nullable String type, String column, boolean defaultMetric) {
+    /** Keeps metric aliases absent from {@link #options()} when no metric was configured. */
+    public static VectorIndexOptions resolveConfigured(
+            Options options, @Nullable String type, String column) {
         if (type == null) {
             CoreOptions core = new CoreOptions(options);
             List<String> declared =
@@ -140,14 +149,8 @@ public final class VectorIndexOptions implements Serializable {
         }
         String prefix = type + ".";
         String fieldPrefix = "fields." + column + ".";
-        List<String> aliases =
-                Arrays.asList(
-                        fieldPrefix + "distance.metric",
-                        fieldPrefix + "metric",
-                        prefix + "distance.metric",
-                        prefix + "metric");
-        String metric = null;
-        for (String key :
+        List<String> aliases = metricAliases(type, column);
+        List<String> metricKeys =
                 Arrays.asList(
                         fieldPrefix + "distance.metric",
                         fieldPrefix + "metric",
@@ -155,28 +158,59 @@ public final class VectorIndexOptions implements Serializable {
                         prefix + "distance.metric",
                         prefix + "metric",
                         "distance.metric",
-                        "metric")) {
-            if (options.get(key) != null) {
-                metric = options.get(key);
-                break;
+                        "metric");
+        Map<String, String> overrides = options.dynamicOptions();
+        Map<String, String> defaults = new HashMap<>(options.toMap());
+        overrides.keySet().forEach(defaults::remove);
+        String fieldOptionsKey =
+                options.containsKey(fieldPrefix + "index-options")
+                        ? fieldPrefix + "index-options"
+                        : fieldPrefix + "pk-vector.index.options";
+        boolean dynamicFieldOptions = overrides.containsKey(fieldOptionsKey);
+        // Expand field JSON in its own source so its keys retain the same precedence.
+        // Apply metric aliases together after expansion (COSINE and cosine are equivalent).
+        Options source = new Options(dynamicFieldOptions ? overrides : defaults);
+        aliases.forEach(source::remove);
+        Options expanded = new CoreOptions(source).globalIndexOptions(type, column);
+        Options resolved =
+                dynamicFieldOptions
+                        ? new Options(defaults, expanded.toMap())
+                        : new Options(expanded.toMap(), overrides);
+        String metric = firstValue(expanded.toMap(), aliases);
+        if (metric == null || !dynamicFieldOptions) {
+            String override = firstValue(overrides, metricKeys);
+            if (override != null) {
+                metric = override;
             }
         }
-        Options defaults = new Options(options.toMap(), options);
-        // Metric aliases are one parameter. Merge field JSON before applying that parameter,
-        // so generic string conflict checks cannot reject aliases such as COSINE and cosine.
-        aliases.forEach(defaults::remove);
-        Options resolved = new CoreOptions(defaults).globalIndexOptions(type, column);
-        for (String key : aliases) {
-            if (resolved.get(key) != null) {
-                metric = resolved.get(key);
-                break;
-            }
+        if (metric == null) {
+            metric = firstValue(options.toMap(), metricKeys);
         }
-        if (metric != null || defaultMetric) {
-            String normalized = normalizeMetric(metric);
+        String normalized = normalizeMetric(metric);
+        if (metric != null) {
             aliases.forEach(key -> resolved.setString(key, normalized));
         }
-        return new VectorIndexOptions(type, resolved, normalizeMetric(metric));
+        return new VectorIndexOptions(type, resolved, normalized);
+    }
+
+    @Nullable
+    private static String firstValue(Map<String, String> options, List<String> keys) {
+        for (String key : keys) {
+            String value = options.get(key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> metricAliases(String type, String column) {
+        String fieldPrefix = "fields." + column + ".";
+        return Arrays.asList(
+                fieldPrefix + "distance.metric",
+                fieldPrefix + "metric",
+                type + ".distance.metric",
+                type + ".metric");
     }
 
     private static String normalizeMetric(@Nullable String metric) {

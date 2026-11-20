@@ -18,16 +18,16 @@
 """Public vector index reader with lazy execution backend selection."""
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
+from pypaimon.globalindex.global_index_meta import range_vector_index_file
 
 
 class VindexVectorGlobalIndexReader(GlobalIndexReader):
     """Query a vindex file through Native when available or the Python SDK."""
 
     def __init__(self, file_io, index_path, io_metas, options=None):
-        assert len(io_metas) == 1, "Expected exactly one index file per shard"
         self._file_io = file_io
         self._index_path = index_path
-        self._io_meta = io_metas[0]
+        self._io_meta = range_vector_index_file(io_metas)
         self._options = dict(options or {})
         from pypaimon.globalindex.index_dispatch import _VindexReaderExecution
         self._execution = _VindexReaderExecution(self)

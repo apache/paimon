@@ -41,10 +41,19 @@ import scala.collection.mutable
 private[paimon] object OssieToSparkMetricView {
   private val aggregates = Set("sum", "count", "avg", "min", "max")
   private val functions =
-    aggregates ++ Set("abs", "round", "floor", "ceil", "ceiling", "coalesce", "date_trunc")
+    aggregates ++ Set(
+      "abs",
+      "round",
+      "floor",
+      "ceil",
+      "ceiling",
+      "coalesce",
+      "date_trunc",
+      "extract")
   private val dateTruncUnits =
     Set("YEAR", "QUARTER", "MONTH", "WEEK", "DAY", "HOUR", "MINUTE", "SECOND")
   private val dateTruncFunction = Seq("system", "builtin", "date_trunc")
+  private val extractFunctions = Map("YEAR" -> "year", "MONTH" -> "month", "DAY" -> "dayofmonth")
 
   case class Conversion(yaml: String, dateTruncOrigins: Set[Origin])
 
@@ -161,7 +170,7 @@ private[paimon] object OssieToSparkMetricView {
     val expr =
       SQLConf.withExistingConf(conf)(CatalystSqlParser.parseExpression(normalizeStrings(sql)))
     var aggregate = false
-    expr.foreach {
+    val validated = expr.transformDown {
       case f: UnresolvedFunction =>
         require(
           f.ignoreNulls.isEmpty && f.orderingWithinGroup.isEmpty,
@@ -189,22 +198,39 @@ private[paimon] object OssieToSparkMetricView {
         require(
           !f.arguments.exists(_.isInstanceOf[UnresolvedStar]) || name == "count",
           "Only COUNT(*) supports a star in Ossie expressions")
-      case _: Literal | _: UnresolvedAttribute | _: UnresolvedStar =>
-      case _: Add | _: Subtract | _: Multiply | _: Divide | _: Remainder | _: UnaryMinus |
+        if (name == "extract") {
+          f.arguments match {
+            // Spark constructs the unit literal at the call's origin only for EXTRACT(... FROM ...).
+            case Seq(unit @ Literal(value: UTF8String, _: StringType), input)
+                if unit.origin == f.origin =>
+              val builtin = extractFunctions.getOrElse(
+                value.toString.toUpperCase(Locale.ROOT),
+                throw new IllegalArgumentException(s"Unsupported Ossie EXTRACT unit: $value"))
+              f.copy(nameParts = Seq("system", "builtin", builtin), arguments = Seq(input))
+            case _ =>
+              throw new IllegalArgumentException("Ossie EXTRACT expects EXTRACT(unit FROM input)")
+          }
+        } else {
+          f
+        }
+      case e @ (_: Literal | _: UnresolvedAttribute | _: UnresolvedStar) => e
+      case e @ (_: Add | _: Subtract | _: Multiply | _: Divide | _: Remainder | _: UnaryMinus |
           _: UnaryPositive | _: CaseWhen | _: EqualTo | _: LessThan | _: LessThanOrEqual |
           _: GreaterThan | _: GreaterThanOrEqual | _: And | _: Or | _: Not | _: IsNull |
-          _: IsNotNull | _: In =>
+          _: IsNotNull | _: In) =>
+        e
       case c: Cast =>
         require(
           c.dataType.isInstanceOf[NumericType] || c.dataType == StringType ||
             c.dataType == BooleanType || c.dataType == DateType,
           s"Unsupported Ossie cast type: ${c.dataType}"
         )
+        c
       case other =>
         throw new IllegalArgumentException(s"Unsupported OSSIE_SQL_2026 expression: ${other.sql}")
     }
     require(!metric || aggregate, "Ossie metrics must contain a supported aggregate")
-    expr
+    validated
   }
 
   // Ossie strings use ANSI doubled quotes and literal backslashes. Normalize only string tokens
