@@ -54,6 +54,7 @@ import okhttp3.mockwebserver.MockResponse;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -287,6 +288,15 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
                     404);
         }
         List<String> fields = schema.fieldNames();
+        List<String> unsupportedScanOptions =
+                unsupportedScanOptions(schema.options(), spec.options());
+        if (!unsupportedScanOptions.isEmpty()) {
+            return error(
+                    null,
+                    null,
+                    "Prediction does not support scan options: " + unsupportedScanOptions,
+                    400);
+        }
         for (String input : spec.inputs().values()) {
             if (!fields.contains(input)) {
                 return error(
@@ -453,7 +463,8 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
     }
 
     private static Schema outputSchema(TableSchema source, List<String> mergeKeyColumns) {
-        Schema.Builder builder = Schema.newBuilder();
+        Schema.Builder builder =
+                Schema.newBuilder().option(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT.key(), "false");
         Map<String, DataField> fields =
                 source.fields().stream().collect(Collectors.toMap(DataField::name, field -> field));
         for (String name : mergeKeyColumns) {
@@ -462,6 +473,26 @@ final class RESTCatalogPredictionHandler implements AutoCloseable {
         return builder.column("response", DataTypes.STRING())
                 .column("error", DataTypes.STRING())
                 .build();
+    }
+
+    private static List<String> unsupportedScanOptions(
+            Map<String, String> tableOptions, Map<String, String> requestOptions) {
+        List<String> unsupported = new ArrayList<>();
+        collectUnsupportedScanOptions(tableOptions, unsupported);
+        collectUnsupportedScanOptions(requestOptions, unsupported);
+        return unsupported;
+    }
+
+    private static void collectUnsupportedScanOptions(
+            Map<String, String> options, List<String> unsupported) {
+        for (String key : options.keySet()) {
+            if ((key.startsWith("scan.") || key.startsWith("incremental-"))
+                    && !CoreOptions.SCAN_SNAPSHOT_ID.key().equals(key)
+                    && !CoreOptions.SCAN_TAG_NAME.key().equals(key)
+                    && !unsupported.contains(key)) {
+                unsupported.add(key);
+            }
+        }
     }
 
     private static List<String> mergeKeyColumns(TableSchema source, PredictionSpec spec) {

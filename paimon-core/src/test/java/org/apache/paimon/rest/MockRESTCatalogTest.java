@@ -77,6 +77,7 @@ import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -396,12 +397,60 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 .hasMessageContaining("reserved output name");
     }
 
+    @Test
+    void testPredictionRejectsRowFilteringScanOptions() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_scan_options", "id", 2);
+        PredictionSpec spec =
+                new PredictionSpec(
+                        "restricted-scan-option",
+                        fixture.model,
+                        Collections.singletonMap("text", "content"),
+                        Collections.singletonList("id"),
+                        "Echo the input",
+                        null,
+                        Collections.singletonMap(CoreOptions.SCAN_BUCKET.key(), "0"),
+                        "restricted-scan-option-token");
+
+        assertThatThrownBy(() -> catalog.submitPrediction(fixture.source, spec))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining(CoreOptions.SCAN_BUCKET.key());
+    }
+
+    @Test
+    void testPredictionPublishesEmptyResultTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_empty_result");
+        FileStoreTable source = (FileStoreTable) catalog.getTable(fixture.source);
+        commitRows(
+                source,
+                GenericRow.ofKind(RowKind.DELETE, 1, BinaryString.fromString("first")),
+                GenericRow.ofKind(RowKind.DELETE, 2, BinaryString.fromString("second")));
+        assertThat(batchRead(source)).isEmpty();
+
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("empty-result", "empty-result-token"));
+        Prediction completed = waitForPrediction(submitted.predictionId());
+
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        FileStoreTable output =
+                (FileStoreTable) catalog.getTable(completed.output().table().toIdentifier());
+        assertThat(output.snapshotManager().latestSnapshot()).isNotNull();
+        assertThat(output.snapshotManager().latestSnapshot().totalRecordCount()).isZero();
+        assertThat(batchRead(output)).isEmpty();
+    }
+
     private PredictionFixture createPredictionFixture(String database) throws Exception {
         return createPredictionFixture(database, "id");
     }
 
     private PredictionFixture createPredictionFixture(String database, String primaryKey)
             throws Exception {
+        return createPredictionFixture(database, primaryKey, 1);
+    }
+
+    private PredictionFixture createPredictionFixture(
+            String database, String primaryKey, int buckets) throws Exception {
         Identifier source = Identifier.create(database, "clips");
         Identifier model = Identifier.create(database, "echo_model");
         catalog.createDatabase(database, false);
@@ -411,7 +460,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         .column(primaryKey, DataTypes.INT())
                         .column("content", DataTypes.STRING())
                         .primaryKey(primaryKey)
-                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET.key(), Integer.toString(buckets))
                         .build(),
                 false);
         commitRows(
