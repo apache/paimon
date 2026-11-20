@@ -18,7 +18,6 @@
 
 package org.apache.paimon;
 
-import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -82,7 +81,6 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -142,45 +140,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                createExternalPaths(),
+                options.createExternalPaths(),
                 options.externalPathStrategy(),
                 options.externalPathWeights(),
                 options.indexFileInDataFileDir(),
                 options.globalIndexExternalPaths());
-    }
-
-    private List<Path> createExternalPaths() {
-        String externalPaths = options.dataFileExternalPaths();
-        ExternalPathStrategy strategy = options.externalPathStrategy();
-        if (externalPaths == null
-                || externalPaths.isEmpty()
-                || strategy == ExternalPathStrategy.NONE) {
-            return Collections.emptyList();
-        }
-
-        String specificFS = options.externalSpecificFS();
-
-        List<Path> paths = new ArrayList<>();
-        for (String pathString : externalPaths.split(",")) {
-            Path path = new Path(pathString.trim());
-            String scheme = path.toUri().getScheme();
-            if (scheme == null) {
-                throw new IllegalArgumentException("scheme should not be null: " + path);
-            }
-
-            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
-                checkArgument(
-                        specificFS != null,
-                        "External path specificFS should not be null when strategy is specificFS.");
-                if (scheme.equalsIgnoreCase(specificFS)) {
-                    paths.add(path);
-                }
-            } else {
-                paths.add(path);
-            }
-        }
-        checkArgument(!paths.isEmpty(), "External paths should not be empty");
-        return paths;
     }
 
     @Override

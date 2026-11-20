@@ -734,8 +734,9 @@ public class TableCommitTest {
         // pt=2 while a job pinned to the snapshot it started from (e.g. rescale) writes pt=1.
         FileStoreTable table = createPkDvTable();
         String streamingUser = UUID.randomUUID().toString();
-        try (IOManagerImpl ioManager = new IOManagerImpl(tempDir.toString());
-                TableWriteImpl<?> write = table.newWrite(streamingUser).withIOManager(ioManager);
+        try (TableWriteImpl<?> write =
+                        table.newWrite(streamingUser)
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
                 TableCommitImpl commit = table.newCommit(streamingUser)) {
             for (int k = 0; k < 3; k++) {
                 write.write(GenericRow.of(1, k, 0L));
@@ -759,15 +760,13 @@ public class TableCommitTest {
                             singletonMap(
                                     COMMIT_LAST_SAFE_SNAPSHOT.key(), String.valueOf(jobStart)));
             String pinnedUser = UUID.randomUUID().toString();
-            try (IOManagerImpl pinnedIoManager = new IOManagerImpl(tempDir.toString());
-                    TableWriteImpl<?> pinnedWrite =
-                            pinned.newWrite(pinnedUser).withIOManager(pinnedIoManager);
+            try (TableWriteImpl<?> pinnedWrite =
+                            pinned.newWrite(pinnedUser)
+                                    .withIOManager(new IOManagerImpl(tempDir.toString()));
                     TableCommitImpl pinnedCommit = pinned.newCommit(pinnedUser)) {
                 pinnedWrite.write(GenericRow.of(1, 9, 9L));
                 assertThatCode(() -> pinnedCommit.commit(0, pinnedWrite.prepareCommit(false, 0)))
                         .doesNotThrowAnyException();
-                // Finish background compaction before JUnit removes the table directory.
-                pinnedWrite.prepareCommit(true, 1);
             }
         }
     }

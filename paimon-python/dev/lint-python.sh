@@ -208,18 +208,11 @@ function pytest_check() {
     # the return value of a pipeline is the status of the last command to exit
     # with a non-zero status or zero if no command exited with a non-zero status
     set -o pipefail
-    # Preserve native stderr if a Ray worker or the test process exits before pytest's summary.
-    (PYTHONFAULTHANDLER=1 $PYTEST_PATH --capture=tee-sys $TEST_DIR) 2>&1 | tee -a $LOG_FILE
+    ($PYTEST_PATH $TEST_DIR) 2>&1 | tee -a $LOG_FILE
 
     PYCODESTYLE_STATUS=$?
     if [ $PYCODESTYLE_STATUS -ne 0 ]; then
         print_function "STAGE" "pytest checks... [FAILED]"
-        print_function "STEP" "pytest exited with status $PYCODESTYLE_STATUS"
-        if [ -d /tmp/ray/session_latest/logs ]; then
-            find /tmp/ray/session_latest/logs -maxdepth 1 -type f \
-                \( -name '*.err' -o -name 'raylet.out' -o -name 'gcs_server.out' \) \
-                -exec tail -n 80 {} +
-        fi
         # Stop the running script.
         exit 1;
     else

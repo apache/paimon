@@ -59,7 +59,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -70,8 +69,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -414,16 +411,11 @@ public abstract class AbstractCatalog implements Catalog {
         return schemas.stream()
                 .flatMap(
                         schema -> {
-                            Map<String, String> options = schema.toSchema().options();
-                            return Arrays.stream(
-                                    new String[] {
-                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
-                                        options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
-                                    });
+                            CoreOptions options = new CoreOptions(schema.options());
+                            List<Path> paths = new ArrayList<>(options.globalIndexExternalPaths());
+                            paths.addAll(options.dataFileExternalPathList());
+                            return paths.stream();
                         })
-                .filter(Objects::nonNull)
-                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
-                .map(Path::new)
                 .distinct()
                 .collect(Collectors.toList());
     }

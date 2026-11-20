@@ -19,11 +19,13 @@
 package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -54,6 +56,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -63,6 +66,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction.IGNORE;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createGlobalIndexFileReadWrite;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Default topology builder. */
@@ -178,7 +182,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             List<byte[]> commitMessageBytes =
                     javaSparkContext
                             .parallelize(taskList, parallelism)
-                            .map(DefaultGlobalIndexTopoBuilder::buildIndex)
+                            .mapPartitions(DefaultGlobalIndexTopoBuilder::buildIndexes)
                             .collect();
             commitMessages.addAll(CommitMessageSerializer.deserializeAll(commitMessageBytes));
         }
@@ -211,20 +215,30 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         return Math.min(taskCount, maxParallelism);
     }
 
-    private static byte[] buildIndex(Pair<byte[], byte[]> builderAndSplits) throws Exception {
+    @VisibleForTesting
+    static Iterator<byte[]> buildIndexes(Iterator<Pair<byte[], byte[]>> tasks) throws Exception {
         ClassLoader classLoader = DefaultGlobalIndexBuilder.class.getClassLoader();
-        DefaultGlobalIndexBuilder indexBuilder =
-                InstantiationUtil.deserializeObject(builderAndSplits.getLeft(), classLoader);
-        byte[] dataSplitBytes = builderAndSplits.getRight();
-        IndexedSplit split = InstantiationUtil.deserializeObject(dataSplitBytes, classLoader);
-        ReadBuilder builder = indexBuilder.table().newReadBuilder();
-        builder.withReadType(indexBuilder.readType());
+        List<byte[]> messages = new ArrayList<>();
+        // Each Spark partition owns one allocator across all of its serialized shard tasks.
+        GlobalIndexFileReadWrite fileReadWrite = null;
+        CommitMessageSerializer serializer = new CommitMessageSerializer();
+        while (tasks.hasNext()) {
+            Pair<byte[], byte[]> task = tasks.next();
+            DefaultGlobalIndexBuilder indexBuilder =
+                    InstantiationUtil.deserializeObject(task.getLeft(), classLoader);
+            IndexedSplit split = InstantiationUtil.deserializeObject(task.getRight(), classLoader);
+            if (fileReadWrite == null) {
+                fileReadWrite = createGlobalIndexFileReadWrite(indexBuilder.table());
+            }
+            ReadBuilder builder = indexBuilder.table().newReadBuilder();
+            builder.withReadType(indexBuilder.readType());
 
-        try (RecordReader<InternalRow> recordReader = builder.newRead().createReader(split);
-                CloseableIterator<InternalRow> data = recordReader.toCloseableIterator()) {
-            CommitMessage commitMessage = indexBuilder.build(data);
-            return new CommitMessageSerializer().serialize(commitMessage);
+            try (RecordReader<InternalRow> recordReader = builder.newRead().createReader(split);
+                    CloseableIterator<InternalRow> data = recordReader.toCloseableIterator()) {
+                messages.add(serializer.serialize(indexBuilder.build(data, fileReadWrite)));
+            }
         }
+        return messages.iterator();
     }
 
     /**
