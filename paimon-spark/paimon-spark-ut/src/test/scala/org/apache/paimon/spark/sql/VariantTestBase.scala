@@ -26,12 +26,13 @@ import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 abstract class VariantTestBase extends PaimonSparkTestBase {
 
-  private def variantPushDownEnabled: Boolean =
-    spark.conf.getOption("spark.sql.variant.pushVariantIntoScan").contains("true")
+  // Paimon accepts no variant extractions (see PaimonSupportsPushDownVariantExtractions), so the
+  // scan reads whole variants even when `spark.sql.variant.pushVariantIntoScan` is on.
+  private def variantPushDownEnabled: Boolean = false
 
   private def scanReadSchemaOf(df: org.apache.spark.sql.DataFrame): StructType = {
     df.queryExecution.optimizedPlan
-      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.readSchema() }
+      .collectFirst { case r: DataSourceV2ScanRelation => r.scan.readSchema() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the optimized plan"))
   }
 
@@ -1226,7 +1227,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
 
     val df = sql("SELECT try_variant_get(v, '$.age', 'int') FROM T")
     val desc = df.queryExecution.optimizedPlan
-      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.description() }
+      .collectFirst { case r: DataSourceV2ScanRelation => r.scan.description() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the plan"))
 
     if (variantPushDownEnabled) {
@@ -1234,5 +1235,41 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     } else {
       assert(!desc.contains("PushedVariants"), s"got: $desc")
     }
+  }
+
+  test("Paimon Variant pushdown: extraction next to other variant columns") {
+    sql("CREATE TABLE T (id INT, x INT, v1 VARIANT, v2 VARIANT)")
+    sql("""INSERT INTO T VALUES (1, 10, parse_json('{"a":"x"}'), parse_json('{"b":7}'))""")
+
+    val df = sql("SELECT variant_get(v1, '$.a', 'string') FROM T")
+    val readSchema = scanReadSchemaOf(df)
+    assert(readSchema.fieldNames.toSet == Set("v1"), s"got ${readSchema.fieldNames.toSeq}")
+    checkAnswer(df, Seq(Row("x")))
+    checkAnswer(
+      sql("SELECT variant_get(v1, '$.a', 'string'), variant_get(v2, '$.b', 'int') FROM T"),
+      Seq(Row("x", 7)))
+  }
+
+  test("Paimon Variant pushdown: extraction next to a metadata column") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES (1, parse_json('{"a":"x"}'))""")
+
+    checkAnswer(
+      sql("SELECT __paimon_file_path IS NOT NULL, variant_get(v, '$.a', 'string') FROM T"),
+      Seq(Row(true, "x")))
+  }
+
+  Seq("true", "false").foreach {
+    dv =>
+      test(s"Paimon Variant pushdown: UPDATE and DELETE with a variant condition, dv=$dv") {
+        sql(
+          "CREATE TABLE T (id INT, v VARIANT) " +
+            s"TBLPROPERTIES ('bucket' = '-1', 'deletion-vectors.enabled' = '$dv')")
+        sql("""INSERT INTO T VALUES (1, parse_json('{"a":"x"}')), (2, parse_json('{"a":"y"}'))""")
+
+        sql("UPDATE T SET id = 10 WHERE variant_get(v, '$.a', 'string') = 'x'")
+        sql("DELETE FROM T WHERE variant_get(v, '$.a', 'string') = 'y'")
+        checkAnswer(sql("SELECT id FROM T"), Seq(Row(10)))
+      }
   }
 }
