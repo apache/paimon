@@ -242,8 +242,12 @@ public class SnapshotConflictChecker {
         // keep the same file name too, but change the data layout and still need validation.
         return before.size() != 1
                 || after.size() != 1
-                || !before.get(0).fileName().equals(after.get(0).fileName())
-                || !withoutFileIndex(before.get(0)).equals(withoutFileIndex(after.get(0)));
+                || !sameDataExceptFileIndex(before.get(0), after.get(0));
+    }
+
+    static boolean sameDataExceptFileIndex(DataFileMeta before, DataFileMeta after) {
+        return before.fileName().equals(after.fileName())
+                && withoutFileIndex(before).equals(withoutFileIndex(after));
     }
 
     private static DataFileMeta withoutFileIndex(DataFileMeta file) {

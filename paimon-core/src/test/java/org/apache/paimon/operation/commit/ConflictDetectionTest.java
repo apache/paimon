@@ -41,6 +41,7 @@ import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResul
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -1845,6 +1846,94 @@ class ConflictDetectionTest {
                         error -> assertThat(error).hasMessageContaining("source rows changed"));
     }
 
+    @Test
+    void testCentroidBuildAcrossFileIndexRewrite() {
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        Snapshot latest = snapshot(2, Snapshot.CommitKind.COMPACT);
+        SnapshotManager snapshots = mock(SnapshotManager.class);
+        when(snapshots.snapshot(2)).thenReturn(latest);
+        CommitScanner scanner = mock(CommitScanner.class);
+        when(scanner.schema(0))
+                .thenReturn(
+                        TableSchema.create(
+                                0,
+                                new Schema.Builder()
+                                        .column("label", new IntType())
+                                        .column("v", new IntType())
+                                        .build()));
+        ConflictDetection detection =
+                createConflictDetection(scanner, true, false, false, snapshots);
+        DataFileMeta source =
+                DataFileMeta.forAppend(
+                        "data",
+                        100,
+                        10,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        new byte[] {1},
+                        null,
+                        null,
+                        null,
+                        10L,
+                        null);
+        DataFileMeta rewritten =
+                source.copy(Collections.singletonList("new.index")).copy((byte[]) null);
+        ManifestEntry before = ManifestEntry.create(DELETE, partition, 0, 1, source);
+        ManifestEntry after = ManifestEntry.create(ADD, partition, 0, 1, rewritten);
+        List<SimpleFileEntry> base =
+                Collections.singletonList(createFileEntryWithRowId("data", ADD, 10L, 10L));
+        List<IndexManifestEntry> routers =
+                Collections.singletonList(
+                        centroidRouter(
+                                "router",
+                                10,
+                                19,
+                                1,
+                                CentroidIndexMeta.router(
+                                                new ResultEntry("model", 0, null), "model", 2)
+                                        .meta()));
+        when(scanner.readIncrementalEntries(latest, Collections.singletonList(partition)))
+                .thenReturn(Arrays.asList(after, before));
+        assertThat(
+                        detection.checkConflicts(
+                                latest,
+                                base,
+                                Collections.emptyList(),
+                                routers,
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+
+        // A real row-ID change on the same physical file, or a second data change in the
+        // same compaction, must still invalidate the router.
+        for (List<ManifestEntry> delta :
+                Arrays.asList(
+                        Arrays.asList(
+                                before,
+                                ManifestEntry.create(
+                                        ADD, partition, 0, 1, rewritten.assignFirstRowId(20L))),
+                        Arrays.asList(
+                                after,
+                                before,
+                                ManifestEntry.create(ADD, partition, 1, 1, source)))) {
+            when(scanner.readIncrementalEntries(latest, Collections.singletonList(partition)))
+                    .thenReturn(delta);
+            assertThat(
+                            detection.checkConflicts(
+                                    latest,
+                                    base,
+                                    Collections.emptyList(),
+                                    routers,
+                                    null,
+                                    Snapshot.CommitKind.APPEND))
+                    .hasValueSatisfying(
+                            error -> assertThat(error).hasMessageContaining("source rows changed"));
+        }
+    }
+
     private IndexManifestEntry centroidRouter(
             String name, long from, long to, long snapshot, byte[] meta) {
         IndexFileMeta file =
@@ -2269,6 +2358,10 @@ class ConflictDetectionTest {
     }
 
     private Snapshot snapshot(long id) {
+        return snapshot(id, Snapshot.CommitKind.APPEND);
+    }
+
+    private Snapshot snapshot(long id, Snapshot.CommitKind kind) {
         return new Snapshot(
                 id,
                 0,
@@ -2282,7 +2375,7 @@ class ConflictDetectionTest {
                 "commit-user",
                 null,
                 id,
-                Snapshot.CommitKind.APPEND,
+                kind,
                 id,
                 0,
                 0,

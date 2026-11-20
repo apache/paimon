@@ -44,6 +44,7 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.Triple;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -688,9 +689,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                         });
             }
             Snapshot snapshot = snapshotManager.snapshot(baseline + 1);
-            for (ManifestEntry change :
+            List<ManifestEntry> changes =
                     commitScanner()
-                            .readIncrementalEntries(snapshot, new ArrayList<>(active.keySet()))) {
+                            .readIncrementalEntries(snapshot, new ArrayList<>(active.keySet()));
+            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                changes = excludeFileIndexRewrites(changes);
+            }
+            for (ManifestEntry change : changes) {
                 DataFileMeta file = change.file();
                 Map<Integer, RowRangeIndex> fields = active.get(change.partition());
                 if (fields == null || file.firstRowId() == null) {
@@ -720,6 +725,35 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             }
         }
         return Optional.empty();
+    }
+
+    private static List<ManifestEntry> excludeFileIndexRewrites(List<ManifestEntry> changes) {
+        if (changes.size() < 2) {
+            return changes;
+        }
+        Map<Triple<BinaryRow, Integer, String>, List<ManifestEntry>> byFile =
+                changes.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        entry ->
+                                                Triple.of(
+                                                        entry.partition(),
+                                                        entry.bucket(),
+                                                        entry.file().fileName())));
+        List<ManifestEntry> dataChanges = new ArrayList<>();
+        for (List<ManifestEntry> entries : byFile.values()) {
+            if (entries.size() == 2) {
+                ManifestEntry a = entries.get(0);
+                ManifestEntry b = entries.get(1);
+                if (a.kind() != b.kind()
+                        && a.totalBuckets() == b.totalBuckets()
+                        && SnapshotConflictChecker.sameDataExceptFileIndex(a.file(), b.file())) {
+                    continue;
+                }
+            }
+            dataChanges.addAll(entries);
+        }
+        return dataChanges;
     }
 
     private List<IndexManifestEntry> globalIndexFileAdditions(
