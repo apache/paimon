@@ -34,6 +34,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for vector parameter resolution shared by both table modes. */
 class VectorIndexOptionsTest {
 
+    @Test
+    void testShardingUsesExplicitOptionsThenFieldScope() {
+        Map<String, String> table = new HashMap<>();
+        table.put("ivf-flat.sharding", "range");
+        table.put("fields.v.sharding", "centroid");
+        assertThat(sharding(table, Collections.emptyMap(), "v")).isEqualTo("centroid");
+        assertThat(sharding(table, Collections.emptyMap(), "other")).isEqualTo("range");
+
+        table.put("fields.v.index-options", "{\"sharding\":\"centroid\"}");
+        Map<String, String> call = new HashMap<>();
+        call.put("ivf-flat.sharding", "range");
+        assertThat(sharding(table, call, "v")).isEqualTo("range");
+        call.put("fields.v.sharding", "centroid");
+        assertThat(sharding(table, call, "v")).isEqualTo("centroid");
+        call.put("fields.v.index-options", "{\"sharding\":\"range\"}");
+        assertThat(sharding(table, call, "v")).isEqualTo("range");
+        assertThat(
+                        sharding(
+                                Collections.singletonMap("sharding", "centroid"),
+                                Collections.emptyMap(),
+                                "v"))
+                .isNull();
+    }
+
+    private static String sharding(
+            Map<String, String> table, Map<String, String> call, String field) {
+        return VectorIndexOptions.resolve(new Options(table, call), "ivf-flat", field)
+                .options()
+                .get("ivf-flat.sharding");
+    }
+
     @ParameterizedTest
     @ValueSource(
             strings = {

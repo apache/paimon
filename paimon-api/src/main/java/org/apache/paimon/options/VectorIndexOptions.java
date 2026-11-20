@@ -176,6 +176,23 @@ public final class VectorIndexOptions implements Serializable {
             String normalized = normalizeMetric(metric);
             aliases.forEach(key -> resolved.setString(key, normalized));
         }
+        // The build topology and the index factory both consume the typed sharding key.
+        // Resolve the explicit source separately before field JSON can shadow its typed value.
+        String fieldKey = fieldPrefix + "sharding";
+        String typeKey = prefix + "sharding";
+        Options explicit = new Options(options.dynamicOptions());
+        if (explicit.containsKey(fieldPrefix + "index-options")
+                || explicit.containsKey(fieldPrefix + "pk-vector.index.options")) {
+            explicit = new CoreOptions(explicit).globalIndexOptions(type, column);
+        }
+        String sharding = explicit.getString(fieldKey, explicit.get(typeKey));
+        if (sharding == null) {
+            sharding = resolved.getString(fieldKey, resolved.get(typeKey));
+        }
+        if (sharding != null) {
+            resolved.setString(typeKey, sharding);
+            resolved.setString(fieldKey, sharding);
+        }
         return new VectorIndexOptions(type, resolved, normalizeMetric(metric));
     }
 

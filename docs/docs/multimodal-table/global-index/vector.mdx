@@ -472,7 +472,9 @@ Spark supports centroid-based sharding for `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-
 and `diskann` on Data Evolution append tables. Set `<index-type>.sharding=centroid`
 when building the index. The default is `range`. Each contiguous source row-ID range in a
 partition gets one routing model and one shard file per centroid. The table must enable row tracking and
-Data Evolution, have no primary key, and use `bucket=-1`.
+Data Evolution, have no primary key, and use `bucket=-1`. A table with several vector columns can use
+`fields.embedding.sharding=centroid` for just the `embedding` column. An explicit
+`ivf-pq.sharding=range` in the build procedure overrides that stored setting.
 
 For the 768-dimensional example table above, this call builds a cosine IVF-PQ index on one
 `dt` partition. The `options` apply to this build.

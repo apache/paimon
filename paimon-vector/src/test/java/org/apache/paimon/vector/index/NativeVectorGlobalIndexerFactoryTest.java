@@ -73,6 +73,9 @@ public class NativeVectorGlobalIndexerFactoryTest {
         options.setString(algorithm + ".sharding", "unknown");
         assertThatThrownBy(() -> GlobalIndexer.create(algorithm, fields, options))
                 .hasMessageContaining(algorithm + ".sharding");
+        options.setString("fields.v.sharding", "centroid");
+        assertThat(GlobalIndexer.create(algorithm, fields, options))
+                .isExactlyInstanceOf(NativeCentroidVectorGlobalIndexer.class);
         assertThatThrownBy(() -> GlobalIndexerFactoryUtils.load(algorithm + "-centroid"))
                 .hasMessageContaining("Can't find global index");
     }
