@@ -227,6 +227,13 @@ class GlobalIndexBuildTest(
         'file.format': 'parquet',
     }
 
+    def test_centroid_sharding_requires_spark(self):
+        schema = pa.schema([('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options={**self.table_options, 'ivf-pq.sharding': 'centroid'})
+        with self.assertRaisesRegex(NotImplementedError, "built with Spark"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
+        GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.sharding': 'range'})
+
     def test_native_vector_build_preserves_field_option_formats(self):
         schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
         configurations = {

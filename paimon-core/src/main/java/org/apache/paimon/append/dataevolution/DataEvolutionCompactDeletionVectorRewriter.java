@@ -25,6 +25,7 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -34,6 +35,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -42,9 +44,11 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -100,22 +104,12 @@ public class DataEvolutionCompactDeletionVectorRewriter {
 
     private Map<BinaryRow, AppendDeleteFileMaintainer> collectMaintainers(
             Snapshot snapshot, List<CommitMessage> messages) {
-        Map<BinaryRow, AppendDeleteFileMaintainer> result = new LinkedHashMap<>();
+        Map<BinaryRow, AppendDeleteFileMaintainer> result = createMaintainers(snapshot, messages);
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
 
         for (CommitMessage message : messages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             CompactIncrement compactIncrement = commitMessage.compactIncrement();
-            checkNoCompactIndexChanges(compactIncrement);
-
-            checkState(
-                    commitMessage.bucket() == UNAWARE_BUCKET
-                            && commitMessage.totalBuckets() == null,
-                    "Data evolution compaction should only produce unaware-bucket commit "
-                            + "messages, but got bucket %s and total buckets %s.",
-                    commitMessage.bucket(),
-                    commitMessage.totalBuckets());
-
             List<DataFileMeta> before = normalFiles(compactIncrement.compactBefore());
             List<DataFileMeta> after = normalFiles(compactIncrement.compactAfter());
 
@@ -124,14 +118,7 @@ public class DataEvolutionCompactDeletionVectorRewriter {
                 continue;
             }
 
-            AppendDeleteFileMaintainer maintainer =
-                    result.computeIfAbsent(
-                            commitMessage.partition(),
-                            ignored ->
-                                    BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                            table.store().newIndexFileHandler(),
-                                            snapshot,
-                                            commitMessage.partition()));
+            AppendDeleteFileMaintainer maintainer = result.get(commitMessage.partition());
             if (isMaterialized(compactIncrement)) {
                 removeMaterializedDeletionVectors(maintainer, rangeHelper, before);
                 continue;
@@ -163,6 +150,53 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             }
             rewritten.forEach(maintainer::notifyNewDeletionVector);
         }
+        return result;
+    }
+
+    private Map<BinaryRow, AppendDeleteFileMaintainer> createMaintainers(
+            Snapshot snapshot, List<CommitMessage> messages) {
+        Map<BinaryRow, List<IndexManifestEntry>> entriesByPartition = new LinkedHashMap<>();
+        for (CommitMessage message : messages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            CompactIncrement increment = commitMessage.compactIncrement();
+            checkNoCompactIndexChanges(increment);
+            checkState(
+                    commitMessage.bucket() == UNAWARE_BUCKET
+                            && commitMessage.totalBuckets() == null,
+                    "Data evolution compaction should only produce unaware-bucket commit "
+                            + "messages, but got bucket %s and total buckets %s.",
+                    commitMessage.bucket(),
+                    commitMessage.totalBuckets());
+            List<DataFileMeta> before = normalFiles(increment.compactBefore());
+            List<DataFileMeta> after = normalFiles(increment.compactAfter());
+            if (before.isEmpty() && after.isEmpty()) {
+                continue;
+            }
+            entriesByPartition.computeIfAbsent(
+                    commitMessage.partition(), ignored -> new ArrayList<>());
+        }
+        if (entriesByPartition.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        IndexFileHandler handler = table.store().newIndexFileHandler();
+        Set<Pair<BinaryRow, Integer>> buckets =
+                entriesByPartition.keySet().stream()
+                        .map(partition -> Pair.of(partition, UNAWARE_BUCKET))
+                        .collect(Collectors.toSet());
+        // Filter before decoding DV ranges and scan only once for all affected partitions.
+        for (IndexManifestEntry entry :
+                handler.scanBucketEntries(snapshot, DELETION_VECTORS_INDEX, buckets)) {
+            entriesByPartition.get(entry.partition()).add(entry);
+        }
+
+        Map<BinaryRow, AppendDeleteFileMaintainer> result = new LinkedHashMap<>();
+        entriesByPartition.forEach(
+                (partition, entries) ->
+                        result.put(
+                                partition,
+                                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                                        handler, partition, entries)));
         return result;
     }
 

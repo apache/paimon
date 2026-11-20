@@ -290,6 +290,15 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if selected_ranges:
                 self._file_states.append(_BlobFileState(file, supplier, selected_ranges))
 
+        ordered_states = sorted(self._file_states, key=lambda state: state.file.first_row_id)
+        self._disjoint = all(
+            left.file.row_id_range().to < right.file.first_row_id
+            for left, right in zip(ordered_states, ordered_states[1:])
+        )
+        if self._disjoint:
+            self._file_states = ordered_states
+        self._first_active_state = 0
+
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batch_row_ids = self._next_batch_row_ids()
         if not batch_row_ids:
@@ -302,13 +311,23 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
         batch_first = batch_row_ids[0]
         batch_last = batch_row_ids[-1]
-        for state in self._file_states:
+        for state_index in range(self._first_active_state, len(self._file_states)):
+            state = self._file_states[state_index]
+            if self._disjoint and state.file.first_row_id > batch_last:
+                break
             if not self._state_overlaps_batch(state, batch_first, batch_last):
+                if self._disjoint:
+                    if state.selected_range_index < len(state.selected_ranges):
+                        break
+                    self._first_active_state = state_index + 1
                 continue
             blob_values = self._read_blob_values(state, batch_row_ids)
             if not blob_values:
                 continue
-            group = groups.setdefault(state.file.max_sequence_number, {})
+            # Disjoint files have no competing versions. A single group avoids
+            # looking through unrelated sequences for every output row.
+            sequence = 0 if self._disjoint else state.file.max_sequence_number
+            group = groups.setdefault(sequence, {})
             if resolve_blobs_concurrently and self._file_io is None:
                 self._file_io = state.reader._file_io
             for row_id, blob in blob_values.items():

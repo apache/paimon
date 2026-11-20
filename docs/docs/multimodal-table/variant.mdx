@@ -32,7 +32,7 @@ suitable for event attributes, model output, tool parameters, and other data tha
 frequently to model every field as a table column.
 
 Paimon stores `VARIANT` with the
-[Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding),
+[Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding.md),
 instead of storing its JSON text. The data is parsed when it is converted to `VARIANT`, and queries
 can extract a path as a requested SQL type.
 
@@ -148,7 +148,8 @@ payload (GROUP)
 The `typed_value` fields are normal typed Parquet leaves. A reader that pushes Variant path
 extractions into the scan can read the required leaves instead of decoding the complete Variant
 value. This is most useful when a document is wide but queries repeatedly access a small set of
-paths.
+paths. Paimon's Spark connector does not push these extractions yet; see
+[Query Pushdown](#query-pushdown).
 
 Shredding is lossless:
 
@@ -246,25 +247,11 @@ Shredding and query pushdown are separate capabilities. Shredding creates typed 
 the query engine must also push the requested Variant paths into the Paimon scan to avoid reading
 the full Variant.
 
-Spark 4.1 and later can push `variant_get` extractions into Paimon when
-`spark.sql.variant.pushVariantIntoScan` is enabled:
-
-```sql
-SET spark.sql.variant.pushVariantIntoScan = true;
-
-SELECT
-    id,
-    variant_get(payload, '$.user_id', 'bigint') AS user_id,
-    variant_get(payload, '$.city', 'string') AS city
-FROM user_events
-ORDER BY id;
--- (1, 1001, Hangzhou), (2, 1002, Beijing)
-```
-
-The SQL and result are the same for plain, shredded, and mixed-layout files. Shredded files provide
-the largest I/O benefit because the requested paths are available as independent Parquet leaves.
-Selecting the complete Variant, such as `SELECT payload`, requires reading and reconstructing the
-full value.
+The Spark connector does not accept Variant extraction pushdown yet. When a scan accepts an
+extraction, Spark 4.1 and 4.2 build it without column pruning and without its metadata columns,
+which Spark 4.3 fixes in SPARK-57499. The Paimon scan therefore reads the full Variant and Spark
+evaluates `variant_get` on it, whatever `spark.sql.variant.pushVariantIntoScan` is set to. The SQL
+and result are the same for plain, shredded, and mixed-layout files.
 
 ## Limitations
 

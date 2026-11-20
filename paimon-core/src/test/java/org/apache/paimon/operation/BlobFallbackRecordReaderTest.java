@@ -156,6 +156,75 @@ public class BlobFallbackRecordReaderTest {
     }
 
     @Test
+    public void testDisjointSequenceGroupsDoNotCreatePerGroupPlaceholders() throws Exception {
+        List<DataFileMeta> files = new ArrayList<>();
+        List<Long> expectedRowIds = new ArrayList<>();
+        List<Long> expectedSequences = new ArrayList<>();
+        for (int i = 0; i < 128; i++) {
+            files.add(blobFile("file-" + i, i * 2, 2, i + 1));
+            expectedRowIds.add((long) i * 2);
+            expectedRowIds.add((long) i * 2 + 1);
+            expectedSequences.add((long) i + 1);
+            expectedSequences.add((long) i + 1);
+        }
+        Collections.reverse(files);
+        List<Range> syntheticGaps = new ArrayList<>();
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                files,
+                                file -> oneRowPerBatchReader(file, fileRows(file, null)),
+                                (reader, range) -> {
+                                    syntheticGaps.add(range);
+                                    return reader;
+                                },
+                                new Range(0, 255),
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX,
+                                false));
+
+        assertThat(rows.rowIds).containsExactlyElementsOf(expectedRowIds);
+        assertThat(rows.sequenceNumbers).containsExactlyElementsOf(expectedSequences);
+        assertThat(rows.nullBlobRowCount).isZero();
+        assertThat(syntheticGaps).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDisjointSequencesPreserveGapsAndPlaceholders(boolean keepPlaceholders)
+            throws Exception {
+        DataFileMeta first = blobFile("first", 1, 2, 7);
+        DataFileMeta second = blobFile("second", 5, 2, 3);
+        List<Range> selected = ranges(0, 2, 4, 7);
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Arrays.asList(second, first),
+                                file ->
+                                        oneRowPerBatchReader(
+                                                file,
+                                                fileRows(
+                                                        file, selected, placeholderRows(first, 2))),
+                                (reader, range) -> reader,
+                                new Range(0, 7),
+                                selected,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX,
+                                keepPlaceholders));
+
+        assertThat(rows.rowIds).containsExactly(1L, 5L, 6L);
+        assertThat(rows.sequenceNumbers).containsExactly(7L, 3L, 3L);
+        if (keepPlaceholders) {
+            assertThat(rows.placeholderRowCount).isEqualTo(4);
+            assertThat(rows.nullBlobRowCount).isZero();
+        } else {
+            assertThat(rows.nullBlobRowIds).containsExactly(0L, 2L, 4L, 7L);
+            assertThat(rows.nullBlobSequenceNumbers).containsOnly(-1L);
+        }
+    }
+
+    @Test
     public void testBlobFallbackRecordReader() throws Exception {
         DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
         DataFileMeta oldFile = blobFile("old-file", 0, 5, 1);

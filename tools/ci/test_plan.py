@@ -35,7 +35,7 @@ class SelectionTest(unittest.TestCase):
 
     def test_spark_keeps_common_docs_and_interoperability_tests(self):
         suites = self.suites(['paimon-spark/paimon-spark-common/src/main/scala/Change.scala'])
-        self.assertEqual(suites, {'core', 'spark3', 'spark4', 'spark42', 'e2e-flink1'})
+        self.assertEqual(suites, {'core', 'spark3', 'spark4', 'spark42', 'spark43', 'e2e-flink1'})
 
     def test_flink_keeps_hive_iceberg_and_both_e2e_versions(self):
         suites = self.suites(['paimon-flink/paimon-flink-common/src/main/java/Change.java'])
@@ -64,7 +64,7 @@ class SelectionTest(unittest.TestCase):
     def test_mixed_changes_take_union(self):
         self.assertEqual(self.suites(['docs/intro.md', 'paimon-spark/pom.xml',
                                       'paimon-flink/pom.xml']),
-                         {'core', 'spark3', 'spark4', 'spark42', 'flink1-common',
+                         {'core', 'spark3', 'spark4', 'spark42', 'spark43', 'flink1-common',
                           'flink1-connectors', 'flink2', 'e2e-flink1',
                           'e2e-flink2', 'iceberg'})
         result = plan.select(['paimon-python/setup.py', 'paimon-core/Change.java'])
@@ -220,7 +220,7 @@ class GitDiffTest(unittest.TestCase):
         base = self.git('rev-parse', 'HEAD')
         self.commit('paimon-spark/Change.scala', 'spark')
         outputs, _ = self.run_pr_plan(base, self.git('rev-parse', 'HEAD'))
-        self.assertEqual(len(outputs['matrix']['include']), 7)
+        self.assertEqual(len(outputs['matrix']['include']), 8)
 
         for path in ('docs/static/old image.png', 'docs/static/new image.png'):
             with self.subTest(path=path):
@@ -241,7 +241,7 @@ class GitDiffTest(unittest.TestCase):
         outputs = dict(line.split('=', 1) for line in Path('output.txt').read_text().splitlines())
         self.assertTrue(json.loads(outputs['java']))
         self.assertFalse(json.loads(outputs['python']))
-        self.assertEqual(len(json.loads(outputs['matrix'])['include']), 7)
+        self.assertEqual(len(json.loads(outputs['matrix'])['include']), 8)
         self.assertIn('Spark interoperability', Path('summary.md').read_text())
 
 

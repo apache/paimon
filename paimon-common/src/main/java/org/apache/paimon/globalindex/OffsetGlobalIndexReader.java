@@ -241,6 +241,13 @@ public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReade
         return result.map(r -> r.offset(offset));
     }
 
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return wrapped.visitBBoxIntersects(fieldRef, minX, minY, maxX, maxY)
+                .thenApply(this::applyOffset);
+    }
+
     @Nullable
     private GlobalIndexResult localCandidates(@Nullable GlobalIndexResult candidates) {
         if (candidates == null) {

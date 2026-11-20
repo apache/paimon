@@ -22,14 +22,14 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Index writer for single-column global index with relative row id (from 0 to rowCnt - 1). */
+/** Single-column global index writer using row IDs relative to the indexed range. */
 public interface GlobalIndexSingleColumnWriter extends GlobalIndexWriter {
 
     /**
-     * Write the indexed key and its related relative row id to the index file.
+     * Write the indexed key and its relative row ID.
      *
      * @param key nullable index key
-     * @param relativeRowId local row id calculated by {@code rowId - rangeStart}
+     * @param relativeRowId local row ID calculated by {@code rowId - rangeStart}
      */
     void write(@Nullable Object key, long relativeRowId);
 

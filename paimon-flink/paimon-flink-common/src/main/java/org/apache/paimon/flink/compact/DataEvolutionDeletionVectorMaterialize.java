@@ -20,19 +20,14 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
+import org.apache.paimon.flink.sink.DataEvolutionRowIdRewriteSink;
 import org.apache.paimon.flink.source.DataEvolutionDeletionVectorMaterializeSource;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
 
@@ -70,21 +65,6 @@ public class DataEvolutionDeletionVectorMaterialize {
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionDeletionVectorMaterializeSource.buildSource(
                         env, source, tableIdentifier);
-        sinkFromSource(sourceStream, snapshot);
-    }
-
-    private void sinkFromSource(
-            DataStreamSource<DataEvolutionCompactTask> input, Snapshot snapshot) {
-        Options conf = Options.fromMap(table.options());
-        Integer workerParallelism =
-                conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
-        PartitionTransformation<DataEvolutionCompactTask> transformation =
-                new PartitionTransformation<>(
-                        input.getTransformation(), new RebalancePartitioner<>());
-        transformation.setParallelism(
-                workerParallelism == null ? env.getParallelism() : workerParallelism);
-
-        DataStream<DataEvolutionCompactTask> rebalanced = new DataStream<>(env, transformation);
-        DataEvolutionDeletionVectorMaterializeSink.sink(table, rebalanced, snapshot);
+        DataEvolutionRowIdRewriteSink.sink(table, sourceStream, snapshot);
     }
 }

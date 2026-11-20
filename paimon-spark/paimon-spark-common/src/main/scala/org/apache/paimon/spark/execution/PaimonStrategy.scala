@@ -57,6 +57,7 @@ import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.ArrayType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -808,7 +809,9 @@ case class LateralVectorSearchExec(
   private def toFloatArray(value: Any): Option[Array[Float]] = {
     value match {
       case null => None
-      case arrayData: ArrayData => Some(arrayData.toFloatArray())
+      case arrayData: ArrayData =>
+        val elementType = queryVectorExpr.dataType.asInstanceOf[ArrayType].elementType
+        Some(PaimonTableValuedFunctions.readQueryVector(arrayData, elementType))
       case _ =>
         throw new RuntimeException(s"Cannot extract query vector from expression value: $value")
     }
