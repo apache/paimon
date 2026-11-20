@@ -20,6 +20,7 @@ package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -47,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createGlobalIndexFileReadWrite;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 
@@ -148,8 +150,13 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     }
 
     public CommitMessage build(CloseableIterator<InternalRow> data) throws IOException {
+        return build(data, createGlobalIndexFileReadWrite(table));
+    }
+
+    CommitMessage build(CloseableIterator<InternalRow> data, GlobalIndexFileReadWrite fileReadWrite)
+            throws IOException {
         LongCounter rowCounter = new LongCounter(0);
-        List<ResultEntry> resultEntries = writePaimonRows(data, rowCounter);
+        List<ResultEntry> resultEntries = writePaimonRows(data, rowCounter, fileReadWrite);
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),
@@ -165,9 +172,12 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     }
 
     private List<ResultEntry> writePaimonRows(
-            CloseableIterator<InternalRow> rows, LongCounter rowCounter) throws IOException {
+            CloseableIterator<InternalRow> rows,
+            LongCounter rowCounter,
+            GlobalIndexFileReadWrite fileReadWrite)
+            throws IOException {
         GlobalIndexWriter indexWriter =
-                createIndexWriter(table, indexType, indexedFields(), options);
+                createIndexWriter(fileReadWrite, indexType, indexedFields(), options);
         boolean multiColumn = !extraFields.isEmpty();
 
         try {

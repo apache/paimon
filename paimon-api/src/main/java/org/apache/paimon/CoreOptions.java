@@ -4499,6 +4499,49 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
     }
 
+    /** Returns all configured external data paths without applying the write strategy. */
+    public List<Path> dataFileExternalPathList() {
+        String externalPaths = dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            paths.add(new Path(pathString.trim()));
+        }
+        return paths;
+    }
+
+    /** Returns external data paths eligible for writing under the configured strategy. */
+    public List<Path> createExternalPaths() {
+        String externalPaths = dataFileExternalPaths();
+        ExternalPathStrategy strategy = externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = externalSpecificFS();
+        List<Path> paths = new ArrayList<>();
+        for (Path path : dataFileExternalPathList()) {
+            String scheme = path.toUri().getScheme();
+            checkArgument(scheme != null, "scheme should not be null: %s", path);
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
+    }
+
     public ExternalPathStrategy externalPathStrategy() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
     }

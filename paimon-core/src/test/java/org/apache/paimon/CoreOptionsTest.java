@@ -23,6 +23,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.Arrays;
 import java.util.List;
@@ -43,6 +45,59 @@ public class CoreOptionsTest {
                                 .toConfiguration()
                                 .get(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED))
                 .isTrue();
+    }
+
+    @Test
+    void testDataFileExternalPathList() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.dataFileExternalPaths()).isNull();
+        assertThat(core.dataFileExternalPathList()).isEmpty();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, "");
+        assertThat(core.dataFileExternalPathList()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", " file:///a/ ", "file:///a,", "file:///a,,"}) {
+            options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, value);
+            assertThat(core.dataFileExternalPaths()).isEqualTo(value);
+            assertThat(core.dataFileExternalPathList()).containsExactly(new Path("file:///a"));
+        }
+        for (String value :
+                new String[] {
+                    "file:///a,s3://bucket/b",
+                    " file:///a , s3://bucket/b ",
+                    "file:///a,s3://bucket/b,",
+                    "file:///a,s3://bucket/b,,"
+                }) {
+            options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, value);
+            assertThat(core.dataFileExternalPaths()).isEqualTo(value);
+            assertThat(core.dataFileExternalPathList())
+                    .containsExactly(new Path("file:///a"), new Path("s3://bucket/b"));
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.ExternalPathStrategy.class)
+    void testCreateExternalPaths(CoreOptions.ExternalPathStrategy strategy) {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, strategy);
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.createExternalPaths()).isEmpty();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, "");
+        assertThat(core.createExternalPaths()).isEmpty();
+
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, " file:///a , s3://bucket/b ,file:///c,");
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, "FILE");
+        assertThat(core.dataFileExternalPathList())
+                .containsExactly(
+                        new Path("file:///a"), new Path("s3://bucket/b"), new Path("file:///c"));
+        if (strategy == CoreOptions.ExternalPathStrategy.NONE) {
+            assertThat(core.createExternalPaths()).isEmpty();
+        } else if (strategy == CoreOptions.ExternalPathStrategy.SPECIFIC_FS) {
+            assertThat(core.createExternalPaths())
+                    .containsExactly(new Path("file:///a"), new Path("file:///c"));
+        } else {
+            assertThat(core.createExternalPaths()).isEqualTo(core.dataFileExternalPathList());
+        }
     }
 
     @Test

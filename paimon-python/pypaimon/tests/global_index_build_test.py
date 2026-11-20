@@ -813,6 +813,61 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
+    def test_create_global_index_rejects_multiple_external_paths_before_build(self):
+        from pypaimon.globalindex.index_dispatch import build_global_index
+
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {'id': [1], 'name': ['a'], 'age': [10], 'city': ['x']},
+            schema=self.pa_schema,
+        ))
+        option = 'global-index.external-path'
+        root_a = 'file://%s' % os.path.join(self.tempdir, 'external-a')
+        root_b = 'file://%s' % os.path.join(self.tempdir, 'external-b')
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        files_before = {
+            os.path.join(root, name)
+            for root, dirs, files in os.walk(self.tempdir)
+            for name in dirs + files
+        }
+
+        for paths in (root_a + ',' + root_b, root_a + ', ' + root_b + ','):
+            for native in ('false', 'true'):
+                for source in ('table', 'build', 'table-with-build-override'):
+                    with self.subTest(paths=paths, native=native, source=source):
+                        table_options = {'write.native.enabled': native}
+                        build_options = {}
+                        if source == 'build':
+                            build_options[option] = paths
+                        else:
+                            table_options[option] = paths
+                            if source == 'table-with-build-override':
+                                build_options[option] = root_a
+                        configured = table.copy(table_options)
+                        with patch(
+                            'pypaimon.globalindex.index_dispatch.build_global_index',
+                            wraps=build_global_index,
+                        ) as build:
+                            with patch.object(
+                                configured, 'new_batch_write_builder',
+                                wraps=configured.new_batch_write_builder,
+                            ) as write_builder:
+                                with self.assertRaisesRegex(
+                                    ValueError,
+                                    'global-index.external-path.*comma-separated',
+                                ):
+                                    configured.create_global_index('id', options=build_options)
+                                build.assert_not_called()
+                                write_builder.assert_not_called()
+                        self.assertEqual(
+                            snapshot.id, table.snapshot_manager().get_latest_snapshot().id)
+                        self.assertEqual([], IndexFileHandler(table).scan(snapshot))
+                        self.assertEqual(files_before, {
+                            os.path.join(root, name)
+                            for root, dirs, files in os.walk(self.tempdir)
+                            for name in dirs + files
+                        })
+
     def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(

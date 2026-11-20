@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -352,6 +353,62 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThatThrownBy(() -> catalog.dropTable(identifier, false))
                 .isInstanceOf(Catalog.TableNotExistException.class);
         catalog.dropTable(identifier, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = CoreOptions.ExternalPathStrategy.class,
+            names = {"NONE", "SPECIFIC_FS"})
+    public void testDropTableWithDynamicExternalPathStrategy(
+            CoreOptions.ExternalPathStrategy strategy) throws Exception {
+        Identifier identifier = Identifier.create("test_db", "dynamic_external_paths");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Path firstPath = new Path(tempFile.resolve("external-file").toUri().toString());
+        Path secondPath =
+                new Path(TraceableFileIO.SCHEME + "://" + tempFile.resolve("external-traceable"));
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                " " + firstPath + " , " + secondPath + " ")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                strategy.toString())
+                        .option(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        if (strategy == CoreOptions.ExternalPathStrategy.NONE) {
+            assertThat(table.store().pathFactory().getExternalPaths()).isEmpty();
+        } else {
+            assertThat(table.store().pathFactory().getExternalPaths()).containsExactly(firstPath);
+        }
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "specific-fs");
+        dynamicOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), TraceableFileIO.SCHEME);
+        FileStoreTable writerTable = table.copy(dynamicOptions);
+        assertThat(writerTable.store().pathFactory().getExternalPaths())
+                .containsExactly(secondPath);
+        BatchWriteBuilder writeBuilder = writerTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(fileIO.exists(secondPath)).isTrue();
+        FileSystemSchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, table.location());
+        assertThat(schemaManager.listAll()).hasSize(1);
+        assertThat(schemaManager.latest().get().options())
+                .containsEntry(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file");
+
+        catalog.dropTable(identifier, false);
+        assertThat(fileIO.exists(secondPath)).isFalse();
     }
 
     @ParameterizedTest

@@ -132,6 +132,7 @@ class GlobalIndexBuilder:
         else:
             self._options = CoreOptions(self._options).global_index_options(self._index_type, column)
         self._core_options = CoreOptions(self._options)
+        self._validate_external_path()
         if not self._table.options.row_tracking_enabled():
             raise ValueError(
                 "Table '%s' must enable 'row-tracking.enabled=true' before "
@@ -192,6 +193,18 @@ class GlobalIndexBuilder:
         return build_global_index(
             self, partition_filter, execution=execution, concurrency=concurrency,
             ray_remote_args=ray_remote_args)
+
+    def _validate_external_path(self) -> None:
+        # Python placement uses table options; native builds also receive build
+        # overrides. Validate both before selecting a backend or creating files.
+        for options in (self._table.options, self._core_options):
+            path = options.global_index_external_path()
+            if path is not None and ',' in path:
+                raise ValueError(
+                    "PyPaimon global index build only supports a single "
+                    "'global-index.external-path' directory; comma-separated "
+                    "paths are not supported."
+                )
 
     def _validate_unaware_bucket_table(self) -> None:
         # Global index files live in bucket 0 and are keyed by the table-wide
