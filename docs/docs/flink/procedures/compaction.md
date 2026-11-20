@@ -139,6 +139,7 @@ To compact databases. Arguments:
 - `tableOptions`: additional dynamic options of the table.
 
 - `partition_idle_time`: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.
+  For Data Evolution tables, batch compaction selects partitions whose latest data file in the planning snapshot is at least this old.
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 
