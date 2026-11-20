@@ -247,8 +247,8 @@ public class SnapshotConflictChecker {
     }
 
     /**
-     * Another user's COMPACT or OVERWRITE changed a bucket after the compaction writer restored
-     * its state, so the compaction was computed on stale files.
+     * Another user's COMPACT or OVERWRITE changed a bucket after the compaction writer restored its
+     * state, so the compaction was computed on stale files.
      */
     public static class BucketCompactionConflictException extends RuntimeException {
 

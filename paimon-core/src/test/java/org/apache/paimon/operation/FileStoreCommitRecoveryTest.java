@@ -28,6 +28,8 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -481,6 +483,8 @@ public class FileStoreCommitRecoveryTest {
         options.set(CoreOptions.PATH, tempDir.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(CoreOptions.FILE_COMPRESSION, "null");
         Path path = new Path(tempDir.toString());
         TableSchema schema =
                 SchemaUtils.forceCommit(
@@ -495,39 +499,50 @@ public class FileStoreCommitRecoveryTest {
                 FileStoreTableFactory.create(
                         LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
 
-        try (StreamTableWrite seedWrite = table.newWrite("seed");
-                TableCommitImpl seedCommit = table.newCommit("seed")) {
-            seedWrite.write(GenericRow.of(1, 10L));
-            seedCommit.commit(1, seedWrite.prepareCommit(true, 1));
-        }
-        long baseline = table.snapshotManager().latestSnapshotId();
-
         List<CommitMessage> pendingMessages;
         List<CommitMessage> concurrentMessages;
-        try (StreamTableWrite writer = table.newWrite("writer");
-                StreamTableWrite otherWriter = table.newWrite("other")) {
-            writer.write(GenericRow.of(2, 20L));
-            pendingMessages = writer.prepareCommit(true, 2);
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite seedWrite = table.newWrite("seed").withIOManager(ioManager);
+                    TableCommitImpl seedCommit = table.newCommit("seed")) {
+                seedWrite.write(GenericRow.of(1, 10L));
+                seedWrite.write(GenericRow.of(4, 40L));
+                seedWrite.write(GenericRow.of(5, 50L));
+                seedCommit.commit(1, seedWrite.prepareCommit(true, 1));
+            }
+            long baseline = table.snapshotManager().latestSnapshotId();
 
-            otherWriter.write(GenericRow.of(3, 30L));
-            concurrentMessages = otherWriter.prepareCommit(true, 1);
+            try (StreamTableWrite writer = table.newWrite("writer").withIOManager(ioManager);
+                    StreamTableWrite otherWriter =
+                            table.newWrite("other").withIOManager(ioManager)) {
+                writer.write(GenericRow.of(2, 20L));
+                pendingMessages = writer.prepareCommit(true, 2);
+
+                otherWriter.write(GenericRow.of(3, 30L));
+                concurrentMessages = otherWriter.prepareCommit(true, 1);
+            }
+            assertThat(pendingMessages)
+                    .singleElement()
+                    .satisfies(
+                            message -> {
+                                assertThat(message.checkFromSnapshot()).isEqualTo(baseline);
+                                assertThat(
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement()
+                                                        .isEmpty())
+                                        .isFalse();
+                            });
+            assertThat(concurrentMessages)
+                    .singleElement()
+                    .satisfies(
+                            message -> {
+                                assertThat(message.checkFromSnapshot()).isEqualTo(baseline);
+                                assertThat(
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement()
+                                                        .isEmpty())
+                                        .isFalse();
+                            });
         }
-        assertThat(pendingMessages)
-                .singleElement()
-                .satisfies(
-                        message -> {
-                            assertThat(message.checkFromSnapshot()).isEqualTo(baseline);
-                            assertThat(((CommitMessageImpl) message).compactIncrement().isEmpty())
-                                    .isFalse();
-                        });
-        assertThat(concurrentMessages)
-                .singleElement()
-                .satisfies(
-                        message -> {
-                            assertThat(message.checkFromSnapshot()).isEqualTo(baseline);
-                            assertThat(((CommitMessageImpl) message).compactIncrement().isEmpty())
-                                    .isFalse();
-                        });
 
         // Publish only the append phase of identifier 2 for "writer".
         List<CommitMessage> appendOnly =
@@ -567,16 +582,24 @@ public class FileStoreCommitRecoveryTest {
                     .isEqualTo(snapshotAfterConcurrent);
         }
 
+        // Deletion-vector reads skip level-0 files, so compact once more to make the appended
+        // row of identifier 2 visible.
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString());
+                StreamTableWrite finalWrite = table.newWrite("final").withIOManager(ioManager);
+                TableCommitImpl finalCommit = table.newCommit("final")) {
+            finalWrite.compact(BinaryRow.EMPTY_ROW, 0, true);
+            finalCommit.commit(1, finalWrite.prepareCommit(true, 1));
+        }
+
         List<String> rows = new ArrayList<>();
         try (RecordReaderIterator<InternalRow> reader =
-                new RecordReaderIterator<>(
-                        table.newRead().createReader(table.newScan().plan()))) {
+                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
             while (reader.hasNext()) {
                 InternalRow row = reader.next();
                 rows.add(row.getInt(0) + ":" + row.getLong(1));
             }
         }
-        assertThat(rows).containsExactlyInAnyOrder("1:10", "2:20", "3:30");
+        assertThat(rows).containsExactlyInAnyOrder("1:10", "2:20", "3:30", "4:40", "5:50");
 
         // Normal (non-recovery) commits with a stale baseline must still fail with the conflict.
         List<CommitMessage> compactOnly =
