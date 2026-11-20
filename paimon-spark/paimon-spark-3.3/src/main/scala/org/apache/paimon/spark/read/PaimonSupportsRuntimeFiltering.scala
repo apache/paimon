@@ -20,6 +20,7 @@ package org.apache.paimon.spark.read
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.{PaimonInputPartition, SparkFilterConverter}
+import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
@@ -30,6 +31,9 @@ import org.apache.spark.sql.sources.Filter
 import scala.collection.JavaConverters._
 
 trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeFiltering {
+
+  // PaimonBaseScan is compiled against the common trait's readTable$ bridge.
+  override protected def readTable: Table = table
 
   private var _inputSplits: Array[Split] = _
   private var _inputPartitions: Seq[PaimonInputPartition] = _

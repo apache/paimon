@@ -221,6 +221,9 @@ conditions.
 Runtime index filtering uses the scan's original snapshot and combines join keys
 with its existing filters. It only activates when the index covers the complete
 snapshot and its source metadata confirms that indexed values have not changed.
+Every eligible single-column index definition must cover the snapshot. Columns
+also present in a composite index are excluded because the query planner may
+choose that index after combining static and runtime predicates.
 Incomplete, stale, or legacy indexes keep the ordinary scan and its configured
 search semantics. `global-index.column-update-action=IGNORE` also disables the optimization.
 It does not change `scalar-index.search-mode`.
@@ -231,6 +234,12 @@ and 1 MiB of their UTF-8 text representation per filter. Larger filters, unsuppo
 types, and scans with pushed LIMIT, TopN, ranked search, or preserved data grouping
 keep their ordinary scan behavior. Inspect the Spark scan's runtime filters and
 output-row metrics to verify the optimization.
+
+Fallback-branch reads keep their existing snapshot selection and do not use this
+optimization. Capability discovery reads the index manifest once; freshness checks
+run only when Spark supplies a usable scalar runtime filter, restricted by the
+scan's static partition filters. Advertising a column does not guarantee that a
+runtime filter will be accepted if its index is stale.
 
 ### Repartition Oversized Scan Output
 

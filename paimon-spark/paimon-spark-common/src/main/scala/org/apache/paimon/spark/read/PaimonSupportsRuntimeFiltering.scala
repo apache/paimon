@@ -22,10 +22,11 @@ import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.{GlobalIndexSearchMode, StartupMode}
 import org.apache.paimon.globalindex.{DataEvolutionGlobalIndexCoverage, DataEvolutionGlobalIndexRefreshPlanner}
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta
+import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.{PaimonInputPartition, PaimonScan, SparkTypeUtils, SparkV2FilterConverter}
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{FallbackReadFileStoreTable, FileStoreTable, Table}
 import org.apache.paimon.table.source.Split
 import org.apache.paimon.types.DataTypeRoot
 
@@ -65,6 +66,8 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
       None
     } else {
       table match {
+        // A fallback wrapper selects its branches independently, not at main's commit time.
+        case _: FallbackReadFileStoreTable => None
         case fileTable: FileStoreTable if fileTable.primaryKeys().isEmpty =>
           Option(fileTable.snapshotManager().latestSnapshot()).map {
             snapshot =>
@@ -79,26 +82,28 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
     }
   }
 
-  // Ordinary scans do not pay for coverage and freshness discovery. Spark requests these
-  // attributes only when considering runtime filtering for a join.
+  private lazy val runtimeIndexEntries: Seq[IndexManifestEntry] =
+    runtimeReadSnapshot.toSeq.flatMap {
+      case (fileTable, snapshot) =>
+        fileTable
+          .store()
+          .newIndexFileHandler()
+          .scan(
+            snapshot,
+            (entry: IndexManifestEntry) =>
+              Set("btree", "bitmap").contains(entry.indexFile().indexType()) &&
+                entry.indexFile().globalIndexMeta() != null)
+          .asScala
+    }
+
+  // Spark can ask for capabilities even when it never applies a runtime predicate.
+  // Only inspect index metadata here; scan data manifests for freshness in filter().
   private lazy val runtimeIndexFields: Set[String] = runtimeReadSnapshot.toSeq.flatMap {
     case (fileTable, snapshot) =>
-      val indexEntries = Seq("btree", "bitmap")
-        .flatMap {
-          indexType => fileTable.store().newIndexFileHandler().scan(snapshot, indexType).asScala
-        }
-        .filter(
-          e =>
-            e.indexFile().globalIndexMeta() != null &&
-              e.indexFile().globalIndexMeta().getIndexedFieldIds.size() == 1)
-      val indexFiles = indexEntries.map(_.indexFile())
-      val indexedIds = indexFiles.map(_.globalIndexMeta().indexFieldId()).toSet
-      val coverage = new DataEvolutionGlobalIndexCoverage(
-        fileTable,
-        snapshot,
-        null,
-        indexFiles.asJava,
-        GlobalIndexSearchMode.FULL)
+      val compositeFields = runtimeIndexEntries
+        .filter(_.indexFile().globalIndexMeta().getIndexedFieldIds.size() > 1)
+        .flatMap(_.indexFile().globalIndexMeta().getIndexedFieldIds.asScala)
+        .toSet
       readTableRowType.getFields.asScala
         .filter {
           field =>
@@ -110,23 +115,25 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
               case _ => false
             }
             val fieldEntries =
-              indexEntries.filter(_.indexFile().globalIndexMeta().indexFieldId() == field.id())
-            supportedType && indexedIds.contains(field.id()) &&
+              runtimeIndexEntries.filter(
+                _.indexFile().globalIndexMeta().indexFieldId() == field.id())
+            supportedType && fieldEntries.nonEmpty && !compositeFields.contains(field.id()) &&
             !fileTable.partitionKeys().contains(field.name()) &&
-            coverage.unindexedRanges(field.id()).isEmpty &&
+            // The planner can choose a different definition after adding runtime predicates.
+            // Prove each eligible definition complete, never the union of their coverage.
+            fieldEntries.groupBy(_.indexFile().indexType()).values.forall {
+              entries =>
+                new DataEvolutionGlobalIndexCoverage(
+                  fileTable,
+                  snapshot,
+                  null,
+                  entries.map(_.indexFile()).asJava,
+                  GlobalIndexSearchMode.FULL).unindexedRanges(field.id()).isEmpty
+            } &&
             fieldEntries.forall(
               e =>
                 DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                  e.indexFile().globalIndexMeta().sourceMeta())) &&
-            // A past writer may have used IGNORE only as a dynamic option.
-            DataEvolutionGlobalIndexRefreshPlanner
-              .findIndexesToRefresh(
-                fileTable,
-                snapshot,
-                null,
-                fieldEntries.asJava,
-                java.util.Collections.singletonList(field))
-              .isEmpty
+                  e.indexFile().globalIndexMeta().sourceMeta()))
         }
         .map(_.name())
         .toSet
@@ -194,8 +201,22 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
           }
           .flatMap {
             predicate =>
-              if (predicate.children().length == 1) {
-                val name = predicate.children().head.asInstanceOf[NamedReference].fieldNames().head
+              val name = predicate.children().head.asInstanceOf[NamedReference].fieldNames().head
+              val field = table.rowType().getField(name)
+              val (fileTable, snapshot) = runtimeReadSnapshot.get
+              val entries = runtimeIndexEntries.filter(
+                _.indexFile().globalIndexMeta().indexFieldId() == field.id())
+              // A past writer may have used IGNORE only as a dynamic option. Do this
+              // manifest scan only for accepted predicates and the static partition scope.
+              val stale = DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                fileTable,
+                snapshot,
+                PartitionPredicate.and(pushedPartitionFilters.asJava),
+                entries.asJava,
+                java.util.Collections.singletonList(field))
+              if (!stale.isEmpty) {
+                None
+              } else if (predicate.children().length == 1) {
                 Some(
                   new PredicateBuilder(table.rowType()).in(
                     table.rowType().getFieldIndex(name),

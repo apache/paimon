@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.data.GenericRow
+import org.apache.paimon.fs.Path
 import org.apache.paimon.globalindex.{IndexedSplit, IndexQuerySplit}
 import org.apache.paimon.table.AppendOnlyFileStoreTable
 import org.apache.paimon.table.sink.CommitMessageImpl
@@ -28,11 +29,116 @@ import org.apache.spark.sql.connector.expressions.Expressions
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.read.{Batch, PartitionReaderFactory}
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
-import org.mockito.Mockito.{atLeastOnce, never, spy, verify}
+import org.mockito.Mockito.{atLeastOnce, clearInvocations, mockingDetails, never, spy, verify}
 
 import scala.collection.JavaConverters._
 
 class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
+
+  test("ordinary fallback reads preserve a branch snapshot newer than main") {
+    withTable("runtime_fact") {
+      sql("""CREATE TABLE runtime_fact (id INT, p STRING) PARTITIONED BY (p)
+            |TBLPROPERTIES ('row-tracking.enabled'='true',
+            |'data-evolution.enabled'='true', 'bucket'='-1')""".stripMargin)
+      sql("CALL sys.create_branch('test.runtime_fact', 'fallback')")
+      sql("INSERT INTO runtime_fact VALUES (1, 'main')")
+      sql("INSERT INTO `runtime_fact$branch_fallback` VALUES (2, 'fallback')")
+      sql("ALTER TABLE runtime_fact SET TBLPROPERTIES ('scan.fallback-branch'='fallback')")
+      checkAnswer(sql("SELECT id, p FROM runtime_fact"), Seq(Row(1, "main"), Row(2, "fallback")))
+    }
+  }
+
+  Seq(false, true).foreach {
+    queryInReader =>
+      test(s"runtime keys cannot select an incomplete composite index, reader: $queryInReader") {
+        withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+          withTable("runtime_fact", "runtime_dim") {
+            sql(s"""CREATE TABLE runtime_fact (id INT, k INT, c INT) TBLPROPERTIES (
+                   |'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                   |'global-index.query-in-reader.enabled'='$queryInReader')""".stripMargin)
+            sql("""INSERT INTO runtime_fact SELECT /*+ COALESCE(1) */
+                  |CAST(id AS INT), CAST(id % 10 AS INT), 10 FROM range(100)""".stripMargin)
+            sql(
+              "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+                "index_column => 'k,c', index_type => 'btree')")
+            sql("INSERT INTO runtime_fact VALUES (100, 2, 10)")
+            sql(
+              "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+                "index_column => 'k', index_type => 'btree')")
+            sql("CREATE TABLE runtime_dim (k INT, keep INT)")
+            sql("INSERT INTO runtime_dim VALUES (2, 1), (7, 0)")
+            val query = """SELECT /*+ BROADCAST(d) */ f.id
+                          |FROM runtime_fact f JOIN runtime_dim d ON f.k = d.k
+                          |WHERE d.keep = 1 AND f.c = 10""".stripMargin
+            Seq(false, true).foreach {
+              enabled =>
+                withSparkSQLConf(
+                  "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> enabled.toString) {
+                  checkAnswer(sql(query), (2 until 100 by 10).map(Row(_)) :+ Row(100))
+                }
+            }
+          }
+        }
+      }
+  }
+
+  test("capability discovery reads one index manifest and defers scoped freshness scans") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact") {
+        sql(
+          """CREATE TABLE runtime_fact (id INT, k INT, c INT, p INT) PARTITIONED BY (p)
+            |TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+        (0 until 3).foreach(p => sql(s"INSERT INTO runtime_fact VALUES ($p, 2, 3, $p)"))
+        Seq("k", "c").foreach {
+          field =>
+            sql(
+              s"CALL sys.create_global_index(table => 'test.runtime_fact', " +
+                s"index_column => '$field', index_type => 'btree')")
+        }
+        val original = loadTable("runtime_fact")
+        val fileIO = spy(original.fileIO())
+        val table = new AppendOnlyFileStoreTable(
+          fileIO,
+          original.location(),
+          original.schema(),
+          original.catalogEnvironment())
+        val scan = factScan("SELECT id, k, c, p FROM runtime_fact WHERE p = 1").copy(table = table)
+        def reads: Seq[String] = mockingDetails(fileIO).getInvocations.asScala
+          .filter(_.getMethod.getName == "newInputStream")
+          .map(_.getArgument[Path](0).getName)
+          .toSeq
+        def dataReads: Seq[String] = reads.filter(
+          n =>
+            n.startsWith("manifest-") &&
+              !n.startsWith("manifest-list-"))
+        assert(scan.filterAttributes().map(_.fieldNames().head).toSet == Set("p", "k", "c"))
+        assert(reads.count(_.startsWith("index-manifest-")) == 1)
+        assert(dataReads.isEmpty)
+        clearInvocations(fileIO)
+        scan.filter(Array(in(2)))
+        assert(dataReads.nonEmpty)
+        assert(dataReads.distinct.size == 1)
+        assert(!reads.exists(_.startsWith("index-manifest-")))
+        assert(readIds(scan.toBatch, scan.toBatch.createReaderFactory()) == Seq(1))
+      }
+    }
+  }
+
+  test("a complete bitmap cannot hide incomplete coverage of the same column's btree") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact") {
+        createFact()
+        sql("INSERT INTO runtime_fact VALUES (100, 2)")
+        sql(
+          "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+            "index_column => 'k', index_type => 'bitmap')")
+        val scan = factScan("SELECT id, k FROM runtime_fact")
+        assert(scan.filterAttributes().isEmpty)
+        scan.filter(Array(in(2)))
+        assert(readIds(scan.toBatch, scan.toBatch.createReaderFactory()).size == 31)
+      }
+    }
+  }
 
   Seq(("btree", false), ("bitmap", false), ("btree", true), ("bitmap", true)).foreach {
     case (indexType, queryInReader) =>
@@ -170,7 +276,7 @@ class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
     }
   }
 
-  test("an indexed column updated with a writer-only IGNORE option is not advertised") {
+  test("runtime filters reject an index made stale by a writer-only IGNORE option") {
     withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
       withTable("runtime_fact", "runtime_dim") {
         createFact()
@@ -196,7 +302,7 @@ class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
           commit.close()
         }
         assert(!loadTable("runtime_fact").coreOptions().ignoreIndexColumnUpdate())
-        assert(factScan("SELECT id, k FROM runtime_fact").filterAttributes().isEmpty)
+        assert(factScan("SELECT id, k FROM runtime_fact").filterAttributes().nonEmpty)
         sql("CREATE TABLE runtime_dim (k INT, keep INT)")
         sql("INSERT INTO runtime_dim VALUES (200, 1), (7, 0)")
         val query = """SELECT /*+ BROADCAST(d) */ f.id
@@ -210,7 +316,7 @@ class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
               val scan = result.queryExecution.executedPlan.collectFirst {
                 case s: BatchScanExec if s.output.exists(_.name == "id") => s
               }.get
-              assert(scan.runtimeFilters.isEmpty)
+              assert(scan.runtimeFilters.nonEmpty == enabled)
               checkAnswer(result, Seq(Row(0)))
             }
         }
