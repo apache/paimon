@@ -39,15 +39,19 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.VectorScan;
-import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -139,7 +143,13 @@ public class VectorSearchProcedure extends ProcedureBase {
                 "Table column '%s' conflicts with vector-search metadata.",
                 SEARCH_SCORE);
 
-        float[] queryVector = parseVector(queryVectorStr);
+        VectorSearchBuilderImpl builder = newVectorSearchBuilder(procedureContext, fileStoreTable);
+        builder.withVectorColumn(vectorColumn).withLimit(topK).withOptions(optionsMap);
+        if (queryVectorStr.trim().startsWith("[")) {
+            builder.withMultiVector(parseQueryMatrix(queryVectorStr));
+        } else {
+            builder.withVector(parseVector(queryVectorStr));
+        }
         Predicate filter = parseFilter(where, tableType);
         PartitionPredicate partitionFilter = parsePartitions(partitions, fileStoreTable);
         Projection parsedProjection = Projection.parse(projection, tableType, filter);
@@ -147,17 +157,9 @@ public class VectorSearchProcedure extends ProcedureBase {
         validatePrimaryKeyFilter(fileStoreTable, vectorColumn, filterParts);
 
         Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(fileStoreTable);
-        if (snapshot == null) {
-            return new String[0];
+        if (snapshot != null) {
+            builder.withSnapshot(snapshot);
         }
-
-        VectorSearchBuilder builder =
-                newVectorSearchBuilder(procedureContext, fileStoreTable)
-                        .withSnapshot(snapshot)
-                        .withVector(queryVector)
-                        .withVectorColumn(vectorColumn)
-                        .withLimit(topK)
-                        .withOptions(optionsMap);
         if (filter != null) {
             builder.withFilter(filter);
         }
@@ -165,7 +167,11 @@ public class VectorSearchProcedure extends ProcedureBase {
             builder.withPartitionFilter(partitionFilter);
         }
 
-        VectorScan.Plan vectorPlan = builder.newVectorScan().scan();
+        VectorScan scan = builder.newVectorScan();
+        if (snapshot == null) {
+            return new String[0];
+        }
+        VectorScan.Plan vectorPlan = scan.scan();
         GlobalIndexResult result = builder.newVectorRead().read(vectorPlan);
 
         ReadBuilder readBuilder = fileStoreTable.newReadBuilder();
@@ -220,6 +226,32 @@ public class VectorSearchProcedure extends ProcedureBase {
                     "query_vector values must be finite");
         }
         return vector;
+    }
+
+    private static float[][] parseQueryMatrix(String json) {
+        ArrayNode rows;
+        try {
+            rows =
+                    JsonSerdeUtil.OBJECT_MAPPER_INSTANCE
+                            .readerFor(ArrayNode.class)
+                            .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                            .readValue(json);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("query_vector must be a JSON matrix of numbers", e);
+        }
+        float[][] matrix = new float[rows.size()][];
+        for (int i = 0; i < matrix.length; i++) {
+            JsonNode row = rows.get(i);
+            checkArgument(row.isArray(), "query_vector matrix rows must be arrays");
+            matrix[i] = new float[row.size()];
+            for (int j = 0; j < row.size(); j++) {
+                JsonNode coordinate = row.get(j);
+                checkArgument(
+                        coordinate.isNumber(), "query_vector matrix coordinates must be numbers");
+                matrix[i][j] = coordinate.floatValue();
+            }
+        }
+        return matrix;
     }
 
     @Nullable

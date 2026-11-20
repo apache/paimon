@@ -89,9 +89,12 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     }
 
     static void validateMultiVectorOptions(boolean centroid, String metric) {
-        if (centroid || !"cosine".equals(metric)) {
+        if (centroid) {
+            throw new IllegalArgumentException("Multivector indexes require range sharding.");
+        }
+        if (!"cosine".equals(metric)) {
             throw new IllegalArgumentException(
-                    "Multivector indexes require range sharding and cosine similarity.");
+                    "Multivector indexes require cosine similarity, got metric '" + metric + "'.");
         }
     }
 

@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -64,6 +65,26 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class GlobalIndexBuilderUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderUtils.class);
+
+    /** Validates composite and multivector indexes before planning any shards to build. */
+    public static void validateIndexFields(String type, List<DataField> fields, Options options) {
+        if (fields.size() > 1) {
+            try {
+                GlobalIndexer.create(type, fields, options);
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                type,
+                                fields.stream().map(DataField::name).collect(Collectors.toList())),
+                        e);
+            }
+        } else if (fields.size() == 1
+                && CoreOptions.isVectorIndexType(type)
+                && VectorIndexUtils.isMultiVector(fields.get(0).type())) {
+            GlobalIndexer.create(type, fields, options);
+        }
+    }
 
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,

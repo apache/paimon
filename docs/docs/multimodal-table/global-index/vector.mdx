@@ -346,14 +346,16 @@ for SQL ordering and Java/Python score access.
 
 ### Search a List of Vectors
 
-On a Data Evolution table, Spark SQL and Java can search a column containing multiple
+On a Data Evolution table, Spark SQL, Flink SQL and Java can search a column containing multiple
 embeddings per row. The native `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`
 indexes support these columns with range sharding and cosine similarity.
+Omitting the metric selects `cosine`. Index creation rejects any other metric.
 The column can be `ARRAY<VECTOR<FLOAT, d>>` or `ARRAY<ARRAY<FLOAT>>`. For the latter,
 specify the inner dimension when building the index. Each row can contain a different
 number of vectors. You can build an independent index for each such column.
 
 ```sql
+-- Spark SQL
 CALL sys.create_global_index(
     table => 'db.documents', index_column => 'chunks', index_type => 'ivf-flat',
     options => 'ivf-flat.dimension=2,ivf-flat.distance.metric=cosine'
@@ -371,6 +373,16 @@ place in the result. Null embeddings are skipped. A row with no embeddings has n
 Query matrices require at least one vector, fixed inner dimensions and finite coordinates.
 Spark SQL accepts a matrix in an uncorrelated `vector_search` call. A correlated
 `LATERAL vector_search` call takes one query vector per outer row.
+In Flink SQL, pass the matrix as a JSON string to the search procedure. The procedure
+executes matrix queries locally even when `vector-search.distribute.enabled` is enabled.
+
+```sql
+CALL sys.vector_search(
+    `table` => 'db.documents', vector_column => 'chunks',
+    query_vector => '[[1,0],[0,1]]', top_k => 10,
+    projection => 'id,__paimon_search_score'
+);
+```
 
 For a matrix query, Paimon retrieves candidate rows for each query vector and scores the
 union against their complete lists from the query snapshot. Candidate retrieval is approximate.

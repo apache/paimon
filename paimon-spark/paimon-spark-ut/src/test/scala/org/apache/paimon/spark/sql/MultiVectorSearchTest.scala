@@ -28,6 +28,24 @@ import org.apache.paimon.types.DataTypes
 /** End-to-end tests for row-ranked multivector search. */
 class MultiVectorSearchTest extends PaimonSparkTestBase {
 
+  test("reject an explicit non-cosine metric when creating a list index on an empty table") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (chunks ARRAY<ARRAY<FLOAT>>)
+                  |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      val error = intercept[RuntimeException] {
+        spark
+          .sql(
+            """CALL sys.create_global_index(table => 'test.T', index_column => 'chunks',
+              |index_type => 'ivf-flat', options => 'ivf-flat.metric=inner_product')""".stripMargin)
+          .collect()
+      }
+      assert(error.getCause.isInstanceOf[IllegalArgumentException])
+      assert(
+        error.getCause.getMessage.contains("require cosine similarity, got metric 'inner_product'"))
+    }
+  }
+
   test("reject matrix queries with unsupported SQL shapes during analysis") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, chunks ARRAY<ARRAY<FLOAT>>)
