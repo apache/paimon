@@ -917,11 +917,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Identifier id = identifier("reused_multi_vector_query");
         catalog.createTable(
                 id,
-                Schema.newBuilder()
-                        .column("chunks", DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.FLOAT())))
-                        .option("bucket", "-1")
-                        .option("row-tracking.enabled", "true")
-                        .option("data-evolution.enabled", "true")
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column(
+                                                "chunks",
+                                                DataTypes.ARRAY(
+                                                        DataTypes.ARRAY(DataTypes.FLOAT()))))
                         .option("vector-index.search-mode", "detail")
                         .build(),
                 false);
