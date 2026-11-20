@@ -83,6 +83,31 @@ class PartialUpdateFirstRetractTest {
         assertThat(buffer.getResult().value().getLong(2)).isEqualTo(-1L);
     }
 
+    @ParameterizedTest
+    @EnumSource(
+            value = RowKind.class,
+            names = {"UPDATE_BEFORE", "DELETE"})
+    void testRetractionOnlyResultCanBeMergedAgain(RowKind retractKind) {
+        ReducerMergeFunctionWrapper buffer = newReducer();
+        buffer.add(record(retractKind, 2, "-50"));
+        buffer.add(record(retractKind, 3, "10"));
+
+        KeyValue result = buffer.getResult();
+        assertThat(result.valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(result.value())
+                .isEqualTo(GenericRow.of(1, decimal("-40"), 2L, Timestamp.fromEpochMillis(3)));
+
+        ReducerMergeFunctionWrapper compact = newReducer();
+        compact.add(record(RowKind.INSERT, 1, "-40"));
+        compact.add(buffer.getResult());
+        assertThat(compact.getResult().value().getDecimal(1, PRECISION, SCALE))
+                .isEqualTo(decimal("0"));
+
+        buffer.add(record(RowKind.UPDATE_AFTER, 4, "60"));
+        assertThat(buffer.getResult().value())
+                .isEqualTo(GenericRow.of(1, decimal("100"), -1L, Timestamp.fromEpochMillis(4)));
+    }
+
     @Test
     void testNullSequenceGroupDoesNotRetractAmount() {
         ReducerMergeFunctionWrapper buffer = newReducer();
@@ -107,8 +132,9 @@ class PartialUpdateFirstRetractTest {
         ReducerMergeFunctionWrapper buffer = newReducer(true, options);
         buffer.add(record(RowKind.UPDATE_BEFORE, 2, "90"));
         buffer.add(record(RowKind.UPDATE_BEFORE, 3, "40"));
+        assertThat(buffer.getResult().valueKind()).isEqualTo(RowKind.DELETE);
         assertThat(buffer.getResult().value().getDecimal(1, PRECISION, SCALE))
-                .isEqualTo(decimal("-130"));
+                .isEqualTo(decimal("130"));
         assertThat(buffer.getResult().value().getLong(2)).isEqualTo(1L);
     }
 

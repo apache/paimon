@@ -37,10 +37,12 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -90,22 +92,68 @@ class PartialUpdateFirstRetractTableTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "input", "lookup"})
+    void testRetractionOnlyBatchBeforeUpdate(String producer) throws Exception {
+        FileStoreTable table = createTable(producer);
+        writeBatch(table, row("40", 1L, "+I"), row("50", 2L, "+I"));
+        writeBatch(table, row("40", 3L, "-U"), row("50", 4L, "-U"));
+        assertThat(readRows(table, ScanMode.ALL)).containsExactly("+I|0|4|+I");
+        writeBatch(table, row("60", 5L, "+U"));
+        assertThat(readRows(table, ScanMode.ALL)).containsExactly("+I|60|5|+U");
+    }
+
+    @Test
+    void testNotNullSumWithSkippedSequenceGroup() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "none",
+                        "sum",
+                        DataTypes.DECIMAL(PRECISION, SCALE).notNull(),
+                        new Options());
+        writeBatch(table, row("17", 1L, "+I"));
+        writeBatch(table, row("1", null, "-U"), row("2", null, "-U"));
+        assertThat(readRows(table, ScanMode.ALL)).containsExactly("+I|17|1|+I");
+
+        writeBatch(table, row("3", null, "-U"), row("5", 2L, "+U"));
+        assertThat(readRows(table, ScanMode.ALL)).containsExactly("+I|22|2|+U");
+    }
+
+    @Test
+    void testNotNullProductWithRetractionOnlyBatch() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "none",
+                        "product",
+                        DataTypes.DECIMAL(PRECISION, SCALE).notNull(),
+                        new Options());
+        writeBatch(table, row("7", 1L, "+I"), row("1", 2L, "+I"), row("1", 3L, "+I"));
+        writeBatch(table, row("1", 4L, "-U"), row("1", 5L, "-U"));
+        assertThat(readRows(table, ScanMode.ALL)).containsExactly("+I|7|5|+I");
+    }
+
     private FileStoreTable createTable(String producer) throws Exception {
+        Options options = new Options();
+        options.set("sequence.field", "seq");
+        return createTable(producer, "sum", DataTypes.DECIMAL(PRECISION, SCALE), options);
+    }
+
+    private FileStoreTable createTable(
+            String producer, String aggregate, DataType amountType, Options options)
+            throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
                             DataTypes.BIGINT().notNull(),
-                            DataTypes.DECIMAL(PRECISION, SCALE),
+                            amountType,
                             DataTypes.BIGINT(),
                             DataTypes.STRING()
                         },
                         new String[] {"id", "amount", "seq", "op"});
-        Options options = new Options();
         options.set("bucket", "1");
         options.set("merge-engine", "partial-update");
         options.set("fields.seq.sequence-group", "amount");
-        options.set("fields.amount.aggregate-function", "sum");
-        options.set("sequence.field", "seq");
+        options.set("fields.amount.aggregate-function", aggregate);
         options.set("rowkind.field", "op");
         options.set("changelog-producer", producer);
         options.set("write-only", String.valueOf(!"lookup".equals(producer)));
@@ -134,7 +182,7 @@ class PartialUpdateFirstRetractTableTest {
         }
     }
 
-    private GenericRow row(String amount, long sequence, String op) {
+    private GenericRow row(String amount, Long sequence, String op) {
         return GenericRow.of(
                 1L,
                 Decimal.fromBigDecimal(new BigDecimal(amount), PRECISION, SCALE),
