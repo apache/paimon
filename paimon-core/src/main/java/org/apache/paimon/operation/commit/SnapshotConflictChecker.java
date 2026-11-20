@@ -210,7 +210,7 @@ public class SnapshotConflictChecker {
             }
             if (scanner.hasDataChangesInBuckets(snapshot, buckets)
                     || scanner.hasIndexChangesInBuckets(snapshot, buckets)) {
-                throw new RuntimeException(
+                throw new BucketCompactionConflictException(
                         String.format(
                                 "Concurrent compaction conflict when committing snapshot %d: "
                                         + "%s snapshot %d by user %s modified the same partition and bucket "
@@ -244,6 +244,19 @@ public class SnapshotConflictChecker {
                 || after.size() != 1
                 || !before.get(0).fileName().equals(after.get(0).fileName())
                 || !withoutFileIndex(before.get(0)).equals(withoutFileIndex(after.get(0)));
+    }
+
+    /**
+     * Another user's COMPACT or OVERWRITE changed a bucket after the compaction writer restored
+     * its state, so the compaction was computed on stale files.
+     */
+    public static class BucketCompactionConflictException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        public BucketCompactionConflictException(String message) {
+            super(message);
+        }
     }
 
     private static DataFileMeta withoutFileIndex(DataFileMeta file) {

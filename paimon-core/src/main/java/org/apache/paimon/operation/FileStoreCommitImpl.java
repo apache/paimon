@@ -65,6 +65,7 @@ import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
 import org.apache.paimon.operation.commit.RowIdConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.SnapshotConflictChecker;
+import org.apache.paimon.operation.commit.SnapshotConflictChecker.BucketCompactionConflictException;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
@@ -1614,13 +1615,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // Check snapshot history even when the file-level conflict scan can be skipped.
-        List<BinaryRow> changedPartitions =
-                snapshotConflictChecker.check(
-                        newSnapshotId,
-                        commitKind,
-                        changes,
-                        rebasedReassignments,
-                        compactionBaselines);
+        List<BinaryRow> changedPartitions;
+        try {
+            changedPartitions =
+                    snapshotConflictChecker.check(
+                            newSnapshotId,
+                            commitKind,
+                            changes,
+                            rebasedReassignments,
+                            compactionBaselines);
+        } catch (BucketCompactionConflictException e) {
+            if (committingCompactRecovery) {
+                throw new StaleCompactRecoveryException(e);
+            }
+            throw e;
+        }
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit table files to snapshot {}", newSnapshotId);
