@@ -1808,6 +1808,20 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.APPEND))
                 .isEmpty();
+        byte[] bitmapMeta =
+                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2, true)
+                        .meta();
+        IndexManifestEntry bitmapIndex = centroidRouter("first", 10, 19, 1, bitmapMeta);
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(bitmapIndex),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
         // A second router starts at snapshot 2. The change in its interval in that
         // snapshot is already included in its training data. Both are active in snapshot 3.
         IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
@@ -1828,7 +1842,7 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.APPEND))
                 .isNotPresent();
-        verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
+        verify(scanner, times(4)).readIncrementalEntries(concurrent, partitions);
         verify(scanner).readIncrementalEntries(latest, partitions);
 
         when(scanner.readIncrementalEntries(latest, partitions))
@@ -1859,7 +1873,7 @@ class ConflictDetectionTest {
                                 from,
                                 to,
                                 1,
-                                null,
+                                CentroidIndexMeta.hasScalarIndexes(meta) ? new int[] {0} : null,
                                 meta,
                                 new org.apache.paimon.index.DataEvolutionIndexSourceMeta(snapshot)
                                         .serialize()));

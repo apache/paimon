@@ -550,10 +550,17 @@ class FileStoreCommit:
 
         # Capture existing-row updates before assigning row IDs to new appends.
         # Deletion vectors make mixed update/delete commits OVERWRITE.
-        update_files = [
-            entry.file for entry in commit_entries
+        updates = [
+            entry for entry in commit_entries
             if entry.kind == 0 and entry.file.first_row_id is not None
         ] if commit_kind in ('APPEND', 'OVERWRITE') and self.table.options.data_evolution_enabled() else []
+        if updates:
+            from pypaimon.execution.python.write.global_index_update_checker import (
+                check_retained_centroid_scalar_indexes,
+            )
+            check_retained_centroid_scalar_indexes(
+                self.table, latest_snapshot, updates, index_deletes or ())
+        update_files = [entry.file for entry in updates]
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
         row_tracking_enabled = self.table.options.row_tracking_enabled()

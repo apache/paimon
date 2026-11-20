@@ -21,6 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
 import org.apache.paimon.globalindex.CentroidIndexFile;
+import org.apache.paimon.globalindex.CentroidShardFilterReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ScoreGetter;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
@@ -56,7 +57,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Routes queries to shard files using row IDs relative to their shared range. */
-final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader {
+final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader
+        implements CentroidShardFilterReader {
     private static final int JOINT_OUTER_PROBES = 4;
     private static final int[] NO_CENTERS = new int[0];
 
@@ -72,6 +74,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
     private final long vectorCount;
     private final String indexType;
     private CentroidRouter model;
+    private IOFunction<Integer, RoaringNavigableMap64> shardFilter;
     private volatile boolean closed;
 
     NativeCentroidRoutedIndexReader(
@@ -89,6 +92,9 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         long count = 0;
         for (GlobalIndexIOMeta file : entries) {
             CentroidIndexFile meta = (CentroidIndexFile) file;
+            if (meta.scalarIndex()) {
+                continue;
+            }
             if (meta.routingModel()) {
                 modelMeta = meta;
                 checkArgument(routing == null, "Multiple routing models.");
@@ -111,6 +117,11 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.metadata = modelMeta;
         this.metric = VectorIndexMeta.read(routing.metadata()).metric();
         this.vectorCount = count;
+    }
+
+    @Override
+    public void withShardFilter(IOFunction<Integer, RoaringNavigableMap64> filter) {
+        this.shardFilter = filter;
     }
 
     private synchronized CentroidRouter model() {
@@ -147,19 +158,18 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             GlobalIndexIOMeta shard, IOFunction<NativeVectorGlobalIndexReader, T> operation) {
         return CompletableFuture.supplyAsync(
                 () -> {
-                    try (NativeVectorGlobalIndexReader reader =
-                            new NativeVectorGlobalIndexReader(
-                                    files,
-                                    Collections.singletonList(shard),
-                                    fieldType,
-                                    executor,
-                                    indexType)) {
+                    try (NativeVectorGlobalIndexReader reader = openShard(shard)) {
                         return operation.apply(reader);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
                 },
                 executor);
+    }
+
+    private NativeVectorGlobalIndexReader openShard(GlobalIndexIOMeta shard) {
+        return new NativeVectorGlobalIndexReader(
+                files, Collections.singletonList(shard), fieldType, executor, indexType);
     }
 
     private synchronized String metric() {
@@ -267,7 +277,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         VectorSearch query = batch.forIndex(0);
         SearchScope scope = SearchScope.of(batch.includeRowIds(), batch.limit());
         boolean considerJoint =
-                centers.get(0).length == 8
+                shardFilter == null
+                        && centers.get(0).length == 8
                         && metadata.nlist() == 64
                         && query.limit() >= 10
                         && query.limit() <= 100
@@ -495,29 +506,46 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         groups.forEach(
                 (file, policies) ->
                         pending.add(
-                                readShard(
-                                        file,
-                                        reader -> {
-                                            // A mixed batch may select this shard with both probe
-                                            // policies.
-                                            for (Map.Entry<Boolean, List<Integer>> policy :
-                                                    policies.entrySet()) {
-                                                List<Integer> indices = policy.getValue();
-                                                searchSubset(
-                                                        reader,
-                                                        batch,
-                                                        scope,
-                                                        indices,
-                                                        policy.getKey(),
-                                                        (index, result) ->
-                                                                plans.get(index)
-                                                                        .matches
-                                                                        .add(result));
-                                            }
-                                            return null;
-                                        })));
+                                CompletableFuture.runAsync(
+                                        () -> searchShard(file, policies, batch, plans, scope),
+                                        executor)));
         return CompletableFuture.allOf(pending.toArray(new CompletableFuture[0]))
                 .thenComposeAsync(done -> finishRound(batch, plans, scope));
+    }
+
+    private void searchShard(
+            GlobalIndexIOMeta file,
+            Map<Boolean, List<Integer>> policies,
+            BatchVectorSearch batch,
+            List<Route> plans,
+            SearchScope scope) {
+        try {
+            if (shardFilter != null) {
+                RoaringNavigableMap64 rows =
+                        shardFilter.apply(((CentroidIndexFile) file).centroid());
+                if (batch.includeRowIds() != null) {
+                    rows.and(batch.includeRowIds());
+                }
+                if (rows.isEmpty()) {
+                    return;
+                }
+                scope = SearchScope.of(rows, batch.limit());
+            }
+            try (NativeVectorGlobalIndexReader reader = openShard(file)) {
+                // A mixed batch may select this shard with both probe policies.
+                for (Map.Entry<Boolean, List<Integer>> policy : policies.entrySet()) {
+                    searchSubset(
+                            reader,
+                            batch,
+                            scope,
+                            policy.getValue(),
+                            policy.getKey(),
+                            (index, result) -> plans.get(index).matches.add(result));
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private Map<GlobalIndexIOMeta, Map<Boolean, List<Integer>>> shardsForRound(List<Route> plans) {

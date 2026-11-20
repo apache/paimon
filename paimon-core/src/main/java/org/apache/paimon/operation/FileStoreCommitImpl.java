@@ -407,6 +407,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
+                if (options.dataEvolutionEnabled()
+                        && appendSimpleEntries.stream()
+                                .anyMatch(entry -> entry.firstRowId() != null)) {
+                    checkAppendFiles = true;
+                }
                 if (changes.appendIndexFiles.stream()
                         .anyMatch(
                                 entry ->

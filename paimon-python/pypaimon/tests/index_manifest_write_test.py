@@ -17,6 +17,7 @@
 
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 import uuid
@@ -24,11 +25,14 @@ import uuid
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.execution.native.write.native_commit import native_messages_supported
+from pypaimon.execution.python.globalindex.build_plan import indexed_row_ranges
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta, has_centroid_scalar_index
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.commit_message import CommitMessage
 
 
 class IndexManifestWriteTest(unittest.TestCase):
@@ -108,6 +112,68 @@ class IndexManifestWriteTest(unittest.TestCase):
         self.assertNotEqual(previous, new_name)
         survivors = {e.index_file.file_name for e in imf.read(new_name)}
         self.assertEqual({'idx-b'}, survivors)
+
+    def test_centroid_scalar_group_owns_vector_range(self):
+        imf = IndexManifestFile(self._table())
+        router = self._entry('centroid-router', 1, b'PAIMCENT\x02\x01' + struct.pack('>iii', 1, 1, 0) + b'm')
+        router.index_file.index_type = 'ivf-flat'
+        previous = imf.write([router])
+        range_entry = self._entry('vector-range', 1)
+        range_entry.index_file.index_type = 'ivf-flat'
+        range_entry.index_file.global_index_meta.extra_field_ids = None
+        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
+            imf.combine_changes(previous, [range_entry], [])
+        range_entry.index_file.index_type = 'ivf-pq'
+        combined = imf.combine_changes(previous, [range_entry], [])
+        self.assertEqual({'ivf-flat', 'ivf-pq'}, {entry.index_file.index_type for entry in imf.read(combined)})
+
+    def test_python_commit_rejects_updates_to_centroid_bitmap_fields_under_ignore(self):
+        name = f'default.centroid_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(self.pa_schema, options={
+            'bucket': '-1', 'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
+            'global-index.column-update-action': 'IGNORE',
+        })
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+        builder = table.new_batch_write_builder()
+
+        def publish(messages):
+            commit = builder.new_commit()
+            try:
+                commit.commit(messages)
+            finally:
+                commit.close()
+
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(pa.table({'id': [7], 'vec': ['before']}, schema=self.pa_schema))
+            publish(writer.prepare_commit())
+        finally:
+            writer.close()
+
+        field_id, extra_id = (field.id for field in table.fields)
+        router = self._entry('centroid-router', field_id,
+                             b'PAIMCENT\x02\x01' + struct.pack('>iii', 1, 1, 0) + b'm')
+        router.index_file.index_type = 'ivf-flat'
+        router.index_file.global_index_meta.row_range_end = 0
+        router.index_file.global_index_meta.extra_field_ids = [extra_id]
+        index_message = CommitMessage((), 0, [], index_adds=[router])
+        self.assertFalse(native_messages_supported(table, [index_message], for_commit=True))
+        publish([index_message])
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertTrue(has_centroid_scalar_index(table, 'ivf-flat', 'id', None))
+        ranges = indexed_row_ranges(table, snapshot, None, field_id, 'ivf-flat')
+        self.assertEqual([(0, 0)], [(r.from_, r.to) for r in ranges])
+
+        update = builder.new_update().new_update_by_row_id()
+        messages = update.update_columns(pa.table({'_ROW_ID': [0], 'vec': ['after']}), ['vec'])
+        self.assertTrue(messages)
+        with self.assertRaisesRegex(RuntimeError, 'active centroid index'):
+            publish(messages)
+        self.assertEqual(snapshot.id, table.snapshot_manager().get_latest_snapshot().id)
+        self.assertEqual(1, table.drop_global_index('id', index_type='ivf-flat', dry_run=True))
+        self.assertEqual(1, table.drop_global_index('id', index_type='ivf-flat'))
+        self.assertFalse(has_centroid_scalar_index(table, 'ivf-flat', 'id', None))
 
     def test_combine_unknown_global_index_delete_is_rejected(self):
         imf = IndexManifestFile(self._table())

@@ -153,6 +153,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         Map<List<Integer>, IndexMetaFileGroup> primaryGroups = new LinkedHashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
+                continue;
+            }
             int indexFieldId = meta.indexFieldId();
             List<Integer> fieldIds = meta.getIndexedFieldIds();
             IndexMetaFileGroup group = primaryGroups.get(fieldIds);
@@ -393,6 +396,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
                 .filter(indexFile -> indexFile.globalIndexMeta() != null)
+                .filter(
+                        file ->
+                                !CentroidIndexMeta.hasScalarIndexes(
+                                        file.globalIndexMeta().indexMeta()))
                 .collect(Collectors.toList());
     }
 

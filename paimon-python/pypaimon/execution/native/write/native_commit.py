@@ -24,6 +24,7 @@ from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.native.table import (
     _catalog_context_options, _catalog_metastore, _option_value_to_string, _options_to_native,
     _resolved_schema_file_io_options)
+from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import (
     deserialize_commit_message, serialize_commit_message,
@@ -39,9 +40,12 @@ def native_messages_supported(table, messages, *, for_commit=False) -> bool:
         # Native 0.5.0 cannot validate retained field IDs against the schema of
         # each publication attempt. Full-row updates also retain field IDs;
         # write_cols=None does not exempt them. Pure conflict probes are safe.
-        if (for_commit and table.options.data_evolution_enabled()
-                and any(file.first_row_id is not None for file in message.new_files)):
-            return False
+        if for_commit and table.options.data_evolution_enabled():
+            if any(file.first_row_id is not None for file in message.new_files):
+                return False
+            # Check for overlapping centroid groups against the snapshot being committed.
+            if any(entry.index_file.index_type in VINDEX_IDENTIFIERS for entry in message.index_adds):
+                return False
         partition = tuple(message.partition)
         for file in message.new_files + message.changelog_files:
             if file.external_path:

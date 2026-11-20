@@ -23,6 +23,8 @@ def build_native_global_index_drop(builder, partition_filter):
     from pypaimon.execution.native.read.builder import (_predicate_to_native)
     from pypaimon.execution.native.runtime import (native_runtime_available)
     from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
+    from pypaimon.globalindex.global_index_meta import has_centroid_scalar_index
+    from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
 
     table = builder._table
     if (not table.options.native_write_enabled()
@@ -32,6 +34,9 @@ def build_native_global_index_drop(builder, partition_filter):
         return None
     from pypaimon_rust.datafusion import GlobalIndexDropBuilder
     if not GlobalIndexDropBuilder.supports_index_type(builder._index_type):
+        return None
+    if (builder._index_type in VINDEX_IDENTIFIERS and table.options.data_evolution_enabled()
+            and has_centroid_scalar_index(table, builder._index_type, builder._index_columns[0], partition_filter)):
         return None
     native = _native_table(table).new_global_index_drop_builder()
     native.with_index_columns(builder._index_columns).with_index_type(builder._index_type)

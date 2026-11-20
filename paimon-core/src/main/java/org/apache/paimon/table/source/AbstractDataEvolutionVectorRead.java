@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.CentroidShardFilterReader;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -54,6 +55,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -71,6 +73,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -111,6 +114,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      * the single thread performing the read.
      */
     @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
+
+    private transient Map<List<IndexFileMeta>, IOFunction<Integer, RoaringNavigableMap64>>
+            shardFilters;
+    private transient Map<Long, RowType> shardBuildSchemas;
 
     static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
@@ -198,7 +205,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     private GlobalIndexer createGlobalIndexer(String indexType, GlobalIndexMeta meta) {
-        if (meta.extraFieldIds() == null) {
+        if (meta.extraFieldIds() == null || CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
             return createGlobalIndexer(indexType);
         }
         return GlobalIndexer.createForRead(
@@ -219,15 +226,42 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         splitSearchSplits(splits, indexSplits, rawSplits);
         scalarPreFilter = null;
         postFiltering = false;
+        shardFilters = new IdentityHashMap<>();
+        shardBuildSchemas = new HashMap<>();
         if (filter == null || indexSplits.isEmpty()) {
             return;
         }
-        RoaringNavigableMap64 matchedRows = scalarMatchedRows(indexSplits);
+        List<IndexVectorSearchSplit> otherSplits = new ArrayList<>();
+        for (IndexVectorSearchSplit split : indexSplits) {
+            IOFunction<Integer, RoaringNavigableMap64> shardFilter =
+                    CentroidBitmapFilter.create(
+                            table, filter, split.vectorIndexFiles(), shardBuildSchemas);
+            shardFilters.put(split.vectorIndexFiles(), shardFilter);
+            if (shardFilter == null) {
+                otherSplits.add(split);
+            }
+        }
+        if (otherSplits.isEmpty()) {
+            return;
+        }
+        RoaringNavigableMap64 matchedRows = scalarMatchedRows(otherSplits);
         if (matchedRows != null) {
             scalarPreFilter = matchedRows;
             return;
         }
         postFiltering = true;
+    }
+
+    @Nullable
+    private IOFunction<Integer, RoaringNavigableMap64> shardFilter(List<IndexFileMeta> files) {
+        if (shardFilters != null && shardFilters.containsKey(files)) {
+            return shardFilters.get(files);
+        }
+        // Distributed readers receive deserialized splits and recreate file readers on the worker.
+        if (shardBuildSchemas == null) {
+            shardBuildSchemas = new HashMap<>();
+        }
+        return CentroidBitmapFilter.create(table, filter, files, shardBuildSchemas);
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
@@ -239,14 +273,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         RoaringNavigableMap64 liveRows =
                 GlobalIndexLiveRowFilter.liveRows(
                         table, planSnapshot, partitionFilter, indexedRowRanges);
-        RoaringNavigableMap64 matchedRows =
-                postFiltering
-                        ? null
-                        : scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
+        RoaringNavigableMap64 matchedRows = postFiltering ? null : scalarPreFilter;
+        if (!postFiltering && matchedRows == null && shardFilters == null) {
+            matchedRows = scalarMatchedRows(splits);
+        }
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
-        for (Range splitRange : indexedRowRanges) {
+        for (int i = 0; i < indexedRowRanges.size(); i++) {
+            Range splitRange = indexedRowRanges.get(i);
             RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
@@ -254,7 +289,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             if (liveRows != null) {
                 include.and(liveRows);
             }
-            if (matchedRows != null) {
+            if (matchedRows != null && shardFilter(splits.get(i).vectorIndexFiles()) == null) {
                 include.and(matchedRows);
             }
 
@@ -396,6 +431,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
+        IOFunction<Integer, RoaringNavigableMap64> shardFilter = shardFilter(vectorIndexFiles);
         GlobalIndexReader reader =
                 createVectorReader(
                         globalIndexer,
@@ -403,8 +439,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeStart,
                         rowRangeEnd,
                         vectorIndexFiles,
+                        shardFilter,
                         executor);
-        if (postFiltering) {
+        if (postFiltering && shardFilter == null) {
             CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> batch =
                     evalPostFilter(
                             reader,
@@ -444,6 +481,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(emptyOptionalResults(vectors.length));
         }
 
+        IOFunction<Integer, RoaringNavigableMap64> shardFilter = shardFilter(vectorIndexFiles);
         GlobalIndexReader reader =
                 createVectorReader(
                         globalIndexer,
@@ -451,8 +489,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeStart,
                         rowRangeEnd,
                         vectorIndexFiles,
+                        shardFilter,
                         executor);
-        if (postFiltering) {
+        if (postFiltering && shardFilter == null) {
             return evalPostFilter(
                     reader, rowRangeStart, rowRangeEnd, vectors, searchLimit, includeRowIds);
         }
@@ -469,6 +508,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
+            @Nullable IOFunction<Integer, RoaringNavigableMap64> shardFilter,
             ExecutorService executor) {
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
@@ -482,6 +522,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeEnd - rowRangeStart + 1,
                         null,
                         executor);
+        if (shardFilter != null) {
+            ((CentroidShardFilterReader) reader).withShardFilter(shardFilter);
+        }
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
     }
 

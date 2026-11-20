@@ -654,6 +654,35 @@ for the current 8-bit PQ codes, `pq.m=64` uses twice the code bytes of
 not recall guarantees. Record the resolved build options, total index size,
 query file reads, and achieved recall when comparing configurations.
 
+### Scalar Bitmap Filters in Centroid Shards
+
+In Spark, pass the vector column in `index_column` and a JSON object mapping scalar column names
+to index types in `extra_fields`. The supported scalar index type is `bitmap`.
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.sharding=centroid',
+    extra_fields => '{"tenant_id":"bitmap","status":"bitmap"}'
+);
+```
+
+Each populated centroid gets one additional scalar index file. Its manifest entry wraps each
+field's original Bitmap metadata together with its index type and byte range in the file.
+
+A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
+conjunctions of these predicates. It applies the exact matches before ranking and skips opening
+the ANN file when no visible vector matches. Other predicates use the existing scalar-filter path.
+Ordinary scalar scans can use independently built scalar indexes.
+
+To change the scalar columns, run the centroid build again with the new `extra_fields`. For the selected
+partitions, the build replaces the indexes of the same type on the vector column. Pass just the
+vector column as `index_column` to `sys.drop_global_index` to remove the group. Updates to any
+indexed column follow `THROW_ERROR` or `DROP_PARTITION_INDEX`. Drop the group before using an
+older Java reader that lacks support for centroid Bitmap files.
+
 ## Per-Field Options
 
 The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared

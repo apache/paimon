@@ -22,12 +22,153 @@ import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
 import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta}
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.source.RawVectorSearchSplit
 import org.apache.paimon.vector.index.VectorTrainingModelIO
 
 import scala.collection.JavaConverters._
 
 /** End-to-end centroid build over nonzero, disjoint source row-ID ranges. */
 class CentroidVectorIndexTest extends PaimonSparkTestBase {
+
+  test("centroid bitmap fields pre-filter top K and follow the vector definition") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, status STRING)
+                  |TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.row-count-per-shard'='128',
+                  |'vector-index.search-mode'='detail',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT cast(id AS INT),
+                  |array(cast(IF(id < 32, id, id + 1000) AS FLOAT), 0.0f),
+                  |IF(id % 2 = 0, 'red', 'blue'),
+                  |CASE WHEN id = 48 THEN NULL ELSE 'busy' END FROM range(64)""".stripMargin)
+      def build(extraFields: String = "", sharding: String = "centroid"): Unit = {
+        val extra = if (extraFields.isEmpty) "" else s", extra_fields => '$extraFields'"
+        spark
+          .sql(
+            s"""CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+               |index_type=>'ivf-flat', options=>'ivf-flat.sharding=$sharding,ivf-flat.dimension=2,
+               |ivf-flat.metric=l2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1'$extra)""".stripMargin
+              .replace("\n", ""))
+          .collect()
+      }
+      def files: Seq[IndexFileMeta] = {
+        val table = loadTable("T")
+        table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .asScala
+          .map(_.indexFile())
+          .toSeq
+      }
+      def nearest(predicate: String): Seq[Int] =
+        spark
+          .sql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+                  |map('centroid.nprobe','2','ivf.nprobe','1')) WHERE $predicate""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      build()
+      assert(nearest("status IS NULL").isEmpty)
+
+      def assertBuildRejected(
+          fields: String,
+          message: String,
+          sharding: String = "centroid"): Unit = {
+        val previousFiles = files.map(_.fileName()).toSet
+        val error = intercept[Exception](build(fields, sharding))
+        assert(
+          Iterator
+            .iterate[Throwable](error)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(e => Option(e.getMessage).exists(_.contains(message))))
+        assert(files.map(_.fileName()).toSet == previousFiles)
+      }
+      assertBuildRejected("""{"status":"btree"}""", "Unsupported index type")
+      assertBuildRejected("""{"status":"bitmap","status":"bitmap"}""", "Duplicate field")
+      assertBuildRejected("""{"status":"bitmap"}""", "requires centroid sharding", "range")
+
+      build("""{"tenant":"bitmap","status":"bitmap"}""")
+      assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
+      assert(files.count(CentroidIndexMeta.isScalarIndex) == 2)
+      assert(files.filter(CentroidIndexMeta.isScalarIndex).map(_.rowCount()).sum == 64)
+      val coveredPlan = loadTable("T")
+        .newVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVector(Array(0f, 0f))
+        .withLimit(1)
+        .newVectorScan()
+        .scan()
+      assert(!coveredPlan.splits().asScala.exists(_.isInstanceOf[RawVectorSearchSplit]))
+      assert(nearest("tenant IN ('red', 'green') AND status IS NULL") == Seq(48))
+      assert(nearest("tenant = 'blue' AND status IS NULL").isEmpty)
+
+      build("""{"status":"bitmap"}""")
+      assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
+      assert(files.forall(_.globalIndexMeta().extraFieldIds().length == 1))
+      assert(nearest("status IS NULL") == Seq(48))
+      assert(
+        spark.sql("SELECT id FROM T WHERE status IS NULL").collect().map(_.getInt(0)).toSeq ==
+          Seq(48))
+
+      intercept[Exception] {
+        spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      }
+      assert(nearest("status IS NULL") == Seq(48))
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='IGNORE')")
+      intercept[Exception] {
+        spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      }
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='DROP_PARTITION_INDEX')")
+      spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      assert(files.isEmpty)
+
+      build("""{"status":"bitmap"}""")
+      assert(nearest("status = 'ready'") == Seq(48))
+      val centroidFiles = files.map(_.fileName()).toSet
+      spark.sql("INSERT INTO T VALUES (64, array(2000.0f, 0.0f), 'red', 'new')").collect()
+      build(sharding = "range")
+      assert(centroidFiles.subsetOf(files.map(_.fileName()).toSet))
+      assert(files.size == centroidFiles.size + 1)
+      assert(nearest("status = 'ready'") == Seq(48))
+      spark
+        .sql("""CALL sys.drop_global_index(table=>'test.T',index_column=>'v',
+               |index_type=>'ivf-flat')""".stripMargin)
+        .collect()
+      assert(files.isEmpty)
+    }
+  }
+
+  test("distributed centroid search applies the shard bitmap before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, status STRING, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql(
+        """INSERT INTO T VALUES
+          |(0, array(0.0f, 0.0f), 'near', 0), (1, array(1.0f, 0.0f), NULL, 0),
+          |(2, array(0.0f, 0.0f), 'near', 1), (3, array(2.0f, 0.0f), NULL, 1)""".stripMargin)
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1',
+               |extra_fields => '{"status":"bitmap"}')""".stripMargin)
+        .collect()
+      withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+        val ids = spark
+          .sql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+                 |map('centroid.nprobe','1','ivf.nprobe','1')) WHERE status IS NULL""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+        assert(ids.toSeq == Seq(1))
+      }
+    }
+  }
 
   private def build(): Unit = {
     spark

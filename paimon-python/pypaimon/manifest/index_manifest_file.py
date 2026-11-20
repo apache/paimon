@@ -404,7 +404,7 @@ def _is_global_index(index_type: str) -> bool:
 
 
 def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
-    # The caller has already matched the index type and primary field.
+    # Centroid groups are owned by their primary vector field.
     return (
         _extra_field_ids(retained_meta) != _extra_field_ids(added_meta)
         or not _row_ranges_intersect(retained_meta, added_meta)
@@ -412,6 +412,8 @@ def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
 
 
 def _extra_field_ids(global_index_meta) -> Optional[List[int]]:
+    if global_index_meta.has_centroid_scalar_indexes():
+        return None
     return global_index_meta.extra_field_ids or None
 
 

@@ -81,7 +81,7 @@ def indexed_row_ranges(
             meta is None
             or index_file.index_type != index_type
             or meta.index_field_id != index_field_id
-            or meta.extra_field_ids
+            or (meta.extra_field_ids and not meta.has_centroid_scalar_indexes())
         ):
             continue
         ranges.append(Range(meta.row_range_start, meta.row_range_end))
