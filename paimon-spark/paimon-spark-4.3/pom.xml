@@ -31,10 +31,15 @@ under the License.
     <artifactId>paimon-spark-4.3_2.13</artifactId>
     <name>Paimon : Spark : 4.3 : 2.13</name>
 
+    <!--
+      Compiles `paimon-spark-4.2`'s main and test sources against Spark 4.3, so both connectors share
+      one copy. This module owns only its NOTICE and the tests that need Spark 4.3 APIs.
+    -->
     <properties>
         <spark.version>4.3.0</spark.version>
         <scala.binary.version>2.13</scala.binary.version>
         <scala.version>2.13.18</scala.version>
+        <spark42.module.dir>${project.basedir}/../paimon-spark-4.2</spark42.module.dir>
     </properties>
 
     <dependencies>
@@ -133,7 +138,50 @@ under the License.
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${spark42.module.dir}/src/main/resources</directory>
+                <excludes>
+                    <exclude>META-INF/NOTICE</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
         <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-spark42-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${spark42.module.dir}/src/main/scala</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>add-spark42-test-sources</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${spark42.module.dir}/src/test/scala</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
