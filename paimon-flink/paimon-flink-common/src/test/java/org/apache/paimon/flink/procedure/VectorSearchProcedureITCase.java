@@ -109,6 +109,28 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDistributedListSearchWithDifferentIndexTypes() {
+        createMultiVectorTable();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("INSERT INTO DOCS VALUES (1, ARRAY[ARRAY[1,0]]), (2, ARRAY[ARRAY[0,1]])");
+        for (String type : Arrays.asList("ivf-flat", "ivf-sq")) {
+            buildMultiVectorIndex(
+                    type,
+                    type + ".dimension=2;" + type + ".nlist=1;global-index.row-count-per-shard=1");
+        }
+        assertThat(sql("SELECT index_type, COUNT(*) FROM `DOCS$table_indexes` GROUP BY index_type"))
+                .containsExactlyInAnyOrder(Row.of("ivf-flat", 2L), Row.of("ivf-sq", 2L));
+        assertThat(
+                        search(
+                                "DOCS",
+                                "1,0",
+                                1,
+                                "id",
+                                "vector-search.distribute.enabled=true;global-index.thread-num=1"))
+                .containsExactly(Row.of("{\"id\":\"1\"}"));
+    }
+
+    @Test
     public void testMultiVectorIndexRejectsNonCosineMetricOnEmptyTable() {
         createMultiVectorTable();
         for (String metric : Arrays.asList("l2", "inner_product")) {

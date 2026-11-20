@@ -57,6 +57,15 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 : new NativeVectorGlobalIndexer(field.type(), nativeOptions, identifier, ratio);
     }
 
+    @Override
+    public GlobalIndexer createForRead(List<DataField> indexFields, Options tableOptions) {
+        if (indexFields.size() == 1 && VectorIndexUtils.isMultiVector(indexFields.get(0).type())) {
+            // List shards carry their dimension and metric in the native header.
+            return create(indexFields, new Options());
+        }
+        return GlobalIndexerFactory.super.createForRead(indexFields, tableOptions);
+    }
+
     static Map<String, String> nativeOptions(
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
         boolean centroid = CentroidVectorGlobalIndexer.centroidSharding(identifier, tableOptions);

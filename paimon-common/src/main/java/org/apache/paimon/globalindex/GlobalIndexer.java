@@ -56,6 +56,12 @@ public interface GlobalIndexer {
                 .create(indexFields, resolveOptions(type, indexFields, options));
     }
 
+    /** Opens an indexer for reading existing files using the current table options. */
+    static GlobalIndexer createForRead(
+            String type, List<DataField> indexFields, Options tableOptions) {
+        return GlobalIndexerFactoryUtils.load(type).createForRead(indexFields, tableOptions);
+    }
+
     /** Resolve the same field and procedure options for build planning and plugin creation. */
     static Options resolveOptions(String type, List<DataField> indexFields, Options options) {
         if (indexFields.isEmpty()) {

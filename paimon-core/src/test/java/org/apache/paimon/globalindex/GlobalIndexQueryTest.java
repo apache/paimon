@@ -172,7 +172,7 @@ class GlobalIndexQueryTest {
                             return reader;
                         });
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any())).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any())).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load("ivf-pq")).thenReturn(factory);
@@ -268,7 +268,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
@@ -464,7 +464,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load(indexType)).thenReturn(factory);
@@ -534,7 +534,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
 
         RowType rowType = RowType.of(DataTypes.INT());
         GlobalIndexQuery plan =
@@ -609,7 +609,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
+        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
         FileIO fileIO = mock(FileIO.class);
         List<Range> first = Collections.singletonList(new Range(110, 119));
         List<Range> second = Collections.singletonList(new Range(130, 139));

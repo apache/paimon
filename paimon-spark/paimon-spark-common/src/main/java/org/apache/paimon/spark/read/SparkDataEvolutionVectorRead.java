@@ -38,7 +38,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -111,11 +110,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         List<List<SerializedSplit>> splitGroups = splitGroups(serializedSplits, parallelism);
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
-                    GlobalIndexer taskGlobalIndexer =
-                            GlobalIndexer.create(
-                                    indexType,
-                                    Collections.singletonList(vectorColumn),
-                                    table.coreOptions().toConfiguration());
+                    GlobalIndexer taskGlobalIndexer = createGlobalIndexer(indexType);
                     IndexPathFactory indexPathFactory =
                             table.store().pathFactory().globalIndexFileFactory();
 

@@ -60,6 +60,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -235,6 +236,53 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
+    public void testMultiVectorCosineSearchAtExtremeScales() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 1);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        for (float storedScale : new float[] {1e-30f, 1e30f, 1f}) {
+            List<ResultEntry> files;
+            try (NativeVectorGlobalIndexWriter writer =
+                    new NativeVectorGlobalIndexWriter(
+                            createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+                for (int i = 0; i < 8; i++) {
+                    float x = i == 7 ? storedScale : -storedScale;
+                    writer.write(
+                            new GenericArray(
+                                    new Object[] {
+                                        BinaryVector.fromPrimitiveArray(new float[] {x, 0f})
+                                    }),
+                            i);
+                }
+                files = writer.finish();
+            }
+            try (GlobalIndexReader reader =
+                    new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
+                            .createReader(
+                                    createFileReader(indexPath),
+                                    toIOMetas(files, indexPath),
+                                    8,
+                                    null,
+                                    executor)) {
+                for (float queryScale : new float[] {1e-30f, 1e30f, 1f}) {
+                    float[] query = {queryScale, 0f};
+                    ScoredGlobalIndexResult result =
+                            reader.visitVectorSearch(new VectorSearch(query, 1, fieldName))
+                                    .get()
+                                    .get();
+                    assertThat(result.results().toArray(1)).containsExactly(7);
+                    assertThat(result.scoreGetter().score(7)).isEqualTo(1f);
+                    assertThat(query).containsExactly(queryScale, 0f);
+                }
+            }
+        }
+    }
+
+    @Test
     public void testMultiVectorParentFilter() throws Exception {
         Assumptions.assumeTrue(isNativeAvailable());
         DataType type = new ArrayType(new VectorType(2, new FloatType()));
@@ -283,19 +331,30 @@ public class NativeVectorGlobalIndexTest {
                         .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
                 filter.add(23);
                 filter.add(19); // Null list inside the range.
+                AtomicInteger encodings = new AtomicInteger();
+                RoaringNavigableMap64 batchFilter =
+                        new RoaringNavigableMap64() {
+                            @Override
+                            public byte[] serialize() throws IOException {
+                                encodings.incrementAndGet();
+                                return super.serialize();
+                            }
+                        };
+                batchFilter.or(filter);
                 List<Optional<ScoredGlobalIndexResult>> batch =
                         reader.visitBatchVectorSearch(
                                         new BatchVectorSearch(
                                                         new float[][] {q, {0f, 1f}}, 3, fieldName)
-                                                .withIncludeRowIds(filter))
+                                                .withIncludeRowIds(batchFilter))
                                 .get();
                 assertThat(batch).hasSize(2);
                 for (Optional<ScoredGlobalIndexResult> result : batch) {
                     assertThat(result.get().results().toArray(3)).containsExactly(5, 23);
-                    assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
-                    assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
-                    assertThat(filter.toArray(3)).containsExactly(5, 19, 23);
                 }
+                assertThat(encodings.get()).isEqualTo(1);
+                assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
+                assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
+                assertThat(batchFilter.toArray(3)).containsExactly(5, 19, 23);
             }
         }
     }

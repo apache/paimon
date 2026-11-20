@@ -139,11 +139,9 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     private Optional<ScoredGlobalIndexResult> searchShard(VectorSearch query) {
         try {
             ensureLoaded();
-            if (multiVector) {
-                return Optional.ofNullable(searchRows(query));
-            }
+            SearchScope scope = SearchScope.of(query.includeRowIds(), query.limit());
             return Optional.ofNullable(
-                    search(query, false, SearchScope.of(query.includeRowIds(), query.limit())));
+                    multiVector ? searchRows(query, scope) : search(query, false, scope));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -178,7 +176,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 List<Optional<ScoredGlobalIndexResult>> results =
                         new ArrayList<>(batch.vectorCount());
                 for (int i = 0; i < batch.vectorCount(); i++) {
-                    results.add(Optional.ofNullable(searchRows(batch.forIndex(i))));
+                    results.add(Optional.ofNullable(searchRows(batch.forIndex(i), scope)));
                 }
                 return results;
             }
@@ -271,23 +269,27 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                 : found.orElse(null);
     }
 
-    private ScoredGlobalIndexResult searchRows(VectorSearch query) throws IOException {
+    private ScoredGlobalIndexResult searchRows(VectorSearch query, SearchScope scope)
+            throws IOException {
         validateSearchVector(query.vector());
 
         RoaringNavigableMap64 remaining = query.includeRowIds();
         long vectors = nativeMeta.totalVectors();
-        int requested = (int) Math.min(query.limit(), vectors);
-        if (remaining != null) {
-            requested = (int) Math.min(requested, remaining.getLongCardinality());
+        int requested = (int) Math.min(scope.effectiveK, vectors);
+        if (requested == 0) {
+            return null;
         }
+        float[] normalized = new float[query.vector().length];
+        NativeVectorGlobalIndexer.normalizeCosine(query.vector(), normalized);
+        byte[] filter = scope.filterBytes;
         Map<Long, Float> scores = new HashMap<>();
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         while (requested > 0) {
             VectorSearchParams params = searchParams(query.options(), requested);
             VectorSearchResult found =
-                    remaining == null
-                            ? vectorReader.search(query.vector(), params)
-                            : vectorReader.search(query.vector(), params, remaining.serialize());
+                    filter == null
+                            ? vectorReader.search(normalized, params)
+                            : vectorReader.search(normalized, params, filter);
             long[] ids = found.ids();
             float[] distances = found.distances();
             int hits = 0;
@@ -323,6 +325,9 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
             remaining.andNot(rows);
             requested =
                     (int) Math.min(query.limit() - scores.size(), remaining.getLongCardinality());
+            if (requested > 0) {
+                filter = remaining.serialize();
+            }
         }
         if (scores.isEmpty()) {
             return null;

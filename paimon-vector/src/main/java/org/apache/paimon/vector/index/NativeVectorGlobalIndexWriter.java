@@ -235,6 +235,10 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             openSpillFile();
         }
         float[] src = materializeAndValidate(fieldData, rowId);
+        if (childGetter != null) {
+            NativeVectorGlobalIndexer.normalizeCosine(src, vectorBuf);
+            src = vectorBuf;
+        }
 
         if (spillBuffer.remaining() < recordSizeInBytes) {
             flushWriteBuffer();

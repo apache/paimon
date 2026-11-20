@@ -195,6 +195,40 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("lateral search decodes DOUBLE and FLOAT query vectors by their element type") {
+    withTable("T", "Q") {
+      spark.sql(
+        """CREATE TABLE T (id INT, chunks ARRAY<ARRAY<FLOAT>>)
+          |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+          |'data-evolution.enabled'='true', 'vector-index.search-mode'='detail')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, array(array(1f, 0f))), (2, array(array(0f, 1f)))")
+      spark.sql("CREATE TABLE Q (id INT, v ARRAY<DOUBLE>)")
+      spark.sql("INSERT INTO Q VALUES (1, array(1D, 0D)), (2, array(0D, 1D))")
+      def search(expr: String) =
+        s"""SELECT q.id, r.id FROM Q AS q, LATERAL (
+           | SELECT id FROM vector_search('T', 'chunks', $expr, 1)) AS r ORDER BY q.id""".stripMargin
+      Seq("q.v", "CAST(q.v AS ARRAY<FLOAT>)").foreach {
+        expr =>
+          assert(
+            spark.sql(search(expr)).collect().map(r => (r.getInt(0), r.getInt(1))).toSeq ==
+              Seq((1, 1), (2, 2)))
+      }
+      val error = intercept[IllegalArgumentException] {
+        spark.sql(search("CAST(q.v AS ARRAY<INT>)")).queryExecution.analyzed
+      }
+      assert(error.getMessage.contains("FLOAT or DOUBLE"))
+      spark.sql("INSERT INTO Q VALUES (3, array(CAST(NULL AS DOUBLE), 1D))")
+      val nullCoordinate = intercept[Exception] {
+        spark.sql(search("q.v")).collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](nullCoordinate)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains("Query coordinates cannot be null"))))
+    }
+  }
+
   test("two indexed list columns select their own dimensions in distributed search") {
     withTable("docs") {
       val schema = Schema
@@ -205,6 +239,8 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
         .option("bucket", "-1")
         .option("data-evolution.enabled", "true")
         .option("row-tracking.enabled", "true")
+        .option("ivf-flat.metric", "l2")
+        .option("ivf-flat.sharding", "centroid")
         .option("global-index.row-count-per-shard", "1")
         .option("global-index.thread-num", "1")
         .option("vector-search.distribute.enabled", "true")
@@ -217,7 +253,7 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
         case (column, dimension) =>
           spark
             .sql(s"""CALL sys.create_global_index(table => 'test.docs', index_column => '$column',
-                    |index_type => 'ivf-flat', options => '${dimension}ivf-flat.nlist=1')
+                    |index_type => 'ivf-flat', options => '${dimension}ivf-flat.nlist=1,ivf-flat.metric=cosine,ivf-flat.sharding=range')
                     |""".stripMargin)
             .collect()
       }

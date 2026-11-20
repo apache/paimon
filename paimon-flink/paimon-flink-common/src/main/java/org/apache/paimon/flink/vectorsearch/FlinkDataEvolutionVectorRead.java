@@ -50,6 +50,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -96,11 +97,8 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
             return GlobalIndexResult.createEmpty();
         }
 
-        GlobalIndexer globalIndexer =
-                !indexSplits.isEmpty() && !rawSplits.isEmpty()
-                        ? createGlobalIndexer(indexSplits)
-                        : null;
-        if (!indexSplits.isEmpty() && !rawSplits.isEmpty()) {
+        Collection<List<IndexVectorSearchSplit>> groups = groupByIndexType(indexSplits);
+        if (groups.size() == 1 && !rawSplits.isEmpty()) {
             int parallelism = flinkParallelism();
             List<Range> rawRowRanges = rawRowRanges(rawSplits);
             if (indexSplits.size() >= parallelism * 2L
@@ -109,19 +107,23 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                         indexSplits,
                         rawSplits,
                         rawRowRanges,
-                        globalIndexer,
+                        createGlobalIndexer(indexSplits),
                         rawPreFilter(rawSplits),
                         parallelism);
             }
         }
 
-        ScoredGlobalIndexResult indexed =
-                indexSplits.isEmpty()
-                        ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexSplitsInFlink(indexSplits, globalIndexer);
-        ScoredGlobalIndexResult raw =
-                readRawSplitsInFlink(rawSplits, globalIndexer, rawPreFilter(rawSplits));
-        return indexed.or(raw).topK(limit);
+        List<ScoredGlobalIndexResult> results = new ArrayList<>();
+        GlobalIndexer rawIndexer = null;
+        for (List<IndexVectorSearchSplit> group : groups) {
+            GlobalIndexer indexer = createGlobalIndexer(group);
+            results.add(readIndexSplitsInFlink(group, indexer));
+            if (rawIndexer == null) {
+                rawIndexer = indexer;
+            }
+        }
+        results.add(readRawSplitsInFlink(rawSplits, rawIndexer, rawPreFilter(rawSplits)));
+        return ScoredGlobalIndexResult.merge(results).topK(limit);
     }
 
     protected ScoredGlobalIndexResult readIndexSplitsInFlink(

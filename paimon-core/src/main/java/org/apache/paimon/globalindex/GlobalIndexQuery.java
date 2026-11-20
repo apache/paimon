@@ -550,7 +550,8 @@ class GlobalIndexQuery {
                 supported = true;
                 continue;
             }
-            GlobalIndexer indexer = GlobalIndexer.create(group.type, group.indexFields(), options);
+            GlobalIndexer indexer =
+                    GlobalIndexer.createForRead(group.type, group.indexFields(), options);
             try (GlobalIndexReader reader =
                     indexer.createReader(
                             meta -> fileIO.newInputStream(meta.filePath()),
