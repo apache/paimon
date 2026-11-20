@@ -156,8 +156,9 @@ def to_arrow(
             ``read.parallelism`` table option. ``None`` (default) falls
             back to the table option; when that is also unset the read
             auto-scales to ``min(number of splits, CPU count)``. Native filtered
-            Data Evolution BLOB payload reads without a limit instead use
-            ``min(number of splits, 32)``. ``1``
+            Data Evolution BLOB reads without a limit instead use
+            ``min(number of splits, 32)`` for payloads or
+            ``min(number of splits, 64)`` for descriptors. ``1``
             keeps reads serial; ``>= 2`` caps the thread pool that reads
             byte-balanced contiguous split groups concurrently and
             assembles the final table in input order. An unfiltered row

@@ -319,8 +319,9 @@ class TableRead:
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
         table option > auto. When neither the argument nor the option is set
-        the read auto-scales to ``min(num_splits, CPU count)``. Materialized native filtered
-        Data Evolution BLOB payload reads without LIMIT use up to 32 workers.
+        the read auto-scales to ``min(num_splits, CPU count)``. Materialized native
+        filtered Data Evolution BLOB reads without LIMIT use up to 32 workers
+        for payloads or 64 for descriptors.
         A value >= 1 caps the thread pool; ``1`` forces serial reads. The validation
         message names whichever source produced the offending value.
         """

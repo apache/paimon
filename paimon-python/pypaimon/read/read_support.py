@@ -216,9 +216,9 @@ def _resolve_parallelism(
 
     Priority: explicit ``parallelism`` argument > ``read.parallelism``
     table option > auto. When neither the argument nor the option is set
-    the read auto-scales to ``min(num_splits, CPU count)``. Materialized native filtered
-    Data Evolution BLOB payload reads without LIMIT use up to 32 workers
-    instead, to overlap remote I/O. A value >= 1
+    the read auto-scales to ``min(num_splits, CPU count)``. Materialized native
+    filtered Data Evolution BLOB reads without LIMIT use up to 32 workers
+    for payloads or 64 for descriptors, to overlap remote I/O. A value >= 1
     caps the thread pool; ``1`` forces serial reads. The validation
     message names whichever source produced the offending value.
     """
@@ -227,14 +227,14 @@ def _resolve_parallelism(
     elif self._read_parallelism is not None:
         value, source = self._read_parallelism, "read.parallelism"
     else:
-        # Remote payload reads benefit from more in-flight split readers than
-        # CPU count alone allows. Streaming callers retain the CPU default
+        # Filtered native BLOB reads benefit from more in-flight split readers
+        # than CPU count alone allows. Streaming callers retain the CPU default
         # because each worker can retain a decoded BLOB batch.
         if (materialized_native and self.predicate is not None and self.limit is None
                 and self.table.options.data_evolution_enabled()
-                and not self.table.options.blob_as_descriptor()
                 and any(is_blob_file_field(field) for field in self.read_type)):
-            return max(1, min(num_splits, 32))
+            cap = 64 if self.table.options.blob_as_descriptor() else 32
+            return max(1, min(num_splits, cap))
         # os.cpu_count() may return None on exotic platforms; fall back
         # to 1. min() with num_splits avoids more workers than work.
         return max(1, min(num_splits, os.cpu_count() or 1))

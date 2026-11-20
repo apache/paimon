@@ -975,7 +975,42 @@ def test_filtered_native_blob_auto_parallelism(
     assert native.call_args.args[1] == list(range(num_splits))
 
 
-@pytest.mark.parametrize('case', ['unfiltered', 'limit', 'descriptor', 'ordinary', 'projection'])
+@pytest.mark.parametrize('method_name, expected_ordered', [
+    ('to_arrow', True), ('to_arrow_batch_reader', False),
+])
+@pytest.mark.parametrize('num_splits, option, runtime, expected', [
+    (110, None, None, 64),
+    (20, None, None, 20),
+    (110, 8, None, 8),
+    (110, 8, 16, 16),
+])
+def test_filtered_native_blob_descriptor_auto_parallelism(
+        method_name, expected_ordered, num_splits, option, runtime, expected):
+    read = _blob_table_read()
+    read.table.options.data_evolution_enabled.return_value = True
+    read.table.options.blob_as_descriptor.return_value = True
+    read.predicate = Mock()
+    read._read_parallelism = option
+    splits = [_Split('data.blob') for _ in range(num_splits)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+    batch = pa.record_batch([pa.array([b'descriptor'], type=pa.large_binary())],
+                            names=['payload'])
+    with patch('pypaimon.read.read_support.os.cpu_count', return_value=2), \
+            patch('pypaimon.execution.native.read.table_read.native_read',
+                  return_value=[batch]) as native:
+        result = getattr(read, method_name)(splits, parallelism=runtime)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.to_pydict() == {'payload': [b'descriptor']}
+    if not expected_ordered and option is None and runtime is None:
+        expected = min(num_splits, 2)
+    assert native.call_args.kwargs['parallelism'] == expected
+    assert native.call_args.kwargs['ordered'] == expected_ordered
+    assert native.call_args.args[1] == list(range(num_splits))
+
+
+@pytest.mark.parametrize('case', ['unfiltered', 'limit', 'ordinary', 'projection'])
 @pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
 def test_native_blob_auto_parallelism_keeps_other_reads_cpu_bounded(case, method_name):
     read = _blob_table_read()
@@ -986,8 +1021,6 @@ def test_native_blob_auto_parallelism_keeps_other_reads_cpu_bounded(case, method
         read.predicate = None
     elif case == 'limit':
         read.limit = 1
-    elif case == 'descriptor':
-        read.table.options.blob_as_descriptor.return_value = True
     elif case == 'ordinary':
         read.table.options.data_evolution_enabled.return_value = False
     else:
