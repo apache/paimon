@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.LongPredicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -93,13 +94,22 @@ public class ConsumerManager implements Serializable {
     }
 
     public void expire(LocalDateTime expireDateTime) {
+        expire(
+                modificationTime ->
+                        expireDateTime.isAfter(DateTimeUtils.toLocalDateTime(modificationTime)));
+    }
+
+    /** Expires consumers last modified before the given epoch-millisecond cutoff. */
+    public void expire(long expireTimeMillis) {
+        expire(modificationTime -> modificationTime < expireTimeMillis);
+    }
+
+    private void expire(LongPredicate expired) {
         try {
             listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
                     .forEach(
                             status -> {
-                                LocalDateTime modificationTime =
-                                        DateTimeUtils.toLocalDateTime(status.getModificationTime());
-                                if (expireDateTime.isAfter(modificationTime)) {
+                                if (expired.test(status.getModificationTime())) {
                                     fileIO.deleteQuietly(status.getPath());
                                 }
                             });
