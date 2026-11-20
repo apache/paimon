@@ -1011,6 +1011,18 @@ public class FieldAggregatorTest {
                 .isInstanceOf(ArithmeticException.class);
     }
 
+    @Test
+    public void testFieldSumDecimalOverflowWithScale() {
+        // compact fast path with a non-zero scale: the bound stays 10^precision
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(5, 2));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("999.99"), 5, 2);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("0.01"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-999.99"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);

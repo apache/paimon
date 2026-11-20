@@ -116,6 +116,17 @@ public class DecimalTest {
         assertThat(add(max, Decimal.fromUnscaledLong(-1, 5, 0), 5, 0).toUnscaledLong())
                 .isEqualTo(99998);
 
+        // compact fast path with a non-zero scale: the bound stays 10^precision, not
+        // 10^(precision + scale)
+        Decimal scaledMax = Decimal.fromBigDecimal(new BigDecimal("999.99"), 5, 2);
+        Decimal scaledOne = Decimal.fromBigDecimal(new BigDecimal("0.01"), 5, 2);
+        assertThat(add(scaledMax, scaledOne, 5, 2)).isNull();
+        assertThat(subtract(Decimal.fromBigDecimal(new BigDecimal("-999.99"), 5, 2), scaledOne, 5, 2))
+                .isNull();
+        assertThat(add(scaledMax, Decimal.fromBigDecimal(new BigDecimal("-0.01"), 5, 2), 5, 2)
+                        .toUnscaledLong())
+                .isEqualTo(99998L);
+
         // non-compact path: fromBigDecimal returns null when precision overflows
         Decimal bigMax =
                 Decimal.fromBigDecimal(
