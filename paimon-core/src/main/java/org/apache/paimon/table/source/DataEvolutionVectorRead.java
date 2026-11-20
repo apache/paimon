@@ -22,10 +22,12 @@ import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -55,8 +57,25 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             DataField vectorColumn,
             float[] vector,
             @Nullable Map<String, String> options) {
-        super(table, partitionFilter, filter, limit, vectorColumn, options);
+        this(table, partitionFilter, filter, limit, vectorColumn, vector, options, null);
+    }
+
+    public DataEvolutionVectorRead(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            @Nullable Map<String, String> options,
+            @Nullable float[][] queryMatrix) {
+        super(table, partitionFilter, filter, limit, vectorColumn, options, queryMatrix);
         this.vector = vector;
+        if (vectorColumn != null && VectorIndexUtils.isMultiVector(vectorColumn.type())) {
+            VectorIndexUtils.validateQuery(
+                    (ArrayType) vectorColumn.type(),
+                    queryMatrix == null ? new float[][] {vector} : queryMatrix);
+        }
     }
 
     @Override
@@ -73,13 +92,21 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             return GlobalIndexResult.createEmpty();
         }
 
-        GlobalIndexer globalIndexer =
-                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
-        ScoredGlobalIndexResult result =
-                indexSplits.isEmpty()
-                        ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexed(indexSplits, globalIndexer);
-        return withRawSearch(result, rawSplits, globalIndexer, rawPreFilter(rawSplits), vector);
+        List<ScoredGlobalIndexResult> results = new ArrayList<>();
+        GlobalIndexer rawIndexer = null;
+        for (List<IndexVectorSearchSplit> group : groupByIndexType(indexSplits)) {
+            GlobalIndexer indexer = createGlobalIndexer(group);
+            results.add(readIndexed(group, indexer));
+            if (rawIndexer == null) {
+                rawIndexer = indexer;
+            }
+        }
+        return withRawSearch(
+                ScoredGlobalIndexResult.merge(results),
+                rawSplits,
+                rawIndexer,
+                rawPreFilter(rawSplits),
+                vector);
     }
 
     protected ScoredGlobalIndexResult readIndexed(
@@ -120,6 +147,6 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             }
         }
         return maybeRerankIndexedResult(
-                ScoredGlobalIndexResult.merge(results), indexType, globalIndexer, vector);
+                mergeIndexedCandidates(results), indexType, globalIndexer, vector);
     }
 }

@@ -79,9 +79,7 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.index.type", "ivf-pq");
 
-        assertThat(
-                        VectorIndexOptions.resolve(new Options(options), null, "embedding", false)
-                                .type())
+        assertThat(VectorIndexOptions.resolve(new Options(options), null, "embedding").type())
                 .isNull();
     }
 

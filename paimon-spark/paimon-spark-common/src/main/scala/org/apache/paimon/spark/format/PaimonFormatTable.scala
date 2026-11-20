@@ -98,11 +98,8 @@ case class PaimonFormatTable(table: FormatTable)
     properties
   }
 
-  override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    val scanBuilder = FormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
-    scanBuilder.pruneColumns(schema)
-    scanBuilder
-  }
+  override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder =
+    FormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     require(

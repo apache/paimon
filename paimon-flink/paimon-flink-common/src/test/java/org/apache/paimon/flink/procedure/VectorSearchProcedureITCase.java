@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -35,6 +36,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -46,6 +48,7 @@ import org.apache.paimon.table.source.IndexVectorSearchSplit;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.client.program.ClusterClient;
@@ -53,6 +56,8 @@ import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -69,6 +74,132 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
 
     private static final String VECTOR_FIELD = "vec";
     private static final int DIMENSION = 2;
+
+    @ParameterizedTest
+    @CsvSource({
+        "ivf-flat, ivf-flat.nlist=1",
+        "ivf-pq, ivf-pq.nlist=1;ivf-pq.pq.m=1",
+        "ivf-sq, ivf-sq.nlist=1",
+        "ivf-rq, ivf-rq.nlist=1",
+        "diskann, diskann.pq.m=1"
+    })
+    public void testRangeIndexRanksRowsByMaxSim(String indexType, String indexOptions) {
+        createMultiVectorTable();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        // Supply distinct training vectors for the quantized indexes in a low-scoring row.
+        String trainingVectors =
+                IntStream.range(0, 256)
+                        .mapToObj(i -> String.format("ARRAY[-1,-1,%d,%d]", i % 17, i % 31))
+                        .collect(Collectors.joining(","));
+        sql(
+                "INSERT INTO DOCS VALUES (1, ARRAY[ARRAY[10,0,0,0]]), "
+                        + "(2, ARRAY[ARRAY[0,10,0,0]]), (3, ARRAY[ARRAY[3,4,0,0]]), "
+                        + "(4, ARRAY[ARRAY[2,0,0,0], ARRAY[0,3,0,0]]), (5, ARRAY[%s])",
+                trainingVectors);
+        String matrix = "[[1,0,0,0],[0,1,0,0]]";
+        String projection = "id,__paimon_search_score";
+        assertThat(search("DOCS", matrix, 2, projection, null)).isEmpty();
+        List<Row> expected =
+                Arrays.asList(
+                        Row.of("{\"id\":\"4\",\"__paimon_search_score\":\"2.0\"}"),
+                        Row.of("{\"id\":\"3\",\"__paimon_search_score\":\"1.4\"}"));
+        assertThat(search("DOCS", matrix, 2, projection, "vector-index.search-mode=detail"))
+                .isEqualTo(expected);
+
+        buildMultiVectorIndex(indexType, indexType + ".dimension=4;" + indexOptions);
+        assertThat(search("DOCS", matrix, 2, projection, "vector-search.distribute.enabled=true"))
+                .isEqualTo(expected);
+    }
+
+    @Test
+    public void testDistributedListSearchWithDifferentIndexTypes() {
+        createMultiVectorTable();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("INSERT INTO DOCS VALUES (1, ARRAY[ARRAY[1,0]]), (2, ARRAY[ARRAY[0,1]])");
+        for (String type : Arrays.asList("ivf-flat", "ivf-sq")) {
+            buildMultiVectorIndex(
+                    type,
+                    type + ".dimension=2;" + type + ".nlist=1;global-index.row-count-per-shard=1");
+        }
+        assertThat(sql("SELECT index_type, COUNT(*) FROM `DOCS$table_indexes` GROUP BY index_type"))
+                .containsExactlyInAnyOrder(Row.of("ivf-flat", 2L), Row.of("ivf-sq", 2L));
+        assertThat(
+                        search(
+                                "DOCS",
+                                "1,0",
+                                1,
+                                "id",
+                                "vector-search.distribute.enabled=true;global-index.thread-num=1"))
+                .containsExactly(Row.of("{\"id\":\"1\"}"));
+    }
+
+    @Test
+    public void testMultiVectorIndexValidatesBuildOptionsOnEmptyTable() {
+        createMultiVectorTable();
+        assertThatThrownBy(() -> buildMultiVectorIndex("ivf-flat", "ivf-flat.metric=cosine"))
+                .hasStackTraceContaining("requires an explicit ivf-flat.dimension");
+        sql("ALTER TABLE DOCS SET ('ivf-flat.distance.metric'='cosine')");
+        for (String metric : Arrays.asList("l2", "inner_product")) {
+            assertThatThrownBy(() -> buildMultiVectorIndex("ivf-flat", "ivf-flat.metric=" + metric))
+                    .hasStackTraceContaining(
+                            "require cosine similarity, got metric '" + metric + "'");
+        }
+        sql(
+                "ALTER TABLE DOCS SET ('fields.vec.index-options'="
+                        + "'{\"dimension\":4,\"sharding\":\"centroid\",\"metric\":\"l2\"}')");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("INSERT INTO DOCS VALUES (1, ARRAY[ARRAY[1,0]])");
+        buildMultiVectorIndex(
+                "ivf-flat", "ivf-flat.dimension=2;ivf-flat.sharding=range;ivf-flat.metric=cosine");
+        assertThat(search("DOCS", "[[1,0]]", 1, "id", null))
+                .containsExactly(Row.of("{\"id\":\"1\"}"));
+    }
+
+    @Test
+    public void testRejectsInvalidMaxSimQueryMatrix() {
+        createMultiVectorTable();
+        assertThatThrownBy(() -> search("DOCS", "[[1,null]]", 1, "id", null))
+                .hasStackTraceContaining("matrix coordinates must be numbers");
+        assertThatThrownBy(() -> search("DOCS", "[[1,0],[1]]", 1, "id", null))
+                .hasStackTraceContaining("dimensions must match");
+    }
+
+    @Test
+    public void testQueryDimensionOnEmptyFixedSizeList() throws Exception {
+        flinkCatalog()
+                .catalog()
+                .createTable(
+                        Identifier.create("default", "docs"),
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column(
+                                        "vec",
+                                        DataTypes.ARRAY(DataTypes.VECTOR(2, DataTypes.FLOAT())))
+                                .option("bucket", "-1")
+                                .option("row-tracking.enabled", "true")
+                                .option("data-evolution.enabled", "true")
+                                .build(),
+                        false);
+        assertThat(search("docs", "[[1,0]]", 1, "id", null)).isEmpty();
+        for (String query : Arrays.asList("[[1,0,0]]", "1,0,0")) {
+            assertThatThrownBy(() -> search("docs", query, 1, "id", null))
+                    .hasStackTraceContaining("Query vector dimension mismatch: expected 2, got 3");
+        }
+    }
+
+    private void createMultiVectorTable() {
+        sql(
+                "CREATE TABLE DOCS (id INT, vec ARRAY<ARRAY<FLOAT>>) WITH ("
+                        + "'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true', "
+                        + "'vector-index.search-mode'='fast')");
+    }
+
+    private void buildMultiVectorIndex(String indexType, String options) {
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.DOCS', index_column => 'vec', "
+                        + "index_type => '%s', options => '%s')",
+                indexType, options);
+    }
 
     @Test
     public void testPrimaryKeyVectorSearch() throws Exception {
@@ -864,6 +995,8 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                 .hasStackTraceContaining("top_k must be positive");
         assertThatThrownBy(() -> search("VALIDATION_T", "NaN,0.0", 1, "id", null))
                 .hasStackTraceContaining("query_vector values must be finite");
+        assertThatThrownBy(() -> search("VALIDATION_T", "[[1,0]]", 1, "id", null))
+                .hasStackTraceContaining("query matrix requires a multivector column");
         assertThatThrownBy(() -> search("VALIDATION_T", "0.0,0.0", 1, "missing", null))
                 .hasStackTraceContaining("Unknown projection column");
         assertThatThrownBy(() -> search("VALIDATION_T", "0.0,0.0", 1, "id,id", null))

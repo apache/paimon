@@ -115,6 +115,13 @@ class GlobalIndexBuilder:
                          if CoreOptions._is_vector_index_type(self._index_type) else
                          self._core_options.global_index_options(self._index_type, self._index_columns[0]))
         self._core_options = CoreOptions(self._options)
+        if self._index_type in VINDEX_IDENTIFIERS:
+            key = self._index_type + ".sharding"
+            layout = self._options.to_map().get(key, "range")
+            if layout == "centroid":
+                raise NotImplementedError("Centroid-sharded vector indexes must be built with Spark.")
+            if layout != "range":
+                raise ValueError("%s must be range or centroid, got %s" % (key, layout))
         if not self._table.options.row_tracking_enabled():
             raise ValueError(
                 "Table '%s' must enable 'row-tracking.enabled=true' before "

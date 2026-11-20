@@ -21,17 +21,18 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.Collections;
+import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Metadata for a vector index file.
  *
- * <p>Serialized as an empty JSON {@code Map<String, String>}. Search-time parameters are passed
- * through {@link org.apache.paimon.predicate.VectorSearch#options()}.
+ * <p>Routed IVF shards can include their local geometry for automatic probing.
  */
 public class VectorIndexMeta implements Serializable {
 
@@ -42,14 +43,51 @@ public class VectorIndexMeta implements Serializable {
     private static final TypeReference<LinkedHashMap<String, String>> MAP_TYPE_REF =
             new TypeReference<LinkedHashMap<String, String>>() {};
 
-    VectorIndexMeta() {}
+    @Nullable private final Integer localNlist;
+    @Nullable private final String metric;
+
+    VectorIndexMeta() {
+        this(null, null);
+    }
+
+    VectorIndexMeta(@Nullable Integer localNlist, @Nullable String metric) {
+        this.localNlist = localNlist;
+        this.metric = metric;
+    }
+
+    @Nullable
+    Integer localNlist() {
+        return localNlist;
+    }
+
+    @Nullable
+    String metric() {
+        return metric;
+    }
 
     public byte[] serialize() throws IOException {
-        return OBJECT_MAPPER.writeValueAsBytes(Collections.<String, String>emptyMap());
+        Map<String, String> values = new LinkedHashMap<>();
+        if (localNlist != null) {
+            values.put("localNlist", localNlist.toString());
+        }
+        if (metric != null) {
+            values.put("metric", metric);
+        }
+        return OBJECT_MAPPER.writeValueAsBytes(values);
     }
 
     public static VectorIndexMeta deserialize(byte[] data) throws IOException {
-        Map<String, String> ignored = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
-        return new VectorIndexMeta();
+        Map<String, String> values = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
+        String nlist = values.get("localNlist");
+        return new VectorIndexMeta(
+                nlist == null ? null : Integer.valueOf(nlist), values.get("metric"));
+    }
+
+    static VectorIndexMeta read(@Nullable byte[] data) {
+        try {
+            return data == null ? new VectorIndexMeta() : deserialize(data);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Invalid vector index metadata.", e);
+        }
     }
 }

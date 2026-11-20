@@ -33,6 +33,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
 
     @Test
+    void testOpaqueIndexMetadataRoundTrip() throws Exception {
+        byte[] descriptor = {3, 7, 1};
+        IndexFileMeta routing =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "model.index",
+                        100,
+                        0,
+                        new GlobalIndexMeta(10, 1000, 7, null, descriptor),
+                        null);
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        assertThat(serializer.fromRow(serializer.toRow(routing))).isEqualTo(routing);
+        org.apache.paimon.manifest.IndexManifestEntry entry =
+                new org.apache.paimon.manifest.IndexManifestEntry(
+                        org.apache.paimon.manifest.FileKind.ADD,
+                        org.apache.paimon.data.BinaryRow.EMPTY_ROW,
+                        0,
+                        routing);
+        org.apache.paimon.manifest.IndexManifestEntrySerializer manifest =
+                new org.apache.paimon.manifest.IndexManifestEntrySerializer();
+        assertThat(manifest.fromRow(manifest.toRow(entry))).isEqualTo(entry);
+    }
+
+    @Test
     void testGlobalIndexSourceMetaRoundTrip() {
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         IndexFileMeta indexFile =
