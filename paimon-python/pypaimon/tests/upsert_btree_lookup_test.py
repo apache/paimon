@@ -32,6 +32,8 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.data_types import AtomicType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
@@ -252,6 +254,9 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                     commit.close()
                 # IGNORE deliberately retains the old key values in the index.
                 # They cannot prove that the new key is absent from the table.
+                table.schema_manager.commit_changes([
+                    SchemaChange.update_column_comment('payload', 'updated description')])
+                table = self.catalog.get_table(table.identifier)
                 self.assertEqual(self._lookup(table, ['id'], {(3,)}), {(3,): [0, 1]})
                 self._upsert(table, pa.table({
                     'id': [3], 'payload': ['new'],
@@ -286,6 +291,9 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                         commit.commit(messages)
                     finally:
                         commit.close()
+                table.schema_manager.commit_changes([
+                    SchemaChange.update_column_comment('payload', 'updated description')])
+                table = self.catalog.get_table(table.identifier)
                 self.assertEqual(self._counted_lookup(table, ['id'], {(10,)}), (
                     {(10,): [5]}, [5]))
                 # This absent key is inside the file's min/max range. A
@@ -392,6 +400,23 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                 mock.patch.object(DataFileMeta, 'row_id_range', counted_row_range):
             self.assertTrue(key_indexes_are_fresh(table, snapshot, ['id'], None))
         self.assertEqual(calls, size)
+
+    def test_historical_schema_freshness_requires_same_key_id_and_type(self):
+        table, snapshot, split, original_index = self._freshness_metadata()
+        original_schema = table.table_schema
+        current_schema = replace(original_schema, id=original_schema.id + 1)
+        plan = Plan([split], snapshot.id)
+        for historical_key, expected in [
+                (replace(original_schema.fields[0], name='old_id'), True),
+                (replace(original_schema.fields[0], type=AtomicType('BIGINT')), False),
+                (replace(original_schema.fields[0], id=100), False)]:
+            historical_schema = replace(original_schema, fields=[historical_key, original_schema.fields[1]])
+            with self.subTest(key=historical_key), \
+                    mock.patch.object(table, 'table_schema', current_schema), \
+                    mock.patch.object(table.schema_manager, 'get_schema', return_value=historical_schema), \
+                    mock.patch.object(TableScan, 'plan_all', return_value=plan), \
+                    mock.patch.object(IndexFileHandler, 'scan', return_value=[original_index]):
+                self.assertEqual(key_indexes_are_fresh(table, snapshot, ['id'], None), expected)
 
     def test_ignore_freshness_checks_native_composite_indexes(self):
         from pypaimon.manifest.index_manifest_file import IndexManifestFile

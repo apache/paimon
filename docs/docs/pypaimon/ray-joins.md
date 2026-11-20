@@ -34,6 +34,13 @@ global index on a Paimon data-evolution table. It avoids scanning and shuffling
 the whole lookup table when the source selects few rows. This is an explicit
 API; ordinary `Dataset.join()` does not automatically select this path.
 
+This API requires Ray 2.50 or later so that composing the result remains lazy.
+Arrow-backed and pandas-backed Ray Datasets are accepted; pandas batches are
+converted to Arrow before checking key types. Schema inference may read source
+batches, but lookup execution starts only when the returned Dataset is consumed.
+Empty pandas sources need explicit key dtypes, such as `pd.Series(dtype="Int64")`;
+an empty `object` column does not establish an integer or string key type.
+
 ```python
 from pypaimon.ray import indexed_lookup_join
 
@@ -67,7 +74,9 @@ One lookup snapshot is fixed when the API is called, including across batches
 and task retries. Concurrent commits become visible on the next call. Keep its
 files available until execution finishes. Actor workers reuse the table and
 FileIO, deduplicate lookup requests within each batch, and join the matches
-back to the original source rows. `batch_size` bounds source rows per lookup;
+back to the original source rows. Workers cache index metadata and scan at most
+16 index files at a time, closing their readers before opening the next group.
+`batch_size` bounds source rows per lookup;
 `output_batch_size` (default 4096) bounds emitted batches. A hot key can still
 require many matching lookup rows in memory, so choose this path for selective
 lookups. Results are unordered.

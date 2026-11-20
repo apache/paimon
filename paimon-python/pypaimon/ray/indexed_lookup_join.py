@@ -25,15 +25,19 @@ import pyarrow.compute as pc
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
-    DataEvolutionGlobalIndexScanner,
-)
-from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 
 
+_MAX_OPEN_INDEX_FILES = 16
+
+
 def _prepare_lookup(table, key):
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        DataEvolutionGlobalIndexScanner,
+    )
+    from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
+
     if (table.is_primary_key_table or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()):
         raise ValueError("indexed_lookup_join requires a data-evolution table with row tracking")
@@ -81,8 +85,44 @@ def _output_schema(source_schema, table, source_on, lookup_on, projection):
     return pa.schema(list(source_schema) + [lookup_schema.field(name) for name in payload])
 
 
+class _LookupIndex:
+    """Cache shard metadata while bounding open readers independently of batch size."""
+
+    def __init__(self, table, key):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+            is_supported_scalar_index,
+        )
+        from pypaimon.index.index_file_handler import IndexFileHandler
+
+        self.table = table
+        field_id = table.field_dict[key].id
+        self.files = [entry.index_file for entry in IndexFileHandler(table).scan(
+            table._read_snapshot, lambda entry: is_supported_scalar_index(entry.index_file)
+            and entry.index_file.global_index_meta.index_field_id == field_id)]
+
+    def scan(self, predicate):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
+        )
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+
+        result = GlobalIndexResult.create_empty()
+        for start in range(0, len(self.files), _MAX_OPEN_INDEX_FILES):
+            with DataEvolutionGlobalIndexScanner.create(
+                    self.table, index_files=self.files[start:start + _MAX_OPEN_INDEX_FILES],
+                    snapshot=self.table._read_snapshot) as scanner:
+                matches = scanner.scan(predicate)
+                if matches is None or not matches.is_exact():
+                    raise ValueError("Lookup index cannot evaluate these keys exactly; use an ordinary Ray join")
+                result = result.or_(matches)
+        return result
+
+    def close(self):
+        self.files.clear()
+
+
 class _LookupBatch:
-    """One actor owns a fixed read view and its lazy scalar-index reader cache."""
+    """One actor owns a fixed read view and its index metadata."""
 
     def __init__(self, table, source_schema, source_on, lookup_on, projection,
                  lookup_filter, output_batch_size):
@@ -95,8 +135,7 @@ class _LookupBatch:
         self.output_batch_size = output_batch_size
         self.output_schema = _output_schema(source_schema, table, source_on, lookup_on, projection)
         self.predicates = table.new_read_builder().new_predicate_builder()
-        self.scanner = DataEvolutionGlobalIndexScanner.create(
-            table, predicate=self.predicates.is_not_null(lookup_on), snapshot=table._read_snapshot)
+        self.scanner = _LookupIndex(table, lookup_on)
 
     def __call__(self, batch):
         if batch.schema != self.source_schema:
@@ -144,6 +183,8 @@ def indexed_lookup_join(source, lookup_table, catalog_options, *, source_on, loo
                         concurrency=1, output_batch_size=4096):
     """Inner-join a Ray Dataset to a completely indexed data-evolution table.
 
+    Requires Ray 2.50 or later for lazy result composition.
+
     Both keys must be single integer or string columns of the same type. The
     result retains source columns and lookup non-key columns, with SQL equality
     semantics: duplicate matches multiply and NULL keys do not match. Column
@@ -158,8 +199,12 @@ def indexed_lookup_join(source, lookup_table, catalog_options, *, source_on, loo
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.ray.ray_paimon import _require_ray_data
+    from packaging.version import Version
 
     ray_data = _require_ray_data()
+    import ray
+    if Version(ray.__version__) < Version("2.50.0"):
+        raise ValueError("indexed_lookup_join requires Ray 2.50 or later for lazy Dataset.union")
     if not isinstance(source, ray_data.Dataset):
         raise TypeError("source must be a Ray Dataset")
     for name, value in (("batch_size", batch_size), ("concurrency", concurrency),
@@ -173,9 +218,24 @@ def indexed_lookup_join(source, lookup_table, catalog_options, *, source_on, loo
     table = _prepare_lookup(CatalogFactory.create(catalog_options).get_table(lookup_table), lookup_on)
     projection = table.field_names if lookup_projection is None else list(lookup_projection)
     source_schema = source.schema()
-    if source_schema is None or not isinstance(source_schema.base_schema, pa.Schema):
+    if source_schema is not None and not isinstance(source_schema.base_schema, pa.Schema):
+        import pandas as pd
+
+        pandas_schema = source_schema.base_schema
+        # Ray converts pandas blocks to Arrow before invoking this identity map.
+        source = source.map_batches(lambda batch: batch, batch_format="pyarrow")
+        source_schema = source.schema()
+        if source_schema is None or not isinstance(source_schema.base_schema, pa.Schema):
+            # Ray skips the map for empty blocks; recover their declared dtypes.
+            empty = pd.DataFrame({name: pd.Series(dtype=dtype)
+                                  for name, dtype in zip(pandas_schema.names, pandas_schema.types)})
+            source_schema = pa.Schema.from_pandas(empty, preserve_index=False)
+        else:
+            source_schema = source_schema.base_schema
+    elif source_schema is not None:
+        source_schema = source_schema.base_schema
+    if not isinstance(source_schema, pa.Schema):
         raise ValueError("source must have an Arrow schema, including when empty")
-    source_schema = source_schema.base_schema
     schema = _output_schema(source_schema, table, source_on, lookup_on, projection)
     result = source.map_batches(
         _LookupBatch, batch_format="pyarrow", batch_size=batch_size, concurrency=concurrency,

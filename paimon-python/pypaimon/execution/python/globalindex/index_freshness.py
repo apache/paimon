@@ -90,7 +90,8 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
             ranges_by_group[group] = _FileRangeIndex(ranges)
 
         schema = table.table_schema
-        known_names = set(table.field_names) | SpecialFields.SYSTEM_FIELD_NAMES
+        schemas = {schema.id: schema}
+        key_types = {field.id: field.type for field in schema.fields if field.id in key_ids}
         for index, baseline in baselines:
             meta = index.index_file.global_index_meta
             indexed_keys = key_ids.intersection([meta.index_field_id] + (meta.extra_field_ids or []))
@@ -98,14 +99,21 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
             if ranges is None:
                 continue
             for file in ranges.overlapping(meta.row_range_start, meta.row_range_end):
-                # Historical schemas are outside this optimization's proof.
-                if file.schema_id != schema.id:
+                if file.schema_id not in schemas:
+                    schemas[file.schema_id] = table.schema_manager.get_schema(file.schema_id)
+                file_schema = schemas[file.schema_id]
+                if file_schema is None:
                     return False
+                historical_types = {field.id: field.type for field in file_schema.fields}
+                if any(historical_types.get(key) != key_types[key] for key in indexed_keys):
+                    return False
+                known_names = {field.name for field in file_schema.fields} | SpecialFields.SYSTEM_FIELD_NAMES
                 if file.write_cols is not None and (
                         any(name not in known_names for name in file.write_cols)
                         or len(file.write_cols) != len(set(file.write_cols))):
                     return False
-                fields = schema.data_file_fields(file.write_cols)
+                # Column names and sequence positions belong to the writer's schema.
+                fields = file_schema.data_file_fields(file.write_cols)
                 sequences = file.write_cols_sequences
                 for position, field in enumerate(fields):
                     if field.id not in indexed_keys:

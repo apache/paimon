@@ -17,6 +17,9 @@
 
 from collections import Counter
 import json
+import subprocess
+import sys
+import textwrap
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -207,6 +210,7 @@ def test_string_key_and_nested_payload(lookup, kind):
 
 
 @pytest.mark.parametrize("lookup", [True], indirect=True, ids=["native"])
+@pytest.mark.execution_defaults
 def test_default_backend_reaches_native_reader(lookup):
     from pypaimon.execution.native.read.table_read import NativeTableRead
     table, _ = lookup
@@ -257,6 +261,57 @@ def test_existing_time_travel_view_is_preserved(lookup):
         assert sum(records(lookup_batch(SOURCE)).values()) == 5
     finally:
         lookup_batch.close()
+
+
+@pytest.mark.parametrize("kind", ["btree", "bitmap"])
+def test_lookup_accepts_historical_data_schema(lookup, kind):
+    from pypaimon.schema.schema_change import SchemaChange
+    table, options = lookup
+    catalog = CatalogFactory.create(options)
+    catalog.alter_table("default.A", [SchemaChange.update_column_comment("value", "payload")])
+    table = catalog.get_table("default.A")
+    table.create_global_index("col0", kind)
+    lookup_batch = worker(table)
+    try:
+        assert sum(records(lookup_batch(SOURCE)).values()) == 5
+    finally:
+        lookup_batch.close()
+
+
+@pytest.mark.parametrize("kind", ["btree", "bitmap"])
+def test_lookup_bounds_index_file_descriptors(lookup, kind):
+    pytest.importorskip("resource")
+    table, options = lookup
+    catalog = CatalogFactory.create(options)
+    catalog.create_table("default.partitioned", Schema.from_pyarrow_schema(
+        SCHEMA, partition_keys=["value"], options={
+            **table.options.options.to_map(), "global-index.thread-num": "1", "read.parallelism": "1"}), False)
+    table = catalog.get_table("default.partitioned")
+    write_rows(table, [{"col0": key, "value": str(key)} for key in range(80)])
+    table.create_global_index("col0", kind)
+    code = textwrap.dedent('''
+        import resource
+        import sys
+        import pyarrow as pa
+        from pypaimon import CatalogFactory
+        from pypaimon.ray.indexed_lookup_join import _LookupBatch, _prepare_lookup
+        table = CatalogFactory.create({"warehouse": sys.argv[1]}).get_table("default.partitioned")
+        source = pa.table({"col00": range(80)})
+        actor = _LookupBatch(_prepare_lookup(table, "col0"), source.schema,
+                             "col00", "col0", ["col0", "value"], None, 100)
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (64, hard))
+        try:
+            for key in range(80):
+                assert sum(batch.num_rows for batch in actor(source.slice(key, 1))) == 1
+            assert sum(batch.num_rows for batch in actor(source)) == 80
+        finally:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+            actor.close()
+    ''')
+    result = subprocess.run([sys.executable, "-c", code, options["warehouse"]],
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_key_type_mismatch_rejected_before_lookup(lookup):
@@ -310,6 +365,7 @@ def test_ray_join_uses_index_and_pins_snapshot(lookup, ray_cluster, tmp_path, mo
     result = indexed_lookup_join(source, "default.A", options,
                                  source_on="col00", lookup_on="col0", batch_size=2,
                                  concurrency=1, output_batch_size=2)
+    assert not (tmp_path / "index-calls").exists(), "constructing the join must not execute lookups"
     write_rows(table, [{"col0": 1, "value": "later"}])
     expected = SOURCE.join(pa.Table.from_pylist(ROWS, schema=SCHEMA),
                            keys="col00", right_keys="col0", join_type="inner")
@@ -328,3 +384,24 @@ def test_ray_empty_source_has_schema(lookup, ray_cluster):
                                  "default.A", options, source_on="col00", lookup_on="col0")
     assert result.take_all() == []
     assert result.schema().names == ["col00", "label", "value"]
+
+
+@pytest.mark.parametrize("version", ["2.10.0", "2.20.0"])
+def test_rejects_ray_with_eager_union(ray_cluster, monkeypatch, version):
+    source = ray_cluster.data.from_arrow(SOURCE)
+    monkeypatch.setattr(ray_cluster, "__version__", version)
+    with pytest.raises(ValueError, match="Ray 2.50"):
+        indexed_lookup_join(source, "missing", {}, source_on="col00", lookup_on="col0")
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_ray_pandas_source(lookup, ray_cluster, empty):
+    import pandas as pd
+    table, options = lookup
+    table.create_global_index("col0", "btree")
+    frame = pd.DataFrame({"col00": pd.Series([] if empty else [1, 1, None, 99], dtype="Int64")})
+    source = ray_cluster.data.from_pandas(frame)
+    result = indexed_lookup_join(source, "default.A", options, source_on="col00", lookup_on="col0")
+    assert Counter(tuple(row.values()) for row in result.take_all()) == (
+        Counter() if empty else Counter({(1, "a"): 2, (1, "b"): 2}))
+    assert result.schema().names == ["col00", "value"]
