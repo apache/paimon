@@ -91,10 +91,11 @@ set of buckets through this optimization.
 
 ## Bucketed Join
 
-Spark can use compatible bucket distributions to avoid a shuffle in a batch join. Enable V2 bucketing and join on the
-distribution keys:
+Spark can use compatible bucket distributions to avoid a shuffle in a batch join. Enable
+`scan.preserve-data-grouping` and V2 bucketing, then join on the distribution keys:
 
 ```sql
+SET spark.paimon.scan.preserve-data-grouping = true;
 SET spark.sql.sources.v2.bucketing.enabled = true;
 
 CREATE TABLE fact_table (order_id INT, f1 STRING) USING paimon

@@ -78,4 +78,13 @@ public interface FileStatus {
     default String getOwner() {
         return null;
     }
+
+    /**
+     * Returns the storage class name reported by the file system, or null if this status does not
+     * carry one. Reading this attribute performs no I/O.
+     */
+    @Nullable
+    default String getStorageClass() {
+        return null;
+    }
 }

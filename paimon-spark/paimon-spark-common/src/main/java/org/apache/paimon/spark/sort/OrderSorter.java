@@ -24,6 +24,8 @@ import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Order sort by alphabetical order. */
@@ -36,8 +38,18 @@ public class OrderSorter extends TableSorter {
 
     @Override
     public Dataset<Row> sort(Dataset<Row> input) {
-        Column[] sortColumns = orderColNames.stream().map(input::col).toArray(Column[]::new);
-        return input.repartitionByRange(sortColumns).sortWithinPartitions(sortColumns);
+        return sortByRange(input, orderColNames, null);
+    }
+
+    /** Range-partition and sort an input, optionally fixing the number of shuffle partitions. */
+    public static Dataset<Row> sortByRange(
+            Dataset<Row> input, List<String> columns, @Nullable Integer numPartitions) {
+        Column[] sortColumns = columns.stream().map(input::col).toArray(Column[]::new);
+        Dataset<Row> ranges =
+                numPartitions == null
+                        ? input.repartitionByRange(sortColumns)
+                        : input.repartitionByRange(numPartitions, sortColumns);
+        return ranges.sortWithinPartitions(sortColumns);
     }
 
     @Override

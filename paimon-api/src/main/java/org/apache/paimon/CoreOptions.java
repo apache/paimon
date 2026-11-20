@@ -4530,6 +4530,7 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(String::trim)
                 .map(
                         x ->
                                 PartitionMarkDoneAction.valueOf(

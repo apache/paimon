@@ -205,7 +205,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testListFilesIterativeReachesResolvedOverride() throws IOException {
+    public void testIterativeListingsReachResolvedOverride() throws IOException {
         FileIO delegate = mock(FileIO.class);
         FileIOLoader loader = mock(FileIOLoader.class);
         when(loader.load(any())).thenReturn(delegate);
@@ -219,6 +219,8 @@ public class ResolvingFileIOTest {
 
         assertSame(marker, resolvingFileIO.listFilesIterative(tableRoot, true));
         verify(delegate).listFilesIterative(tableRoot, true);
+        when(delegate.listStatusIterative(tableRoot)).thenReturn(marker);
+        assertSame(marker, resolvingFileIO.listStatusIterative(tableRoot));
         // the interface default would construct its own iterator backed by listStatus
         verify(delegate, never()).listStatus(any());
     }

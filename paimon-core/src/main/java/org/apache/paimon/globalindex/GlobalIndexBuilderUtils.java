@@ -228,18 +228,24 @@ public class GlobalIndexBuilderUtils {
             }
         }
 
-        Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
+        return groupSplitsByRange(partitionSplitRanges);
+    }
+
+    /** Group planned splits into maximal contiguous row-ID ranges within each partition. */
+    public static <T extends Split> Map<BinaryRow, Map<Range, List<T>>> groupSplitsByRange(
+            Map<BinaryRow, List<Pair<Range, T>>> partitionSplitRanges) {
+        Map<BinaryRow, Map<Range, List<T>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, T>>> partitionEntry :
                 partitionSplitRanges.entrySet()) {
-            List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
+            List<Pair<Range, T>> splitRanges = partitionEntry.getValue();
             splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
+                    Comparator.comparingLong((Pair<Range, T> e) -> e.getKey().from)
                             .thenComparingLong(e -> e.getKey().to));
 
-            Map<Range, List<Split>> partitionRanges = new LinkedHashMap<>();
+            Map<Range, List<T>> partitionRanges = new LinkedHashMap<>();
             Range current = null;
-            List<Split> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, Split> entry : splitRanges) {
+            List<T> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, T> entry : splitRanges) {
                 Range splitRange = entry.getKey();
                 if (current == null) {
                     current = splitRange;

@@ -110,11 +110,13 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
         }
 
         RoaringNavigableMap64 topKRowIds = new RoaringNavigableMap64();
+        Map<Long, Float> topKScores = new HashMap<>();
         for (long[] entry : minHeap) {
             topKRowIds.add(entry[0]);
+            topKScores.put(entry[0], Float.intBitsToFloat((int) entry[1]));
         }
 
-        return ScoredGlobalIndexResult.create(topKRowIds, scoreGetter);
+        return ScoredGlobalIndexResult.create(topKRowIds, topKScores::get);
     }
 
     /** Returns an empty {@link ScoredGlobalIndexResult}. */

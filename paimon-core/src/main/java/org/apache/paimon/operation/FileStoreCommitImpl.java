@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -89,7 +90,9 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -156,6 +159,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private enum RowIdCheck {
+        DEFAULT,
+        MATERIALIZE_DV,
+        RANGE_SORT
+    }
+
     private final SnapshotCommit snapshotCommit;
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -183,7 +192,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
-    private boolean materializeDvRowIdCheck = false;
+    private RowIdCheck rowIdCheck = RowIdCheck.DEFAULT;
+    @Nullable private RuntimeException rangeSortConflict;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -221,7 +231,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
         this.rollback = rollback;
-        this.scanner = new CommitScanner(scanSupplier, snapshotManager, indexManifestFile, options);
+        this.scanner =
+                new CommitScanner(
+                        scanSupplier, schemaManager, snapshotManager, indexManifestFile, options);
         this.commitPreCallbacks = commitPreCallbacks;
         this.commitCallbacks = commitCallbacks;
         this.retryWaiter =
@@ -289,8 +301,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public FileStoreCommit materializeDvRowIdCheck() {
-        materializeDvRowIdCheck = true;
+        rowIdCheck = RowIdCheck.MATERIALIZE_DV;
         return this;
+    }
+
+    @Override
+    public FileStoreCommit dataEvolutionRangeSortCheck() {
+        rowIdCheck = RowIdCheck.RANGE_SORT;
+        return this;
+    }
+
+    @Override
+    public boolean isRangeSortConflict(RuntimeException failure) {
+        return rangeSortConflict != null && rangeSortConflict == failure;
     }
 
     @Override
@@ -883,6 +906,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private Map<Pair<BinaryRow, Integer>, Long> prepareConflictChecks(
             List<CommitMessage> commitMessages) {
+        rangeSortConflict = null;
         if (options.dataEvolutionEnabled()) {
             configureRowIdCheckFromMessages(commitMessages);
         }
@@ -904,14 +928,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     snapshotId);
             checkFromSnapshot = snapshotId;
         }
+        String rewrite = rowIdCheck == RowIdCheck.RANGE_SORT ? "range-sort" : "materialize-DV";
         if (checkFromSnapshot != null) {
             for (CommitMessage message : commitMessages) {
                 if (message.checkFromSnapshot() != null) {
                     continue;
                 }
                 checkArgument(
-                        !materializeDvRowIdCheck,
-                        "A materialize-DV commit message is missing its check-from snapshot.");
+                        rowIdCheck == RowIdCheck.DEFAULT,
+                        "A %s commit message is missing its check-from snapshot.",
+                        rewrite);
                 CommitMessageImpl commitMessage = (CommitMessageImpl) message;
                 checkArgument(
                         commitMessage.newFilesIncrement().newFiles().stream()
@@ -921,10 +947,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "A row-id commit message is missing its check-from snapshot.");
             }
         }
-        if (materializeDvRowIdCheck) {
+        if (rowIdCheck != RowIdCheck.DEFAULT) {
             checkArgument(
                     checkFromSnapshot != null || commitMessages.isEmpty(),
-                    "A materialize-DV commit is missing its check-from snapshot.");
+                    "A %s commit is missing its check-from snapshot.",
+                    rewrite);
             conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
                     checkFromSnapshot);
         } else {
@@ -934,7 +961,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
-        if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
+        // A range sort replaces row IDs even on tables without deletion vectors. Recheck indexes
+        // at every commit attempt, including indexes built after the rewrite was prepared.
+        if (!options.dataEvolutionEnabled()
+                || (!options.deletionVectorsEnabled() && rowIdCheck == RowIdCheck.DEFAULT)) {
             return Collections.emptySet();
         }
 
@@ -1028,19 +1058,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
+        boolean rangeSort = rowIdCheck == RowIdCheck.RANGE_SORT;
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> sortedRanges =
+                rangeSort ? sortedInputRanges(changes.tableFiles) : Collections.emptyMap();
         return latestSnapshot -> {
-            List<IndexManifestEntry> indexFiles =
-                    changes.indexFiles.stream()
-                            // Replace global-index deletions prepared against an older snapshot.
-                            .filter(
-                                    entry ->
-                                            entry.kind() != FileKind.DELETE
-                                                    || entry.indexFile().globalIndexMeta() == null
-                                                    || !materializedBuckets.contains(
-                                                            Pair.of(
-                                                                    entry.partition(),
-                                                                    entry.bucket())))
-                            .collect(Collectors.toList());
+            List<IndexManifestEntry> indexFiles = new ArrayList<>(changes.indexFiles);
 
             // This provider is invoked again after every optimistic-commit conflict. Scanning the
             // latest snapshot here guarantees that an index committed concurrently is either
@@ -1048,9 +1070,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
                 for (IndexManifestEntry entry :
                         indexManifestFile.read(latestSnapshot.indexManifest())) {
-                    if (entry.indexFile().globalIndexMeta() != null
-                            && materializedBuckets.contains(
-                                    Pair.of(entry.partition(), entry.bucket()))) {
+                    GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                    if (meta == null) {
+                        continue;
+                    }
+                    Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+                    if (!materializedBuckets.contains(bucket)) {
+                        continue;
+                    }
+                    RowRangeIndex ranges = sortedRanges.get(bucket);
+                    if (!rangeSort
+                            || (ranges != null
+                                    && ranges.intersects(
+                                            meta.rowRangeStart(), meta.rowRangeEnd()))) {
                         indexFiles.add(entry.toDeleteEntry());
                     }
                 }
@@ -1058,6 +1090,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
         };
+    }
+
+    private static Map<Pair<BinaryRow, Integer>, RowRangeIndex> sortedInputRanges(
+            List<ManifestEntry> changes) {
+        Map<Pair<BinaryRow, Integer>, List<Range>> ranges = new HashMap<>();
+        for (ManifestEntry entry : changes) {
+            DataFileMeta file = entry.file();
+            if (entry.kind() == FileKind.DELETE
+                    && !isBlobFile(file.fileName())
+                    && !isVectorStoreFile(file.fileName())) {
+                ranges.computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()),
+                                ignored -> new ArrayList<>())
+                        .add(file.nonNullRowIdRange());
+            }
+        }
+        return ranges.entrySet().stream()
+                .collect(
+                        Collectors.toMap(
+                                Map.Entry::getKey,
+                                entry -> RowRangeIndex.create(entry.getValue())));
     }
 
     private int tryCommit(
@@ -1433,6 +1486,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
+                }
+                if (rowIdCheck == RowIdCheck.RANGE_SORT && commitKind == CommitKind.COMPACT) {
+                    rangeSortConflict = exception.get();
                 }
                 throw exception.get();
             }

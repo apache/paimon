@@ -27,6 +27,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -50,6 +52,7 @@ import java.util.stream.Collectors;
 /** Manifest entries scanner for commit. */
 public class CommitScanner {
 
+    private final SchemaManager schemaManager;
     private final FileStoreScan scan;
     private final Supplier<FileStoreScan> scanSupplier;
     private final SnapshotManager snapshotManager;
@@ -58,9 +61,11 @@ public class CommitScanner {
 
     public CommitScanner(
             Supplier<FileStoreScan> scanSupplier,
+            SchemaManager schemaManager,
             SnapshotManager snapshotManager,
             IndexManifestFile indexManifestFile,
             CoreOptions options) {
+        this.schemaManager = schemaManager;
         this.scanSupplier = scanSupplier;
         this.scan = scanSupplier.get();
         this.snapshotManager = snapshotManager;
@@ -70,6 +75,10 @@ public class CommitScanner {
         if (dropStats) {
             this.scan.dropStats();
         }
+    }
+
+    TableSchema schema(long schemaId) {
+        return schemaManager.schema(schemaId);
     }
 
     public List<SimpleFileEntry> readIncrementalChanges(

@@ -25,7 +25,7 @@ import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
 import org.apache.spark.sql.test.SharedSparkSession
 
 import java.nio.file.Files
@@ -83,6 +83,20 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
       checkAnswer(sql("SELECT * FROM t"), Seq(Row(3, "c", "x"), Row(4, "d", "y")))
       sql("CREATE TABLE copied TBLPROPERTIES ('file.format'='avro') AS SELECT * FROM t")
       checkAnswer(sql("SELECT * FROM copied"), sql("SELECT * FROM t"))
+    }
+  }
+
+  test("replace table rejects table constraints and keeps the old table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (7)")
+      val e = intercept[AnalysisException] {
+        sql(
+          "CREATE OR REPLACE TABLE t (id INT, CONSTRAINT positive CHECK (id > 0)) " +
+            "TBLPROPERTIES ('file.format'='avro')")
+      }
+      assert(e.getCondition === "UNSUPPORTED_FEATURE.TABLE_OPERATION")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(7)))
     }
   }
 

@@ -20,7 +20,6 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -512,7 +511,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
                 List<GlobalIndexIOMeta> globalMetas =
                         indexFileMetas.stream()
-                                .map(meta -> toGlobalMeta(meta, indexPathFactory))
+                                .map(meta -> CentroidIndexMeta.file(meta, indexPathFactory))
                                 .collect(Collectors.toList());
                 futures.add(
                         CompletableFuture.supplyAsync(
@@ -553,11 +552,11 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     static GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta, IndexPathFactory indexPathFactory) {
-        GlobalIndexMeta globalIndex = meta.globalIndexMeta();
-        checkNotNull(globalIndex);
-        Path filePath = indexPathFactory.toPath(meta);
         return new GlobalIndexIOMeta(
-                filePath, meta.fileSize(), meta.rowCount(), globalIndex.indexMeta());
+                indexPathFactory.toPath(meta),
+                meta.fileSize(),
+                meta.rowCount(),
+                checkNotNull(meta.globalIndexMeta()).indexMeta());
     }
 
     @Override

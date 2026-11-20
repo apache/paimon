@@ -652,6 +652,26 @@ public class LuminaVectorGlobalIndexTest {
     }
 
     @Test
+    public void testBuildDoesNotChangeExecutorThreadCountEnv() throws IOException {
+        String envName = "LUMINA_EXECUTOR_THREAD_COUNT";
+        String before = System.getenv(envName);
+        Options options = createDefaultOptions(2);
+        options.setInteger(
+                LuminaVectorIndexOptions.DISKANN_BUILD_THREAD_COUNT.key(),
+                "7".equals(before) ? 8 : 7);
+
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(
+                        createFileWriter(indexPath),
+                        vectorType,
+                        new LuminaVectorIndexOptions(options));
+        writer.write(new float[] {1.0f, 0.0f}, 0);
+        assertThat(writer.finish()).hasSize(1);
+
+        assertThat(System.getenv(envName)).isEqualTo(before);
+    }
+
+    @Test
     public void testNullAtStart() throws IOException {
         int dimension = 2;
         Options options = createDefaultOptions(dimension);

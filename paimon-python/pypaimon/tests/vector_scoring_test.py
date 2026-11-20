@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from typing import Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
@@ -30,6 +31,7 @@ from pypaimon.execution.python.read.search.vector_search_read import (
     _score_block_size,
     _score_rows,
 )
+from pypaimon.read.split import Split
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.utils.range import Range
@@ -174,13 +176,20 @@ class VectorScoringTest(unittest.TestCase):
         candidates = RoaringBitmap64()
         for row_id in (1, 2, 3):
             candidates.add(row_id)
-        with mock.patch.object(reader, "_read_raw_arrow", return_value=table):
+
+        def new_reader(_splits: List[Split]) -> Tuple[pa.ipc.RecordBatchReader, Iterator[pa.RecordBatch]]:
+            batches = iter(table.to_batches(max_chunksize=2))
+            return pa.ipc.RecordBatchReader.from_batches(table.schema, batches), batches
+
+        table_read = mock.Mock()
+        table_read._resolve_parallelism.return_value = 1
+        table_read._new_arrow_batch_reader.side_effect = new_reader
+        with mock.patch.object(reader, "_plan_raw_read", return_value=(table_read, [])):
             result = reader._read_raw_search([Range(0, 9)], None, [1, 0], score_candidates=candidates)
-        self.assertEqual([1, 3], result.results().to_list())
-        reader._limit = 1
-        with mock.patch.object(reader, "_read_raw_arrow", return_value=table):
+            self.assertEqual([1, 3], result.results().to_list())
+            reader._limit = 1
             result = reader._read_raw_search([Range(0, 9)], None, [1, 0], score_candidates=candidates)
-        self.assertEqual([1], result.results().to_list())
+            self.assertEqual([1], result.results().to_list())
 
     def test_refinement_and_block_memory_bound(self):
         column = _field(1, "embedding", "FLOAT")

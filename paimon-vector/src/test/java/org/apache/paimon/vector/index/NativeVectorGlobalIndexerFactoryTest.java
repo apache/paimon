@@ -18,15 +18,26 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.VectorTrainingModel;
+import org.apache.paimon.index.vector.CentroidRouter;
+import org.apache.paimon.index.vector.VectorIndexTrainer;
+import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,6 +45,79 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for vector global indexer factory SPI registration. */
 public class NativeVectorGlobalIndexerFactoryTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann"})
+    void shardingSelectsTheLayoutAndKeepsTheLocalAlgorithm(String algorithm) {
+        Options options = new Options();
+        options.setString(algorithm + ".dimension", "17");
+        options.setString(algorithm + ".metric", "cosine");
+        List<DataField> fields =
+                Collections.singletonList(new DataField(0, "v", new ArrayType(new FloatType())));
+        assertThat(GlobalIndexer.create(algorithm, fields, options))
+                .isExactlyInstanceOf(NativeVectorGlobalIndexer.class);
+        options.setString(algorithm + ".sharding", "centroid");
+        NativeCentroidVectorGlobalIndexer indexer =
+                (NativeCentroidVectorGlobalIndexer)
+                        GlobalIndexer.create(algorithm, fields, options);
+        assertThat(indexer.options)
+                .containsEntry("index.type", algorithm.replace('-', '_'))
+                .containsEntry("dimension", "17")
+                .doesNotContainKey("sharding");
+        assertThat(indexer.metric()).isEqualTo("cosine");
+        assertThatThrownBy(() -> indexer.createWriter(null))
+                .isInstanceOf(UnsupportedOperationException.class);
+        options.setString(algorithm + ".sharding", "range");
+        assertThat(GlobalIndexer.create(algorithm, fields, options))
+                .isExactlyInstanceOf(NativeVectorGlobalIndexer.class);
+        options.setString(algorithm + ".sharding", "unknown");
+        assertThatThrownBy(() -> GlobalIndexer.create(algorithm, fields, options))
+                .hasMessageContaining(algorithm + ".sharding");
+        assertThatThrownBy(() -> GlobalIndexerFactoryUtils.load(algorithm + "-centroid"))
+                .hasMessageContaining("Can't find global index");
+    }
+
+    @Test
+    void diskAnnCentroidUsesTheIvfRouterTrainingOption() throws Exception {
+        float[] values = new float[256];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = i % 47;
+        }
+        String key = "diskann.ivf.train.max-points-per-centroid";
+        for (boolean dynamic : new boolean[] {false, true}) {
+            Options options = new Options(Collections.singletonMap(key, "4"));
+            if (dynamic) {
+                options.setString(key, "2");
+            }
+            options.setString("diskann.sharding", "centroid");
+            options.setString("diskann.centroid.nlist", "4");
+            options.setString("diskann.dimension", "2");
+            options.setString("diskann.metric", "l2");
+            NativeCentroidVectorGlobalIndexer indexer =
+                    (NativeCentroidVectorGlobalIndexer)
+                            GlobalIndexer.create(
+                                    "diskann",
+                                    Collections.singletonList(
+                                            new DataField(
+                                                    0, "vec", new ArrayType(new FloatType()))),
+                                    options);
+            Map<String, String> coarse = new HashMap<>();
+            coarse.put("index.type", "ivf_flat");
+            coarse.put("nlist", "4");
+            coarse.put("dimension", "2");
+            coarse.put("metric", "l2");
+            coarse.put("ivf.train.max-points-per-centroid", dynamic ? "2" : "4");
+            try (VectorIndexTraining training = VectorIndexTrainer.train(coarse, values, 128);
+                    CentroidRouter expected = CentroidRouter.fromTraining(training);
+                    VectorTrainingModel model =
+                            indexer.trainGlobalModel(
+                                    128,
+                                    Collections.singletonList(new TrainingBatch(values, 128))
+                                            .iterator())) {
+                assertThat(model.serialize()).isEqualTo(expected.serialize());
+            }
+        }
+    }
 
     @Test
     public void testIdentifier() {
