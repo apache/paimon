@@ -364,6 +364,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     /** Plan complete data splits while deferring index evaluation to readers. */
     private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
+                || table.coreOptions().startupMode() == CoreOptions.StartupMode.INCREMENTAL
                 || filter == null
                 // Partition-only scans may apply LIMIT/TopN before deferred index filtering.
                 || !batchScan.snapshotReader().hasNonPartitionFilter()
@@ -497,6 +498,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
+        CoreOptions options = table.coreOptions();
+        // Incremental endpoints are resolved by batchScan, not by the independent index scanner.
+        if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
+            Preconditions.checkArgument(
+                    globalIndexResult == null,
+                    "Unbound global-index results are not supported for incremental reads; "
+                            + "use withRowRanges for explicit row-id selections.");
+            return Optional.empty();
+        }
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
         // can hand in one that was computed off the raw values.
@@ -509,7 +519,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (filter == null) {
             return Optional.empty();
         }
-        CoreOptions options = table.coreOptions();
         if (!options.globalIndexEnabled()) {
             return Optional.empty();
         }

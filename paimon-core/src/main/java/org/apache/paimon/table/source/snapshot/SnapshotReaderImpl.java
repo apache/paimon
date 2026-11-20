@@ -109,6 +109,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private ScanMode scanMode = ScanMode.ALL;
     private boolean hasNonPartitionFilter;
+    @Nullable private RowRangeIndex rowRangeIndex;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -337,12 +338,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withRowRanges(List<Range> sortedPushdownRowRanges) {
-        scan.withRowRanges(sortedPushdownRowRanges);
-        return this;
+        return withRowRangeIndex(
+                sortedPushdownRowRanges == null
+                        ? null
+                        : RowRangeIndex.create(sortedPushdownRowRanges));
     }
 
     @Override
     public SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        this.rowRangeIndex = rowRangeIndex;
         scan.withRowRangeIndex(rowRangeIndex);
         return this;
     }
@@ -717,13 +721,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             split.dataFiles().stream()
                                     .map(DataFileMeta::nonNullRowIdRange)
                                     .collect(Collectors.toList()));
-            splits.add(
-                    new IndexedSplit(
-                            split,
-                            Range.and(
-                                    splitRanges,
-                                    changedRanges.get(Pair.of(split.partition(), split.bucket()))),
-                            null));
+            List<Range> selectedRanges =
+                    Range.and(
+                            splitRanges,
+                            changedRanges.get(Pair.of(split.partition(), split.bucket())));
+            if (rowRangeIndex != null) {
+                selectedRanges = Range.and(selectedRanges, rowRangeIndex.ranges());
+            }
+            if (!selectedRanges.isEmpty()) {
+                splits.add(new IndexedSplit(split, selectedRanges, null));
+            }
         }
         return new PlanImpl(
                 afterPlan.watermark(), afterPlan.snapshot().id(), afterPlan.snapshot(), splits);

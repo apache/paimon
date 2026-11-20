@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -32,6 +33,12 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.IndexQuerySplit;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -47,14 +54,20 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -67,6 +80,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Actual snapshot differences must preserve end-snapshot column and deletion dependencies. */
 class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
@@ -185,6 +199,178 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
         assertThat(rows.get(0).getBlob(3).toData()).containsExactly((byte) 103);
         assertThat(collect(diff(table, "1,3").withProjection(new int[] {0})))
                 .containsExactly(GenericRow.of(3));
+        assertThat(
+                        collect(
+                                diff(table, "1,3")
+                                        .withRowRanges(Collections.singletonList(new Range(2, 2)))))
+                .isEmpty();
+    }
+
+    @Test
+    void testRequestedRowRangeRestrictsAppendsAndPartialUpdates() throws Exception {
+        FileStoreTable table = create();
+        write(table, row(100, "a", "old"));
+        write(table, row(200, "b", "old"), row(300, "c", "old"));
+        List<Range> requested = Collections.singletonList(new Range(2, 2));
+        assertThat(collect(table.newReadBuilder().withRowRanges(requested)))
+                .containsExactly(row(300, "c", "old"));
+        ReadBuilder appendDiff = diff(table, "1,2").withRowRanges(requested);
+        assertThat(((IndexedSplit) appendDiff.newScan().plan().splits().get(0)).rowRanges())
+                .isEqualTo(requested);
+        assertThat(collect(appendDiff)).containsExactly(row(300, "c", "old"));
+        update(
+                table,
+                new String[] {"f2"},
+                1,
+                GenericRow.of(text("new-200")),
+                GenericRow.of(text("new-300")));
+        assertThat(collect(diff(table, "2,3").withRowRanges(requested)))
+                .containsExactly(row(300, "c", "new-300"));
+        assertThat(
+                        collect(
+                                diff(table, "2,3")
+                                        .withRowRanges(Collections.singletonList(new Range(0, 0)))))
+                .isEmpty();
+    }
+
+    @Test
+    void testDeletedRequestedRowDoesNotReturnAnUnrequestedLiveRow() throws Exception {
+        FileStoreTable table = create();
+        write(table, row(100, "a", "old"), row(200, "b", "old"));
+        update(
+                table,
+                new String[] {"f2"},
+                0,
+                GenericRow.of(text("new")),
+                GenericRow.of(text("new")));
+        deleteRows(table, 0);
+        assertThat(
+                        collect(
+                                diff(table, "1,3")
+                                        .withRowRanges(Collections.singletonList(new Range(0, 0)))))
+                .isEmpty();
+    }
+
+    @Test
+    void testSnapshotReaderRangeSettersShareAndClearState() throws Exception {
+        FileStoreTable table = create();
+        write(table, row(100, "a", "old"));
+        Snapshot start = table.latestSnapshot().get();
+        write(table, row(200, "b", "new"), row(300, "c", "new"));
+        Snapshot end = table.latestSnapshot().get();
+        SnapshotReader reader = table.newSnapshotReader();
+        List<Range> requested = Collections.singletonList(new Range(2, 2));
+        assertThat(
+                        collect(
+                                table.newReadBuilder(),
+                                reader.withSnapshot(end)
+                                        .withRowRanges(requested)
+                                        .readIncrementalDiff(start)
+                                        .splits()))
+                .containsExactly(row(300, "c", "new"));
+        reader.withRowRangeIndex(RowRangeIndex.create(Collections.singletonList(new Range(1, 1))));
+        assertThat(
+                        collect(
+                                table.newReadBuilder(),
+                                reader.withSnapshot(end)
+                                        .withRowRanges(requested)
+                                        .readIncrementalDiff(start)
+                                        .splits()))
+                .containsExactly(row(300, "c", "new"));
+        assertThat(
+                        collect(
+                                table.newReadBuilder(),
+                                reader.withSnapshot(end)
+                                        .withRowRanges(Collections.emptyList())
+                                        .readIncrementalDiff(start)
+                                        .splits()))
+                .isEmpty();
+        assertThat(
+                        collect(
+                                table.newReadBuilder(),
+                                reader.withSnapshot(end)
+                                        .withRowRanges(null)
+                                        .readIncrementalDiff(start)
+                                        .splits()))
+                .containsExactly(row(200, "b", "new"), row(300, "c", "new"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testHistoricalDiffDoesNotUseALaterGlobalIndex(boolean indexInReader) throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(100, 10));
+        table.createTag("before", 1);
+        write(table, GenericRow.of(200, 20));
+        table.createTag("end", 2);
+        update(table, new String[] {"v"}, 1, GenericRow.of(30));
+        ScanResult<DataSplit> scan =
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList("v"))
+                        .scan()
+                        .get();
+        List<CommitMessage> indexes = new ArrayList<>();
+        for (DataSplit split : scan.entries()) {
+            indexes.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", "v", split, scan.scanSnapshotId()));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(indexes);
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
+                                Boolean.toString(indexInReader)));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        assertThat(collect(diff(withoutIndex, "1,2").withFilter(predicates.equal(1, 20))))
+                .containsExactly(GenericRow.of(200, 20));
+        for (String range : Arrays.asList("1,2", "before,end")) {
+            assertThat(collect(diff(table, range).withFilter(predicates.equal(1, 20))))
+                    .containsExactly(GenericRow.of(200, 20));
+        }
+        ReadBuilder latest = table.newReadBuilder().withFilter(predicates.equal(1, 30));
+        assertThat(latest.newScan().plan().splits().get(0))
+                .isInstanceOf(indexInReader ? IndexQuerySplit.class : IndexedSplit.class);
+        assertThat(collect(latest)).containsExactly(GenericRow.of(200, 30));
+    }
+
+    @Test
+    void testIncrementalRejectsUnboundExternalIndexResults() throws Exception {
+        FileStoreTable table = create();
+        write(table, row(100, "a", "old"));
+        write(table, row(200, "b", "new"));
+        assertThatThrownBy(
+                        () ->
+                                diff(table, "1,2")
+                                        .newScan()
+                                        .withGlobalIndexResult(GlobalIndexResult.createEmpty())
+                                        .plan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("incremental")
+                .hasMessageContaining("withRowRanges");
+        ReadBuilder latest = table.newReadBuilder();
+        List<Split> selected =
+                latest.newScan()
+                        .withGlobalIndexResult(GlobalIndexResult.fromRange(new Range(1, 1)))
+                        .plan()
+                        .splits();
+        assertThat(collect(latest, selected)).containsExactly(row(200, "b", "new"));
     }
 
     @Test
@@ -263,7 +449,10 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
     }
 
     private List<InternalRow> collect(ReadBuilder builder) throws Exception {
-        List<Split> splits = builder.newScan().plan().splits();
+        return collect(builder, builder.newScan().plan().splits());
+    }
+
+    private List<InternalRow> collect(ReadBuilder builder, List<Split> splits) throws Exception {
         // Exercise the same split transfer used between planning and physical readers.
         splits =
                 InstantiationUtil.deserializeObject(
