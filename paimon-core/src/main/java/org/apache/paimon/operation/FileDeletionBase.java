@@ -471,6 +471,34 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     /**
+     * Collect the data files referenced by {@code snapshot} that also appear in {@code candidates},
+     * accumulating them into {@code referenced}.
+     *
+     * <p>All branches of a table share the same physical data directory; only snapshot, tag and
+     * manifest metadata are branch scoped. A file is therefore still live if any branch references
+     * it, even when the branch running expiration no longer does. The candidate restriction keeps
+     * memory proportional to the current expiration batch instead of the whole table, mirroring
+     * {@link #createDataFileSkipperForTag(Snapshot, Collection)}.
+     */
+    public void addReferencedDataFiles(
+            Map<BinaryRow, Map<Integer, Set<String>>> referenced,
+            Snapshot snapshot,
+            Map<BinaryRow, Map<Integer, Set<String>>> candidates)
+            throws IOException {
+        if (candidates.isEmpty()) {
+            return;
+        }
+        Collection<ExpireFileEntry> matchingEntries =
+                readMergedDataFiles(
+                        manifestList.readDataManifests(snapshot),
+                        createCandidateBucketFilter(candidates),
+                        entry -> containsDataFile(candidates, entry));
+        for (ExpireFileEntry entry : matchingEntries) {
+            addDataFile(referenced, entry);
+        }
+    }
+
+    /**
      * It is possible that a job was killed during expiration and some manifest files have been
      * deleted, so if the clean methods need to get manifests of a snapshot to be cleaned, we should
      * try to read manifests and return empty list if failed instead of calling {@link
@@ -550,12 +578,24 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         return new BucketFilter(false, null, null, filter);
     }
 
-    private void addDataFile(
+    protected void addDataFile(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ExpireFileEntry entry) {
         dataFiles
                 .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                 .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
                 .add(entry.fileName());
+    }
+
+    /** Add {@code entry} to a candidate data file index. */
+    public void addCandidateDataFile(
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ExpireFileEntry entry) {
+        addDataFile(dataFiles, entry);
+    }
+
+    /** Whether {@code entry} is contained in the data file index. */
+    public boolean containsDataFileEntry(
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ExpireFileEntry entry) {
+        return containsDataFile(dataFiles, entry);
     }
 
     protected boolean containsDataFile(
@@ -714,6 +754,15 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
         private static DataFileDeletionPlan empty() {
             return new DataFileDeletionPlan(Collections.emptyMap());
+        }
+
+        /** The {@link ExpireFileEntry}s that are candidates for deletion in this plan. */
+        public Collection<ExpireFileEntry> candidateEntries() {
+            List<ExpireFileEntry> entries = new ArrayList<>(dataFileToDelete.size());
+            for (Pair<ExpireFileEntry, List<Path>> pair : dataFileToDelete.values()) {
+                entries.add(pair.getLeft());
+            }
+            return entries;
         }
     }
 }
