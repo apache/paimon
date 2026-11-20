@@ -79,19 +79,30 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
             return empty;
         }
 
-        GlobalIndexer globalIndexer =
-                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
-        ScoredGlobalIndexResult[] indexedResults =
-                indexSplits.isEmpty()
-                        ? emptyScoredResults(n)
-                        : readIndexedBatch(indexSplits, globalIndexer);
+        List<ScoredGlobalIndexResult[]> byType = new ArrayList<>();
+        GlobalIndexer rawIndexer = null;
+        for (List<IndexVectorSearchSplit> group : groupByIndexType(indexSplits)) {
+            GlobalIndexer indexer = createGlobalIndexer(group);
+            byType.add(readIndexedBatch(group, indexer));
+            if (rawIndexer == null) {
+                rawIndexer = indexer;
+            }
+        }
 
         List<GlobalIndexResult> results = new ArrayList<>(n);
         RoaringNavigableMap64 rawPreFilter = rawPreFilter(rawSplits);
         for (int i = 0; i < n; i++) {
+            List<ScoredGlobalIndexResult> partial = new ArrayList<>(byType.size());
+            for (ScoredGlobalIndexResult[] group : byType) {
+                partial.add(group[i]);
+            }
             results.add(
                     withRawSearch(
-                            indexedResults[i], rawSplits, globalIndexer, rawPreFilter, vectors[i]));
+                            ScoredGlobalIndexResult.merge(partial),
+                            rawSplits,
+                            rawIndexer,
+                            rawPreFilter,
+                            vectors[i]));
         }
         return results;
     }

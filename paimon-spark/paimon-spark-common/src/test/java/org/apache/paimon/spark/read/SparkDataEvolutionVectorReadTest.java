@@ -147,12 +147,14 @@ public class SparkDataEvolutionVectorReadTest {
     @Test
     public void testRawSearchSplitsRangesAcrossSparkTasks() {
         RecordingSparkVectorRead read = new RecordingSparkVectorRead();
-        RawVectorSearchSplit rawSplit =
-                new RawVectorSearchSplit(
-                        Collections.singletonList(new Range(0, 63)), Collections.emptyList(), null);
-
-        ScoredGlobalIndexResult result =
-                read.readRawSplitsInSpark(Collections.singletonList(rawSplit), null, null);
+        GlobalIndexResult result =
+                read.read(
+                        () ->
+                                Collections.singletonList(
+                                        new RawVectorSearchSplit(
+                                                Collections.singletonList(new Range(0, 63)),
+                                                Collections.emptyList(),
+                                                null)));
 
         assertThat(read.rawSearchRanges).containsExactly(new Range(0, 31), new Range(32, 63));
         assertThat(read.sparkParallelism).isEqualTo(2);
@@ -164,7 +166,7 @@ public class SparkDataEvolutionVectorReadTest {
         DistributedRefineSparkVectorRead read = new DistributedRefineSparkVectorRead();
 
         ScoredGlobalIndexResult result =
-                read.readIndexSplitsInSpark(indexSplits("test-vector-ann", 4), new L2Indexer());
+                read.readIndexed(indexSplits("test-vector-ann", 4), new L2Indexer());
 
         assertThat(read.sparkParallelism).isEqualTo(2);
         assertThat(read.rawSearchCandidateRows).containsExactly(0L, 2L);
@@ -178,8 +180,7 @@ public class SparkDataEvolutionVectorReadTest {
         SingleTaskSparkVectorRead read = new SingleTaskSparkVectorRead(createTable());
 
         ScoredGlobalIndexResult result =
-                read.readIndexSplitsInSpark(
-                        indexSplits("test-vector-ann", splitCount), new L2Indexer());
+                read.readIndexed(indexSplits("test-vector-ann", splitCount), new L2Indexer());
 
         assertThat(read.sparkParallelism).isEqualTo(1);
         assertThat(read.scoreCalls).hasValue(splitCount);
@@ -201,8 +202,11 @@ public class SparkDataEvolutionVectorReadTest {
         SingleTaskSparkVectorRead read =
                 new SingleTaskSparkVectorRead(createTable(options), "cosine");
 
-        ScoredGlobalIndexResult result =
-                read.readIndexSplitsInSpark(indexSplits("test-shared-vector", splitCount), null);
+        GlobalIndexResult result =
+                read.read(
+                        () ->
+                                new java.util.ArrayList<>(
+                                        indexSplits("test-shared-vector", splitCount)));
 
         assertThat(read.evaluatedSplits).hasValue(splitCount);
         assertThat(result.results()).contains(splitCount - 1L);
@@ -262,23 +266,19 @@ public class SparkDataEvolutionVectorReadTest {
         }
 
         @Override
-        protected GlobalIndexResult readSplits(List<? extends VectorSearchSplit> splits) {
-            throw new AssertionError("Raw search should not fall back to local vector read.");
-        }
-
-        @Override
-        protected ScoredGlobalIndexResult readIndexSplitsInSpark(
+        protected ScoredGlobalIndexResult readIndexed(
                 List<IndexVectorSearchSplit> splits, @Nullable GlobalIndexer globalIndexer) {
             throw new AssertionError("Index search is not part of this test.");
         }
 
         @Override
-        protected ScoredGlobalIndexResult readRawSplitsInSpark(
-                List<RawVectorSearchSplit> splits,
+        protected ScoredGlobalIndexResult readRawSearch(
+                List<Range> ranges,
+                @Nullable RoaringNavigableMap64 preFilter,
                 @Nullable GlobalIndexer globalIndexer,
-                @Nullable RoaringNavigableMap64 preFilter) {
+                float[] queryVector) {
             rawSparkPathUsed = true;
-            assertThat(splits).hasSize(1);
+            assertThat(ranges).containsExactly(new Range(42, 42));
             assertThat(globalIndexer).isNull();
             assertThat(preFilter).isNull();
 

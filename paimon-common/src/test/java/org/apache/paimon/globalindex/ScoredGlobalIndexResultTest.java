@@ -134,6 +134,24 @@ public class ScoredGlobalIndexResultTest {
     }
 
     @Test
+    public void testTruncatedTopKKeepsSelectedScoresAfterInputIsCleared() {
+        Map<Long, Float> scores = new HashMap<>();
+        scores.put(1L, -0.0f);
+        scores.put(2L, 0.0f);
+        scores.put(3L, 0.0f);
+        scores.put(4L, Float.intBitsToFloat(0x7fc00042));
+        RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
+        scores.keySet().forEach(rowIds::add);
+
+        ScoredGlobalIndexResult topK = ScoredGlobalIndexResult.create(rowIds, scores::get).topK(2);
+        scores.clear();
+
+        assertThat(topK.results()).containsExactly(2L, 4L);
+        assertThat(Float.floatToRawIntBits(topK.scoreGetter().score(2L))).isZero();
+        assertThat(Float.floatToRawIntBits(topK.scoreGetter().score(4L))).isEqualTo(0x7fc00042);
+    }
+
+    @Test
     public void testTopKReturnsSameResultWhenCardinalityDoesNotExceedK() {
         ScoredGlobalIndexResult result =
                 result(new long[] {1, 2, 3}, new float[] {0.1f, 0.2f, 0.3f});

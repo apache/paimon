@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -51,6 +52,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -62,6 +64,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -70,6 +73,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -138,10 +142,36 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
     }
 
+    protected static Collection<List<IndexVectorSearchSplit>> groupByIndexType(
+            List<IndexVectorSearchSplit> splits) {
+        Map<Pair<String, Boolean>, List<IndexVectorSearchSplit>> groups =
+                new TreeMap<>(
+                        Comparator.comparing((Pair<String, Boolean> key) -> key.getLeft())
+                                .thenComparing(Pair::getRight));
+        for (IndexVectorSearchSplit split : splits) {
+            IndexFileMeta file = split.vectorIndexFiles().get(0);
+            boolean routed =
+                    CentroidIndexMeta.isWrapped(checkNotNull(file.globalIndexMeta()).indexMeta());
+            groups.computeIfAbsent(Pair.of(file.indexType(), routed), k -> new ArrayList<>())
+                    .add(split);
+        }
+        return groups.values();
+    }
+
     protected GlobalIndexer createGlobalIndexer(List<IndexVectorSearchSplit> splits) {
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
-        return createGlobalIndexer(firstFile.indexType(), firstMeta);
+        GlobalIndexer indexer = createGlobalIndexer(firstFile.indexType(), firstMeta);
+        if (CentroidIndexMeta.isWrapped(firstMeta.indexMeta())
+                && indexer instanceof VectorGlobalIndexer) {
+            return ((VectorGlobalIndexer) indexer)
+                    .forRead(
+                            file -> table.fileIO().newInputStream(file.filePath()),
+                            buildIOMetaList(
+                                    table.store().pathFactory().globalIndexFileFactory(),
+                                    splits.get(0).vectorIndexFiles()));
+        }
+        return indexer;
     }
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
@@ -330,17 +360,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        List<GlobalIndexIOMeta> indexIOMetaList =
-                buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        indexFileReader,
-                        indexIOMetaList,
-                        rowRangeEnd - rowRangeStart + 1,
-                        null,
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
                         executor);
         if (postFiltering) {
             CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> batch =
@@ -364,8 +390,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitVectorSearch(vectorSearch)
+        return reader.visitVectorSearch(vectorSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
@@ -383,6 +408,32 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(emptyOptionalResults(vectors.length));
         }
 
+        GlobalIndexReader reader =
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
+                        executor);
+        if (postFiltering) {
+            return evalPostFilter(
+                    reader, rowRangeStart, rowRangeEnd, vectors, searchLimit, includeRowIds);
+        }
+        BatchVectorSearch batchVectorSearch =
+                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
+                        .withIncludeRowIds(includeRowIds);
+        return reader.visitBatchVectorSearch(batchVectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+    }
+
+    private GlobalIndexReader createVectorReader(
+            GlobalIndexer globalIndexer,
+            IndexPathFactory indexPathFactory,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> vectorIndexFiles,
+            ExecutorService executor) {
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
         @SuppressWarnings("resource")
@@ -395,16 +446,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeEnd - rowRangeStart + 1,
                         null,
                         executor);
-        BatchVectorSearch batchVectorSearch =
-                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
-                        .withIncludeRowIds(includeRowIds);
-        if (postFiltering) {
-            return evalPostFilter(
-                    reader, rowRangeStart, rowRangeEnd, vectors, searchLimit, includeRowIds);
-        }
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitBatchVectorSearch(batchVectorSearch)
-                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
     }
 
     private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalPostFilter(
@@ -415,7 +457,6 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             int searchLimit,
             @Nullable RoaringNavigableMap64 include) {
         try {
-            OffsetGlobalIndexReader offsetReader = new OffsetGlobalIndexReader(reader, from, to);
             int candidates =
                     VectorSearchPostFilter.candidateLimit(
                             limit, candidatesFactor, searchLimit, to - from + 1);
@@ -426,7 +467,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                     new Range(from, to),
                     include,
                     queries ->
-                            offsetReader.visitBatchVectorSearch(
+                            reader.visitBatchVectorSearch(
                                     new BatchVectorSearch(
                                                     queries,
                                                     candidates,
@@ -490,24 +531,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return firstVectorIndexFile(splits).indexType();
     }
 
-    protected ScoredGlobalIndexResult[] emptyScoredResults(int n) {
-        ScoredGlobalIndexResult[] results = new ScoredGlobalIndexResult[n];
-        for (int i = 0; i < n; i++) {
-            results[i] = ScoredGlobalIndexResult.createEmpty();
-        }
-        return results;
-    }
-
     private List<GlobalIndexIOMeta> buildIOMetaList(
             IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            indexIOMetaList.add(
-                    new GlobalIndexIOMeta(
-                            indexPathFactory.toPath(indexFile),
-                            indexFile.fileSize(),
-                            meta.indexMeta()));
+            indexIOMetaList.add(CentroidIndexMeta.file(indexFile, indexPathFactory));
         }
         return indexIOMetaList;
     }

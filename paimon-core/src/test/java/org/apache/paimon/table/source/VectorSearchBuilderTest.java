@@ -1629,6 +1629,21 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // field does not extend that coverage, so the tail remains eligible for a data fallback.
         buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
 
+        VectorScan.Plan unfiltered =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+        assertThat(indexVectorSearchSplits(unfiltered.splits()))
+                .singleElement()
+                .satisfies(
+                        split -> {
+                            assertThat(split.vectorIndexFiles()).hasSize(2);
+                            assertThat(split.scalarIndexFiles()).isEmpty();
+                        });
+
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
         GlobalIndexResult result =
                 table.newVectorSearchBuilder()
