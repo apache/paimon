@@ -83,6 +83,40 @@ class CentroidVectorGlobalIndexTest {
     private static final long BASE = 1L << 35;
 
     @Test
+    void testBoundedTopKAcrossShards() throws Exception {
+        int limit = 7;
+        NativeCentroidRoutedIndexReader.ShardTopK matches =
+                new NativeCentroidRoutedIndexReader.ShardTopK(limit);
+        assertThat(matches.finish()).isEmpty();
+
+        List<ScoredGlobalIndexResult> shards = new ArrayList<>();
+        List<CompletableFuture<Void>> merges = new ArrayList<>();
+        ExecutorService workers = Executors.newFixedThreadPool(4);
+        try {
+            for (int shard = 31; shard >= 0; shard--) {
+                RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+                long first = BASE + shard * 16L;
+                rows.addRange(new Range(first, first + 15));
+                // Every shard contributes ties at the cutoff, regardless of completion order.
+                ScoredGlobalIndexResult result =
+                        ScoredGlobalIndexResult.create(rows, row -> row % 5);
+                shards.add(result);
+                merges.add(CompletableFuture.runAsync(() -> matches.add(result), workers));
+            }
+            CompletableFuture.allOf(merges.toArray(new CompletableFuture[0]))
+                    .get(30, TimeUnit.SECONDS);
+            assertThat(matches.size()).isEqualTo(limit);
+            assertSameScores(
+                    ScoredGlobalIndexResult.merge(shards).topK(limit),
+                    matches.finish().get(),
+                    limit);
+            assertThat(matches.size()).isZero();
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    @Test
     void distributedSampleBudgetUsesCorpusSizeAndConfiguredRatio() {
         Map<String, String> options = new HashMap<>();
         options.put("index.type", "ivf_flat");
@@ -448,6 +482,29 @@ class CentroidVectorGlobalIndexTest {
                                 Collections.singletonMap("centroid.nprobe", "100"));
                 assertThat(fresh.visitVectorSearch(all).get()).isPresent();
                 assertThat(opened).hasSize(5);
+                opened.clear();
+                List<Optional<ScoredGlobalIndexResult>> exhaustive =
+                        fresh.visitBatchVectorSearch(
+                                        new BatchVectorSearch(queries, 1, "v", all.options()))
+                                .get(30, TimeUnit.SECONDS);
+                assertThat(opened)
+                        .hasSize(4)
+                        .allSatisfy((path, count) -> assertThat(count.get()).isOne());
+                assertThat(exhaustive.get(0).get().results()).containsExactly(0L);
+                assertThat(exhaustive.get(1).get().results()).containsExactly(101L * 200);
+                assertSameScores(exhaustive.get(0).get(), exhaustive.get(2).get(), 1);
+
+                opened.clear();
+                BatchVectorSearch invalidBatch =
+                        new BatchVectorSearch(
+                                new float[][] {vectors[0], new float[] {Float.NaN, 0f}},
+                                1,
+                                "v",
+                                all.options());
+                assertThatThrownBy(() -> fresh.visitBatchVectorSearch(invalidBatch).get())
+                        .hasMessageContaining("non-finite");
+                assertThat(opened).isEmpty();
+
                 VectorSearch invalid =
                         new VectorSearch(
                                 vectors[0],
