@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
@@ -28,6 +29,7 @@ import org.apache.paimon.format.FileMetadataCache;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.ParquetListLayoutResolver.LayoutContext;
+import org.apache.paimon.format.parquet.metadata.SelectiveFooterParser;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.shredding.ShreddingFormatReader;
@@ -232,7 +234,18 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             ParquetInputStream inputStream)
             throws IOException {
         FileMetadataCache cache = context.metadataCache();
-        if (cache == null) {
+        // A selective footer is projection-specific, but the shared cache is keyed by path
+        // alone (its contract requires every user to read the same kind of metadata): caching
+        // one projection's footer would hand later reads of the file a footer missing their
+        // column chunks. Keep the cache populated only with full footers — selective reads
+        // bypass it. The bypass condition mirrors the vendored reader's activation check.
+        boolean selective =
+                "true"
+                                .equals(
+                                        options.getProperty(
+                                                SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY))
+                        && options.getProperty(SelectiveFooterParser.REQUESTED_COLUMNS_KEY) != null;
+        if (cache == null || selective) {
             return ParquetFileReader.readFooter(inputFile, options, inputStream, true);
         }
         return cache.getOrLoad(
@@ -245,8 +258,64 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             throws IOException {
         ParquetInputFile inputFile =
                 ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
+        // No withRange: the full-file range ([0, fileSize)) filters no row group by midpoint, so
+        // it is equivalent to NO_FILTER — but a non-NO_FILTER metadata filter makes the vendored
+        // ParquetFileReader.readFooter skip the selective parse (which does not apply the
+        // filter), silently disabling the selective parser for every production read.
         ParquetReadOptions.Builder readOptionsBuilder =
-                ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
+                ParquetUtil.getParquetReadOptionsBuilder(conf);
+
+        // Enable selective footer parsing when no predicates are present and the feature is
+        // enabled.
+        // This improves performance by only parsing metadata for requested columns.
+        // The effective switch lives in the vendored ParquetFileReader.readFooter: it checks
+        // SELECTIVE_PARSER_ENABLED_KEY and REQUESTED_COLUMNS_KEY and only then tries the
+        // selective parse; this factory is just the property producer.
+        // NOTE: When predicates are present, statistics are needed for row-group filtering,
+        // so selective parser is currently disabled in that case. If selective parser is
+        // extended to support predicates in the future, set parseStatistics=true to preserve
+        // statistics metadata.
+        boolean enableSelectiveParser =
+                conf.get(CoreOptions.PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED);
+        if (enableSelectiveParser && (predicates == null || predicates.isEmpty())) {
+            // A projected name containing the NUL separator cannot round-trip through
+            // REQUESTED_COLUMNS_KEY: splitRequestedColumns would split it into multiple names,
+            // silently rewriting the requested set, and those fragments can match real columns
+            // so the all-unmatched fallback never runs — the reader then fails on the missing
+            // chunk. Keep such reads on the official full parse (identical to the option being
+            // disabled) by not setting any of the selective-parser properties.
+            StringBuilder requestedColumns = new StringBuilder();
+            boolean namesEncodable = true;
+            for (DataField field : readType.getFields()) {
+                if (field.name().contains(SelectiveFooterParser.COLUMN_NAME_SEPARATOR)) {
+                    namesEncodable = false;
+                    break;
+                }
+                if (requestedColumns.length() > 0) {
+                    // Use null character as separator to support column names containing commas
+                    requestedColumns.append(SelectiveFooterParser.COLUMN_NAME_SEPARATOR);
+                }
+                requestedColumns.append(field.name());
+            }
+            if (namesEncodable) {
+                readOptionsBuilder.set(SelectiveFooterParser.SELECTIVE_PARSER_ENABLED_KEY, "true");
+                readOptionsBuilder.set(
+                        SelectiveFooterParser.REQUESTED_COLUMNS_KEY, requestedColumns.toString());
+                readOptionsBuilder.set(
+                        SelectiveFooterParser.CASE_SENSITIVE_KEY, String.valueOf(caseSensitive));
+
+                // Skip statistics parsing by default for better performance.
+                // Statistics are only needed for row-group filtering with predicates.
+                // Since selective parser is only enabled when predicates is empty (see line
+                // 254), statistics are not needed here. If selective parser is extended to
+                // support predicates in the future, this should be set to true.
+                boolean parseStatistics = conf.getBoolean("parquet.footer.parse-statistics", false);
+                if (!parseStatistics) {
+                    readOptionsBuilder.set(SelectiveFooterParser.SKIP_STATISTICS_KEY, "true");
+                }
+            }
+        }
+
         ParquetInputStream inputStream = inputFile.newStream();
         ParquetMetadata footer =
                 readFooter(context, inputFile, readOptionsBuilder.build(), inputStream);
