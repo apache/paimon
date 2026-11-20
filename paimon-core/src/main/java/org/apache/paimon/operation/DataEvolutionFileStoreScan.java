@@ -141,6 +141,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return this;
     }
 
+    /** Reads complete file identities and dependencies before computing a snapshot difference. */
+    public Plan planForIncrementalDiff() {
+        Predicate savedFilter = inputFilter;
+        RowType savedReadType = readType;
+        Long savedLimit = limit;
+        try {
+            withFilter(null);
+            readType = null;
+            limit = null;
+            return plan();
+        } finally {
+            withFilter(savedFilter);
+            readType = savedReadType;
+            limit = savedLimit;
+        }
+    }
+
     @Override
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFiles, boolean useSequential) {

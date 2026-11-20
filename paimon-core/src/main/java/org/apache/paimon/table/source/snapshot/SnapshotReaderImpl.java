@@ -26,6 +26,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -36,6 +37,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.CacheMetrics;
@@ -62,6 +64,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -641,13 +644,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public Plan readIncrementalDiff(Snapshot before) {
         withMode(ScanMode.ALL);
-        FileStoreScan.Plan plan = scan.plan();
+        FileStoreScan.Plan plan = planForIncrementalDiff();
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
+        scan.withSnapshot(before);
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
-                groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+                groupByPartFiles(planForIncrementalDiff().files(FileKind.ADD));
         TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
                 tableSchema, before, beforeFiles, plan.snapshot(), afterFiles);
+        if (options.dataEvolutionEnabled()) {
+            return toDataEvolutionIncrementalPlan(beforeFiles, plan, afterFiles);
+        }
         return toIncrementalPlan(
                 false,
                 new LazyField<>(() -> before),
@@ -655,6 +662,71 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 plan.snapshot(),
                 plan.watermark(),
                 afterFiles);
+    }
+
+    private FileStoreScan.Plan planForIncrementalDiff() {
+        return options.dataEvolutionEnabled()
+                ? ((DataEvolutionFileStoreScan) scan).planForIncrementalDiff()
+                : scan.plan();
+    }
+
+    private Plan toDataEvolutionIncrementalPlan(
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
+            FileStoreScan.Plan afterPlan,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> selected = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, List<Range>> changedRanges = new HashMap<>();
+        RangeHelper<ManifestEntry> ranges =
+                new RangeHelper<>(entry -> entry.file().nonNullRowIdRange());
+        for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> part : afterFiles.entrySet()) {
+            for (Map.Entry<Integer, List<ManifestEntry>> bucket : part.getValue().entrySet()) {
+                Set<ManifestEntry> oldFiles =
+                        new HashSet<>(
+                                beforeFiles
+                                        .getOrDefault(part.getKey(), Collections.emptyMap())
+                                        .getOrDefault(bucket.getKey(), Collections.emptyList()));
+                List<Range> addedRanges = new ArrayList<>();
+                List<ManifestEntry> dependencies = new ArrayList<>();
+                for (List<ManifestEntry> group : ranges.mergeOverlappingRanges(bucket.getValue())) {
+                    boolean changed = false;
+                    for (ManifestEntry entry : group) {
+                        if (!oldFiles.contains(entry)) {
+                            addedRanges.add(entry.file().nonNullRowIdRange());
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        // Shared files still supply untouched columns and the current DV anchor.
+                        dependencies.addAll(group);
+                    }
+                }
+                if (!addedRanges.isEmpty()) {
+                    selected.computeIfAbsent(part.getKey(), ignored -> new HashMap<>())
+                            .put(bucket.getKey(), dependencies);
+                    changedRanges.put(
+                            Pair.of(part.getKey(), bucket.getKey()),
+                            Range.sortAndMergeOverlap(addedRanges));
+                }
+            }
+        }
+        List<Split> splits = new ArrayList<>();
+        for (DataSplit split :
+                generateSplits(afterPlan.snapshot(), false, splitGenerator, selected)) {
+            List<Range> splitRanges =
+                    Range.sortAndMergeOverlap(
+                            split.dataFiles().stream()
+                                    .map(DataFileMeta::nonNullRowIdRange)
+                                    .collect(Collectors.toList()));
+            splits.add(
+                    new IndexedSplit(
+                            split,
+                            Range.and(
+                                    splitRanges,
+                                    changedRanges.get(Pair.of(split.partition(), split.bucket()))),
+                            null));
+        }
+        return new PlanImpl(
+                afterPlan.watermark(), afterPlan.snapshot().id(), afterPlan.snapshot(), splits);
     }
 
     private RecordComparator partitionComparator() {
