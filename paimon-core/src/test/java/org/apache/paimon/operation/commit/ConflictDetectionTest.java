@@ -60,8 +60,10 @@ import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -79,6 +81,7 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -2186,6 +2189,52 @@ class ConflictDetectionTest {
                                 Snapshot.CommitKind.COMPACT))
                 .isFalse();
         verifyNoInteractions(handler);
+    }
+
+    @Test
+    void testCheckConflictsPropagatesIndexManifestReadFailure() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        UncheckedIOException ioFailure =
+                new UncheckedIOException(new IOException("index manifest I/O failure"));
+        when(handler.readManifest("index-manifest-1"))
+                .thenThrow(ioFailure)
+                .thenReturn(Collections.emptyList());
+        ConflictDetection detection =
+                new AppendConflictDetection(
+                        "test-table",
+                        "test-user",
+                        RowType.of(),
+                        null,
+                        BucketMode.BUCKET_UNAWARE,
+                        true,
+                        handler,
+                        null);
+        Snapshot latestSnapshot = indexSnapshot("index-manifest-1");
+
+        assertThatThrownBy(
+                        () ->
+                                detection.checkConflicts(
+                                        latestSnapshot,
+                                        Collections.singletonList(createFileEntry("f1", ADD)),
+                                        Collections.singletonList(createFileEntry("f1", DELETE)),
+                                        Collections.emptyList(),
+                                        null,
+                                        Snapshot.CommitKind.COMPACT))
+                .isSameAs(ioFailure);
+
+        Optional<RuntimeException> dataConflict =
+                detection.checkConflicts(
+                        latestSnapshot,
+                        Collections.singletonList(createFileEntry("f1", ADD)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createDvIndexEntry("dv1", ADD, Collections.singletonList("f2"))),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+        assertThat(dataConflict).isPresent();
+        assertThat(dataConflict.get())
+                .hasMessageContaining("File deletion conflicts detected")
+                .hasCauseInstanceOf(IllegalStateException.class);
     }
 
     private DataEvolutionConflictDetection indexCompactionDetection(

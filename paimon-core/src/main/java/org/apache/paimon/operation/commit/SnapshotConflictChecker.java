@@ -96,6 +96,25 @@ public class SnapshotConflictChecker {
         return baseSnapshots;
     }
 
+    /**
+     * Whether a message must pass the bucket compaction check but has no restored snapshot, such as
+     * a message serialized by an older version.
+     */
+    public boolean hasCompactionWithoutBaseline(List<CommitMessage> messages) {
+        if (!bucketCompactionCheckEnabled) {
+            return false;
+        }
+        for (CommitMessage message : messages) {
+            Long snapshotId = message.checkFromSnapshot();
+            if ((snapshotId == null || snapshotId < 0)
+                    && changesDataOrDeletionVectors(
+                            ((CommitMessageImpl) message).compactIncrement())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Checks snapshot history and returns the changed partitions if collected for strict mode. */
     @Nullable
     public List<BinaryRow> check(
@@ -195,6 +214,18 @@ public class SnapshotConflictChecker {
         }
         long firstSnapshot =
                 ranges.values().stream().mapToLong(range -> range.to).min().getAsLong() + 1;
+        if (firstSnapshot < newSnapshotId) {
+            Long earliest = snapshotManager.earliestSnapshotId();
+            if (earliest != null && firstSnapshot < earliest) {
+                // Snapshot expiration removed the history this compaction must be checked against.
+                throw new BucketCompactionConflictException(
+                        String.format(
+                                "Cannot check compaction when committing snapshot %d: snapshot %d "
+                                        + "after the restored state has expired (earliest snapshot is %d). "
+                                        + "Reload the bucket and recompute compaction.",
+                                newSnapshotId, firstSnapshot, earliest));
+            }
+        }
         for (long id = firstSnapshot; id < newSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitUser().equals(commitUser)
@@ -248,7 +279,8 @@ public class SnapshotConflictChecker {
 
     /**
      * Another user's COMPACT or OVERWRITE changed a bucket after the compaction writer restored its
-     * state, so the compaction was computed on stale files.
+     * state, or the snapshots needed to check this have expired, so the compaction may have been
+     * computed on stale files.
      */
     public static class BucketCompactionConflictException extends RuntimeException {
 

@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
@@ -44,6 +45,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -51,6 +53,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -72,6 +75,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -86,6 +90,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -786,6 +791,335 @@ public class FileStoreCommitRecoveryTest {
             }
             assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(1L);
         }
+    }
+
+    @Test
+    public void testRecoverHalfCommittedIdentifierPropagatesIndexManifestReadFailure()
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tempDir.toString());
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(CoreOptions.FILE_COMPRESSION, "null");
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileIO fileIO = spy(LocalFileIO.create());
+        FileStoreTable table =
+                FileStoreTableFactory.create(fileIO, path, schema, CatalogEnvironment.empty());
+        assertThat(table.bucketMode()).isEqualTo(BucketMode.BUCKET_UNAWARE);
+
+        CommitMessageImpl seedMessage;
+        CommitMessageImpl appendMessage;
+        CommitMessageImpl compactedMessage;
+        try (StreamTableWrite seedWrite = table.newWrite("seed");
+                StreamTableWrite writer = table.newWrite("writer")) {
+            seedWrite.write(GenericRow.of(1, 10L));
+            seedWrite.write(GenericRow.of(2, 20L));
+            seedMessage = (CommitMessageImpl) seedWrite.prepareCommit(false, 1).get(0);
+
+            writer.write(GenericRow.of(3, 30L));
+            appendMessage = (CommitMessageImpl) writer.prepareCommit(false, 2).get(0);
+
+            writer.write(GenericRow.of(3, 30L));
+            compactedMessage = (CommitMessageImpl) writer.prepareCommit(false, 3).get(0);
+        }
+
+        DataFileMeta seedFile = seedMessage.newFilesIncrement().newFiles().get(0);
+        BitmapDeletionVector dv = new BitmapDeletionVector();
+        dv.delete(0);
+        IndexFileMeta dvIndex =
+                table.store()
+                        .newIndexFileHandler()
+                        .dvIndex(BinaryRow.EMPTY_ROW, 0)
+                        .writeSingleFile(Collections.singletonMap(seedFile.fileName(), dv));
+        try (TableCommitImpl seedCommit = table.newCommit("seed")) {
+            seedCommit.commit(1, Collections.singletonList(seedMessage));
+            seedCommit.commit(
+                    2,
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(
+                                            Collections.singletonList(dvIndex)),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        CommitMessageImpl pendingMessage =
+                new CommitMessageImpl(
+                        appendMessage.partition(),
+                        appendMessage.bucket(),
+                        appendMessage.totalBuckets(),
+                        appendMessage.newFilesIncrement(),
+                        new CompactIncrement(
+                                appendMessage.newFilesIncrement().newFiles(),
+                                compactedMessage.newFilesIncrement().newFiles(),
+                                Collections.emptyList()));
+        ManifestCommittable pending =
+                new ManifestCommittable(2, null, Collections.singletonList(pendingMessage));
+
+        // Publish only the append phase of identifier 2 for "writer".
+        try (FileStoreCommit commit = table.store().newCommit("writer", table)) {
+            commit.commit(
+                    new ManifestCommittable(2, null, Collections.singletonList(appendMessage)),
+                    false);
+        }
+        long snapshotBeforeRecovery = table.snapshotManager().latestSnapshotId();
+        String indexManifest = table.snapshotManager().latestSnapshot().indexManifest();
+        assertThat(indexManifest).isNotNull();
+        Path indexManifestPath =
+                table.store().pathFactory().indexManifestFileFactory().toPath(indexManifest);
+
+        try (FileStoreCommit commit = table.store().newCommit("writer", table)) {
+            List<ManifestCommittable> recovered =
+                    commit.filterCommitted(Collections.singletonList(pending));
+            assertThat(recovered).hasSize(1);
+
+            doThrow(new IOException("Index manifest read failed"))
+                    .when(fileIO)
+                    .newInputStream(indexManifestPath);
+            assertThatThrownBy(() -> commit.commit(recovered.get(0), false))
+                    .hasRootCauseInstanceOf(IOException.class)
+                    .hasRootCauseMessage("Index manifest read failed");
+            assertThat(table.snapshotManager().latestSnapshotId())
+                    .isEqualTo(snapshotBeforeRecovery);
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.APPEND);
+
+            doCallRealMethod().when(fileIO).newInputStream(indexManifestPath);
+            assertThat(commit.commit(recovered.get(0), false)).isEqualTo(1);
+        }
+
+        Snapshot compacted = table.snapshotManager().latestSnapshot();
+        assertThat(compacted.id()).isEqualTo(snapshotBeforeRecovery + 1);
+        assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        List<String> rows = new ArrayList<>();
+        try (RecordReaderIterator<InternalRow> reader =
+                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
+            while (reader.hasNext()) {
+                InternalRow row = reader.next();
+                rows.add(row.getInt(0) + ":" + row.getLong(1));
+            }
+        }
+        assertThat(rows).containsExactlyInAnyOrder("2:20", "3:30");
+    }
+
+    @Test
+    public void testRecoverHalfCommittedIdentifierAfterBaselineExpired() throws Exception {
+        FileStoreTable table = createPrimaryKeyDvTable();
+        List<CommitMessage> pendingMessages;
+        long baseline;
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite seedWrite = table.newWrite("seed").withIOManager(ioManager);
+                    TableCommitImpl seedCommit = table.newCommit("seed")) {
+                seedWrite.write(GenericRow.of(1, 10L));
+                seedWrite.write(GenericRow.of(4, 40L));
+                seedCommit.commit(1, seedWrite.prepareCommit(true, 1));
+            }
+            baseline = table.snapshotManager().latestSnapshotId();
+
+            // Checkpoint 2 of "writer" is prepared against the baseline snapshot.
+            try (StreamTableWrite writer = table.newWrite("writer").withIOManager(ioManager)) {
+                writer.write(GenericRow.of(2, 20L));
+                pendingMessages = writer.prepareCommit(true, 2);
+            }
+        }
+        assertThat(pendingMessages)
+                .singleElement()
+                .satisfies(
+                        message -> {
+                            assertThat(message.checkFromSnapshot()).isEqualTo(baseline);
+                            assertThat(((CommitMessageImpl) message).compactIncrement().isEmpty())
+                                    .isFalse();
+                        });
+
+        // Another writer publishes an empty APPEND.
+        try (TableCommitImpl otherCommit = table.newCommit("other").ignoreEmptyCommit(false)) {
+            otherCommit.commit(1, Collections.emptyList());
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(baseline + 1);
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.APPEND);
+
+        // Only the APPEND phase of checkpoint 2 is published.
+        try (TableCommitImpl commit = table.newCommit("writer")) {
+            commit.commit(2, singlePhase(pendingMessages, false));
+        }
+        long appendSnapshot = table.snapshotManager().latestSnapshotId();
+        assertThat(appendSnapshot).isEqualTo(baseline + 2);
+
+        // Normal retention expires every snapshot before the APPEND, keeping the staged files.
+        table.newExpireSnapshots()
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ZERO)
+                                .build())
+                .expire();
+        assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(appendSnapshot);
+
+        // Two fresh restorations both skip the compact phase instead of failing.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try (TableCommitImpl freshCommit = table.newCommit("writer")) {
+                freshCommit.filterAndCommit(Collections.singletonMap(2L, pendingMessages));
+            }
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(appendSnapshot);
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.APPEND);
+        }
+
+        assertThat(readRowsAfterFullCompaction(table))
+                .containsExactlyInAnyOrder("1:10", "2:20", "4:40");
+    }
+
+    @Test
+    public void testFilterHalfCommittedIdentifierWithoutCompactionBaseline() throws Exception {
+        FileStoreTable table = createPrimaryKeyDvTable();
+        List<CommitMessage> pendingMessages;
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite seedWrite = table.newWrite("seed").withIOManager(ioManager);
+                    TableCommitImpl seedCommit = table.newCommit("seed")) {
+                seedWrite.write(GenericRow.of(1, 10L));
+                seedWrite.write(GenericRow.of(4, 40L));
+                seedCommit.commit(1, seedWrite.prepareCommit(true, 1));
+            }
+            try (StreamTableWrite writer = table.newWrite("writer").withIOManager(ioManager)) {
+                writer.write(GenericRow.of(2, 20L));
+                pendingMessages = writer.prepareCommit(true, 2);
+            }
+        }
+
+        // Messages serialized by older versions do not carry the restored snapshot.
+        List<CommitMessage> legacyMessages =
+                pendingMessages.stream()
+                        .map(message -> (CommitMessageImpl) message)
+                        .map(
+                                message ->
+                                        new CommitMessageImpl(
+                                                message.partition(),
+                                                message.bucket(),
+                                                message.totalBuckets(),
+                                                message.newFilesIncrement(),
+                                                message.compactIncrement(),
+                                                null))
+                        .collect(Collectors.toList());
+        assertThat(legacyMessages)
+                .singleElement()
+                .satisfies(
+                        message ->
+                                assertThat(
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement()
+                                                        .isEmpty())
+                                        .isFalse());
+
+        try (TableCommitImpl commit = table.newCommit("writer")) {
+            commit.commit(2, singlePhase(legacyMessages, false));
+        }
+        long appendSnapshot = table.snapshotManager().latestSnapshotId();
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try (TableCommitImpl freshCommit = table.newCommit("writer")) {
+                freshCommit.filterAndCommit(Collections.singletonMap(2L, legacyMessages));
+            }
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(appendSnapshot);
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.APPEND);
+        }
+
+        // Ordinary commits keep rejecting a compaction without a restored snapshot.
+        try (TableCommitImpl commit = table.newCommit("writer")) {
+            assertThatThrownBy(() -> commit.commit(3, singlePhase(legacyMessages, true)))
+                    .hasStackTraceContaining("missing its restored snapshot");
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(appendSnapshot);
+
+        assertThat(readRowsAfterFullCompaction(table))
+                .containsExactlyInAnyOrder("1:10", "2:20", "4:40");
+    }
+
+    private FileStoreTable createPrimaryKeyDvTable() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tempDir.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(CoreOptions.FILE_COMPRESSION, "null");
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+    }
+
+    /**
+     * Keeps only one phase of the messages: the data increment, or the compact increment if {@code
+     * compactOnly} is true.
+     */
+    private static List<CommitMessage> singlePhase(
+            List<CommitMessage> messages, boolean compactOnly) {
+        return messages.stream()
+                .map(message -> (CommitMessageImpl) message)
+                .map(
+                        message ->
+                                new CommitMessageImpl(
+                                        message.partition(),
+                                        message.bucket(),
+                                        message.totalBuckets(),
+                                        compactOnly
+                                                ? DataIncrement.emptyIncrement()
+                                                : message.newFilesIncrement(),
+                                        compactOnly
+                                                ? message.compactIncrement()
+                                                : CompactIncrement.emptyIncrement(),
+                                        message.checkFromSnapshot()))
+                .collect(Collectors.toList());
+    }
+
+    /** Deletion-vector reads skip level-0 files, so compact fully before reading. */
+    private List<String> readRowsAfterFullCompaction(FileStoreTable table) throws Exception {
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString());
+                StreamTableWrite finalWrite = table.newWrite("final").withIOManager(ioManager);
+                TableCommitImpl finalCommit = table.newCommit("final")) {
+            finalWrite.compact(BinaryRow.EMPTY_ROW, 0, true);
+            finalCommit.commit(1, finalWrite.prepareCommit(true, 1));
+        }
+        List<String> rows = new ArrayList<>();
+        try (RecordReaderIterator<InternalRow> reader =
+                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
+            while (reader.hasNext()) {
+                InternalRow row = reader.next();
+                rows.add(row.getInt(0) + ":" + row.getLong(1));
+            }
+        }
+        return rows;
     }
 
     private FileStoreCommitImpl newCommitWithSnapshotCommit(

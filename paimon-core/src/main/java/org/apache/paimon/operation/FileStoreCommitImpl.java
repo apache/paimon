@@ -413,6 +413,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (messages.isEmpty()) {
             return null;
         }
+        if (snapshotConflictChecker.hasCompactionWithoutBaseline(messages)) {
+            // Messages from older serializer versions do not carry the restored snapshot, so the
+            // bucket history cannot be checked. Ordinary commits still reject such messages.
+            LOG.warn(
+                    "Skipping compaction recovery for table {}, user {}, identifier {}: a compaction message has no restored snapshot to check the bucket history against",
+                    tableName,
+                    commitUser,
+                    committable.identifier());
+            return null;
+        }
         // An expired or orphan-cleaned output cannot be replayed. Skip the whole identifier,
         // rather than publishing only some of its buckets. I/O failures must still fail recovery.
         for (Path output : outputs) {
