@@ -31,13 +31,16 @@ import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -83,6 +86,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1831,6 +1838,100 @@ public class VectorSearchBuilderTest extends TableTestBase {
         List<Integer> ids1 = readIds(table, results.get(1));
         assertThat(ids1.size()).isLessThanOrEqualTo(3);
         assertThat(ids1).contains(4, 5);
+    }
+
+    @Test
+    public void testBatchConsumesSplitsIncrementallyAndPreservesFirstScore() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_THREAD_NUM.key(), "1"));
+        AtomicInteger scored = new AtomicInteger();
+        DataEvolutionBatchVectorRead read =
+                new DataEvolutionBatchVectorRead(
+                        table,
+                        null,
+                        null,
+                        1,
+                        table.rowType().getField(VECTOR_FIELD_NAME),
+                        new float[][] {{0, 0}},
+                        null) {
+                    @Override
+                    protected GlobalIndexer createGlobalIndexer(
+                            List<IndexVectorSearchSplit> splits) {
+                        return null;
+                    }
+
+                    @Override
+                    protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
+                        return "ivf-flat";
+                    }
+
+                    @Override
+                    protected CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalBatch(
+                            GlobalIndexer indexer,
+                            IndexPathFactory paths,
+                            long from,
+                            long to,
+                            List<IndexFileMeta> files,
+                            float[][] queries,
+                            int k,
+                            RoaringNavigableMap64 included,
+                            ExecutorService executor) {
+                        if (from == 1) {
+                            assertThat(scored.get()).isEqualTo(1);
+                        }
+                        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+                        rows.add(from);
+                        float score = from == 1 ? 10 : (to == 0 ? 5 : 100);
+                        return CompletableFuture.completedFuture(
+                                Collections.singletonList(
+                                        Optional.of(
+                                                ScoredGlobalIndexResult.create(
+                                                        rows,
+                                                        row -> {
+                                                            scored.incrementAndGet();
+                                                            return score;
+                                                        }))));
+                    }
+
+                    @Override
+                    protected ScoredGlobalIndexResult readRawSearch(
+                            List<Range> ranges,
+                            RoaringNavigableMap64 filter,
+                            GlobalIndexer indexer,
+                            float[] query) {
+                        return VectorSearchBuilderTest.scoredResult(200, 0L);
+                    }
+                };
+
+        List<VectorSearchSplit> splits = new ArrayList<>();
+        for (Range range : Arrays.asList(new Range(0, 0), new Range(1, 1), new Range(0, 2))) {
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            range.from,
+                            range.to,
+                            Collections.singletonList(
+                                    new IndexFileMeta(
+                                            "ivf-flat",
+                                            "part",
+                                            0,
+                                            1,
+                                            null,
+                                            null,
+                                            new GlobalIndexMeta(
+                                                    range.from, range.to, 0, null, null))),
+                            Collections.emptyList()));
+        }
+        splits.add(
+                new RawVectorSearchSplit(
+                        Collections.singletonList(new Range(0, 0)), Collections.emptyList(), null));
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult) read.readBatch(() -> splits).get(0);
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(result.scoreGetter().score(1L)).isEqualTo(10f);
     }
 
     @Test
