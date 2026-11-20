@@ -22,6 +22,8 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{AnalysisException, Row}
 
+import scala.collection.JavaConverters._
+
 class PaimonPartitionManagementTest extends PaimonSparkTestBase {
 
   withPk.foreach {
@@ -235,7 +237,107 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
           "(3, CAST('y' AS BINARY), 'a')")
       spark.sql("TRUNCATE TABLE T PARTITION (p1 = 'x')")
       checkAnswer(spark.sql("SELECT a FROM T"), Row(3) :: Nil)
+      // A partial spec that matches no partition truncates nothing.
+      spark.sql("TRUNCATE TABLE T PARTITION (p1 = 'z')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(3) :: Nil)
     }
+  }
+
+  Seq("BINARY", "STRING").foreach {
+    partitionType =>
+      test(s"Paimon Partition Management: drop a blank $partitionType partition") {
+        withTable("T") {
+          spark.sql(s"CREATE TABLE T (a INT, p $partitionType) PARTITIONED BY (p)")
+          spark.sql(
+            s"INSERT INTO T VALUES (1, CAST(' ' AS $partitionType)), (2, NULL), " +
+              s"(3, CAST('a' AS $partitionType))")
+          // A blank value's partition name is the null partition's.
+          spark.sql("ALTER TABLE T DROP PARTITION (p = ' ')")
+          checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Row(3) :: Nil)
+        }
+      }
+  }
+
+  test("Paimon Partition Management: truncate binary partitions whose names do not parse back") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, p1 BINARY, p2 STRING) PARTITIONED BY (p1, p2)")
+      spark.sql(
+        "INSERT INTO T VALUES (1, CAST(' ' AS BINARY), 'a'), (2, NULL, 'a'), " +
+          "(3, X'FF', 'b'), (4, CAST('x' AS BINARY), 'b')")
+      spark.sql("TRUNCATE TABLE T PARTITION (p1 = ' ')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Row(3) :: Row(4) :: Nil)
+      // X'FF' is not valid UTF-8, so its partition name holds other bytes.
+      spark.sql("TRUNCATE TABLE T PARTITION (p2 = 'b')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Nil)
+    }
+  }
+
+  test("Paimon Partition Management: truncate a partition that a batch read does not see") {
+    withTable("T") {
+      spark.sql(
+        "CREATE TABLE T (k INT, p STRING) PARTITIONED BY (p) TBLPROPERTIES ('primary-key' = " +
+          "'k,p', 'bucket' = '1', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')")
+      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+      // A batch read skips level 0 of a deletion-vector table, which holds every file here.
+      assert(loadTable("T").newReadBuilder().newScan().listPartitions().isEmpty)
+      def partitions: Seq[String] =
+        loadTable("T").newSnapshotReader().partitions().asScala.map(_.getString(0).toString).toSeq
+      assert(partitions.sorted == Seq("a", "b"))
+      spark.sql("TRUNCATE TABLE T PARTITION (p = 'a')")
+      assert(partitions == Seq("b"))
+    }
+  }
+
+  test("Paimon Partition Management: drop a timestamp partition whose legacy name is shifted") {
+    withTimeZone("America/Los_Angeles") {
+      withTable("T") {
+        spark.sql("CREATE TABLE T (a INT, p TIMESTAMP) PARTITIONED BY (p)")
+        // The legacy name of 10:30:01 is its UTC wall clock, which parses back as 17:30:01 here.
+        spark.sql(
+          "INSERT INTO T VALUES (1, CAST('2024-06-01 10:30:01' AS TIMESTAMP)), " +
+            "(2, CAST('2024-06-01 17:30:01' AS TIMESTAMP))")
+        spark.sql("ALTER TABLE T DROP PARTITION (p = '2024-06-01 10:30:01')")
+        checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Nil)
+      }
+    }
+  }
+
+  test("Paimon Partition Management: address the null partition by NULL, not its default name") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, p1 STRING, p2 STRING) PARTITIONED BY (p1, p2)")
+      spark.sql("INSERT INTO T VALUES (1, NULL, 'x'), (2, 'b', 'x')")
+      val truncate = intercept[IllegalArgumentException] {
+        spark.sql("TRUNCATE TABLE T PARTITION (p1 = '__DEFAULT_PARTITION__', p2 = 'x')")
+      }
+      assert(truncate.getMessage.contains("use p1 = NULL"))
+      val drop = intercept[IllegalArgumentException] {
+        spark.sql("ALTER TABLE T DROP PARTITION (p1 = '__DEFAULT_PARTITION__')")
+      }
+      assert(drop.getMessage.contains("use p1 = NULL"))
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(1) :: Row(2) :: Nil)
+
+      spark.sql("ALTER TABLE T DROP PARTITION (p1 = NULL)")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Nil)
+    }
+  }
+
+  Seq("BINARY", "STRING").foreach {
+    partitionType =>
+      test(s"Paimon Partition Management: show the statistics of a blank $partitionType partition") {
+        withTable("T") {
+          spark.sql(s"CREATE TABLE T (a INT, p $partitionType) PARTITIONED BY (p)")
+          spark.sql(s"INSERT INTO T VALUES (1, CAST(' ' AS $partitionType)), (2, NULL), (3, NULL)")
+          def information(spec: String): String =
+            spark
+              .sql(s"SHOW TABLE EXTENDED IN $dbName0 LIKE 'T' PARTITION ($spec)")
+              .select("information")
+              .collect()
+              .head
+              .getString(0)
+          assert(information("p = ' '").contains("Partition Statistics: 1 rows"))
+          assert(information("p = NULL").contains("Partition Statistics: 2 rows"))
+        }
+      }
   }
 
   test("Paimon Partition Management: timestamp partition column") {

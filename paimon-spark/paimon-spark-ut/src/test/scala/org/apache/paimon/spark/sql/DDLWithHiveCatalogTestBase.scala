@@ -138,6 +138,40 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: drop a blank partition") {
+    spark.sql(s"USE $paimonHiveCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      Seq("false", "true").foreach {
+        inMetastore =>
+          withTable("paimon_db.blank_tbl") {
+            spark.sql(
+              "CREATE TABLE paimon_db.blank_tbl (a INT, p STRING) USING PAIMON " +
+                "PARTITIONED BY (p) " +
+                s"TBLPROPERTIES ('metastore.partitioned-table' = '$inMetastore')")
+            // In a metastore, blank and NULL have the same partition name, so one commit cannot
+            // add both.
+            Seq("(1, ' ')", "(2, NULL)", "(3, 'a')").foreach {
+              row => spark.sql(s"INSERT INTO paimon_db.blank_tbl VALUES $row")
+            }
+            val drop = "ALTER TABLE paimon_db.blank_tbl DROP PARTITION (p = ' ')"
+            if (inMetastore.toBoolean) {
+              // The metastore names a blank partition as it names the null one.
+              val e = intercept[IllegalArgumentException](spark.sql(drop))
+              assert(e.getMessage.contains("does not parse back"))
+              assert(!e.getMessage.contains("= NULL"))
+              checkAnswer(
+                spark.sql("SELECT a FROM paimon_db.blank_tbl"),
+                Row(1) :: Row(2) :: Row(3) :: Nil)
+            } else {
+              spark.sql(drop)
+              checkAnswer(spark.sql("SELECT a FROM paimon_db.blank_tbl"), Row(2) :: Row(3) :: Nil)
+            }
+          }
+      }
+    }
+  }
+
   test(
     "Paimon partition expire test with hive catalog: expire partition for paimon table sparkCatalogName") {
     spark.sql(s"USE $paimonHiveCatalogName")
