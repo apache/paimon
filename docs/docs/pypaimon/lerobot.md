@@ -404,10 +404,11 @@ to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
 ## Export a LeRobot Dataset
 
-Export one source Dataset from a three-table group to a local LeRobot directory.
+Export one source Dataset from a three-table group to a local directory or an
+`oss://bucket/prefix` LeRobot dataset.
 If the group contains multiple Datasets, select one by its `_datasets.id` UUID.
 Pass the same `tag_name` used for training to export a fixed snapshot.
-The destination directory must not exist.
+The destination directory or OSS prefix must not exist.
 Pass the table-group prefix, or the actual Frames table name for a group
 created by `PaimonLeRobotWriter`.
 
@@ -418,7 +419,16 @@ conn.export_to_lerobot(
     dataset_id="019a91e1-f035-79b9-b04b-44734dc2eb74",
 )
 # Use version="v2.0" for a LeRobot v2.0 consumer.
+conn.export_to_lerobot("robot_data", "oss://my-bucket/lerobot/export-v3")
 ```
+
+OSS output uses the table's FileIO when it can access the target bucket. Pass
+`output_options` with `fs.oss.endpoint`, `fs.oss.accessKeyId`,
+`fs.oss.accessKeySecret`, and optional `fs.oss.securityToken` when the output
+bucket has separate credentials. The exporter stages files in the worker's
+temporary directory, uploads them to OSS, and writes `meta/info.json` last.
+An incomplete upload leaves its prefix for inspection; choose a new prefix or
+remove it before retrying.
 
 V3.0 keeps source-local indices and copies each encoded MP4 once, including
 videos shared by multiple Episodes. V2.0 and v2.1 write one Parquet and one MP4 per

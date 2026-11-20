@@ -19,15 +19,19 @@
 import copy
 import hashlib
 import json
+import os
 import shutil
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options import Options
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.dataset import _component_table, _read_arrow
 from pypaimon.multimodal.lerobot.metadata import (
@@ -35,6 +39,7 @@ from pypaimon.multimodal.lerobot.metadata import (
 )
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.table import _target_schema
+from pypaimon.common.file_io import FileIO
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 
 
@@ -45,7 +50,8 @@ _V3_VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03
 
 
 def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
-                      dataset_id=None, tag_name=None, batch_size=1024):
+                      dataset_id=None, tag_name=None, batch_size=1024,
+                      output_options=None):
     """Export one original Dataset; the destination must not already exist.
 
     The v3 exporter copies each encoded video payload once. The v2 exporter
@@ -62,9 +68,28 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         raise ValueError("dataset_id must be a non-empty string.")
     if tag_name is not None:
         _validate_tag_name(tag_name)
-    target = Path(output_dir).expanduser().resolve()
-    if target.exists():
-        raise FileExistsError(target)
+    location = os.fspath(output_dir)
+    if not isinstance(location, str):
+        raise ValueError("output_dir must be a local path or oss:// URI.")
+    parsed = urlparse(location)
+    if parsed.scheme not in ("", "oss"):
+        raise ValueError("output_dir must be a local path or oss:// URI.")
+    remote = parsed.scheme == "oss"
+    if remote:
+        parent_segment = any(part in (".", "..")
+                             for part in parsed.path.split("/"))
+        if (not parsed.netloc or not parsed.path.strip("/") or parsed.query
+                or parsed.fragment or parent_segment):
+            raise ValueError("output_dir must be an OSS bucket and a nonempty prefix.")
+        target_uri = location.rstrip("/")
+        if output_options is not None and not isinstance(output_options, Mapping):
+            raise ValueError("output_options must be a mapping.")
+    else:
+        if output_options is not None:
+            raise ValueError("output_options is only used with OSS output.")
+        target = Path(location).expanduser().resolve()
+        if target.exists():
+            raise FileExistsError(target)
 
     try:
         frames = connection.get_table(table_name)
@@ -107,23 +132,56 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
     if expected != info["total_frames"]:
         raise ValueError("LeRobot Frame count disagrees with Dataset metadata.")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=".lerobot-export-", dir=target.parent))
+    stage = None
     reader = None
+    output_io = None
     try:
+        if remote:
+            output_io = (FileIO.get(target_uri, Options(dict(output_options)))
+                         if output_options is not None else read_frames.file_io)
+            if output_io.exists(target_uri):
+                raise FileExistsError(target_uri)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        stage = Path(tempfile.mkdtemp(
+            prefix=".lerobot-export-", dir=None if remote else target.parent))
         reader = _PaimonTableFrameReader(
             read_frames, columns=_target_schema(read_frames).names)
         _write_dataset(stage, reader, source, info, source_episodes,
                        version, batch_size)
         reader.close()
         reader = None
+        if remote:
+            _upload_to_oss(stage, target_uri, output_io)
+            return target_uri
         stage.rename(target)
         return target
     finally:
         if reader is not None:
             reader.close()
-        if stage.exists():
+        if stage is not None and stage.exists():
             shutil.rmtree(stage)
+        if output_options is not None and output_io is not None:
+            output_io.close()
+
+
+def _upload_to_oss(stage, prefix, file_io):
+    if file_io.exists(prefix):
+        raise FileExistsError(prefix)
+    info = stage / "meta/info.json"
+    for path in sorted(stage.rglob("*")):
+        if not path.is_file() or path == info:
+            continue
+        _upload_file(path, prefix + "/" + path.relative_to(stage).as_posix(),
+                     file_io)
+    _upload_file(info, prefix + "/meta/info.json", file_io)
+
+
+def _upload_file(path, uri, file_io):
+    if file_io.exists(uri):
+        raise FileExistsError(uri)
+    with path.open("rb") as source, file_io.new_output_stream(uri) as target:
+        shutil.copyfileobj(source, target, length=1024 * 1024)
 
 
 def _read_source_episodes(table, dataset_id):

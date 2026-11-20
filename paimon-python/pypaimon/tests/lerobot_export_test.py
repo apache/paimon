@@ -17,6 +17,7 @@
 import json
 import io
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pyarrow as pa
@@ -24,6 +25,7 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
+from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.tests.lerobot_aggregate_test import source
 
@@ -207,3 +209,54 @@ def test_export_v20_requires_source_statistics(tmp_path):
     with pytest.raises(ValueError, match="requires source-level statistics"):
         conn.export_to_lerobot("robot", tmp_path / "v20", version="v2.0")
     assert not (tmp_path / "v20").exists()
+
+
+@pytest.mark.parametrize("version", ["v3.0", "v2.1"])
+def test_export_to_oss_prefix(tmp_path, version):
+    class MemoryOss:
+        def __init__(self):
+            self.objects = {}
+            self.writes = []
+
+        def exists(self, uri):
+            return uri in self.objects or any(
+                key.startswith(uri.rstrip("/") + "/") for key in self.objects)
+
+        def new_output_stream(self, uri):
+            store = self
+
+            class Output(io.BytesIO):
+                def close(self):
+                    store.objects[uri] = self.getvalue()
+                    store.writes.append(uri)
+                    super().close()
+
+            return Output()
+
+        def close(self):
+            pass
+
+    original = source(tmp_path / "input", video=True)
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original)
+    target = MemoryOss()
+    prefix = "oss://test-bucket/lerobot/export"
+    original_get = FileIO.get
+    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
+                    side_effect=lambda uri, options=None:
+                    target if uri.startswith("oss://") else original_get(uri, options)):
+        assert conn.export_to_lerobot(
+            "robot", prefix, version=version,
+            output_options={"fs.oss.endpoint": "test-endpoint"}) == prefix
+        assert target.writes[-1] == prefix + "/meta/info.json"
+        assert len([key for key in target.objects if key.endswith(".mp4")]) == (
+            1 if version == "v3.0" else 2)
+        data_file = next(value for key, value in target.objects.items()
+                         if key.endswith(".parquet") and "/data/" in key)
+        assert pq.read_table(io.BytesIO(data_file)).num_rows > 0
+        before = len(target.writes)
+        with pytest.raises(FileExistsError):
+            conn.export_to_lerobot(
+                "robot", prefix, version=version,
+                output_options={"fs.oss.endpoint": "test-endpoint"})
+        assert len(target.writes) == before

@@ -201,8 +201,9 @@ class MultimodalConnection:
             version: str = "v3.0",
             dataset_id: Optional[str] = None,
             tag_name: Optional[str] = None,
-            batch_size: int = 1024):
-        """Export one source Dataset from a LeRobot table group to a local directory.
+            batch_size: int = 1024,
+            output_options: Optional[Dict[str, str]] = None):
+        """Export one source Dataset to a local directory or OSS prefix.
 
         ``version`` is ``v3.0``, ``v2.1``, or ``v2.0``. Multi-source groups require a
         ``dataset_id`` from ``<table_name>_datasets.id``.
@@ -210,7 +211,8 @@ class MultimodalConnection:
         from pypaimon.multimodal.lerobot.export import export_to_lerobot
         return export_to_lerobot(
             self, table_name, output_dir, version=version,
-            dataset_id=dataset_id, tag_name=tag_name, batch_size=batch_size)
+            dataset_id=dataset_id, tag_name=tag_name, batch_size=batch_size,
+            output_options=output_options)
 
     def recover_lerobot_append(self, table_name: str):
         """Recover a three-table group after an interrupted append."""
