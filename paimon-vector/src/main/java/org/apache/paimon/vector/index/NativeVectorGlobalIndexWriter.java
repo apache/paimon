@@ -42,7 +42,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
-import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -77,8 +76,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private static final long WRITE_PROGRESS_INTERVAL_BYTES = 64L * 1024 * 1024;
     static final int MAX_FLOAT_ARRAY_LENGTH = Integer.MAX_VALUE - 8;
     private static final long TRAIN_MEMORY_WARNING_BYTES = 4L * 1024 * 1024 * 1024;
-
-    static final int EMPTY_MULTIVECTOR_MAGIC = 0x504D5645; // PMVE
 
     private final GlobalIndexFileWriter fileWriter;
     private final String identifier;
@@ -309,15 +306,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
         try {
             if (count == 0) {
-                if (childGetter != null) {
-                    String name = fileWriter.newFileName(fileNamePrefix());
-                    try (DataOutputStream out =
-                            new DataOutputStream(fileWriter.newOutputStream(name))) {
-                        out.writeInt(EMPTY_MULTIVECTOR_MAGIC);
-                        out.writeInt(dim);
-                    }
-                    return Collections.singletonList(new ResultEntry(name, rowCount, null));
-                }
                 if (!centroidShard) {
                     return Collections.emptyList();
                 }

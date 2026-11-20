@@ -370,6 +370,7 @@ A single query vector ranks rows by their best matching embedding. A query matri
 uses MaxSim to rank rows. For every query vector, take the highest cosine similarity
 among a row's embeddings, then sum those similarities. Each row can occupy one
 place in the result. Null embeddings are skipped. A row with no embeddings has no score.
+A range with no embeddings produces no index file.
 Query matrices require at least one vector, fixed inner dimensions and finite coordinates.
 Spark SQL accepts a matrix in an uncorrelated `vector_search` call. A correlated
 `LATERAL vector_search` call takes one query vector per outer row.

@@ -217,7 +217,26 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
-    public void testMultiVectorParentFilterAndEmptyRange() throws Exception {
+    public void testEmptyMultiVectorRangeDoesNotCreateAFile() throws Exception {
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        String kind = "ivf-flat";
+        Map<String, String> options =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, new Options(), kind, fieldName);
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, options, kind)) {
+            writer.write(null, 0);
+            writer.write(new GenericArray(new Object[0]), 1);
+            writer.write(new GenericArray(new Object[] {null}), 2);
+            assertThat(writer.finish()).isEmpty();
+            assertThat(fileIO.listStatus(indexPath)).isEmpty();
+        }
+    }
+
+    @Test
+    public void testMultiVectorParentFilter() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
         DataType type = new ArrayType(new VectorType(2, new FloatType()));
         String kind = "ivf-flat";
         Options options = new Options();
@@ -226,77 +245,56 @@ public class NativeVectorGlobalIndexTest {
                 NativeVectorGlobalIndexerFactory.nativeOptions(type, options, kind, fieldName);
         assertThat(nativeOptions.get("dimension")).isEqualTo("2");
         float[] q = {1f, 0f};
-        for (boolean empty : new boolean[] {true, false}) {
-            try (NativeVectorGlobalIndexWriter writer =
-                    new NativeVectorGlobalIndexWriter(
-                            createFileWriter(indexPath), type, nativeOptions, kind)) {
-                writer.write(null, 7);
-                writer.write(new GenericArray(new Object[] {null}), 19);
-                if (!empty) {
-                    Assumptions.assumeTrue(isNativeAvailable());
-                    Object x = BinaryVector.fromPrimitiveArray(q);
-                    Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
-                    Object opposite = BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f});
-                    writer.write(new GenericArray(new Object[] {x, x, x, null}), 23);
-                    writer.write(new GenericArray(new Object[] {y, y, y}), 5);
-                    writer.write(new GenericArray(new Object[] {opposite}), 11);
-                }
-                List<ResultEntry> files = writer.finish();
-                assertThat(files).hasSize(1);
-                assertThat(files.get(0).rowCount()).isEqualTo(empty ? 2 : 5);
-                try (GlobalIndexReader reader =
-                        new NativeVectorGlobalIndexer(type, nativeOptions, kind)
-                                .createReader(
-                                        createFileReader(indexPath),
-                                        toIOMetas(files, indexPath),
-                                        24,
-                                        null,
-                                        executor)) {
-                    Optional<ScoredGlobalIndexResult> hits =
-                            reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
-                    if (empty) {
-                        assertThat(hits).isEmpty();
-                        assertThatThrownBy(
-                                        () ->
-                                                reader.visitVectorSearch(
-                                                                new VectorSearch(
-                                                                        new float[] {1f},
-                                                                        1,
-                                                                        fieldName))
-                                                        .get())
-                                .hasRootCauseMessage(
-                                        "Query vector dimension mismatch: index expects 2, but got 1");
-                    } else {
-                        assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
-                        RoaringNavigableMap64 filter = new RoaringNavigableMap64();
-                        filter.add(5);
-                        ScoredGlobalIndexResult filtered =
-                                reader.visitVectorSearch(
-                                                new VectorSearch(q, 1, fieldName)
-                                                        .withIncludeRowIds(filter))
-                                        .get()
-                                        .get();
-                        assertThat(filtered.results().toArray(1)).containsExactly(5);
-                        assertThat(filtered.scoreGetter().score(5))
-                                .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
-                        filter.add(23);
-                        filter.add(19); // Null list inside the range.
-                        List<Optional<ScoredGlobalIndexResult>> batch =
-                                reader.visitBatchVectorSearch(
-                                                new BatchVectorSearch(
-                                                                new float[][] {q, {0f, 1f}},
-                                                                3,
-                                                                fieldName)
-                                                        .withIncludeRowIds(filter))
-                                        .get();
-                        assertThat(batch).hasSize(2);
-                        for (Optional<ScoredGlobalIndexResult> result : batch) {
-                            assertThat(result.get().results().toArray(3)).containsExactly(5, 23);
-                        }
-                        assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
-                        assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
-                        assertThat(filter.toArray(3)).containsExactly(5, 19, 23);
-                    }
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, kind)) {
+            writer.write(null, 7);
+            writer.write(new GenericArray(new Object[] {null}), 19);
+            writer.write(new GenericArray(new Object[0]), 0);
+            Object x = BinaryVector.fromPrimitiveArray(q);
+            Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
+            Object opposite = BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f});
+            writer.write(new GenericArray(new Object[] {x, x, x, null}), 23);
+            writer.write(new GenericArray(new Object[] {y, y, y}), 5);
+            writer.write(new GenericArray(new Object[] {opposite}), 11);
+            List<ResultEntry> files = writer.finish();
+            assertThat(files).hasSize(1);
+            assertThat(files.get(0).rowCount()).isEqualTo(6);
+            try (GlobalIndexReader reader =
+                    new NativeVectorGlobalIndexer(type, nativeOptions, kind)
+                            .createReader(
+                                    createFileReader(indexPath),
+                                    toIOMetas(files, indexPath),
+                                    24,
+                                    null,
+                                    executor)) {
+                Optional<ScoredGlobalIndexResult> hits =
+                        reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
+                assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
+                RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+                filter.add(5);
+                ScoredGlobalIndexResult filtered =
+                        reader.visitVectorSearch(
+                                        new VectorSearch(q, 1, fieldName).withIncludeRowIds(filter))
+                                .get()
+                                .get();
+                assertThat(filtered.results().toArray(1)).containsExactly(5);
+                assertThat(filtered.scoreGetter().score(5))
+                        .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
+                filter.add(23);
+                filter.add(19); // Null list inside the range.
+                List<Optional<ScoredGlobalIndexResult>> batch =
+                        reader.visitBatchVectorSearch(
+                                        new BatchVectorSearch(
+                                                        new float[][] {q, {0f, 1f}}, 3, fieldName)
+                                                .withIncludeRowIds(filter))
+                                .get();
+                assertThat(batch).hasSize(2);
+                for (Optional<ScoredGlobalIndexResult> result : batch) {
+                    assertThat(result.get().results().toArray(3)).containsExactly(5, 23);
+                    assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
+                    assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
+                    assertThat(filter.toArray(3)).containsExactly(5, 19, 23);
                 }
             }
         }

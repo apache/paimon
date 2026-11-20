@@ -43,7 +43,6 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -88,7 +87,6 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
     private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
     private volatile SeekableInputStream openStream;
-    private int emptyDimension;
 
     public NativeVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
@@ -275,9 +273,6 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
 
     private ScoredGlobalIndexResult searchRows(VectorSearch query) throws IOException {
         validateSearchVector(query.vector());
-        if (vectorReader == null) {
-            return null;
-        }
 
         RoaringNavigableMap64 remaining = query.includeRowIds();
         long vectors = nativeMeta.totalVectors();
@@ -510,7 +505,7 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
-        int dimension = nativeMeta == null ? emptyDimension : nativeMeta.dimension();
+        int dimension = nativeMeta.dimension();
         if (multiVector) {
             VectorIndexUtils.validateQuery(new float[][] {(float[]) vector});
         }
@@ -529,17 +524,6 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     VectorIndexReader reader = null;
                     try {
-                        if (multiVector && ioMeta.fileSize() == 2 * Integer.BYTES) {
-                            DataInputStream empty = new DataInputStream(in);
-                            int magic = empty.readInt();
-                            emptyDimension = empty.readInt();
-                            if (magic != NativeVectorGlobalIndexWriter.EMPTY_MULTIVECTOR_MAGIC
-                                    || emptyDimension <= 0) {
-                                throw new IOException("Invalid empty multivector shard.");
-                            }
-                            openStream = in;
-                            return;
-                        }
                         reader = new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
                         nativeMeta = reader.metadata();
                         if (multiVector && !"cosine".equals(nativeMeta.metric())) {

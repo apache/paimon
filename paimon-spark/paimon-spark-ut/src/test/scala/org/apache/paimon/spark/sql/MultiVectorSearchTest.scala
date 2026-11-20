@@ -46,6 +46,29 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("skip a range with no embeddings when building a list index") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (chunks ARRAY<ARRAY<FLOAT>>)
+          |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+          |'data-evolution.enabled'='true', 'vector-index.search-mode'='detail')""".stripMargin)
+      spark.sql("""INSERT INTO T VALUES (NULL), (array()), (array(CAST(NULL AS ARRAY<FLOAT>)))""")
+      spark
+        .sql("""CALL sys.create_global_index(table => 'test.T', index_column => 'chunks',
+               |index_type => 'ivf-flat', options => 'ivf-flat.dimension=2')""".stripMargin)
+        .collect()
+      assert(
+        spark
+          .sql("SELECT * FROM `T$table_indexes` WHERE index_type = 'ivf-flat'")
+          .collect()
+          .isEmpty)
+      val query = "SELECT * FROM vector_search('T', 'chunks', array(array(1f, 0f)), 1)"
+      assert(spark.sql(query).collect().isEmpty)
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('vector-index.search-mode'='fast')")
+      assert(spark.sql(query).collect().isEmpty)
+    }
+  }
+
   test("reject matrix queries with unsupported SQL shapes during analysis") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, chunks ARRAY<ARRAY<FLOAT>>)
