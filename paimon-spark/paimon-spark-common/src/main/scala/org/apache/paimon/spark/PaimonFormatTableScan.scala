@@ -55,25 +55,7 @@ case class PaimonFormatTableScan(
   }
 
   override def estimateStatistics: Statistics = {
-    // Spark can ask a fresh scan for statistics before filter and column pushdown.
-    // Avoid listing files in every catalog-managed partition just to estimate the table size.
-    if (
-      table.partitionManager() != null &&
-      pushedPartitionFilters.isEmpty && pushedDataFilters.isEmpty && pushedLimit.isEmpty &&
-      readTableRowType == tableRowType
-    ) {
-      new Statistics {
-        override def sizeInBytes(): OptionalLong = OptionalLong.empty()
-        override def numRows(): OptionalLong = OptionalLong.empty()
-      }
-    } else {
-      val splits = inputSplits
-      PaimonStatistics(
-        splits,
-        readTableRowType,
-        table.rowType(),
-        table.statistics(),
-        plannedRowCount)
-    }
+    val splits = inputSplits
+    PaimonStatistics(splits, readTableRowType, table.rowType(), table.statistics(), plannedRowCount)
   }
 }

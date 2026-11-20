@@ -23,6 +23,7 @@ import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
 import org.apache.spark.sql.connector.read.SupportsReportStatistics
+import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.Collections
@@ -72,7 +73,7 @@ class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("unfiltered Format Table statistics do not list catalog-managed partitions") {
+  test("Format Table statistics before pushdown do not list catalog-managed partitions") {
     val tableName = "catalog_partition_unfiltered_stats"
     withTable(tableName) {
       sql(
@@ -96,6 +97,33 @@ class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
         assert(!stats.sizeInBytes().isPresent)
       } finally {
         restCatalogServer.setPartitionListingSupported(true)
+      }
+    }
+  }
+
+  test("a full-schema unfiltered Format Table scan can be broadcast after pushdown") {
+    val tableName = "catalog_partition_broadcast_dim"
+    withTable(tableName) {
+      sql(s"""CREATE TABLE $tableName (id INT, dt STRING)
+             |USING CSV
+             |PARTITIONED BY (dt)
+             |TBLPROPERTIES (
+             |  'format-table.implementation' = 'paimon',
+             |  'metastore.partitioned-table' = 'true')
+             |""".stripMargin)
+      sql(s"INSERT INTO $tableName VALUES (1, '20260715')")
+
+      withSparkSQLConf(
+        "spark.sql.adaptive.enabled" -> "false",
+        "spark.sql.autoBroadcastJoinThreshold" -> "1048576") {
+        val plan = spark
+          .sql(s"""SELECT r.id, d.id, d.dt
+                  |FROM range(1000000) r LEFT JOIN $tableName d
+                  |ON r.id = coalesce(d.id, -1)
+                  |""".stripMargin)
+          .queryExecution
+          .executedPlan
+        assert(plan.collectFirst { case join: BroadcastHashJoinExec => join }.isDefined, plan)
       }
     }
   }
