@@ -42,6 +42,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.SortedMap;
+import java.util.function.UnaryOperator;
 
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.shade.guava30.com.google.common.base.MoreObjects.firstNonNull;
@@ -51,6 +52,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class TagAutoCreation {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagAutoCreation.class);
+    private static final int MAX_TAG_YEAR = 9999;
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
@@ -165,15 +167,24 @@ public class TagAutoCreation {
         LocalDateTime time = LocalDateTime.ofInstant(Instant.ofEpochMilli(watermark), zone);
         TagPeriodHandler tagPeriodHandler = TagPeriodHandler.create(options);
         Duration delay = options.tagCreationDelay();
+        UnaryOperator<LocalDateTime> normalize = tagPeriodHandler::normalizeForWatermarkValidation;
+        LocalDateTime firstTag = normalize.apply(time);
+        LocalDateTime delayedTag =
+                latestSnapshot == null || delay.isZero()
+                        ? firstTag
+                        : normalize.apply(time.minus(delay));
         try {
-            tagPeriodHandler.timeToTag(tagPeriodHandler.normalizeToPreviousTag(time));
-            if (latestSnapshot != null && !delay.isZero()) {
-                tagPeriodHandler.timeToTag(
-                        tagPeriodHandler.normalizeToPreviousTag(time.minus(delay)));
+            tagPeriodHandler.timeToTag(firstTag);
+            if (!firstTag.equals(delayedTag)) {
+                tagPeriodHandler.timeToTag(delayedTag);
             }
         } catch (DateTimeException e) {
             DateTimeException cause = e;
-            if (latestSnapshot != null) {
+            // If even the delayed boundary is too far ahead, completing tags one at a time
+            // or using a separate tag creator cannot make that boundary printable.
+            boolean exceedsTagRange =
+                    firstTag.getYear() > MAX_TAG_YEAR && delayedTag.getYear() > MAX_TAG_YEAR;
+            if (latestSnapshot != null && !exceedsTagRange) {
                 if (creation == null) {
                     if (options.writeOnly()) {
                         // A dedicated creator can remember tags that have already expired.
@@ -191,7 +202,7 @@ public class TagAutoCreation {
                 try {
                     LocalDateTime nextTag =
                             creation.processSnapshotsUpTo(latestSnapshot.id(), false);
-                    LocalDateTime tag = creation.tagTime(time, nextTag);
+                    LocalDateTime tag = creation.tagTime(time, nextTag, normalize);
                     if (tag != null) {
                         tagPeriodHandler.timeToTag(tag);
                     }
@@ -312,14 +323,22 @@ public class TagAutoCreation {
 
     @Nullable
     private LocalDateTime tagTime(LocalDateTime time, @Nullable LocalDateTime nextTag) {
+        return tagTime(time, nextTag, periodHandler::normalizeToPreviousTag);
+    }
+
+    @Nullable
+    private LocalDateTime tagTime(
+            LocalDateTime time,
+            @Nullable LocalDateTime nextTag,
+            UnaryOperator<LocalDateTime> normalize) {
         if (nextTag == null) {
-            return periodHandler.normalizeToPreviousTag(time);
+            return normalize.apply(time);
         }
         LocalDateTime delayedTime = time.minus(delay);
         if (delayedTime.isBefore(periodHandler.nextTagTime(nextTag))) {
             return null;
         }
-        return automaticCompletion ? nextTag : periodHandler.normalizeToPreviousTag(delayedTime);
+        return automaticCompletion ? nextTag : normalize.apply(delayedTime);
     }
 
     private boolean isAfterOrEqual(LocalDateTime t1, LocalDateTime t2) {
