@@ -173,6 +173,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         CommitScanner commitScanner =
                 new CommitScanner(
                         table.store()::newScan,
+                        ((AbstractFileStoreTable) table).schemaManager(),
                         table.snapshotManager(),
                         null,
                         new CoreOptions(table.schema().options()));

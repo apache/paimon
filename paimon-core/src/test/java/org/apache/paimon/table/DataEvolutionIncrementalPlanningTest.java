@@ -46,6 +46,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +55,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DataEvolutionIncrementalPlanningTest {
 
     @TempDir java.nio.file.Path directory;
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void testSmallScanBufferPreservesRows(int pages) throws Exception {
+        FileStoreTable table =
+                createTable(false)
+                        .copy(
+                                Collections.singletonMap(
+                                        "sort-spill-buffer-size", pages * 64 + " kb"));
+        write(table, GenericRow.of(1, 0), GenericRow.of(2, 0));
+        ReadBuilder read = table.newReadBuilder();
+        assertThat(readIds(read, read.newScan().plan())).containsExactly(1, 2);
+        try (IOManagerImpl io = new IOManagerImpl(directory.toString());
+                DataFileMetaStore store = newStore(1024 * 1024)) {
+            TableScan.Plan plan = plan(read, store, io);
+            assertThat(readIds(read, plan)).containsExactly(1, 2);
+            // The unused fallback store is sealed and stays within its original empty budget.
+            if (pages == 2) {
+                assertThat(store.serializedBytes()).isEqualTo(Long.BYTES);
+                assertThat(store.slice(0, 0)).isEmpty();
+            } else {
+                assertThat(store.serializedBytes()).isGreaterThan(Long.BYTES);
+            }
+        }
+    }
 
     @Test
     void testSmallLimitFitsReplayBudget() throws Exception {

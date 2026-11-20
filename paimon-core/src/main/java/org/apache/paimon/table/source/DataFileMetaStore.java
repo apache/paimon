@@ -37,12 +37,12 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.AbstractList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -69,8 +69,8 @@ public final class DataFileMetaStore implements Closeable {
     private Path indexPath;
     private BufferedOutputStream dataOutput;
     private DataOutputStream indexOutput;
-    private FileChannel dataInput;
-    private FileChannel indexInput;
+    private RandomAccessFile dataInput;
+    private RandomAccessFile indexInput;
     private DataFileMetaSerializer writer = new DataFileMetaSerializer();
     private DataOutputSerializer encoded = new DataOutputSerializer(1024);
     private int count;
@@ -134,8 +134,8 @@ public final class DataFileMetaStore implements Closeable {
             indexOutput.writeLong(dataBytes);
             dataOutput.close();
             indexOutput.close();
-            dataInput = FileChannel.open(dataPath, StandardOpenOption.READ);
-            indexInput = FileChannel.open(indexPath, StandardOpenOption.READ);
+            dataInput = new RandomAccessFile(dataPath.toFile(), "r");
+            indexInput = new RandomAccessFile(indexPath.toFile(), "r");
             dataOutput = null;
             indexOutput = null;
             writer = null;
@@ -194,7 +194,7 @@ public final class DataFileMetaStore implements Closeable {
 
     private long offset(int record) throws IOException {
         ByteBuffer offset = ByteBuffer.allocate(Long.BYTES);
-        readFully(indexInput, offset, (long) record * Long.BYTES);
+        readFully(indexInput, offset.array(), (long) record * Long.BYTES);
         return offset.getLong(0);
     }
 
@@ -214,7 +214,7 @@ public final class DataFileMetaStore implements Closeable {
                 throw new IOException("Metadata record exceeds the maximum array size.");
             }
             byte[] bytes = new byte[(int) (to - from)];
-            readFully(dataInput, ByteBuffer.wrap(bytes), from);
+            readFully(dataInput, bytes, from);
             return new DataFileMetaSerializer().deserialize(new DataInputDeserializer(bytes));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
@@ -251,7 +251,9 @@ public final class DataFileMetaStore implements Closeable {
                         throw new NoSuchElementException();
                     }
                     try {
+                        checkInterrupted();
                         DataFileMeta value = reader.deserialize(input);
+                        checkInterrupted();
                         remaining--;
                         return value;
                     } catch (IOException failure) {
@@ -267,7 +269,7 @@ public final class DataFileMetaStore implements Closeable {
     }
 
     private InputStream rangeInput(long from, long to) {
-        // Positional reads share only the owner's channels, never a mutable cursor or extra FD.
+        // Iterators retain only their logical position and buffer, never an extra file handle.
         return new InputStream() {
             private long position = from;
 
@@ -290,7 +292,7 @@ public final class DataFileMetaStore implements Closeable {
                     return -1;
                 }
                 int requested = (int) Math.min(length, to - position);
-                int read = dataInput.read(ByteBuffer.wrap(bytes, offset, requested), position);
+                int read = readAt(dataInput, bytes, offset, requested, position);
                 if (read <= 0) {
                     throw new EOFException("Incomplete metadata store data.");
                 }
@@ -300,14 +302,33 @@ public final class DataFileMetaStore implements Closeable {
         };
     }
 
-    private static void readFully(FileChannel channel, ByteBuffer buffer, long position)
-            throws IOException {
-        while (buffer.hasRemaining()) {
-            int read = channel.read(buffer, position);
+    private void readFully(RandomAccessFile input, byte[] bytes, long position) throws IOException {
+        int offset = 0;
+        while (offset < bytes.length) {
+            int read = readAt(input, bytes, offset, bytes.length - offset, position + offset);
             if (read <= 0) {
                 throw new EOFException("Incomplete metadata store record or index.");
             }
-            position += read;
+            offset += read;
+        }
+    }
+
+    private synchronized int readAt(
+            RandomAccessFile input, byte[] bytes, int offset, int length, long position)
+            throws IOException {
+        ensureReadable();
+        checkInterrupted();
+        // RAF reads cannot close shared handles on interruption. Serialize seeks with reads and
+        // owner close; bound each read so cancellation is checked between chunks.
+        input.seek(position);
+        int read = input.read(bytes, offset, Math.min(length, BUFFER_SIZE));
+        checkInterrupted();
+        return read;
+    }
+
+    private static void checkInterrupted() throws InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("Metadata replay interrupted.");
         }
     }
 
@@ -321,7 +342,7 @@ public final class DataFileMetaStore implements Closeable {
 
     private void keepAlive() {
         if (cleanupReference != null) {
-            // JDK 8 has no reachabilityFence. Keep the owner alive until its last channel I/O.
+            // JDK 8 has no reachabilityFence. Keep the owner alive until its last file I/O.
             synchronized (this) {
                 // Acquiring the owner's monitor is the reachability barrier.
             }
@@ -389,8 +410,8 @@ public final class DataFileMetaStore implements Closeable {
 
         private CleanupReference(
                 DataFileMetaStore owner,
-                FileChannel data,
-                FileChannel index,
+                RandomAccessFile data,
+                RandomAccessFile index,
                 Path dataPath,
                 Path indexPath) {
             super(owner, CleanupHolder.QUEUE);

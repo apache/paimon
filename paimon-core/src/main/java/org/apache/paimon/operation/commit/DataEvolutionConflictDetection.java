@@ -450,6 +450,11 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                     rowIdConflictChecker,
                     commitKind);
         }
+        Optional<RuntimeException> exception =
+                checkCentroidSourceChanges(latestSnapshot, indexFiles);
+        if (exception.isPresent()) {
+            return exception;
+        }
         return checkForRowIdFromSnapshot(
                 latestSnapshot,
                 Lists.transform(deltaFiles, SimpleFileEntry::from),

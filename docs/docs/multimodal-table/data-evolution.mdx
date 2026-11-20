@@ -555,6 +555,10 @@ replay keeps only the required complete dependency groups. Candidate metadata
 is still scanned and externally sorted before selecting that prefix; the
 largest-group and sorting memory boundaries still apply.
 
+Streaming scan planning requires at least three sort-buffer pages. Smaller
+buffers remain valid and use ordinary scan planning with its original metadata
+memory boundary.
+
 Streaming commit conflict checking requires at least six sort-buffer pages for
 its two sorters. Smaller buffers remain valid and use ordinary conflict checking,
 which retains its original metadata memory boundary instead of increasing the

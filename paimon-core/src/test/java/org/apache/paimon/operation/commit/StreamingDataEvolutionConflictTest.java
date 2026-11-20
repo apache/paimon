@@ -25,6 +25,9 @@ import org.apache.paimon.disk.BufferFileWriter;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -35,8 +38,11 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
@@ -79,6 +85,75 @@ import static org.mockito.Mockito.when;
 class StreamingDataEvolutionConflictTest {
 
     @TempDir Path temporary;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testCentroidSourceChangesMatchOrdinaryCheck(boolean indexedColumn) throws Exception {
+        Fixture fixture = new Fixture(list(file("base", ADD, 0L, 10, 0, -1)), 10, false);
+        TableSchema schema =
+                TableSchema.create(
+                        0,
+                        Schema.newBuilder()
+                                .column("a", DataTypes.INT())
+                                .column("b", DataTypes.INT())
+                                .build());
+        when(fixture.scanner.schema(0)).thenReturn(schema);
+        DataFileMeta update =
+                file("updated", ADD, 0L, 10, 0, -1)
+                        .file()
+                        .withWriteCols(Collections.singletonList(indexedColumn ? "a" : "b"));
+        when(fixture.scanner.readIncrementalEntries(
+                        fixture.snapshot, Collections.singletonList(EMPTY_ROW)))
+                .thenReturn(
+                        Collections.singletonList(
+                                ManifestEntry.create(ADD, EMPTY_ROW, 0, -1, update)));
+        byte[] meta =
+                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "router",
+                        100,
+                        0,
+                        null,
+                        null,
+                        new GlobalIndexMeta(
+                                0,
+                                9,
+                                0,
+                                null,
+                                meta,
+                                new DataEvolutionIndexSourceMeta(1).serialize()));
+        List<IndexManifestEntry> changes =
+                Collections.singletonList(new IndexManifestEntry(ADD, EMPTY_ROW, 0, indexFile));
+        Optional<RuntimeException> ordinary =
+                fixture.detection.checkConflicts(
+                        fixture.snapshot,
+                        fixture.base,
+                        Collections.emptyList(),
+                        changes,
+                        null,
+                        CommitKind.APPEND);
+        assertThat(ordinary.isPresent()).isEqualTo(indexedColumn);
+        try (IOManager io = IOManager.create(temporary.toString())) {
+            Optional<RuntimeException> streaming =
+                    fixture.detection.checkConflictsStreaming(
+                            options(),
+                            io,
+                            fixture.snapshot,
+                            Collections.singletonList(EMPTY_ROW),
+                            Collections.emptyList(),
+                            changes,
+                            null,
+                            CommitKind.APPEND);
+            assertThat(streaming.isPresent()).isEqualTo(indexedColumn);
+            if (indexedColumn) {
+                assertThat(streaming.get()).hasMessage(ordinary.get().getMessage());
+                assertThat(streaming.get()).hasMessageContaining("source rows changed");
+            }
+            fixture.assertNoLegacyBaseCollection();
+        }
+    }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("cases")

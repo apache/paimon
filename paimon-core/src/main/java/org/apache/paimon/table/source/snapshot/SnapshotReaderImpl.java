@@ -419,6 +419,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 throw new RuntimeException(failure);
             }
         }
+        return readPlan();
+    }
+
+    private Plan readPlan() {
         FileStoreScan.Plan plan = scan.plan();
         @Nullable Snapshot snapshot = plan.snapshot();
 
@@ -457,6 +461,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     || scanMode != ScanMode.ALL) {
                 throw new UnsupportedOperationException(
                         "Incremental metadata planning requires a DE batch ALL scan.");
+            }
+            // The external sorter needs three pages; smaller valid budgets keep ordinary planning.
+            if (options.sortSpillBufferSize() / options.pageSize() < 3) {
+                Plan plan = readPlan();
+                store.seal();
+                return plan;
             }
             IncrementalSplitPlanner planner = new IncrementalSplitPlanner(store);
             Snapshot snapshot =

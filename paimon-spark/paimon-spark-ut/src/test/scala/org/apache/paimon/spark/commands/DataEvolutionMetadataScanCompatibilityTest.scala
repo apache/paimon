@@ -29,6 +29,22 @@ class DataEvolutionMetadataScanCompatibilityTest extends PaimonSparkTestBase {
     "'bucket'='-1','row-tracking.enabled'='true'," +
       "'data-evolution.enabled'='true','write-only'='true'"
 
+  Seq(2, 3).foreach {
+    pages =>
+      test(s"streaming metadata mode preserves SELECT with $pages sort-buffer pages") {
+        withTable("t") {
+          sql(s"""CREATE TABLE t (id INT, value INT) TBLPROPERTIES (
+                 |$options,'page-size'='64 kb','sort-spill-buffer-size'='${pages * 64} kb')
+                 |""".stripMargin)
+          sql("INSERT INTO t VALUES (1,10),(2,20)")
+          checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10), Row(2, 20)))
+          sql(s"ALTER TABLE t SET TBLPROPERTIES ('$modeOption'='streaming')")
+          checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10), Row(2, 20)))
+          checkAnswer(sql("SELECT * FROM t WHERE id=2 LIMIT 1"), Seq(Row(2, 20)))
+        }
+      }
+  }
+
   test("streaming metadata mode preserves fallback rows and current partition precedence") {
     withTable("t") {
       sql(s"""CREATE TABLE t (id INT, value INT, p INT) PARTITIONED BY (p)

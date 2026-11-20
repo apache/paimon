@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.channels.FileChannel;
@@ -48,6 +49,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -200,11 +202,11 @@ class DataFileMetaStoreTest {
             List<DataFileMeta> slice = store.slice(0, 1);
             assertThat(store.withAutomaticCleanup()).isSameAs(store);
             assertThat(slice).containsExactly(file(0));
-            FileChannel data = channel(store, "dataInput");
-            FileChannel index = channel(store, "indexInput");
+            RandomAccessFile data = input(store, "dataInput");
+            RandomAccessFile index = input(store, "indexInput");
             store.close();
-            assertThat(data.isOpen()).isFalse();
-            assertThat(index.isOpen()).isFalse();
+            assertThat(data.getFD().valid()).isFalse();
+            assertThat(index.getFD().valid()).isFalse();
             assertThatThrownBy(() -> slice.get(0)).isInstanceOf(IllegalStateException.class);
             // A queued notification after explicit close must remain harmless.
             cleanupNotification(store).finalizeReferent();
@@ -213,27 +215,27 @@ class DataFileMetaStoreTest {
     }
 
     @Test
-    void testAutomaticCleanupNotificationClosesChannelsAndDeletesFilesWithoutForcedGc()
+    void testAutomaticCleanupNotificationClosesHandlesAndDeletesFilesWithoutForcedGc()
             throws Exception {
         try (DataFileMetaStore store = new DataFileMetaStore(directory, 1024 * 1024)) {
             store.append(file(0));
             store.seal();
             store.withAutomaticCleanup();
-            FileChannel data = channel(store, "dataInput");
-            FileChannel index = channel(store, "indexInput");
+            RandomAccessFile data = input(store, "dataInput");
+            RandomAccessFile index = input(store, "indexInput");
             // Deterministically exercise the queue callback, without asserting GC timing.
             cleanupNotification(store).finalizeReferent();
             cleanupNotification(store).finalizeReferent();
-            assertThat(data.isOpen()).isFalse();
-            assertThat(index.isOpen()).isFalse();
+            assertThat(data.getFD().valid()).isFalse();
+            assertThat(index.getFD().valid()).isFalse();
             assertNoOwnedFiles();
         }
     }
 
-    private static FileChannel channel(DataFileMetaStore store, String name) throws Exception {
+    private static RandomAccessFile input(DataFileMetaStore store, String name) throws Exception {
         Field field = DataFileMetaStore.class.getDeclaredField(name);
         field.setAccessible(true);
-        return (FileChannel) field.get(store);
+        return (RandomAccessFile) field.get(store);
     }
 
     private static FinalizablePhantomReference<?> cleanupNotification(DataFileMetaStore store)
@@ -395,6 +397,70 @@ class DataFileMetaStoreTest {
                     .isInstanceOf(UncheckedIOException.class);
         }
         assertNoOwnedFiles();
+    }
+
+    @Test
+    void testInterruptedDataReplayDoesNotPoisonIndependentSlices() throws Exception {
+        try (DataFileMetaStore store = new DataFileMetaStore(directory, 1024 * 1024)) {
+            store.append(file(0));
+            store.append(file(1));
+            store.seal();
+            List<DataFileMeta> interruptedSlice = store.slice(0, 2);
+            List<DataFileMeta> independentSlice = store.slice(0, 2);
+            // Resolve index offsets before interruption, but leave both data buffers empty.
+            Iterator<DataFileMeta> interrupted = interruptedSlice.iterator();
+            Iterator<DataFileMeta> independent = independentSlice.iterator();
+
+            assertInterruptedReadFails(interrupted::next);
+
+            assertThat(independent.next()).isEqualTo(file(0));
+            assertThat(independent.next()).isEqualTo(file(1));
+            assertThat(independent.hasNext()).isFalse();
+            assertThat(independentSlice).containsExactly(file(0), file(1));
+            assertThat(independentSlice.get(0)).isEqualTo(file(0));
+            assertThat(independentSlice.get(1)).isEqualTo(file(1));
+
+            Iterator<DataFileMeta> buffered = interruptedSlice.iterator();
+            assertThat(buffered.next()).isEqualTo(file(0));
+            assertInterruptedReadFails(buffered::next);
+            assertThat(independentSlice).containsExactly(file(0), file(1));
+        }
+        assertNoOwnedFiles();
+    }
+
+    @Test
+    void testInterruptedIndexReadDoesNotPoisonIndependentSlices() throws Exception {
+        try (DataFileMetaStore store = new DataFileMetaStore(directory, 1024 * 1024)) {
+            store.append(file(0));
+            store.append(file(1));
+            store.seal();
+            List<DataFileMeta> interruptedSlice = store.slice(0, 2);
+            List<DataFileMeta> independentSlice = store.slice(0, 2);
+
+            assertInterruptedReadFails(() -> interruptedSlice.get(0));
+
+            assertThat(independentSlice.get(0)).isEqualTo(file(0));
+            assertThat(independentSlice.get(1)).isEqualTo(file(1));
+            assertThat(independentSlice).containsExactly(file(0), file(1));
+        }
+        assertNoOwnedFiles();
+    }
+
+    private static void assertInterruptedReadFails(Runnable read) throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(
+                            () -> {
+                                Thread.currentThread().interrupt();
+                                assertThatThrownBy(read::run)
+                                        .isInstanceOf(UncheckedIOException.class);
+                                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                            })
+                    .get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test
