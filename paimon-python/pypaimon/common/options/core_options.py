@@ -977,7 +977,9 @@ class CoreOptions:
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description("Search mode for scalar index queries.")
+        .with_description("Search mode for scalar indexes. If neither this option nor the legacy "
+                          "global-index.search-mode is set, ordinary Data Evolution batch scans "
+                          "use full and search filters use fast.")
     )
 
     VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
@@ -1815,17 +1817,21 @@ class CoreOptions:
     def scalar_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
 
+    def scalar_scan_search_mode(self):
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FULL)
+
     def vector_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
 
     def full_text_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
 
-    def _family_index_search_mode(self, option):
+    def _family_index_search_mode(self, option, default=None):
         if self.options.contains(option):
             return self.options.get(option)
         global_mode = self.global_index_search_mode()
-        return global_mode if global_mode is not None else self.options.get(option)
+        return global_mode if global_mode is not None else self.options.get(option, default)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

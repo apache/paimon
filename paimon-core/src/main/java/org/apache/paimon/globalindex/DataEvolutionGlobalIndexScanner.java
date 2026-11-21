@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
@@ -86,48 +87,20 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
-            Options options,
-            RowType rowType,
-            FileIO fileIO,
-            IndexPathFactory indexPathFactory,
-            Collection<IndexFileMeta> indexFiles) {
-        this(
-                table,
-                snapshot,
-                partitionFilter,
-                options,
-                rowType,
-                fileIO,
-                indexPathFactory,
-                indexFiles,
-                indexFiles);
-    }
-
-    private DataEvolutionGlobalIndexScanner(
-            FileStoreTable table,
-            @Nullable Snapshot snapshot,
-            @Nullable PartitionPredicate partitionFilter,
-            Options options,
-            RowType rowType,
-            FileIO fileIO,
-            IndexPathFactory indexPathFactory,
+            GlobalIndexSearchMode searchMode,
             Collection<IndexFileMeta> coverageIndexFiles,
             Collection<IndexFileMeta> indexFiles) {
         this.table = table;
         this.indexFiles = new ArrayList<>(indexFiles);
-        this.fileIO = fileIO;
-        this.options = options;
-        this.rowType = rowType;
+        this.fileIO = table.fileIO();
+        this.options = table.coreOptions().toConfiguration();
+        this.rowType = table.rowType();
         this.executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        this.indexPathFactory = indexPathFactory;
+        this.indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         this.coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table,
-                        snapshot,
-                        partitionFilter,
-                        coverageIndexFiles,
-                        table.coreOptions().scalarIndexSearchMode());
+                        table, snapshot, partitionFilter, coverageIndexFiles, searchMode);
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, List<IndexMetaFileGroup>> groupsByField = groupIndexFiles(indexFiles);
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
@@ -242,10 +215,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table),
                         partitionFilter,
-                        table.coreOptions().toConfiguration(),
-                        table.rowType(),
-                        table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().scalarIndexSearchMode(),
+                        globalIndexFiles,
                         globalIndexFiles));
     }
 
@@ -277,10 +248,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         snapshot,
                         partitionFilter,
-                        table.coreOptions().toConfiguration(),
-                        table.rowType(),
-                        table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().scalarScanSearchMode(),
+                        indexFiles,
                         indexFiles));
     }
 
@@ -324,10 +293,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         snapshot,
                         partitionFilter,
-                        table.coreOptions().toConfiguration(),
-                        table.rowType(),
-                        table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
                         selectedIndexFiles));
     }

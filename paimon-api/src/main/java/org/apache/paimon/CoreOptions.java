@@ -3190,7 +3190,10 @@ public class CoreOptions implements Serializable {
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription("Search mode for scalar index queries.");
+                    .withDescription(
+                            "Search mode for scalar indexes. If neither this option nor the legacy "
+                                    + "global-index.search-mode is set, ordinary Data Evolution batch "
+                                    + "scans use full and search filters use fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -5086,6 +5089,10 @@ public class CoreOptions implements Serializable {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
     }
 
+    public GlobalIndexSearchMode scalarScanSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FULL);
+    }
+
     public boolean globalIndexFilterRefineFromData() {
         return options.get(GLOBAL_INDEX_FILTER_REFINE_FROM_DATA);
     }
@@ -5100,11 +5107,14 @@ public class CoreOptions implements Serializable {
 
     private GlobalIndexSearchMode indexSearchMode(
             ConfigOption<GlobalIndexSearchMode> familySearchMode) {
-        if (options.contains(familySearchMode)) {
-            return options.get(familySearchMode);
-        }
-        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
-                .orElseGet(() -> options.get(familySearchMode));
+        return indexSearchMode(familySearchMode, familySearchMode.defaultValue());
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode,
+            GlobalIndexSearchMode defaultMode) {
+        return options.getOptional(familySearchMode)
+                .orElseGet(() -> options.getOptional(GLOBAL_INDEX_SEARCH_MODE).orElse(defaultMode));
     }
 
     public Integer globalIndexThreadNum() {

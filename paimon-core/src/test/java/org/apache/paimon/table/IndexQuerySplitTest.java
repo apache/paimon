@@ -323,10 +323,10 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         ReadBuilder read =
                 distributedTable(table).newReadBuilder().withFilter(b.startsWith(1, str("a")));
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).hasSize(2).allMatch(split -> split instanceof IndexQuerySplit);
+        assertThat(splits).hasSize(3).allMatch(split -> split instanceof IndexQuerySplit);
         // The first range still has both files needed for column merging.
         assertThat(((IndexQuerySplit) splits.get(0)).dataSplit().dataFiles()).hasSize(2);
-        assertThat(read(read, splits)).hasSize(200);
+        assertThat(read(read, splits)).hasSize(300);
     }
 
     @ParameterizedTest
