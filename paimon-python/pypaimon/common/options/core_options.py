@@ -976,10 +976,18 @@ class CoreOptions:
     SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
-        .no_default_value()
-        .with_description("Search mode for scalar indexes. If neither this option nor the legacy "
-                          "global-index.search-mode is set, ordinary Data Evolution batch scans "
-                          "use full and scalar prefilters in vector and full-text search use fast.")
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description("Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                          "setting also serves as a fallback for scalar prefilters.")
+    )
+
+    SCALAR_INDEX_PREFILTER_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.prefilter.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description("Search mode for scalar prefilters in vector and full-text search. If unset, "
+                          "use an explicit scalar-index.search-mode, then an explicit "
+                          "global-index.search-mode, then fast.")
     )
 
     VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
@@ -1819,8 +1827,14 @@ class CoreOptions:
             CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST)
 
     def scalar_scan_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def scalar_prefilter_search_mode(self):
+        option = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE
+        if self.options.to_map().get(option.key()) is not None:
+            return self.options.get(option)
         return self._family_index_search_mode(
-            CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FULL)
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, option.default_value())
 
     def vector_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)

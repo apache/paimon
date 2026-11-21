@@ -1573,10 +1573,16 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
         </tr>
         <tr>
-            <td><h5>scalar-index.search-mode</h5></td>
-            <td style="word-wrap: break-word;">full for ordinary Data Evolution batch scans, fast for scalar prefilters in vector and full-text search</td>
+            <td><h5>scalar-index.prefilter.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
-            <td>Search mode for scalar indexes. An explicit setting overrides the legacy global-index.search-mode fallback.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+            <td>Search mode for scalar prefilters in vector and full-text search. If unset, use an explicit scalar-index.search-mode, then an explicit global-index.search-mode, then fast.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scalar-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>scan.bounded.watermark</h5></td>

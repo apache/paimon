@@ -603,6 +603,21 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
         GlobalIndexResult result = builder.newFullTextRead().read(plan);
         assertThat(result.results()).containsExactlyInAnyOrder(1L, 2L, 3L, 4L, 5L);
+
+        FileStoreTable prefilterFast =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE.key(), "fast"));
+        assertThat(searchWithFilter(prefilterFast, idFilter, 10).results())
+                .containsExactlyInAnyOrder(1L, 2L);
+
+        ReadBuilder readBuilder = prefilterFast.newReadBuilder().withFilter(idFilter);
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactlyInAnyOrder(1, 2, 3, 4, 5);
     }
 
     @Test

@@ -189,13 +189,28 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
+        return createForScalarFilters(
+                table,
+                pinnedSnapshot,
+                partitionFilter,
+                indexFiles,
+                table.coreOptions().scalarPrefilterSearchMode());
+    }
+
+    public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode) {
         return create(
                 table,
                 pinnedSnapshot,
                 partitionFilter,
                 indexFiles.stream()
                         .filter(file -> !isMultiFieldIndex(file))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                searchMode);
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -203,6 +218,20 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
+        return create(
+                table,
+                pinnedSnapshot,
+                partitionFilter,
+                indexFiles,
+                table.coreOptions().scalarIndexSearchMode());
+    }
+
+    private static Optional<DataEvolutionGlobalIndexScanner> create(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode) {
         List<IndexFileMeta> globalIndexFiles =
                 globalIndexFiles(indexFiles).stream()
                         .filter(file -> isIndexInSchema(table.rowType(), file))
@@ -215,7 +244,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table),
                         partitionFilter,
-                        table.coreOptions().scalarIndexSearchMode(),
+                        searchMode,
                         globalIndexFiles,
                         globalIndexFiles));
     }

@@ -202,7 +202,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                     scalarUnindexedRanges(
                             snapshot,
                             scalarFiles,
-                            effectiveOptions.scalarIndexSearchMode(),
+                            effectiveOptions.scalarPrefilterSearchMode(),
                             filterFieldIds);
             if (!bitmapCoverage.isEmpty()) {
                 List<Range> covered = Range.sortAndMergeOverlap(bitmapCoverage, true);
@@ -286,7 +286,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         // use the actual contributing fields so a declined OR arm does not generate raw work.
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, snapshot, partitionFilter, scalarFiles);
+                        table, snapshot, partitionFilter, scalarFiles, searchMode);
         if (!optionalScanner.isPresent()) {
             return Collections.emptyList();
         }

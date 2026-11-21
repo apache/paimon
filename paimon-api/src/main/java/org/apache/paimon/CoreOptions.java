@@ -3186,15 +3186,22 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Fallback search mode for global index queries.");
 
-    @Documentation.OverrideDefault(
-            "full for ordinary Data Evolution batch scans, fast for scalar prefilters in vector and full-text search")
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
-                    .noDefaultValue()
+                    .defaultValue(GlobalIndexSearchMode.FULL)
                     .withDescription(
-                            "Search mode for scalar indexes. An explicit setting overrides the "
-                                    + "legacy global-index.search-mode fallback.");
+                            "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                                    + "setting also serves as a fallback for scalar prefilters.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
+            key("scalar-index.prefilter.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription(
+                            "Search mode for scalar prefilters in vector and full-text search. If "
+                                    + "unset, use an explicit scalar-index.search-mode, then an "
+                                    + "explicit global-index.search-mode, then fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -5091,7 +5098,16 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarScanSearchMode() {
-        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FULL);
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarPrefilterSearchMode() {
+        return options.getOptional(SCALAR_INDEX_PREFILTER_SEARCH_MODE)
+                .orElseGet(
+                        () ->
+                                indexSearchMode(
+                                        SCALAR_INDEX_SEARCH_MODE,
+                                        SCALAR_INDEX_PREFILTER_SEARCH_MODE.defaultValue()));
     }
 
     public boolean globalIndexFilterRefineFromData() {
