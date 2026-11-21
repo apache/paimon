@@ -225,14 +225,13 @@ public abstract class ConflictDetection {
             // then the delta file must be <DELETE deltaFile1, DELETE dv1>; and vice versa,
             // If the delta file is <DELETE deltaFile2, DELETE dv2>,
             // then the base file must be <ADD baseFile2, ADD dv2>.
+            // Manifest I/O failures must propagate rather than be reported as a conflict.
+            List<IndexManifestEntry> baseIndexEntries =
+                    latestSnapshot.indexManifest() == null
+                            ? Collections.emptyList()
+                            : indexFileHandler.readManifest(latestSnapshot.indexManifest());
             try {
-                baseEntries =
-                        buildBaseEntriesWithDV(
-                                baseEntries,
-                                latestSnapshot.indexManifest() == null
-                                        ? Collections.emptyList()
-                                        : indexFileHandler.readManifest(
-                                                latestSnapshot.indexManifest()));
+                baseEntries = buildBaseEntriesWithDV(baseEntries, baseIndexEntries);
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {

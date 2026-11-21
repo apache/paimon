@@ -287,10 +287,21 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
+        commitMultipleAndCount(committables, checkAppendFiles);
+    }
+
+    /** Commits the committables and returns how many of them published at least one snapshot. */
+    private int commitMultipleAndCount(
+            List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
+            int publishedCommittables = 0;
             for (ManifestCommittable committable : committables) {
-                newSnapshots += commit.commit(committable, checkAppendFiles);
+                int snapshots = commit.commit(committable, checkAppendFiles);
+                newSnapshots += snapshots;
+                if (snapshots > 0) {
+                    publishedCommittables++;
+                }
             }
             if (!committables.isEmpty()) {
                 maintain(
@@ -298,6 +309,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         maintainExecutor,
                         newSnapshots > 0 || expireForEmptyCommit);
             }
+            return publishedCommittables;
         } else {
             ManifestCommittable committable;
             if (committables.size() > 1) {
@@ -321,6 +333,7 @@ public class TableCommitImpl implements InnerTableCommit {
                     committable.identifier(),
                     maintainExecutor,
                     newSnapshots > 0 || expireForEmptyCommit);
+            return newSnapshots > 0 ? 1 : 0;
         }
     }
 
@@ -337,11 +350,13 @@ public class TableCommitImpl implements InnerTableCommit {
                         .collect(Collectors.toList());
         List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
 
-        if (!retryCommittables.isEmpty()) {
-            checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables, checkAppendFiles);
+        if (retryCommittables.isEmpty()) {
+            return 0;
         }
-        return retryCommittables.size();
+        checkFilesExistence(retryCommittables);
+        // Only count identifiers that published a snapshot. A dropped compaction recovery
+        // publishes nothing, so callers that restart after recovery must not restart again.
+        return commitMultipleAndCount(retryCommittables, checkAppendFiles);
     }
 
     private void checkFilesExistence(List<ManifestCommittable> committables) {
