@@ -251,6 +251,12 @@ class RESTTokenFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self.file_io().try_to_write_atomic(path, content)
 
+    def try_to_write_exclusive(self, path: str, content: str) -> bool:
+        return self.file_io().try_to_write_exclusive(path, content)
+
+    def check_exclusive_write_supported(self, path: str):
+        return self.file_io().check_exclusive_write_supported(path)
+
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         if table_root != self.path:
             raise ValueError("Table root does not match RESTTokenFileIO bound table root.")

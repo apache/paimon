@@ -540,6 +540,12 @@ class CachingFileIO(FileIO):
     def try_to_write_atomic(self, *args, **kwargs):
         return self._delegate.try_to_write_atomic(*args, **kwargs)
 
+    def try_to_write_exclusive(self, *args, **kwargs):
+        return self._delegate.try_to_write_exclusive(*args, **kwargs)
+
+    def check_exclusive_write_supported(self, path: str):
+        return self._delegate.check_exclusive_write_supported(path)
+
     def create_blob_presigned_url(self, *args, **kwargs):
         return self._delegate.create_blob_presigned_url(*args, **kwargs)
 

@@ -17,6 +17,7 @@
 """LeRobot Dataset v3 integration for multimodal Paimon tables."""
 
 from pypaimon.multimodal.lerobot.api import load_from_lerobot
+from pypaimon.multimodal.lerobot.export import export_to_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     PaimonDatasetReader,
     PaimonLeRobotDataset,
@@ -29,4 +30,5 @@ __all__ = [
     "PaimonLeRobotDataset",
     "PaimonLeRobotWriter",
     "load_from_lerobot",
+    "export_to_lerobot",
 ]

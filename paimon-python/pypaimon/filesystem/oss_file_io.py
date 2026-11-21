@@ -18,6 +18,7 @@
 """OSS-specific operations, reusing the existing Arrow/Jindo FileIO."""
 
 import re
+from contextlib import closing
 from urllib.parse import urlparse
 
 from pypaimon.common.options.config import OssOptions
@@ -74,6 +75,89 @@ class OssFileIO(PyArrowFileIO):
             raise OSError("Failed to atomically write oss://{}/{}".format(self._oss_bucket, key)) from error
         finally:
             session.session.close()
+
+    def try_to_write_exclusive(self, path: str, content: str) -> bool:
+        """Create an OSS object only if absent; never use the rename fallback."""
+        key = self._exclusive_object_key(path)
+
+        try:
+            import oss2
+        except ImportError as error:
+            raise ImportError(
+                "OSS exclusive writes require oss2. Install pypaimon[oss] "
+                "or pypaimon[jindo].") from error
+
+        session = oss2.Session()
+        try:
+            bucket = self._create_oss_bucket(session)
+            self._check_exclusive_bucket(bucket)
+            headers = self._sse_headers()
+            headers['x-oss-forbid-overwrite'] = 'true'
+            payload = content.encode('utf-8')
+            try:
+                bucket.put_object(key, payload, headers=headers)
+                return True
+            except oss2.exceptions.ServerError as error:
+                if error.code == 'FileAlreadyExists':
+                    return False
+                raise
+            except oss2.exceptions.RequestError as error:
+                # The server may have created the object before the response
+                # was lost. The caller supplies a unique claim ID as content.
+                try:
+                    with closing(bucket.get_object(key)) as result:
+                        recorded = result.read()
+                except oss2.exceptions.OssError:
+                    raise error
+                return recorded == payload
+        except oss2.exceptions.OssError as error:
+            raise OSError("Failed to exclusively write {}".format(path)) from error
+        finally:
+            session.session.close()
+
+    def check_exclusive_write_supported(self, path: str):
+        """Reject unsupported OSS buckets before preparing an export."""
+        self._exclusive_object_key(path)
+        try:
+            import oss2
+        except ImportError as error:
+            raise ImportError(
+                "OSS exclusive writes require oss2. Install pypaimon[oss] "
+                "or pypaimon[jindo].") from error
+        session = oss2.Session()
+        try:
+            self._check_exclusive_bucket(self._create_oss_bucket(session))
+        except oss2.exceptions.OssError as error:
+            raise OSError("Failed to check exclusive OSS write support") from error
+        finally:
+            session.session.close()
+
+    def _exclusive_object_key(self, path):
+        uri = urlparse(path)
+        if uri.scheme != 'oss' or self._extract_oss_bucket(path) != self._oss_bucket:
+            raise ValueError("Exclusive write must target the configured OSS bucket")
+        key = self._extract_oss_object_key(path)
+        if not key or key == '.' or key.endswith('/'):
+            raise ValueError("Exclusive write requires an OSS object path")
+        return key
+
+    @staticmethod
+    def _check_exclusive_bucket(bucket):
+        import oss2
+
+        # Check afresh: the cached metadata-write capability may predate a
+        # bucket versioning change. Unknown status must fail closed.
+        try:
+            versioning = bucket.get_bucket_versioning().status
+        except oss2.exceptions.ServerError as error:
+            if error.status == 403 and error.code == 'AccessDenied':
+                raise NotImplementedError(
+                    "OSS exclusive writes require permission to query "
+                    "bucket versioning.") from error
+            raise
+        if versioning is not None:
+            raise NotImplementedError(
+                "OSS exclusive writes require bucket versioning to be disabled.")
 
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         try:

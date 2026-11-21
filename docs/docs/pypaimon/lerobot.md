@@ -402,6 +402,25 @@ By default, imports copy the original videos. Set
 re-encoding (requires PyAV 14.2+), retaining decoding dependencies. Each clip is limited
 to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
+## Export a LeRobot Dataset
+
+Export one Dataset to an existing Object Table. Pass the table-group prefix
+(`PaimonLeRobotWriter` groups use the Frames table name). For groups with
+multiple Datasets, select one by `_datasets.id`; use `tag_name` for a fixed snapshot.
+
+```python
+conn.export_to_lerobot(
+    "robot_merged", output_table="exports", sub_folder="train_001",
+    version="v2.1", dataset_id="<Dataset UUID>",
+)
+```
+
+Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
+re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
+`sub_folder` names the new directory under the target Object Table, such as
+`train_001/`. The directory must not exist. Export requires OSS exclusive
+creation; FUSE-routed Object Tables are not supported.
+
 ## Capture LeRobot frames directly into Paimon
 
 `PaimonLeRobotWriter` implements the write-side surface used by LeRobot's
