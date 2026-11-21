@@ -142,6 +142,13 @@ class LocalMemoryCacheManager:
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
 
+    def invalidate(self, file_path: str) -> None:
+        with self._lock:
+            keys = [key for key in self._cache if key[0] == file_path]
+            for key in keys:
+                self._current_size -= len(self._cache.pop(key))
+            self._file_size_cache.pop(file_path, None)
+
 
 class LocalDiskCacheManager:
     """Block-level local disk cache with LRU eviction."""
@@ -170,11 +177,9 @@ class LocalDiskCacheManager:
         return self._block_size
 
     def _cache_path(self, file_path: str, block_index: int) -> str:
-        key = f"{self._block_size}:{file_path}:{block_index}"
-        h = hashlib.sha256(key.encode('utf-8')).hexdigest()
-        prefix = h[:2]
-        sub_dir = os.path.join(self._cache_dir, prefix)
-        return os.path.join(sub_dir, h)
+        h = hashlib.sha256(file_path.encode('utf-8')).hexdigest()
+        # Keep a file prefix so invalidation also finds blocks cached before a restart.
+        return os.path.join(self._cache_dir, h[:2], f"{h}-{self._block_size}-{block_index}")
 
     def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
         path = self._cache_path(file_path, block_index)
@@ -261,6 +266,26 @@ class LocalDiskCacheManager:
 
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
+
+    def invalidate(self, file_path: str) -> None:
+        h = hashlib.sha256(file_path.encode('utf-8')).hexdigest()
+        directory = os.path.join(self._cache_dir, h[:2])
+        with self._lock:
+            try:
+                names = os.listdir(directory)
+            except FileNotFoundError:
+                names = []
+            for name in names:
+                if not name.startswith(h + '-') or '.tmp.' in name:
+                    continue
+                path = os.path.join(directory, name)
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+                # Other errors must abort the caller before it replaces the source file.
+                self._current_size -= self._entry_index.pop(path, 0)
+            self._file_size_cache.pop(file_path, None)
 
 
 class CachingInputStream(io.RawIOBase):
@@ -508,6 +533,12 @@ class CachingFileIO(FileIO):
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)
+
+    def invalidate_cache(self, paths) -> None:
+        """Discard cached blocks and sizes before a non-concurrent metadata replacement."""
+        if self._cache is not None:
+            for path in paths:
+                self._cache.invalidate(path)
 
     def get_file_status(self, path: str):
         return self._delegate.get_file_status(path)

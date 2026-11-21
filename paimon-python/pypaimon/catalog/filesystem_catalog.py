@@ -564,11 +564,31 @@ class FileSystemCatalog(Catalog):
             identifier: Union[str, Identifier],
             branch_name: str,
     ) -> None:
+        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+        from pypaimon.tag.tag_manager import TagManager
+
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        table = self.get_table(identifier)
+        check_not_system_table(identifier, "fast_forward")
+        if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
+            raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
+        table_path = self.get_table_path(identifier)
+        current_branch = identifier.get_branch_name_or_default()
+        schema_manager = SchemaManager(self.file_io, table_path, current_branch)
+        # A failed copy can leave a partial schema. Retry must not load it first.
+        if not schema_manager._list_versioned_files():
+            raise TableNotExistException(identifier)
+        branch_manager = FileSystemBranchManager(
+            self.file_io,
+            table_path,
+            SnapshotManager(self.file_io, table_path, current_branch),
+            TagManager(self.file_io, table_path, current_branch),
+            schema_manager,
+            current_branch,
+        )
         try:
-            table.branch_manager().fast_forward(branch_name)
+            branch_manager.fast_forward(branch_name)
         except ValueError as e:
             if "doesn't exist" in str(e):
                 raise BranchNotExistException(branch_name) from e
