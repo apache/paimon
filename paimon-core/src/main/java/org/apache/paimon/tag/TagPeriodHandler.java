@@ -21,12 +21,16 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Timestamp;
 
+import java.math.BigInteger;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.ResolverStyle;
+import java.time.temporal.ChronoUnit;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -103,6 +107,11 @@ public interface TagPeriodHandler {
 
     LocalDateTime normalizeToPreviousTag(LocalDateTime time);
 
+    /** Compute the previous tag boundary for a new watermark without wrapping the year. */
+    default LocalDateTime normalizeForWatermarkValidation(LocalDateTime time) {
+        return normalizeToPreviousTag(time);
+    }
+
     String timeToTag(LocalDateTime time);
 
     LocalDateTime nextTagTime(LocalDateTime time);
@@ -136,6 +145,38 @@ public interface TagPeriodHandler {
                     Timestamp.fromEpochMillis((mills / periodMills) * periodMills)
                             .toLocalDateTime();
             return normalized.minus(onePeriod());
+        }
+
+        /**
+         * Uses the same period alignment as {@link #normalizeToPreviousTag(LocalDateTime)}. Tag
+         * creation and preview use that method's {@link Timestamp} conversion for compatibility
+         * with existing snapshots. This method preserves the full epoch day so an out-of-range tag
+         * year cannot wrap to a printable year during validation.
+         */
+        @Override
+        public LocalDateTime normalizeForWatermarkValidation(LocalDateTime time) {
+            Duration period = onePeriod();
+            LocalDateTime localMillis = time.truncatedTo(ChronoUnit.MILLIS);
+            // Align the already zone-adjusted local time against the local epoch.
+            long remainder =
+                    periodRemainder(localMillis.toInstant(ZoneOffset.UTC), period.toMillis());
+            return localMillis.minus(Duration.ofMillis(remainder)).minus(period);
+        }
+
+        private static long periodRemainder(Instant instant, long periodMillis) {
+            long millis;
+            try {
+                millis = instant.toEpochMilli();
+            } catch (ArithmeticException overflow) {
+                // A zone offset can move a long watermark outside the epoch-millisecond range.
+                return BigInteger.valueOf(instant.getEpochSecond())
+                        .multiply(BigInteger.valueOf(1000))
+                        .add(BigInteger.valueOf(instant.getNano() / 1_000_000))
+                        .remainder(BigInteger.valueOf(periodMillis))
+                        .longValueExact();
+            }
+            // Keep the existing truncation toward zero for pre-epoch timestamps.
+            return millis % periodMillis;
         }
 
         @Override

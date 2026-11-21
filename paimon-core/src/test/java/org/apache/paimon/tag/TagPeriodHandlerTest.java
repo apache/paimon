@@ -19,6 +19,8 @@
 package org.apache.paimon.tag;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -30,6 +32,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for TagPeriodHandler. */
 public class TagPeriodHandlerTest {
+
+    @ParameterizedTest
+    @CsvSource({
+        "1969-12-31T23:59:59.999, 60, 1969-12-31T23:00",
+        "1970-01-01T01:14:00, 37, 1970-01-01T00:37",
+        "1970-01-01T01:14:00.000999999, 37, 1970-01-01T00:37",
+        "+54696732-08-30T20:26:40, 60, +54696732-08-30T19:00",
+        "+11761245-09-30T20:26:40, 60, +11761245-09-30T19:00",
+        "+292278994-08-17T21:12:55.807, 60, +292278994-08-17T20:00",
+        "-292275055-05-16T04:47:04.193, 60, -292275055-05-16T04:00"
+    })
+    public void testNormalizeForWatermarkValidation(String input, long minutes, String expected) {
+        TagPeriodHandler handler =
+                new TagPeriodHandler.PeriodDurationTagPeriodHandler(Duration.ofMinutes(minutes));
+        assertThat(handler.normalizeForWatermarkValidation(LocalDateTime.parse(input)))
+                .isEqualTo(LocalDateTime.parse(expected));
+    }
 
     @Test
     public void testDailyTagPeriodHandler() {

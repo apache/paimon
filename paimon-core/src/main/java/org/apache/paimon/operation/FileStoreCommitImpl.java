@@ -80,6 +80,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
+import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -197,6 +198,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
+    @Nullable private TagAutoCreation tagAutoCreation;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -290,6 +292,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire) {
         this.conflictDetection.withPartitionExpire(partitionExpire);
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit withTagAutoCreation(TagAutoCreation tagAutoCreation) {
+        this.tagAutoCreation = tagAutoCreation;
         return this;
     }
 
@@ -1370,6 +1378,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> changelogFiles = changes.changelogFiles;
         List<IndexManifestEntry> indexFiles = changes.indexFiles;
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
+
+        Long previousWatermark = latestSnapshot == null ? null : latestSnapshot.watermark();
+        if (watermark != null && (previousWatermark == null || watermark > previousWatermark)) {
+            TagAutoCreation.validateWatermark(
+                    options, watermark, snapshotManager, latestSnapshot, tagAutoCreation);
+        }
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
