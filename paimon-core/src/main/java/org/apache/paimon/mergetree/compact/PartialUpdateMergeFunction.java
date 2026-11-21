@@ -152,6 +152,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
      */
     private boolean meetInsert;
 
+    /**
+     * Whether a DELETE record re-initialized the row and no later insert has brought the row back.
+     * A row removed only by UPDATE_BEFORE records keeps its fields, so the result stays
+     * UPDATE_BEFORE and a later merge does not re-initialize the row from it. An insert after the
+     * DELETE clears it, because the INSERT result of a write buffer does not keep the DELETE
+     * either.
+     */
+    private boolean meetDelete;
+
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
             boolean ignoreDelete,
@@ -185,6 +194,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.currentKey = null;
         this.currentDeleteRow = false;
         this.meetInsert = false;
+        this.meetDelete = false;
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         this.latestSequenceNumber = 0;
@@ -216,10 +226,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             if (removeRecordOnDelete) {
+                currentDeleteRow = true;
                 if (kv.valueKind() == RowKind.DELETE) {
-                    currentDeleteRow = true;
+                    meetDelete = true;
                     row = new GenericRow(getters.length);
                     initRow(row, kv.value());
+                } else {
+                    // -U only marks the row removed and keeps the fields of other writers
+                    updateNonNullFields(kv);
                 }
                 return;
             }
@@ -239,6 +253,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
             currentDeleteRow = false;
+            meetDelete = false;
             updateNonNullFields(kv);
         } else {
             updateWithSequenceGroup(kv);
@@ -384,6 +399,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 if (kv.valueKind() == RowKind.DELETE
                                         && sequenceGroupPartialDelete.contains(field)) {
                                     currentDeleteRow = true;
+                                    meetDelete = true;
                                     row = new GenericRow(getters.length);
                                     initRow(row, kv.value());
                                     return;
@@ -435,7 +451,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             reused = new KeyValue();
         }
 
-        RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
+        RowKind rowKind;
+        if (currentDeleteRow) {
+            rowKind = meetDelete ? RowKind.DELETE : RowKind.UPDATE_BEFORE;
+        } else {
+            rowKind = meetInsert ? RowKind.INSERT : RowKind.DELETE;
+        }
         return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
     }
 
