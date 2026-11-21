@@ -22,16 +22,32 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
@@ -46,6 +62,112 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IndexedSplitRecordReader}. */
 public class IndexedSplitRecordReaderTest {
+
+    @Test
+    public void testUnscoredRangeReadPreservesFileMetadata(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        FileStoreTable table = createDataEvolutionTable(tempDir);
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(new PredicateBuilder(table.rowType()).notEqual(0, 12));
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit dataSplit = (DataSplit) splits.get(0);
+        assertThat(dataSplit.dataFiles()).hasSize(1);
+        Path expectedPath =
+                new Path(dataSplit.bucketPath(), dataSplit.dataFiles().get(0).fileName());
+        IndexedSplit split =
+                new IndexedSplit(dataSplit, Arrays.asList(new Range(1, 2), new Range(4, 5)), null);
+
+        List<Integer> ids = new ArrayList<>();
+        List<Long> positions = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(split)) {
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                try {
+                    assertThat(batch).isInstanceOf(FileRecordIterator.class);
+                    FileRecordIterator<InternalRow> fileBatch =
+                            (FileRecordIterator<InternalRow>) batch;
+                    assertThat(fileBatch.filePath()).isEqualTo(expectedPath);
+                    InternalRow row;
+                    while ((row = fileBatch.next()) != null) {
+                        ids.add(row.getInt(0));
+                        positions.add(fileBatch.returnedPosition());
+                    }
+                } finally {
+                    batch.releaseBatch();
+                }
+            }
+        }
+        assertThat(ids).containsExactly(11, 14, 15);
+        assertThat(positions).containsExactly(1L, 4L, 5L);
+    }
+
+    @Test
+    public void testUnscoredRowIdAndFileMetadataSurviveFilterAndTransform(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        FileStoreTable table = createDataEvolutionTable(tempDir);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int id = 20; id < 26; id++) {
+                write.write(GenericRow.of(id));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withReadType(SpecialFields.rowTypeWithRowId(table.rowType()));
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit dataSplit = (DataSplit) splits.get(0);
+        DataFileMeta file =
+                dataSplit.dataFiles().stream()
+                        .filter(f -> f.nonNullFirstRowId() == 6L)
+                        .findFirst()
+                        .get();
+        Path expectedPath = new Path(dataSplit.bucketPath(), file.fileName());
+        IndexedSplit split =
+                new IndexedSplit(
+                        dataSplit, Arrays.asList(new Range(7, 8), new Range(10, 11)), null);
+
+        List<Integer> ids = new ArrayList<>();
+        List<Long> rowIds = new ArrayList<>();
+        List<Long> positions = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
+            assertThat(reader).isInstanceOf(ScoreRecordReader.class);
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                RecordReader.RecordIterator<InternalRow> projected =
+                        batch.filter(row -> row.getInt(0) != 22)
+                                .transform(row -> GenericRow.of(row.getInt(0) * 10));
+                try {
+                    assertThat(projected)
+                            .isInstanceOf(FileRecordIterator.class)
+                            .isInstanceOf(ScoreRecordIterator.class);
+                    FileRecordIterator<InternalRow> fileBatch =
+                            (FileRecordIterator<InternalRow>) projected;
+                    ScoreRecordIterator<InternalRow> scoredBatch =
+                            (ScoreRecordIterator<InternalRow>) projected;
+                    assertThat(fileBatch.filePath()).isEqualTo(expectedPath);
+                    InternalRow row;
+                    while ((row = projected.next()) != null) {
+                        ids.add(row.getInt(0));
+                        rowIds.add(scoredBatch.returnedRowId());
+                        positions.add(fileBatch.returnedPosition());
+                        assertThat(Float.isNaN(scoredBatch.returnedScore())).isTrue();
+                    }
+                } finally {
+                    projected.releaseBatch();
+                }
+            }
+        }
+        assertThat(ids).containsExactly(210, 240, 250);
+        assertThat(rowIds).containsExactly(7L, 10L, 11L);
+        assertThat(positions).containsExactly(1L, 4L, 5L);
+    }
 
     @Test
     public void testReadWithScores() throws IOException {
@@ -378,6 +500,29 @@ public class IndexedSplitRecordReaderTest {
         assertThat(mockReader.isClosed()).isFalse();
         reader.close();
         assertThat(mockReader.isClosed()).isTrue();
+    }
+
+    private FileStoreTable createDataEvolutionTable(java.nio.file.Path tempDir) throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
+                .createTable(
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option("bucket", "-1")
+                                .option("row-tracking.enabled", "true")
+                                .option("data-evolution.enabled", "true")
+                                .option("write-only", "true")
+                                .build());
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int id = 10; id < 16; id++) {
+                write.write(GenericRow.of(id));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        return table;
     }
 
     private IndexedSplit createIndexedSplit(List<Range> ranges, @Nullable float[] scores) {

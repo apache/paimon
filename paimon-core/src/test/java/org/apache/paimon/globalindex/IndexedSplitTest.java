@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
@@ -192,6 +193,30 @@ public class IndexedSplitTest {
         IndexedSplit split3 =
                 new IndexedSplit(dataSplit, Collections.singletonList(new Range(5, 5)), null);
         assertThat(split3.rowCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testMergedRowCountWithDeletionVector() throws Exception {
+        DataSplit.Builder builder =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(
+                                Collections.singletonList(
+                                        DataFileTestUtils.newFile("file1", 0, 1, 100, 1000L)));
+        List<Range> ranges = Collections.singletonList(new Range(20, 29));
+        assertThat(new IndexedSplit(builder.build(), ranges, null).mergedRowCount()).hasValue(10);
+        builder.withDataDeletionFiles(Collections.singletonList(null));
+        assertThat(new IndexedSplit(builder.build(), ranges, null).mergedRowCount()).hasValue(10);
+        builder.withDataDeletionFiles(Collections.singletonList(new DeletionFile("dv", 0, 10, 1L)));
+        IndexedSplit split = new IndexedSplit(builder.build(), ranges, null);
+        assertThat(split.mergedRowCount()).isEmpty();
+        IndexedSplit restored =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(split), getClass().getClassLoader());
+        assertThat(restored.mergedRowCount()).isEmpty();
     }
 
     @Test
