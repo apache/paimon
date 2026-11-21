@@ -407,11 +407,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (options.dataEvolutionEnabled()
-                        && appendSimpleEntries.stream()
-                                .anyMatch(entry -> entry.firstRowId() != null)) {
-                    checkAppendFiles = true;
-                }
                 if (changes.appendIndexFiles.stream()
                         .anyMatch(
                                 entry ->
@@ -1497,6 +1492,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
                 throw exception.get();
             }
+        }
+        if (latestSnapshot != null) {
+            conflictDetection.checkRetainedGlobalIndexes(
+                    latestSnapshot, deltaFiles, indexFiles, commitKind);
         }
 
         Snapshot newSnapshot;

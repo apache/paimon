@@ -265,9 +265,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (commitKind != CommitKind.COMPACT) {
-            checkRetainedCentroidScalarIndexes(latestSnapshot, deltaFiles, indexFiles);
-        }
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
         Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (!changedRowRanges.isEmpty()) {
@@ -282,13 +279,17 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         return Collections.emptyList();
     }
 
-    private void checkRetainedCentroidScalarIndexes(
-            Snapshot snapshot, List<ManifestEntry> changes, List<IndexManifestEntry> indexFiles) {
-        if (snapshot.indexManifest() == null) {
+    @Override
+    public void checkRetainedGlobalIndexes(
+            Snapshot snapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (commitKind == CommitKind.COMPACT || snapshot.indexManifest() == null) {
             return;
         }
         Map<BinaryRow, List<DataFileMeta>> updates = new HashMap<>();
-        for (ManifestEntry change : changes) {
+        for (ManifestEntry change : deltaFiles) {
             if (change.kind() == FileKind.ADD && change.file().firstRowId() != null) {
                 updates.computeIfAbsent(change.partition(), ignored -> new ArrayList<>())
                         .add(change.file());
