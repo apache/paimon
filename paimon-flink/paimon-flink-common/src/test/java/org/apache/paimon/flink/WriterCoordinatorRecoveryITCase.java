@@ -97,8 +97,11 @@ public class WriterCoordinatorRecoveryITCase extends AbstractTestBase {
         StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         env.setParallelism(1);
-        // Only the two explicitly triggered checkpoints may refresh the coordinator's cache.
+        // Only the two explicitly triggered checkpoints may refresh the coordinator's cache. Since
+        // Flink 2.3 the first periodic checkpoint after a restart is only delayed by the minimum
+        // pause between checkpoints, so the pause is as long as the interval.
         env.enableCheckpointing(TimeUnit.HOURS.toMillis(1));
+        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(TimeUnit.HOURS.toMillis(1));
         DataStream<InternalRow> source =
                 env.fromSource(
                         new ReplayingSource(sourceId),

@@ -32,6 +32,7 @@ import org.apache.paimon.flink.lakestream.LakeStreamUtils;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
+import org.apache.paimon.flink.utils.MaterializedTableUtils;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
@@ -561,10 +562,19 @@ public class FlinkCatalog extends AbstractCatalog {
         mtOptions.set(MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
         mtOptions.set(
                 MATERIALIZED_TABLE_INTERVAL_FRESHNESS, mt.getDefinitionFreshness().getInterval());
-        mtOptions.set(
-                MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
-                CoreOptions.MaterializedTableIntervalFreshnessTimeUnit.valueOf(
-                        mt.getDefinitionFreshness().getTimeUnit().name()));
+        String timeUnit = MaterializedTableUtils.freshnessTimeUnit(mt.getDefinitionFreshness());
+        CoreOptions.MaterializedTableIntervalFreshnessTimeUnit freshnessTimeUnit;
+        try {
+            freshnessTimeUnit =
+                    CoreOptions.MaterializedTableIntervalFreshnessTimeUnit.valueOf(timeUnit);
+        } catch (IllegalArgumentException e) {
+            // Flink 2.3 has more time units than the four that Paimon stores, WEEK for example
+            throw new UnsupportedOperationException(
+                    "Materialized table freshness in "
+                            + timeUnit
+                            + " is not supported, use SECOND, MINUTE, HOUR or DAY.");
+        }
+        mtOptions.set(MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT, freshnessTimeUnit);
         mtOptions.set(
                 MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
                 CoreOptions.MaterializedTableRefreshMode.valueOf(
@@ -1235,11 +1245,9 @@ public class FlinkCatalog extends AbstractCatalog {
             Options options) {
         String definitionQuery = options.get(MATERIALIZED_TABLE_DEFINITION_QUERY);
         IntervalFreshness freshness =
-                IntervalFreshness.of(
+                MaterializedTableUtils.intervalFreshness(
                         options.get(MATERIALIZED_TABLE_INTERVAL_FRESHNESS),
-                        IntervalFreshness.TimeUnit.valueOf(
-                                options.get(MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT)
-                                        .name()));
+                        options.get(MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT).name());
         CatalogMaterializedTable.LogicalRefreshMode logicalRefreshMode =
                 CatalogMaterializedTable.LogicalRefreshMode.valueOf(
                         options.get(MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE).name());
@@ -1255,12 +1263,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 decodeRefreshHandlerBytes(options.get(MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES));
         // remove materialized table related options
         allMaterializedTableAttributes().forEach(newOptions::remove);
-        return CatalogMaterializedTable.newBuilder()
+        return MaterializedTableUtils.definitionQuery(
+                        CatalogMaterializedTable.newBuilder(), definitionQuery)
                 .schema(schema)
                 .comment(table.comment().orElse(""))
                 .partitionKeys(table.partitionKeys())
                 .options(newOptions)
-                .definitionQuery(definitionQuery)
                 .freshness(freshness)
                 .logicalRefreshMode(logicalRefreshMode)
                 .refreshMode(refreshMode)

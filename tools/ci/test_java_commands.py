@@ -85,10 +85,10 @@ class MavenCommandsTest(unittest.TestCase):
                           for version in ('cdc', '1.16', '1.17', '1.18', '1.19', '1.20')})
         self.assertEqual(self.modules(self.commands('flink2', java=11)[1]),
                          {'org.apache.paimon:paimon-flink-' + version
-                          for version in ('common', '2.0', '2.1', '2.2')})
+                          for version in ('common', '2.0', '2.1', '2.2', '2.3')})
 
     def test_e2e_uses_the_same_version_when_building_and_testing(self):
-        for suite, java, version in [('e2e-flink1', 8, '1.20'), ('e2e-flink2', 11, '2.2')]:
+        for suite, java, version in [('e2e-flink1', 8, '1.20'), ('e2e-flink2', 11, '2.3')]:
             build, test = self.commands(suite, java=java)
             self.assertTrue(any('flink-' + version in arg for arg in build))
             self.assertEqual([arg for arg in build if arg.startswith('-P')],

@@ -28,7 +28,7 @@ under the License.
 # Installation
 
 Choose the Paimon connector that matches your Flink **minor version**. This branch contains
-connectors for Flink 1.16–1.20 and 2.0–2.2. Use the documentation for your Paimon release when
+connectors for Flink 1.16–1.20 and 2.0–2.3. Use the documentation for your Paimon release when
 installing a released connector.
 
 ## Prerequisites
@@ -53,6 +53,7 @@ the timestamped jar available there. A directory may be empty until that version
 
 | Version      | Type        | Jar                                                                                                                                                                           |
 |--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 2.3    | Bundled Jar | [paimon-flink-2.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.3/@@VERSION@@/paimon-flink-2.3-@@VERSION@@.jar)          |
 | Flink 2.2    | Bundled Jar | [paimon-flink-2.2-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.2/@@VERSION@@/paimon-flink-2.2-@@VERSION@@.jar)          |
 | Flink 2.1    | Bundled Jar | [paimon-flink-2.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.1/@@VERSION@@/paimon-flink-2.1-@@VERSION@@.jar)          |
 | Flink 2.0    | Bundled Jar | [paimon-flink-2.0-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.0/@@VERSION@@/paimon-flink-2.0-@@VERSION@@.jar)          |
@@ -69,6 +70,7 @@ the timestamped jar available there. A directory may be empty until that version
 
 | Version      | Type        | Jar                                                                                                                                       |
 |--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 2.3 | Bundled Jar | [paimon-flink-2.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.3/@@VERSION@@/) |
 | Flink 2.2 | Bundled Jar | [paimon-flink-2.2-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.2/@@VERSION@@/) |
 | Flink 2.1 | Bundled Jar | [paimon-flink-2.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.1/@@VERSION@@/) |
 | Flink 2.0 | Bundled Jar | [paimon-flink-2.0-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-2.0/@@VERSION@@/) |
@@ -115,8 +117,8 @@ from the repository root. Select the profile for your Flink major version:
 # Flink 1.20 example
 mvn -pl paimon-flink/paimon-flink-1.20 -am -Pflink1 -DskipTests install
 
-# Flink 2.2 example
-mvn -pl paimon-flink/paimon-flink-2.2 -am -Pflink2 -DskipTests install
+# Flink 2.3 example
+mvn -pl paimon-flink/paimon-flink-2.3 -am -Pflink2 -DskipTests install
 ```
 
 The bundled jar is written to

@@ -687,13 +687,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 "Cannot move itself for column b"));
 
         // missing column
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY h STRING FIRST"))
-                .hasMessageContaining(
-                        "Try to modify a column `h` which does not exist in the table");
+        assertAlterTableFails(
+                "ALTER TABLE T MODIFY h STRING FIRST",
+                "Try to modify a column `h` which does not exist in the table",
+                "Column `h` does not exist in the table");
 
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY h STRING AFTER d"))
-                .hasMessageContaining(
-                        "Try to modify a column `h` which does not exist in the table");
+        assertAlterTableFails(
+                "ALTER TABLE T MODIFY h STRING AFTER d",
+                "Try to modify a column `h` which does not exist in the table",
+                "Column `h` does not exist in the table");
     }
 
     @Test
@@ -811,9 +813,10 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[ts, TIMESTAMP(3), true, null, null, `ts` - INTERVAL '1' HOUR]");
 
         // add one more watermark
-        assertThatThrownBy(
-                        () -> sql("ALTER TABLE T ADD WATERMARK FOR ts AS ts - INTERVAL '2' HOUR"))
-                .hasMessageContaining("The base table has already defined the watermark strategy");
+        assertAlterTableFails(
+                "ALTER TABLE T ADD WATERMARK FOR ts AS ts - INTERVAL '2' HOUR",
+                "The base table has already defined the watermark strategy",
+                "The current table has already defined the watermark strategy");
     }
 
     @Test
@@ -836,8 +839,10 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[ts, TIMESTAMP(3), true, null, null, null]");
 
         // drop again
-        assertThatThrownBy(() -> sql("ALTER TABLE T DROP WATERMARK"))
-                .hasMessageContaining("The base table does not define any watermark strategy");
+        assertAlterTableFails(
+                "ALTER TABLE T DROP WATERMARK",
+                "The base table does not define any watermark strategy",
+                "The current table does not define any watermark strategy");
     }
 
     @Test
@@ -845,11 +850,10 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a STRING, ts TIMESTAMP(3))");
 
         // modify watermark
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "ALTER TABLE T MODIFY WATERMARK FOR ts AS ts - INTERVAL '1' HOUR"))
-                .hasMessageContaining("The base table does not define any watermark");
+        assertAlterTableFails(
+                "ALTER TABLE T MODIFY WATERMARK FOR ts AS ts - INTERVAL '1' HOUR",
+                "The base table does not define any watermark",
+                "The current table does not define any watermark");
 
         // add watermark
         sql("ALTER TABLE T ADD WATERMARK FOR ts AS ts - INTERVAL '1' HOUR");
@@ -1869,6 +1873,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot drop primary keys on a non-empty table."));
+    }
+
+    /** Flink 2.3 reworded some validation messages of ALTER TABLE. */
+    private void assertAlterTableFails(
+            String alterTable, String messageBeforeFlink23, String messageSinceFlink23) {
+        assertThatThrownBy(() -> sql(alterTable))
+                .satisfiesAnyOf(
+                        e -> assertThat(e).hasMessageContaining(messageBeforeFlink23),
+                        e -> assertThat(e).hasMessageContaining(messageSinceFlink23));
     }
 
     private static final String BLOB_TABLE_OPTIONS =
