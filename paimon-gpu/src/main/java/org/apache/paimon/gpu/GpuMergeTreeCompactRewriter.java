@@ -47,6 +47,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 
 /**
  * A deduplicating merge-tree compaction on the device. Each batch of sections (key intervals that
@@ -108,8 +109,14 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
         DataFilePathFactory outputs = writerFactory.pathFactory(outputLevel);
         List<DataFileMeta> after = new ArrayList<>();
         List<Path> written = new ArrayList<>();
+        // Why Paimon's rewriter takes the whole compaction instead; it runs once, after the device
+        // path, so its own failures propagate as they are.
+        String cpuReason = null;
         try {
             for (List<List<SortedRun>> batch : batches(sections)) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException("Compaction cancelled");
+                }
                 List<DataFileMeta> files = extractFilesFromSections(batch);
                 List<String> inputs = new ArrayList<>(files.size());
                 long rows = 0;
@@ -132,13 +139,9 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
                 counters.device(rows, summary.rows(), System.nanoTime() - t0);
                 if (summary.ties()) {
                     // Not a failure: which tied row Paimon keeps is its readers' order.
-                    for (Path path : written) {
-                        io.deleteQuietly(path);
-                    }
-                    String tie = "rows of a key with equal sequence numbers and kinds";
-                    LOG.debug("Compaction on the CPU: {}", tie);
-                    counters.cpu(tie);
-                    return fallback.rewrite(outputLevel, dropDelete, sections);
+                    cpuReason = "rows of a key with equal sequence numbers and kinds";
+                    LOG.debug("Compaction on the CPU: {}", cpuReason);
+                    break;
                 }
                 check(files, rows, summary);
                 if (summary.rows() == 0) {
@@ -147,15 +150,31 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
                 }
                 after.add(meta(io, output, outputLevel, summary));
             }
+        } catch (InterruptedException | CancellationException cancelled) {
+            // Cancelled, or the factory closed: no CPU compaction either.
+            deleteQuietly(io, written);
+            throw cancelled;
         } catch (Exception | Error failure) {
-            for (Path path : written) {
-                io.deleteQuietly(path);
+            deleteQuietly(io, written);
+            if (Thread.currentThread().isInterrupted()) {
+                throw failure;
             }
             LOG.warn("Device compaction failed; Paimon's rewriter runs it instead", failure);
-            counters.cpu("device failure: " + failure);
+            cpuReason = "device failure: " + failure;
+        }
+        if (cpuReason != null) {
+            deleteQuietly(io, written);
+            counters.cpu(cpuReason);
             return fallback.rewrite(outputLevel, dropDelete, sections);
         }
         return new CompactResult(before, after);
+    }
+
+    private static void deleteQuietly(FileIO io, List<Path> paths) {
+        for (Path path : paths) {
+            io.deleteQuietly(path);
+        }
+        paths.clear();
     }
 
     private String unsupported(List<DataFileMeta> files, List<List<SortedRun>> sections) {
@@ -332,13 +351,18 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
         fallback.close();
     }
 
-    /** What the rewriters of one factory did. */
+    /**
+     * What the rewriters of one factory did; keeps a count of CPU compactions and a few reasons.
+     */
     static final class Stats {
+        private static final int REASONS_KEPT = 3;
+
         private long deviceBatches;
         private long deviceRowsIn;
         private long deviceRowsOut;
         private long deviceNanos;
-        private final List<String> cpuReasons = new ArrayList<>();
+        private long cpuCompactions;
+        private final List<String> cpuReasons = new ArrayList<>(REASONS_KEPT);
 
         synchronized void device(long rowsIn, long rowsOut, long nanos) {
             deviceBatches++;
@@ -348,7 +372,10 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
         }
 
         synchronized void cpu(String reason) {
-            cpuReasons.add(reason);
+            cpuCompactions++;
+            if (cpuReasons.size() < REASONS_KEPT) {
+                cpuReasons.add(reason);
+            }
         }
 
         @Override
@@ -359,10 +386,8 @@ final class GpuMergeTreeCompactRewriter extends AbstractCompactRewriter {
                     deviceRowsIn,
                     deviceRowsOut,
                     deviceNanos / 1e9,
-                    cpuReasons.size(),
-                    cpuReasons.isEmpty()
-                            ? ""
-                            : cpuReasons.subList(0, Math.min(3, cpuReasons.size())));
+                    cpuCompactions,
+                    cpuReasons.isEmpty() ? "" : cpuReasons);
         }
     }
 }

@@ -304,14 +304,12 @@ under the License.
 
     <profiles>
         <profile>
-            <!-- GPU compaction (paimon-gpu) through TornadoVM, which needs JDK 22 or later. -->
+            <!-- GPU compaction (paimon-gpu) through TornadoVM, which needs JDK 22 or later. Only
+                 paimon-gpu targets Java 22 (see its pom); every other module keeps its target. -->
             <id>gpu</id>
             <modules>
                 <module>paimon-gpu</module>
             </modules>
-            <properties>
-                <target.java.version>22</target.java.version>
-            </properties>
             <activation>
                 <property>
                     <name>gpu</name>

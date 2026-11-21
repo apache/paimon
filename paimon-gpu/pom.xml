@@ -32,6 +32,9 @@ under the License.
     <name>Paimon : GPU : </name>
 
     <properties>
+        <!-- TornadoVM needs Java 22; set here only, so the modules this one depends on keep
+             their Java 8 target when built in the same reactor. -->
+        <target.java.version>22</target.java.version>
         <tornadovm.version>8.1.0-jdk22plus</tornadovm.version>
         <!-- The device tests run only in a TornadoVM JVM, for example
              -Dpaimon.gpu.testArgs="@$TORNADOVM_HOME/tornado-argfile"; without it they are skipped. -->

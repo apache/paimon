@@ -31,6 +31,8 @@ import uk.ac.manchester.tornado.api.types.arrays.LongArray;
 import uk.ac.manchester.tornado.cudf.Cudf;
 
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,7 +41,8 @@ import java.util.regex.Pattern;
  * sequence number, keeps the last row of each key, and writes the survivors to one Parquet file.
  *
  * <p>One plan a capacity; a batch with more rows, or more string bytes, than the plan holds builds
- * a larger one. Batches run one at a time.
+ * a larger one. Batches run one at a time; a caller waiting for its turn can be interrupted, and
+ * once closed the compactor takes no more batches.
  */
 final class DeviceCompactor implements AutoCloseable {
 
@@ -103,7 +106,9 @@ final class DeviceCompactor implements AutoCloseable {
     private static final int MIN_CAPACITY = 1 << 20;
 
     private final KvLayout layout;
+    private final ReentrantLock lock = new ReentrantLock();
     private Plan plan;
+    private boolean closed;
 
     DeviceCompactor(KvLayout layout) {
         this.layout = layout;
@@ -123,7 +128,38 @@ final class DeviceCompactor implements AutoCloseable {
         return (int) capacity;
     }
 
-    synchronized Summary compact(
+    /**
+     * Runs one batch.
+     *
+     * @throws InterruptedException if the calling thread is interrupted before its turn, or was
+     *     interrupted already; no device work has started then
+     * @throws CancellationException if the compactor was closed; no device work has started then
+     */
+    Summary compact(
+            List<String> inputs,
+            long rows,
+            long charsPerColumn,
+            String output,
+            boolean dropDelete,
+            int codec)
+            throws InterruptedException {
+        lock.lockInterruptibly();
+        try {
+            // A caller cancelled while it waited, or after its factory closed, starts nothing:
+            // a plan built now would have no owner to free it.
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Device compaction cancelled");
+            }
+            if (closed) {
+                throw new CancellationException("The device compactor is closed");
+            }
+            return compactLocked(inputs, rows, charsPerColumn, output, dropDelete, codec);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Summary compactLocked(
             List<String> inputs,
             long rows,
             long charsPerColumn,
@@ -156,7 +192,7 @@ final class DeviceCompactor implements AutoCloseable {
             if (needed > charsPerColumn) {
                 // A string column decoded to more bytes than the guess: read the batch again,
                 // sized.
-                return compact(inputs, rows, needed, output, dropDelete, codec);
+                return compactLocked(inputs, rows, needed, output, dropDelete, codec);
             }
             throw failure;
         }
@@ -176,10 +212,16 @@ final class DeviceCompactor implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        if (plan != null) {
-            plan.close();
-            plan = null;
+    public void close() {
+        lock.lock();
+        try {
+            closed = true;
+            if (plan != null) {
+                plan.close();
+                plan = null;
+            }
+        } finally {
+            lock.unlock();
         }
     }
 

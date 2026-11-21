@@ -103,7 +103,8 @@ public final class GpuCompactRewriterFactory implements CompactRewriterFactory, 
                 device = new DeviceCompactor(layout);
             }
         }
-        if (layout == null) {
+        if (layout == null || device == null) {
+            // Unsupported table, or the factory is closed.
             return defaultRewriter;
         }
         return new GpuMergeTreeCompactRewriter(
