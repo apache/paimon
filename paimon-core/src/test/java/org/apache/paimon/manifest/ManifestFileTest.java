@@ -386,7 +386,6 @@ public class ManifestFileTest {
         ManifestFile manifests = table.store().manifestFileFactory().create();
         ManifestAvroWriter writer = manifests.createAvroWriter();
         try (ManifestAvroReader reader = openManifestReader(legacy)) {
-            assertThat(writer.canReusePartitionStats(legacy, reader)).isFalse();
             writer.writeEncodedManifest(reader, legacy);
         }
         writer.close();
@@ -397,7 +396,6 @@ public class ManifestFileTest {
                 .containsExactlyElementsOf(manifests.read(legacy.fileName()));
         ManifestAvroWriter next = manifests.createAvroWriter();
         try (ManifestAvroReader reader = openManifestReader(copy)) {
-            assertThat(next.canReusePartitionStats(copy, reader)).isTrue();
             next.writeEncodedManifest(reader, copy);
         }
         next.close();

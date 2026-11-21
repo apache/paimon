@@ -19,7 +19,6 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.SimpleColStats;
@@ -34,8 +33,7 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.ObjectSerializer;
@@ -66,16 +64,12 @@ public final class ManifestAvroWriter implements AutoCloseable {
 
     private static final int MAX_BUFFERED_ENCODED_PARTITIONS = 8_192;
 
-    private static final String PARTITION_STATS_ORDER = "paimon.partition-stats.order";
-    private static final String JAVA_FLOAT_ORDER = "java-float-compare-v1";
-
     private static final RowType PARTITION_PROJECTION =
             ManifestEntry.MANIFEST_ROW_TYPE.project(ManifestEntry.PARTITION);
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final RowType partitionType;
-    private final Map<String, String> partitionStatsHeader;
     private final AvroFileFormat avroFileFormat;
     private final ObjectSerializer<ManifestEntry> serializer;
     private final String compression;
@@ -102,14 +96,6 @@ public final class ManifestAvroWriter implements AutoCloseable {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
-        this.partitionStatsHeader =
-                partitionType.getFields().stream()
-                                .anyMatch(
-                                        field ->
-                                                field.type() instanceof FloatType
-                                                        || field.type() instanceof DoubleType)
-                        ? Collections.singletonMap(PARTITION_STATS_ORDER, JAVA_FLOAT_ORDER)
-                        : Collections.emptyMap();
         this.avroFileFormat = avroFileFormat;
         this.serializer = serializer;
         this.compression = compression;
@@ -195,7 +181,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
         try {
             FileWriter fileWriter = currentWriter();
-            boolean reusePartitionStats = canReusePartitionStats(metadata, reader);
+            boolean reusePartitionStats = canReusePartitionStats(metadata);
             long copiedRecords = 0;
             while (reader.hasNext()) {
                 ManifestAvroReader.RawBlock block = reader.next();
@@ -230,13 +216,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
     }
 
-    @VisibleForTesting
-    boolean canReusePartitionStats(ManifestFileMeta manifest, ManifestAvroReader reader) {
-        // Older writers can report finite bounds for partitions containing NaN.
-        if (!partitionStatsHeader.isEmpty()
-                && !JAVA_FLOAT_ORDER.equals(reader.headerMetadata(PARTITION_STATS_ORDER))) {
-            return false;
-        }
+    private boolean canReusePartitionStats(ManifestFileMeta manifest) {
         SimpleStats stats = manifest.partitionStats();
         int fields = partitionType.getFieldCount();
         if (stats.minValues().getFieldCount() != fields
@@ -246,6 +226,10 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
         long entries = Math.addExact(manifest.numAddedFiles(), manifest.numDeletedFiles());
         for (int i = 0; i < fields; i++) {
+            // Older writers can omit NaN or lose the sign of a zero endpoint.
+            if (partitionType.getTypeAt(i).is(DataTypeFamily.APPROXIMATE_NUMERIC)) {
+                return false;
+            }
             if (stats.nullCounts().isNullAt(i)) {
                 return false;
             }
@@ -496,10 +480,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 outputCreated = true;
                 writer =
                         avroFileFormat.createBlockWriter(
-                                out,
-                                ManifestEntry.MANIFEST_ROW_TYPE,
-                                compression,
-                                partitionStatsHeader);
+                                out, ManifestEntry.MANIFEST_ROW_TYPE, compression);
             } catch (IOException failure) {
                 UncheckedIOException primaryFailure =
                         new UncheckedIOException(
