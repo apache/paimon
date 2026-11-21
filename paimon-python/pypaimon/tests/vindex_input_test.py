@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from importlib import import_module
 import io
 import tempfile
 import threading
@@ -213,9 +214,11 @@ class VindexInputTest(unittest.TestCase):
             native.close.side_effect = error
         module = mock.Mock()
         module.VectorIndexReader.side_effect = open_reader
-        with mock.patch.dict("sys.modules", {"paimon_vindex": module}), mock.patch(
-                'pypaimon.execution.native.read.vindex_reader._native_reader_type',
-                return_value=None):
+        # Import before taking the sys.modules snapshot so that patch.dict
+        # keeps the reader module cached when the mock SDK is removed.
+        native_reader = import_module('pypaimon.execution.native.read.vindex_reader')
+        with mock.patch.dict("sys.modules", {"paimon_vindex": module}), mock.patch.object(
+                native_reader, '_native_reader_type', return_value=None):
             reader = VindexVectorGlobalIndexReader(
                 io_, "s3://bucket", [GlobalIndexIOMeta(file_name="index", file_size=2)])
             if phase in ("constructor", "initialize"):
