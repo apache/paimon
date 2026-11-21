@@ -2243,8 +2243,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                        file_name="c-short.index",
                        row_range_start=0, row_range_end=4).index_file
         long = _entry(None, field_id=2, index_type="bitmap",
-                       file_name="c-long.index",
-                       row_range_start=5, row_range_end=9).index_file
+                      file_name="c-long.index",
+                      row_range_start=5, row_range_end=9).index_file
 
         class _StubReader(GlobalIndexReader):
             def visit_contains(self_inner, field_ref, literal):
