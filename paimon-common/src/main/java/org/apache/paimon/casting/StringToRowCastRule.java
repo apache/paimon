@@ -83,6 +83,9 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             int fieldCount) {
         try {
             String str = value.toString().trim();
+            if ("NULL".equalsIgnoreCase(str)) {
+                return null;
+            }
             if ("{}".equals(str) || "STRUCT()".equalsIgnoreCase(str)) {
                 return createNullRow(fieldCount);
             }
@@ -148,7 +151,7 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             TokenSplitter.Token token, CastExecutor<BinaryString, Object> castExecutor) {
         String value = token.value();
         // only an unquoted null is the null field; "null" is the four-character string
-        return !token.literal() && "null".equals(value)
+        return !token.literal() && "null".equalsIgnoreCase(value)
                 ? null
                 : castExecutor.cast(BinaryString.fromString(value));
     }

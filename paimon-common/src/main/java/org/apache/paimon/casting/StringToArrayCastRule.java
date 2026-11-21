@@ -71,6 +71,9 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             BinaryString value, CastExecutor<BinaryString, Object> elementCastExecutor) {
         try {
             String str = value.toString().trim();
+            if ("NULL".equalsIgnoreCase(str)) {
+                return null;
+            }
             if ("[]".equals(str) || "ARRAY()".equalsIgnoreCase(str)) {
                 return new GenericArray(new Object[0]);
             }
@@ -116,7 +119,7 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             String value = token.value();
             // only an unquoted null is the null element; "null" is the four-character string
             Object element =
-                    !token.literal() && "null".equals(value)
+                    !token.literal() && "null".equalsIgnoreCase(value)
                             ? null
                             : elementCastExecutor.cast(BinaryString.fromString(value));
             elements.add(element);

@@ -50,6 +50,8 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -639,6 +641,74 @@ public class CastExecutorTest {
         assertThat(result.getInt(0)).isEqualTo(1);
         assertThat(result.isNullAt(1)).isTrue();
         assertThat(result.getInt(2)).isEqualTo(3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "NULL", "NuLl"})
+    public void testStringToArrayNullLiterals(String literal) {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.INT()));
+        compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
+        compareCastResult(
+                cast,
+                BinaryString.fromString("ARRAY(1, " + literal + ")"),
+                new GenericArray(new Object[] {1, null}));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "NULL", "NuLl"})
+    public void testStringToMapNullLiterals(String literal) {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE, DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
+        compareCastResult(
+                cast,
+                BinaryString.fromString("MAP(1, " + literal + ")"),
+                new GenericMap(Collections.singletonMap(1, null)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "NULL", "NuLl"})
+    public void testStringToRowNullLiterals(String literal) {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE, RowType.of(DataTypes.INT(), DataTypes.INT()));
+        compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
+        compareCastResult(
+                cast,
+                BinaryString.fromString("STRUCT(1, " + literal + ")"),
+                GenericRow.of(1, null));
+    }
+
+    @Test
+    public void testQuotedAndEscapedNullStringsRemainLiteral() {
+        for (String literal : Arrays.asList("null", "NULL", "NuLl")) {
+            BinaryString value = BinaryString.fromString(literal);
+            String fields = "\"" + literal + "\", \\" + literal + ", null";
+            compareCastResult(
+                    CastExecutors.resolve(
+                            VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.STRING())),
+                    BinaryString.fromString("ARRAY(" + fields + ")"),
+                    new GenericArray(new Object[] {value, value, null}));
+            compareCastResult(
+                    CastExecutors.resolve(
+                            VarCharType.STRING_TYPE,
+                            RowType.of(DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING())),
+                    BinaryString.fromString("STRUCT(" + fields + ")"),
+                    GenericRow.of(value, value, null));
+            Map<Object, Object> expected = new HashMap<>();
+            expected.put(1, value);
+            expected.put(2, value);
+            expected.put(3, null);
+            compareCastResult(
+                    CastExecutors.resolve(
+                            VarCharType.STRING_TYPE,
+                            DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())),
+                    BinaryString.fromString(
+                            "MAP(1, \"" + literal + "\", 2, \\" + literal + ", 3, null)"),
+                    new GenericMap(expected));
+        }
     }
 
     @Test

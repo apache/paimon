@@ -265,6 +265,9 @@ public class DefaultValueRow implements InternalRow {
             if (fullType instanceof RowType && !fullType.equals(type)) {
                 InternalRow fullDefault =
                         (InternalRow) convertDefaultValue(fullType, defaultValueStr);
+                if (fullDefault == null) {
+                    return null;
+                }
                 NestedProjectedRow projected =
                         NestedProjectedRow.create((RowType) fullType, (RowType) type);
                 return new InternalRowSerializer((RowType) type)
