@@ -18,9 +18,6 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.IsNotNull;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.IndexCastMapping;
@@ -128,7 +125,7 @@ public class SimpleStatsEvolutions {
     public Predicate filterUnsafeFilter(
             long dataSchemaId, @Nullable Predicate filter, boolean keepNewFieldFilter) {
         if (filter == null || dataSchemaId == tableSchemaId) {
-            return forFileStats(filter);
+            return filter;
         }
 
         List<Predicate> filters = PredicateBuilder.splitAnd(filter);
@@ -144,41 +141,7 @@ public class SimpleStatsEvolutions {
                 result.add(predicate);
             }
         }
-        return result.isEmpty() ? null : forFileStats(PredicateBuilder.and(result));
-    }
-
-    /**
-     * A legacy file can have finite bounds even when it contains NaN. For a comparison that accepts
-     * NaN, only the null count can exclude the file. Keep the original predicate for row filtering
-     * and preserve independent predicates in the same expression.
-     */
-    @Nullable
-    public static Predicate forFileStats(@Nullable Predicate filter) {
-        if (filter instanceof LeafPredicate) {
-            LeafPredicate leaf = (LeafPredicate) filter;
-            if (leaf.fieldRefOptional().isPresent() && leaf.comparisonMatchesNaN()) {
-                return LeafPredicate.of(
-                        leaf.transform(), IsNotNull.INSTANCE, Collections.emptyList());
-            }
-        } else if (filter instanceof CompoundPredicate) {
-            CompoundPredicate compound = (CompoundPredicate) filter;
-            List<Predicate> children = compound.children();
-            List<Predicate> rewritten = null;
-            for (int i = 0; i < children.size(); i++) {
-                Predicate child = children.get(i);
-                Predicate safe = forFileStats(child);
-                if (safe != child) {
-                    if (rewritten == null) {
-                        rewritten = new ArrayList<>(children);
-                    }
-                    rewritten.set(i, safe);
-                }
-            }
-            if (rewritten != null) {
-                return new CompoundPredicate(compound.function(), rewritten);
-            }
-        }
-        return filter;
+        return result.isEmpty() ? null : PredicateBuilder.and(result);
     }
 
     public List<DataField> tableDataFields() {

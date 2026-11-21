@@ -33,7 +33,6 @@ import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -71,7 +70,6 @@ import static org.apache.paimon.utils.InternalRowUtils.get;
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean dropStats = false;
-    @Nullable private Predicate fileStatsFilter;
     @Nullable private RowType readType;
     private final boolean deletionVectorsEnabled;
 
@@ -126,7 +124,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         // overwrite to keep all filter here
         // TODO refactor this hacky
         this.inputFilter = predicate;
-        this.fileStatsFilter = SimpleStatsEvolutions.forFileStats(predicate);
         return this;
     }
 
@@ -200,7 +197,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
 
             return splitByRowId.stream()
-                    .filter(group -> fileStatsFilter == null || filterByStats(group))
+                    .filter(group -> inputFilter == null || filterByStats(group))
                     .flatMap(group -> pruneByReadType(group).stream())
                     .map(entry -> dropStats ? dropStats(entry) : entry)
                     .collect(Collectors.toList());
@@ -214,7 +211,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private boolean filterByStats(List<ManifestEntry> entries) {
         EvolutionStats stats =
                 evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
-        return fileStatsFilter.test(
+        return inputFilter.test(
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 

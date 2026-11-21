@@ -27,7 +27,6 @@ import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -145,16 +144,6 @@ public class LeafPredicate implements Predicate {
 
     public List<Object> literals() {
         return literals;
-    }
-
-    /** Whether this comparison can match a NaN omitted from data-file bounds. */
-    public boolean comparisonMatchesNaN() {
-        if (literals.isEmpty()) {
-            return false;
-        }
-        DataType type = transform.outputType();
-        return (type instanceof FloatType && function.test(type, Float.NaN, literals))
-                || (type instanceof DoubleType && function.test(type, Double.NaN, literals));
     }
 
     @Override

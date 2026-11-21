@@ -19,9 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -43,12 +41,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.StatsTestUtils;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -67,7 +61,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -347,119 +340,6 @@ public class ManifestFileTest {
         assertThat(result.maxLevel()).isNull();
         assertThat(result.partitionStats()).isEqualTo(source.partitionStats());
         assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
-    }
-
-    private FileStoreTable partitionedTable(DataType partitionType) throws Exception {
-        Path root = new Path(tempDir.toUri());
-        FileIO io = LocalFileIO.create();
-        TableSchema schema =
-                new FileSystemSchemaManager(io, root)
-                        .createTable(
-                                Schema.newBuilder()
-                                        .column("id", DataTypes.INT())
-                                        .column("p0", partitionType)
-                                        .partitionKeys("p0")
-                                        .option("bucket", "-1")
-                                        .build());
-        return FileStoreTableFactory.create(io, root, schema);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"zstd", "deflate"})
-    void testCopyPythonFloatingManifest(String targetCodec) throws Exception {
-        // Produced by the Python committer from partitions 5.0 and NaN in one commit.
-        FileStoreTable table =
-                partitionedTable(DataTypes.DOUBLE())
-                        .copy(Collections.singletonMap("manifest.compression", targetCodec));
-        java.nio.file.Path dir = Files.createDirectories(tempDir.resolve("manifest"));
-        try (java.io.InputStream in =
-                getClass().getResourceAsStream("/interop/python-floating-list.avro")) {
-            Files.copy(in, dir.resolve("legacy-list"));
-        }
-        ManifestList list = table.store().manifestListFactory().create();
-        ManifestFileMeta legacy = list.read("legacy-list").get(0);
-        assertThat(legacy.partitionStats().maxValues().getDouble(0)).isEqualTo(5.0);
-        try (java.io.InputStream in =
-                getClass().getResourceAsStream("/interop/python-floating-manifest.avro")) {
-            Files.copy(in, dir.resolve(legacy.fileName()));
-        }
-        ManifestFile manifests = table.store().manifestFileFactory().create();
-        ManifestAvroWriter writer = manifests.createAvroWriter();
-        try (ManifestAvroReader reader = openManifestReader(legacy)) {
-            writer.writeEncodedManifest(reader, legacy);
-        }
-        writer.close();
-        ManifestFileMeta copy = list.read(list.write(writer.result()).getKey()).get(0);
-        assertThat(copy.partitionStats().minValues().getDouble(0)).isEqualTo(5.0);
-        assertThat(copy.partitionStats().maxValues().getDouble(0)).isNaN();
-        assertThat(manifests.read(copy.fileName()))
-                .containsExactlyElementsOf(manifests.read(legacy.fileName()));
-        ManifestAvroWriter next = manifests.createAvroWriter();
-        try (ManifestAvroReader reader = openManifestReader(copy)) {
-            next.writeEncodedManifest(reader, copy);
-        }
-        next.close();
-        assertThat(next.result().get(0).partitionStats()).isEqualTo(copy.partitionStats());
-    }
-
-    @Test
-    void testRecomputeIncompleteCopiedPartitionStats() throws Exception {
-        FileStoreTable table = partitionedTable(DataTypes.BOOLEAN());
-        ManifestFile manifests = table.store().manifestFileFactory().create();
-        List<ManifestEntry> entries = new ArrayList<>();
-        for (Boolean value : Arrays.asList(null, false, true)) {
-            BinaryRow part = new BinaryRow(1);
-            BinaryRowWriter row = new BinaryRowWriter(part);
-            if (value == null) {
-                row.setNullAt(0);
-            } else {
-                row.writeBoolean(0, value);
-            }
-            row.complete();
-            entries.add(
-                    ManifestEntry.create(
-                            Boolean.FALSE.equals(value) ? FileKind.DELETE : FileKind.ADD,
-                            part,
-                            0,
-                            1,
-                            gen.next().file()));
-        }
-        ManifestFileMeta src = writeSingleManifest(manifests, entries);
-        SimpleStats original = src.partitionStats();
-        for (SimpleStats incomplete :
-                Arrays.asList(
-                        new SimpleStats(
-                                original.minValues(),
-                                original.maxValues(),
-                                BinaryArray.fromLongArray(new Long[] {null})),
-                        new SimpleStats(
-                                entries.get(0).partition(),
-                                entries.get(0).partition(),
-                                original.nullCounts()))) {
-            ManifestFileMeta metadata =
-                    new ManifestFileMeta(
-                            src.fileName(),
-                            src.fileSize(),
-                            src.numAddedFiles(),
-                            src.numDeletedFiles(),
-                            incomplete,
-                            src.schemaId(),
-                            src.minBucket(),
-                            src.maxBucket(),
-                            src.minLevel(),
-                            src.maxLevel(),
-                            src.minRowId(),
-                            src.maxRowId(),
-                            src.totalBuckets(),
-                            src.extraFiles());
-            ManifestAvroWriter writer = manifests.createAvroWriter();
-            try (ManifestAvroReader reader = openManifestReader(src)) {
-                writer.writeEncodedManifest(reader, metadata);
-                writer.write(entries.get(2));
-            }
-            writer.close();
-            assertThat(writer.result().get(0).partitionStats()).isEqualTo(original);
-        }
     }
 
     @Test

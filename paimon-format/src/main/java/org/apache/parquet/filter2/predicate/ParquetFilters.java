@@ -130,10 +130,21 @@ public class ParquetFilters {
             FilterPredicate filter = predicate.function().visit(this, field, literals);
             // Parquet bounds can exclude NaN. Keep the NaN branch whenever the
             // original row predicate accepts it; dictionaries can still rule it out.
-            if (predicate.comparisonMatchesNaN()) {
+            if (comparisonMatchesNaN(predicate, field, literals)) {
                 return FilterApi.or(filter, visitIsNaN(field));
             }
             return filter;
+        }
+
+        private boolean comparisonMatchesNaN(
+                LeafPredicate predicate, FieldRef field, List<Object> literals) {
+            if (literals.isEmpty()) {
+                return false;
+            }
+            return (field.type() instanceof FloatType
+                            && predicate.function().test(field.type(), Float.NaN, literals))
+                    || (field.type() instanceof DoubleType
+                            && predicate.function().test(field.type(), Double.NaN, literals));
         }
 
         @Override
