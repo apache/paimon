@@ -21,7 +21,9 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -84,7 +86,11 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
 
     @Override
     public void close() throws IOException {
-        loserTree.close();
+        try {
+            IOUtils.closeAll(loserTree, mergeFunctionWrapper::reset);
+        } catch (Exception e) {
+            ExceptionUtils.rethrowIOException(e);
+        }
     }
 
     /** The iterator iterates on {@link SortMergeReaderWithLoserTree}. */
