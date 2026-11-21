@@ -18,12 +18,19 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedures.Procedure;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
@@ -33,6 +40,15 @@ import java.util.Optional;
 public class ProcedureUtil {
 
     private ProcedureUtil() {}
+
+    static TableScan.Plan planSearchResult(
+            ReadBuilder readBuilder, GlobalIndexResult result, @Nullable Snapshot snapshot) {
+        TableScan scan = readBuilder.newScan();
+        if (snapshot != null && scan instanceof DataEvolutionBatchScan) {
+            return ((DataEvolutionBatchScan) scan).withGlobalIndexResult(result, snapshot).plan();
+        }
+        return scan.withGlobalIndexResult(result).plan();
+    }
 
     public static List<String> listProcedures() {
         return Collections.unmodifiableList(

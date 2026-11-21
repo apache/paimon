@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
@@ -29,10 +32,15 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /** IT cases for {@link FullTextSearchProcedure}. */
 public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
@@ -114,6 +122,38 @@ public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
                                 assertThat(row)
                                         .contains("\"id\":\"1\"")
                                         .contains("\"content\":\"refreshed content\""));
+    }
+
+    @Test
+    public void testFullTextSearchReadsRowsFromRankingSnapshot() throws Exception {
+        sql(
+                "CREATE TABLE T (id INT, content STRING) WITH ("
+                        + "'bucket' = '-1', 'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("INSERT INTO T VALUES (1, 'apache paimon')");
+        buildFullTextIndex("T");
+        FileStoreTable table = paimonTable("T");
+        Snapshot rankedSnapshot = table.latestSnapshot().get();
+        sql("INSERT OVERWRITE T VALUES (9, 'later content')");
+
+        // Expose the earlier snapshot to ranking, while fresh scans see the overwrite.
+        FileStoreTable searchTable = spy(table);
+        doReturn(Optional.of(rankedSnapshot)).when(searchTable).latestSnapshot();
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.getTable(Identifier.fromString("default.T"))).thenReturn(searchTable);
+        FullTextSearchProcedure procedure = new FullTextSearchProcedure();
+        procedure.withCatalog(catalog);
+
+        assertThat(
+                        procedure.call(
+                                null,
+                                "default.T",
+                                "content",
+                                "{\"match\":{\"column\":\"content\",\"terms\":\"paimon\"}}",
+                                1,
+                                "id,content",
+                                null))
+                .containsExactly("{\"id\":\"1\",\"content\":\"apache paimon\"}");
     }
 
     @Test
