@@ -19,7 +19,9 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import pyarrow
 
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.write.partition_spec import _partition_spec_value, _UNREPRESENTABLE_PARTITION_VALUE
+from pypaimon.schema.data_types import AtomicType, DataType, PyarrowFieldParser
 from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
 
@@ -44,9 +46,11 @@ def _read_file_to_arrow(
     fmt: Format,
     partition_spec: Optional[Dict[str, str]],
     read_fields: Optional[List[str]],
-    partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
+    partition_key_types: Optional[Dict[str, DataType]] = None,
     text_column_name: Optional[str] = None,
     text_line_delimiter: str = "\n",
+    legacy_partition_name: bool = True,
+    csv_skip_empty_lines: bool = False,
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
@@ -84,9 +88,12 @@ def _read_file_to_arrow(
     elif fmt == Format.CSV:
         import pyarrow.csv as csv
         try:
+            # Files leave the partition columns out, so a row whose only column in the file is null is an
+            # empty line. Keep such lines as rows unless csv.skip-empty-lines is set, as Java does.
             tbl = csv.read_csv(
                 pyarrow.BufferReader(data),
                 read_options=csv_read_options,
+                parse_options=csv.ParseOptions(ignore_empty_lines=csv_skip_empty_lines),
             )
         except (pyarrow.ArrowException, OSError) as e:
             raise RuntimeError(f"Failed to read {path}") from e
@@ -129,19 +136,29 @@ def _read_file_to_arrow(
     else:
         raise ValueError(f"Format {fmt} read not implemented in Python")
 
-    if partition_spec:
-        for k, v in partition_spec.items():
-            if k in tbl.column_names:
-                continue
-            pa_type = (
-                partition_key_types.get(k, pyarrow.string())
-                if partition_key_types
-                else pyarrow.string()
-            )
-            arr = pyarrow.array([v] * tbl.num_rows, type=pyarrow.string())
-            if pa_type != pyarrow.string():
-                arr = arr.cast(pa_type)
-            tbl = tbl.append_column(k, arr)
+    # Files of earlier versions keep the partition columns, as files of a table with only partition columns do.
+    keeps_partition_columns = any(k in tbl.column_names for k in partition_key_types or {})
+    for k in partition_key_types or partition_spec or {}:
+        data_type = (partition_key_types or {}).get(k, AtomicType('STRING'))
+        field = pyarrow.field(k, PyarrowFieldParser.from_paimon_type(data_type), nullable=data_type.nullable)
+        if k in tbl.column_names:
+            try:
+                arr = tbl[k].cast(field.type)
+            except (pyarrow.ArrowInvalid, pyarrow.ArrowNotImplementedError):
+                values = [_partition_spec_value(v, data_type, legacy_ltz=legacy_partition_name)
+                          for v in tbl[k].to_pylist()]
+                arr = pyarrow.array(values, type=field.type)
+            tbl = tbl.set_column(tbl.schema.get_field_index(k), field, arr)
+        elif partition_spec and k in partition_spec:
+            v = partition_spec[k]
+            value = _partition_spec_value(v, data_type, legacy_ltz=legacy_partition_name)
+            if value is _UNREPRESENTABLE_PARTITION_VALUE:
+                raise ValueError(f"Partition value '{v}' cannot be represented as {data_type} in Python")
+            arr = pyarrow.array([value] * tbl.num_rows, type=field.type)
+            tbl = tbl.append_column(field, arr)
+
+    if split.row_filter is not None and partition_key_types:
+        tbl = _filter_partition_rows(tbl, split, keeps_partition_columns, partition_key_types, legacy_partition_name)
 
     if read_fields and tbl.num_columns > 0:
         existing = [c for c in read_fields if c in tbl.column_names]
@@ -150,17 +167,78 @@ def _read_file_to_arrow(
     return tbl
 
 
+def _filter_partition_rows(tbl: pyarrow.Table, split: FormatDataSplit, keeps_partition_columns: bool,
+                           types: Dict[str, DataType], legacy_ltz: bool) -> pyarrow.Table:
+    """The rows of a split that its partition filter selects.
+
+    A file that keeps its partition columns, as files of earlier versions do, can hold values that differ from
+    its directory's, so its rows are matched by their own values. The other files take their directory's.
+    """
+    if not keeps_partition_columns:
+        return tbl if split.directory_matches else tbl.slice(0, 0)
+    from pypaimon.execution.python.read.format_table_scan import _partition_filter_value
+    try:
+        values = {k: _partition_filter_value(v, types[k]) for k, v in split.row_filter.items()}
+    except (ValueError, TypeError, OverflowError):
+        return tbl.slice(0, 0)
+    if any(k not in tbl.column_names for k in values):
+        return tbl.slice(0, 0)
+    matches = {}
+
+    def match(key, value):
+        # repr keeps apart the values that equality joins, such as 0.0 and -0.0, which name different partitions.
+        cache_key = (key, type(value), repr(value))
+        if cache_key not in matches:
+            try:
+                matches[cache_key] = _partition_filter_value(
+                    value, types[key], legacy_ltz=legacy_ltz) == values[key]
+            except (ValueError, TypeError, OverflowError):
+                matches[cache_key] = False
+        return matches[cache_key]
+
+    columns = [tbl[k].to_pylist() for k in values]
+    mask = [all(match(k, value) for k, value in zip(values, row)) for row in zip(*columns)]
+    return tbl.filter(pyarrow.array(mask, type=pyarrow.bool_()))
+
+
+def _csv_skip_empty_lines(table: FormatTable) -> bool:
+    """Java's csv.skip-empty-lines, which defaults to false."""
+    return table.options().get('csv.skip-empty-lines', 'false').lower() == 'true'
+
+
+def _cast_to_declared_types(tbl: pyarrow.Table, table: FormatTable) -> pyarrow.Table:
+    """Read the data columns of a CSV or JSON file with their declared types.
+
+    These formats infer each file's types, so a column with only nulls infers the null type and cannot be
+    concatenated with another file's. A column that does not cast keeps its inferred type, as before.
+    """
+    if table.format() not in (Format.CSV, Format.JSON):
+        return tbl
+    for field in table.fields:
+        if field.name in table.partition_keys or field.name not in tbl.column_names:
+            continue
+        index = tbl.schema.get_field_index(field.name)
+        arrow_type = PyarrowFieldParser.from_paimon_type(field.type)
+        if tbl.schema.field(index).type == arrow_type:
+            continue
+        try:
+            column = tbl.column(index).cast(arrow_type)
+        except (pyarrow.ArrowInvalid, pyarrow.ArrowNotImplementedError):
+            continue
+        tbl = tbl.set_column(index, pyarrow.field(field.name, arrow_type), column)
+    return tbl
+
+
 def _partition_key_types(
     table: FormatTable,
-) -> Optional[Dict[str, pyarrow.DataType]]:
-    """Build partition column name -> PyArrow type from table schema."""
+) -> Optional[Dict[str, DataType]]:
+    """Build partition column name -> type from table schema."""
     if not table.partition_keys:
         return None
     result = {}
     for f in table.fields:
         if f.name in table.partition_keys:
-            pa_field = PyarrowFieldParser.from_paimon_field(f)
-            result[f.name] = pa_field.type
+            result[f.name] = f.type
     return result if result else None
 
 
@@ -168,9 +246,11 @@ def to_arrow(
     self,
     splits: List[FormatDataSplit],
 ) -> pyarrow.Table:
-    read_fields = self.projection
+    read_fields = self.projection or self.table.field_names
     fmt = self.table.format()
     partition_key_types = _partition_key_types(self.table)
+    legacy_partition_name = CoreOptions.from_dict(self.table.options()).options.get(
+        CoreOptions.PARTITION_GENERATE_LEGACY_NAME)
     text_col = (
         _text_format_schema_column(self.table)
         if fmt == Format.TEXT
@@ -193,7 +273,10 @@ def to_arrow(
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            legacy_partition_name=legacy_partition_name,
+            csv_skip_empty_lines=_csv_skip_empty_lines(self.table),
         )
+        t = _cast_to_declared_types(t, self.table)
         if t.num_rows > 0:
             tables.append(t)
             nrows += t.num_rows
@@ -225,6 +308,8 @@ def to_iterator(
     splits: List[FormatDataSplit],
 ) -> Iterator[Any]:
     partition_key_types = _partition_key_types(self.table)
+    legacy_partition_name = CoreOptions.from_dict(self.table.options()).options.get(
+        CoreOptions.PARTITION_GENERATE_LEGACY_NAME)
     fmt = self.table.format()
     text_col = (
         _text_format_schema_column(self.table)
@@ -245,11 +330,14 @@ def to_iterator(
             split,
             fmt,
             split.partition,
-            self.projection,
+            self.projection or self.table.field_names,
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            legacy_partition_name=legacy_partition_name,
+            csv_skip_empty_lines=_csv_skip_empty_lines(self.table),
         )
+        t = _cast_to_declared_types(t, self.table)
         for batch in t.to_batches():
             for i in range(batch.num_rows):
                 if self.limit is not None and n_yielded >= self.limit:
