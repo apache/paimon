@@ -232,9 +232,11 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
+        BTreeIndexSchema schema = new BTreeIndexSchema(table);
         List<IndexFileMeta> globalIndexFiles =
                 globalIndexFiles(indexFiles).stream()
                         .filter(file -> isIndexInSchema(table.rowType(), file))
+                        .filter(schema::isCompatible)
                         .collect(Collectors.toList());
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
@@ -307,10 +309,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
         DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
         int fieldId = indexField.id();
+        BTreeIndexSchema schema = new BTreeIndexSchema(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
                         .scan(snapshot, topNIndexFileFilter(partitionFilter, fieldId)).stream()
                         .map(IndexManifestEntry::indexFile)
+                        .filter(schema::isCompatible)
                         .collect(Collectors.toList());
         if (indexFiles.isEmpty()) {
             return Optional.empty();
@@ -358,6 +362,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             return entry -> false;
         }
         Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
+        BTreeIndexSchema schema = new BTreeIndexSchema(table);
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
                     if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
@@ -368,7 +373,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                             || !isIndexInSchema(table.rowType(), entry.indexFile())) {
                         return false;
                     }
-                    return filterFieldIds.contains(globalIndex.indexFieldId());
+                    return filterFieldIds.contains(globalIndex.indexFieldId())
+                            && schema.isCompatible(entry.indexFile());
                 };
         return indexFileFilter;
     }

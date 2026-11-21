@@ -65,6 +65,7 @@ public class DataEvolutionGlobalIndexCoverage {
         this.partitionFilter = partitionFilter;
         this.searchMode = checkNotNull(searchMode);
         this.coverageByField = new HashMap<>();
+        BTreeIndexSchema schema = new BTreeIndexSchema(table);
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
@@ -72,7 +73,8 @@ public class DataEvolutionGlobalIndexCoverage {
             }
             // Single-field coverage belongs to single-field index definitions. Multi-field
             // query paths supply their actual coverage explicitly.
-            if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
+            if ((meta.extraFieldIds() != null && meta.extraFieldIds().length > 0)
+                    || !schema.isCompatible(indexFile)) {
                 continue;
             }
             addCoverage(meta.indexFieldId(), meta.rowRange());

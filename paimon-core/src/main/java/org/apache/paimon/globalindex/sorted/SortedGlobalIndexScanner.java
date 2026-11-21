@@ -41,9 +41,12 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
+import static java.util.stream.Collectors.partitioningBy;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.compatibleIndexSchema;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.currentIndexEntries;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -137,18 +140,21 @@ public class SortedGlobalIndexScanner implements Serializable {
         snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
 
         Preconditions.checkArgument(indexFields != null, "indexFields must be set before scan.");
-        List<IndexManifestEntry> currentIndexes =
-                currentIndexEntries(table, snapshot, indexType, indexFields, partitionPredicate);
+        Map<Boolean, List<IndexManifestEntry>> indexesByCompatibility =
+                currentIndexEntries(table, snapshot, indexType, indexFields, partitionPredicate)
+                        .stream()
+                        .collect(partitioningBy(compatibleIndexSchema(table)));
+        List<IndexManifestEntry> currentIndexes = indexesByCompatibility.get(true);
+        List<IndexManifestEntry> deletedIndexEntries = indexesByCompatibility.get(false);
         List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
-        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
-            deletedIndexEntries =
+            deletedIndexEntries.addAll(
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table, snapshot, partitionPredicate, currentIndexes, indexFields);
-            for (IndexManifestEntry entry : deletedIndexEntries) {
-                rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
-            }
+                            table, snapshot, partitionPredicate, currentIndexes, indexFields));
+        }
+        for (IndexManifestEntry entry : deletedIndexEntries) {
+            rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
         }
 
         rangesToBuild = Range.sortAndMergeOverlap(rangesToBuild, true);
