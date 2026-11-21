@@ -22,7 +22,7 @@ import pyarrow.compute as pc
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.execution.python.read.reader.deduplicate_merge_function import (DeduplicateMergeFunction)
-from pypaimon.common.floating_point import floating_array_sort_key, floating_sort_key
+from pypaimon.common.floating_point import floating_array_sort_key
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.table.special_fields import SpecialFields
@@ -272,8 +272,7 @@ class KeyValueDataWriter(DataWriter):
 
     @staticmethod
     def _key_tuple(row: dict, col_names: List[str], key_arity: int) -> tuple:
-        return tuple(floating_sort_key(value) if isinstance(value, float) else value
-                     for value in (row[col_names[i]] for i in range(key_arity)))
+        return tuple(row[col_names[i]] for i in range(key_arity))
 
     @staticmethod
     def _row_to_tuple(row: dict, col_names: List[str]) -> tuple:
@@ -334,8 +333,6 @@ class KeyValueDataWriter(DataWriter):
         # Table, so this serves both the per-batch entry path (legacy)
         # and the buffer-wide sort path (used by ``_flush_all``).
         sort_columns = [data.column(key) for key in self.trimmed_primary_keys]
-        sort_columns = [floating_array_sort_key(col) if pa.types.is_floating(col.type) else col
-                        for col in sort_columns]
         sort_orders = ['ascending'] * len(sort_columns)
         sequence_fields = self.options.sequence_field()
         if sequence_fields:

@@ -129,6 +129,16 @@ def test_primary_key_and_changelog_stats_modes(tmp_path):
 
 
 @pytest.mark.parametrize('typ', [pa.float32(), pa.float64()])
+@pytest.mark.parametrize('value', [-float('inf'), float('inf')])
+def test_all_infinity_append_file_has_exact_bounds(tmp_path, typ, value):
+    table = _write(tmp_path, pa.table({'v': pa.array([value, None], type=typ)}),
+                   {'bucket': '-1', 'metadata.stats-mode': 'full'})
+    file, = _files(table)
+    assert _bounds(file.value_stats) == ([value], [value])
+    assert file.value_stats.null_counts == [1]
+
+
+@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()])
 @pytest.mark.parametrize(('values', 'low', 'high'), [
     ([0.0], 0.0, 0.0), ([-0.0], -0.0, -0.0),
     ([+0.0, -0.0], -0.0, 0.0), ([-0.0, 0.0], -0.0, +0.0),
@@ -145,20 +155,28 @@ def test_floating_file_and_key_bounds(tmp_path, typ, values, low, high):
         assert float(minimum[0]).hex() == low.hex()
         assert float(maximum[0]).hex() == high.hex()
         assert stats.null_counts[0] == 0
-    # The leading float of each sorted composite key must agree with its scalar bounds.
-    for row, expected, pick in ((file.min_key, low, min), (file.max_key, high, max)):
-        assert row.values[1] == pick(i for i, v in enumerate(values) if v.hex() == expected.hex())
-        assert row.values[0].hex() == expected.hex()
+    # File run endpoints still describe the actual first and last physical keys.
+    stored = pq.ParquetFile(next(tmp_path.rglob(file.file_name))).read(columns=['f', 'id'])
+    for row, idx in ((file.min_key, 0), (file.max_key, -1)):
+        assert row.values[0].hex() == stored['f'][idx].as_py().hex()
+        assert row.values[1] == stored['id'][idx].as_py()
 
 
-def test_floating_key_identity_used_for_file_bounds(tmp_path):
-    table = _write(tmp_path, pa.table({'k': [0., -0., +0., float('nan'), -float('nan')],
-                                      'v': [1, 2, 3, 4, 5]}),
-                   {'bucket': '1', 'metadata.stats-mode': 'full'}, primary_keys=['k'])
-    file, = _files(table)
-    assert file.row_count == 3
-    assert file.min_key.values[0].hex() == (-0.).hex()
-    assert math.isnan(file.max_key.values[0])
+def test_floating_stats_preserve_overlapping_key_runs(tmp_path):
+    options = {'bucket': '1', 'metadata.stats-mode': 'full', 'scan.native-plan.enabled': 'false',
+               'read.native.enabled': 'false'}
+    table = _write(tmp_path, pa.table({'k': [-1., float('nan')], 'v': [0, 1]}),
+                   options, primary_keys=['k'])
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.table({'k': [1.], 'v': [100]}))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    read = table.new_read_builder()
+    assert sorted(read.new_read().to_arrow(read.new_scan().plan().splits())['v'].to_pylist()) == [0, 1, 100]
 
 
 @pytest.mark.parametrize('values, low, high', [

@@ -420,8 +420,11 @@ class DataWriter(ABC):
         # min key & max key
 
         selected_table = data.select(self.trimmed_primary_keys)
-        min_key = [col[0].as_py() for col in selected_table.columns]
-        max_key = [col[-1].as_py() for col in selected_table.columns]
+        key_columns_batch = selected_table.to_batches()[0]
+        min_key_row_batch = key_columns_batch.slice(0, 1)
+        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+        min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+        max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # Keep key statistics independent of the value column modes.
         key_fields = self.trimmed_primary_keys_fields

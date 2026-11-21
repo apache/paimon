@@ -52,6 +52,7 @@ import java.math.BigDecimal;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests that verify extracting column stats from in-memory ParquetMetadata produces the same
@@ -81,6 +82,16 @@ public class ParquetInMemoryStatsTest {
                         .get()
                         .extract(fileIO, path, fileIO.getFileSize(path));
         assertThat(stats).containsExactly(new SimpleColStats(null, null, 1L));
+
+        RowType wrongType = RowType.builder().field("f", new FloatType()).build();
+        SimpleStatsExtractor wrong =
+                FileFormat.fromIdentifier("parquet", new Options())
+                        .createStatsExtractor(
+                                wrongType, SimpleColStatsCollector.createFullStatsFactories(1))
+                        .get();
+        assertThatThrownBy(() -> wrong.extract(fileIO, path, fileIO.getFileSize(path)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Expected Parquet FLOAT");
     }
 
     @Test

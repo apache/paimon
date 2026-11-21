@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import re
 
 import pyarrow as pa
@@ -130,8 +131,10 @@ class _ParquetBounds:
                 return None
             minimum = low if minimum is None else min(minimum, low)
             maximum = high if maximum is None else max(maximum, high)
-        # Parquet normalizes zero bounds to -0.0/+0.0. Keep exact Arrow signs.
-        if minimum is None or (pa.types.is_floating(column_type) and (minimum == 0.0 or maximum == 0.0)):
+        # Parquet normalizes zero signs. Some writers also use a finite sentinel for
+        # the other bound of an all-infinity column. Consult the input in either case.
+        if minimum is None or (pa.types.is_floating(column_type) and (
+                minimum == 0.0 or maximum == 0.0 or not math.isfinite(minimum) or not math.isfinite(maximum))):
             return None
         return minimum, maximum
 
@@ -144,10 +147,13 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
         return stats
     if pa.types.is_floating(column.type):
         # Footer and Arrow numeric bounds can omit NaN or lose the sign of zero.
-        if parquet_bounds is not None and not pc.any(pc.is_nan(column)).as_py():
-            bounds_from_footer = parquet_bounds.bounds(name, column.type)
-            if bounds_from_footer is not None:
-                stats['min_values'], stats['max_values'] = bounds_from_footer
+        if not pc.any(pc.is_nan(column)).as_py():
+            limits = parquet_bounds.bounds(name, column.type) if parquet_bounds is not None else None
+            if limits is None:
+                extrema = pc.min_max(column).as_py()
+                limits = extrema['min'], extrema['max']
+            if limits[0] != 0.0 and limits[1] != 0.0:
+                stats['min_values'], stats['max_values'] = limits
                 return stats
         keys = floating_array_sort_key(column)
         extrema = pc.min_max(keys).as_py()

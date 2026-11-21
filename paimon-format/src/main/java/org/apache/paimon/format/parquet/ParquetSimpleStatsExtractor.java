@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
@@ -47,7 +48,9 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.Type;
 
 import javax.annotation.Nullable;
 
@@ -139,6 +142,7 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                 switch (field.type().getTypeRoot()) {
                     case FLOAT:
                     case DOUBLE:
+                        validateFloatingColumn(field, footer.getFileMetaData().getSchema());
                         result[i] =
                                 collectors[i].convert(
                                         new SimpleColStats(
@@ -150,6 +154,23 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                 }
             }
             return Pair.of(result, new FileInfo(reader.getRecordCount()));
+        }
+    }
+
+    private static void validateFloatingColumn(DataField field, MessageType schema) {
+        if (schema.containsField(field.name())) {
+            Type physical = schema.getType(field.name());
+            PrimitiveType.PrimitiveTypeName expected =
+                    field.type().getTypeRoot() == DataTypeRoot.FLOAT
+                            ? PrimitiveType.PrimitiveTypeName.FLOAT
+                            : PrimitiveType.PrimitiveTypeName.DOUBLE;
+            Preconditions.checkArgument(
+                    physical.isPrimitive()
+                            && physical.asPrimitiveType().getPrimitiveTypeName() == expected,
+                    "Expected Parquet %s for field %s, found %s",
+                    expected,
+                    field.name(),
+                    physical);
         }
     }
 

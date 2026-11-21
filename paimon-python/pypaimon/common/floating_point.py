@@ -23,6 +23,7 @@ import pyarrow as pa
 
 def floating_sort_key(value):
     """Java Float/Double.compare order for a non-null scalar."""
+    value = float(value)
     if math.isnan(value):
         return True, 0.0, 0.0
     return False, value, math.copysign(1.0, value)
