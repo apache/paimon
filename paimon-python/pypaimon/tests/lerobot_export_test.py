@@ -21,7 +21,6 @@ import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -33,9 +32,8 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
-from pypaimon.multimodal.lerobot.export import (
-    _encode_episode_video, _safe_path, _write_v3_episodes,
-)
+from pypaimon.multimodal.lerobot import export as export_module
+from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
 from pypaimon.table.object.object_table import ObjectTable
 from pypaimon.tests.lerobot_aggregate_test import source
 
@@ -147,6 +145,7 @@ def test_export_v2_creates_one_exact_video_per_episode(tmp_path, version):
     output = _export_to_disk(conn, "robot", tmp_path / "v2", version=version)
     info = json.loads((output / "meta/info.json").read_text())
     assert info["codebase_version"] == version
+    assert info["fps"] == 10
     assert info["total_videos"] == 2
     assert (output / "meta/episodes_stats.jsonl").exists() == (version == "v2.1")
     if version == "v2.1":
@@ -154,25 +153,34 @@ def test_export_v2_creates_one_exact_video_per_episode(tmp_path, version):
     assert len((output / "meta/episodes.jsonl").read_text().splitlines()) == 2
     assert _open_video_frames(output / "videos/chunk-000/camera/episode_000000.mp4") == 2
     assert _open_video_frames(output / "videos/chunk-000/camera/episode_000001.mp4") == 3
+    av = pytest.importorskip("av")
+    video_path = output / "videos/chunk-000/camera/episode_000000.mp4"
+    with av.open(str(video_path)) as video:
+        assert video.streams.video[0].average_rate == 10
     assert pq.read_table(output / "data/chunk-000/episode_000000.parquet").num_rows == 2
     assert pq.read_table(output / "data/chunk-000/episode_000001.parquet").num_rows == 3
 
 
-def test_v2_encoder_preserves_fractional_fps(tmp_path):
-    av = pytest.importorskip("av")
-    rate = Fraction(30000, 1001)
-    original = Path(source(tmp_path / "input", video=True)[7:])
-    input_video = original / "videos/camera/chunk-000/file-000.mp4"
-    output_video = tmp_path / "episode.mp4"
-    _encode_episode_video(input_video, output_video,
-                          [SimpleNamespace(frame_index=index) for index in range(5)],
-                          float(rate))
-    with av.open(str(output_video)) as container:
-        video = container.streams.video[0]
-        frames = list(container.decode(video=0))
-        assert video.average_rate == rate
-        assert len(frames) == 5
-        assert (frames[1].pts - frames[0].pts) * frames[0].time_base == 1 / rate
+def test_export_rejects_fractional_dataset_fps(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+    original_read = export_module._read_arrow
+
+    def fractional_info(table, columns):
+        rows = original_read(table, columns)
+        if "info" not in rows.column_names:
+            return rows
+        info = json.loads(rows["info"][0].as_py())
+        info["fps"] = 29.97
+        return rows.set_column(
+            rows.schema.get_field_index("info"), "info",
+            pa.array([json.dumps(info)]))
+
+    with mock.patch.object(
+            export_module, "_read_arrow", side_effect=fractional_info):
+        with pytest.raises(ValueError, match="fps must be an integer"):
+            _export_to_disk(conn, "robot", tmp_path / "fractional")
+    assert not (tmp_path / "fractional").exists()
 
 
 def test_safe_path_on_python36(tmp_path):

@@ -22,7 +22,6 @@ import json
 import re
 import shutil
 import tempfile
-from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,7 +33,8 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.dataset import _component_table, _read_arrow
 from pypaimon.multimodal.lerobot.metadata import (
-    _companion_identifier, _companion_table_identifiers, _validate_tag_name,
+    _companion_identifier, _companion_table_identifiers, _dataset_fps,
+    _validate_tag_name,
 )
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.table import _target_schema
@@ -109,6 +109,7 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
             raise ValueError("LeRobot dataset_id %r was not found." % dataset_id)
         source = selected[0]
     info = json.loads(source["info"])
+    info["fps"] = _dataset_fps(info.get("fps"))
     source_episodes = _read_source_episodes(episodes, source["id"])
     if len(source_episodes) != info["total_episodes"]:
         raise ValueError("LeRobot Episode count disagrees with Dataset metadata.")
@@ -515,8 +516,7 @@ def _encode_episode_video(source_path, output_path, descriptors, fps):
     with av.open(str(source_path)) as source, \
             av.open(str(output_path), mode="w", format="mp4") as target:
         video = source.streams.video[0]
-        stream = target.add_stream(
-            "libx264", rate=Fraction(str(fps)).limit_denominator(1000000))
+        stream = target.add_stream("libx264", rate=fps)
         stream.width, stream.height = video.width, video.height
         stream.pix_fmt = "yuv420p"
         stream.options = {"crf": "18", "threads": "4"}
