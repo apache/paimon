@@ -66,7 +66,8 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         Options options = table.coreOptions().toConfiguration();
         return new RestoreAndFailCommittableStateManager<>(
                 ManifestCommittableSerializer::new,
-                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
+                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE),
+                StoreCommitter.END_INPUT_HANDLER);
     }
 
     protected static OneInputStreamOperatorFactory<InternalRow, Committable>
@@ -89,6 +90,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         Options options = table.coreOptions().toConfiguration();
         return new RestoreCommittableStateManager<>(
                 ManifestCommittableSerializer::new,
-                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
+                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE),
+                StoreCommitter.END_INPUT_HANDLER);
     }
 }
