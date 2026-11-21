@@ -174,7 +174,7 @@ def _prepare_dataset(
             )
             seen_tasks = _validate_frame_controls(
                 batch,
-                info["fps"],
+                int(info["fps"]),
                 episode_index,
                 episode_begin,
                 begin,
