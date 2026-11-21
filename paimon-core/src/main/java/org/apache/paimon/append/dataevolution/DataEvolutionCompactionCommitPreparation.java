@@ -48,4 +48,9 @@ public class DataEvolutionCompactionCommitPreparation {
                         .rewriteDeletionVectors(messages));
         return result;
     }
+
+    public List<DataEvolutionDeletionVectorRewriteTask> planDeletionVectorRewrites(
+            List<CommitMessage> messages) {
+        return new DataEvolutionDeletionVectorRewritePlanner(table, snapshot).plan(messages);
+    }
 }

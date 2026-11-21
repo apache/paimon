@@ -25,7 +25,6 @@ import org.apache.paimon.options.MemorySize;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -65,13 +64,22 @@ public class DeletionVectorIndexFileWriter {
 
     public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input)
             throws IOException {
-        if (input.isEmpty()) {
-            return Collections.emptyList();
-        }
+        return writeWithRolling(input.entrySet().iterator());
+    }
+
+    /** Streams complete anchor bitmaps across work units into shared rolling files. */
+    public List<IndexFileMeta> writeWithRolling(
+            Iterator<Map.Entry<String, DeletionVector>> iterator) throws IOException {
         List<IndexFileMeta> result = new ArrayList<>();
-        Iterator<Map.Entry<String, DeletionVector>> iterator = input.entrySet().iterator();
-        while (iterator.hasNext()) {
-            result.add(tryWriter(iterator));
+        try {
+            while (iterator.hasNext()) {
+                result.add(tryWriter(iterator));
+            }
+        } catch (IOException | RuntimeException e) {
+            for (IndexFileMeta file : result) {
+                fileIO.deleteQuietly(indexPathFactory.toPath(file));
+            }
+            throw e;
         }
         return result;
     }
@@ -87,8 +95,20 @@ public class DeletionVectorIndexFileWriter {
                     break;
                 }
             }
-        } finally {
+        } catch (IOException | RuntimeException e) {
+            try {
+                writer.close();
+            } catch (IOException closeError) {
+                e.addSuppressed(closeError);
+            }
+            fileIO.deleteQuietly(indexPathFactory.toPath(writer.result()));
+            throw e;
+        }
+        try {
             writer.close();
+        } catch (IOException e) {
+            fileIO.deleteQuietly(indexPathFactory.toPath(writer.result()));
+            throw e;
         }
         return writer.result();
     }
