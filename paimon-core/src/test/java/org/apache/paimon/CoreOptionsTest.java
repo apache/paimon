@@ -204,6 +204,9 @@ public class CoreOptionsTest {
         Options conf = new Options();
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(CoreOptions.SCALAR_INDEX_SEARCH_MODE.hasDefaultValue()).isFalse();
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())
@@ -213,6 +216,8 @@ public class CoreOptionsTest {
 
         conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
         options = new CoreOptions(conf);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
         assertThat(options.vectorIndexSearchMode())
@@ -224,6 +229,8 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
         conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
         options = new CoreOptions(conf);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())

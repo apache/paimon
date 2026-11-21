@@ -61,6 +61,9 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
     def test_default_values(self):
         options = CoreOptions(Options.from_none())
         self.assertIsNone(options.global_index_search_mode())
+        self.assertIsNone(CoreOptions.SCALAR_INDEX_SEARCH_MODE.default_value())
+        self.assertEqual(
+            GlobalIndexSearchMode.FULL, options.scalar_scan_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
         self.assertEqual(
@@ -71,6 +74,7 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
     def test_legacy_global_mode_is_family_fallback(self):
         options = CoreOptions(Options({"global-index.search-mode": "detail"}))
         for getter in (
+                options.scalar_scan_search_mode,
                 options.scalar_index_search_mode,
                 options.vector_index_search_mode,
                 options.full_text_index_search_mode):
@@ -83,6 +87,8 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             "vector-index.search-mode": "full",
             "full-text-index.search-mode": "fast",
         }))
+        self.assertEqual(
+            GlobalIndexSearchMode.FAST, options.scalar_scan_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
         self.assertEqual(

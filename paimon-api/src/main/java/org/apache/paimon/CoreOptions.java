@@ -3186,14 +3186,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Fallback search mode for global index queries.");
 
+    @Documentation.OverrideDefault(
+            "full for ordinary Data Evolution batch scans, fast for scalar prefilters in vector and full-text search")
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
-                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .noDefaultValue()
                     .withDescription(
-                            "Search mode for scalar indexes. If neither this option nor the legacy "
-                                    + "global-index.search-mode is set, ordinary Data Evolution batch "
-                                    + "scans use full and search filters use fast.");
+                            "Search mode for scalar indexes. An explicit setting overrides the "
+                                    + "legacy global-index.search-mode fallback.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -5086,7 +5087,7 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
-        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST);
     }
 
     public GlobalIndexSearchMode scalarScanSearchMode() {
