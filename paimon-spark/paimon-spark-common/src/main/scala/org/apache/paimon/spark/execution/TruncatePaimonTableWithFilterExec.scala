@@ -18,20 +18,17 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.{FileStoreTable, Table}
-import org.apache.paimon.table.sink.{BatchTableCommit, CommitMessage}
+import org.apache.paimon.table.sink.BatchTableCommit
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 
-import java.util.{Collections => JCollections, List => JList}
-
-import scala.collection.JavaConverters._
+import java.util.{Collections => JCollections}
 
 case class TruncatePaimonTableWithFilterExec(
     table: Table,
@@ -43,12 +40,19 @@ case class TruncatePaimonTableWithFilterExec(
       case Some(p) =>
         table match {
           case fileStoreTable: FileStoreTable =>
-            val matchedPartitions =
-              fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions()
-            if (matchedPartitions.isEmpty) {
+            if (fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions().isEmpty) {
               withCommit(table)(_.commit(JCollections.emptyList()))
             } else {
-              truncateMatchedPartitions(fileStoreTable, matchedPartitions)
+              // The commit matches the predicate against the partition values themselves. A spec
+              // rebuilt from a value does not always parse back to it, such as a blank string,
+              // whose name is the default partition name.
+              val commit = fileStoreTable.newCommit(
+                CoreOptions.createCommitUser(new Options(fileStoreTable.options())))
+              try {
+                commit.truncatePartitions(p)
+              } finally {
+                commit.close()
+              }
             }
           case _ =>
             throw new UnsupportedOperationException("Unsupported truncate table")
@@ -57,27 +61,6 @@ case class TruncatePaimonTableWithFilterExec(
         withCommit(table)(_.truncateTable())
     }
     Nil
-  }
-
-  /**
-   * Removes the data of the matched partitions by their stored values: an empty static overwrite. A
-   * spec rebuilt from a stored value does not always parse back to it, such as a blank string,
-   * whose name is the default partition name.
-   */
-  private def truncateMatchedPartitions(
-      fileStoreTable: FileStoreTable,
-      partitions: JList[BinaryRow]): Unit = {
-    val target =
-      fileStoreTable.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> "false").asJava)
-    val commit = target.newCommit(CoreOptions.createCommitUser(new Options(target.options())))
-    try {
-      commit
-        .withOperation(Snapshot.Operation.TRUNCATE)
-        .withOverwriteStaticPartitions(partitions)
-        .commit(JCollections.emptyList[CommitMessage]())
-    } finally {
-      commit.close()
-    }
   }
 
   private def withCommit(table: Table)(operation: BatchTableCommit => Unit): Unit = {

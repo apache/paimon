@@ -211,6 +211,20 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
     }
   }
 
+  test("Paimon Optimization: metadata only delete leaves expired partitions alone") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, dt STRING) PARTITIONED BY (dt)")
+      sql("INSERT INTO t VALUES (1, '2020-01-01'), (2, '2099-01-01')")
+      sql(
+        "ALTER TABLE t SET TBLPROPERTIES ('partition.expiration-time' = '7 d', " +
+          "'partition.expiration-check-interval' = '0 s', " +
+          "'partition.timestamp-pattern' = '$dt', 'partition.timestamp-formatter' = 'yyyy-MM-dd')")
+      val df = sql("DELETE FROM t WHERE dt = '2099-01-01'")
+      checkTruncatePaimonTable(df)
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(1)))
+    }
+  }
+
   test(s"Paimon Optimization: eval subqueries for delete table with ScalarSubquery") {
     withPk.foreach(
       hasPk => {
