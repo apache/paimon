@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
@@ -102,6 +103,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final Map<String, String> options;
     @Nullable protected final float[][] queryMatrix;
     private final int candidatesFactor;
+    private final GlobalIndexSearchMode scalarPrefilterMode;
     // Serialized with Spark/Flink worker closures; reset for each new read.
     private boolean postFiltering;
 
@@ -157,6 +159,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         Options effectiveOptions = Options.fromMap(mergedOptions);
         this.candidatesFactor =
                 effectiveOptions.get(CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR);
+        this.scalarPrefilterMode =
+                filter == null
+                        ? null
+                        : new CoreOptions(effectiveOptions).scalarPrefilterSearchMode();
         if (candidatesFactor <= 0) {
             throw new IllegalArgumentException(
                     CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key()
@@ -329,7 +335,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
+                        table,
+                        planSnapshot,
+                        partitionFilter,
+                        scalarIndexFiles,
+                        scalarPrefilterMode);
         if (!optionalScanner.isPresent()) {
             return null;
         }
@@ -374,7 +384,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
+                        table,
+                        planSnapshot,
+                        partitionFilter,
+                        scalarIndexFiles,
+                        scalarPrefilterMode);
         if (!optionalScanner.isPresent()) {
             return null;
         }

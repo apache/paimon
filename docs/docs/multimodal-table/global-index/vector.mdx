@@ -323,8 +323,9 @@ columns, each query runs ANN once per shard. Post-filtering may return fewer tha
 when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
 work for more candidates. Post-filtering does not retry or scan raw data to fill Top-K.
 Raw work outside vector coverage still follows the configured index search modes. When a
-scalar index can evaluate the predicate but covers only some rows, scalar `full`/`detail`
-modes also plan raw scans for its uncovered rows.
+scalar index can evaluate the predicate but covers only some rows, setting
+[`scalar-index.prefilter.search-mode`](./manage-indexes#coverage-and-freshness)
+to `full` or `detail` also plans raw scans for its uncovered rows.
 
 Build a BTree index for frequently used metadata filters, such as `category`, `tenant_id`,
 or `event_time`, to restrict candidate row IDs before ANN.

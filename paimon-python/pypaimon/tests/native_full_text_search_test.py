@@ -116,6 +116,18 @@ def test_scalar_filter_modes_before_full_text_top_k(rest_catalog, text_mode, sca
     assert indexes._ids(table) == list(range(12))
 
 
+@pytest.mark.parametrize('prefilter_mode, scalar_mode, expected', [
+    ('fast', 'full', set()), ('full', 'fast', {1, 5, 7}), ('detail', 'fast', {1, 5, 7}),
+])
+def test_prefilter_mode_overrides_legacy_scalar_mode(rest_catalog, prefilter_mode, scalar_mode, expected):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'full-text-index.search-mode': 'fast',
+                             'scalar-index.search-mode': scalar_mode,
+                             'scalar-index.prefilter.search-mode': prefilter_mode})
+    predicate = table.new_read_builder().new_predicate_builder().equal('label', 'keep')
+    assert set(_compare(table, predicate=predicate)) == expected
+
+
 @pytest.mark.parametrize('refine', [False, True])
 @pytest.mark.parametrize('scalar_mode', ['fast', 'full', 'detail'])
 @pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
