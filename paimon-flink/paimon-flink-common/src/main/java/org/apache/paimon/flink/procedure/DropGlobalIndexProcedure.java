@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
@@ -124,15 +125,12 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                                                 String.format(
                                                         "Table '%s' has no snapshot.", tableId)));
 
-        // Create filter for index entries to delete — match by primary column + full column set
         Filter<IndexManifestEntry> filter =
                 entry ->
                         entry.indexFile().indexType().equals(indexTypeLower)
                                 && entry.indexFile().globalIndexMeta() != null
-                                && entry.indexFile()
-                                        .globalIndexMeta()
-                                        .getIndexedFieldIds()
-                                        .equals(indexFieldIds)
+                                && CentroidIndexMeta.matchesIndexFields(
+                                        entry.indexFile().globalIndexMeta(), indexFieldIds)
                                 && (partitionPredicate == null
                                         || partitionPredicate.test(entry.partition()));
 

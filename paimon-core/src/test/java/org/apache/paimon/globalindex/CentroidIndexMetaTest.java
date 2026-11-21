@@ -19,10 +19,12 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.GlobalIndexMeta;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -78,5 +80,28 @@ class CentroidIndexMetaTest {
         meta[8] = 99;
         assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, meta))
                 .hasMessageContaining("version");
+    }
+
+    @Test
+    void bitmapRolePairsWithTheVectorGeneration() {
+        ResultEntry bitmap =
+                CentroidIndexMeta.scalarIndex(new ResultEntry("bitmap", 3, new byte[] {9}), "g", 4);
+        CentroidIndexFile decoded =
+                (CentroidIndexFile)
+                        CentroidIndexMeta.file(path, 100, bitmap.rowCount(), bitmap.meta());
+        assertThat(CentroidIndexMeta.hasScalarIndexes(bitmap.meta())).isTrue();
+        assertThat(decoded.scalarIndex()).isTrue();
+        assertThat(decoded.routingModel()).isFalse();
+        assertThat(decoded.centroid()).isEqualTo(4);
+        assertThat(decoded.modelId()).isEqualTo("g");
+        assertThat(decoded.metadata()).containsExactly(9);
+        GlobalIndexMeta meta = new GlobalIndexMeta(0, 9, 1, new int[] {2}, bitmap.meta());
+        assertThat(CentroidIndexMeta.matchesIndexFields(meta, Collections.singletonList(1)))
+                .isTrue();
+        assertThat(CentroidIndexMeta.matchesIndexFields(meta, Collections.singletonList(2)))
+                .isFalse();
+        GlobalIndexMeta composite = new GlobalIndexMeta(0, 9, 1, new int[] {2}, null);
+        assertThat(CentroidIndexMeta.matchesIndexFields(composite, Collections.singletonList(1)))
+                .isFalse();
     }
 }

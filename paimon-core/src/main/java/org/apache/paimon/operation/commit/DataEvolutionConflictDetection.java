@@ -279,6 +279,59 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         return Collections.emptyList();
     }
 
+    @Override
+    public void checkRetainedGlobalIndexes(
+            Snapshot snapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (commitKind == CommitKind.COMPACT || snapshot.indexManifest() == null) {
+            return;
+        }
+        Map<BinaryRow, List<DataFileMeta>> updates = new HashMap<>();
+        for (ManifestEntry change : deltaFiles) {
+            if (change.kind() == FileKind.ADD && change.file().firstRowId() != null) {
+                updates.computeIfAbsent(change.partition(), ignored -> new ArrayList<>())
+                        .add(change.file());
+            }
+        }
+        if (updates.isEmpty()) {
+            return;
+        }
+        Set<String> deletedIndexes =
+                indexFiles.stream()
+                        .filter(entry -> entry.kind() == FileKind.DELETE)
+                        .map(entry -> entry.indexFile().fileName())
+                        .collect(Collectors.toSet());
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        for (IndexManifestEntry index : indexFileHandler.readManifest(snapshot.indexManifest())) {
+            IndexFileMeta file = index.indexFile();
+            GlobalIndexMeta meta = file.globalIndexMeta();
+            List<DataFileMeta> partitionUpdates = updates.get(index.partition());
+            if (partitionUpdates == null
+                    || meta == null
+                    || !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                    || !CentroidIndexMeta.isRoutingModel(meta.indexMeta())
+                    || deletedIndexes.contains(file.fileName())) {
+                continue;
+            }
+            for (DataFileMeta update : partitionUpdates) {
+                Range changed = update.nonNullRowIdRange();
+                if (changed.to < meta.rowRangeStart() || changed.from > meta.rowRangeEnd()) {
+                    continue;
+                }
+                TableSchema schema =
+                        schemas.computeIfAbsent(update.schemaId(), commitScanner()::schema);
+                if (!Collections.disjoint(
+                        meta.getIndexedFieldIds(), fileFieldIds(schema, update))) {
+                    throw new IllegalStateException(
+                            "Update affects an active centroid index with Bitmap fields. "
+                                    + "Drop the index or use DROP_PARTITION_INDEX before updating.");
+                }
+            }
+        }
+    }
+
     private List<SimpleFileEntry> scanChangedRowRanges(
             Snapshot latestSnapshot,
             List<BinaryRow> changedPartitions,
@@ -669,11 +722,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 Map<Pair<BinaryRow, Integer>, List<Range>> additions = new HashMap<>();
                 for (IndexManifestEntry index : starting) {
                     GlobalIndexMeta meta = index.indexFile().globalIndexMeta();
-                    additions
-                            .computeIfAbsent(
-                                    Pair.of(index.partition(), meta.indexFieldId()),
-                                    ignored -> new ArrayList<>())
-                            .add(meta.rowRange());
+                    for (int fieldId : meta.getIndexedFieldIds()) {
+                        additions
+                                .computeIfAbsent(
+                                        Pair.of(index.partition(), fieldId),
+                                        ignored -> new ArrayList<>())
+                                .add(meta.rowRange());
+                    }
                 }
                 additions.forEach(
                         (key, ranges) -> {
