@@ -1397,10 +1397,10 @@ def test_decimal_keytime_native_writer_refused_python_persists(tmp_path):
 
     with patch(
             'pypaimon.execution.native.write.native_write.native_runtime_available',
-            return_value=True), \
-            patch(
-                'pypaimon.execution.native.write.native_write.create_native_write_table'
-            ) as create_table:
+            return_value=True
+    ), patch(
+            'pypaimon.execution.native.write.native_write.create_native_write_table'
+    ) as create_table:
         assert create_native_write(table, 'job') is None
         create_table.assert_not_called()
         wb = table.new_batch_write_builder()
