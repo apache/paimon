@@ -162,7 +162,7 @@ def _prefix_has_files(file_io, prefix):
 def _reserve_object_prefix(prefix, file_io):
     if _prefix_has_files(file_io, prefix):
         raise FileExistsError(prefix)
-    if not file_io.try_to_write_atomic(
+    if not file_io.try_to_write_exclusive(
             prefix + "/meta/.pypaimon-export-claim", "claimed"):
         raise FileExistsError(prefix)
 

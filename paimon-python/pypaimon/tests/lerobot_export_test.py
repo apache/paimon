@@ -62,7 +62,7 @@ class MemoryOss:
                        if key.startswith(uri.rstrip("/") + "/")]
         return entries
 
-    def try_to_write_atomic(self, uri, content):
+    def try_to_write_exclusive(self, uri, content):
         with self.lock:
             if uri in self.objects:
                 return False
@@ -372,7 +372,7 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
     target = MemoryOss()
     wrapped = SimpleNamespace(
         exists=target.exists, list_status=target.list_status,
-        try_to_write_atomic=target.try_to_write_atomic,
+        try_to_write_exclusive=target.try_to_write_exclusive,
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(

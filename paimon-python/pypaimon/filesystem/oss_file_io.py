@@ -75,6 +75,53 @@ class OssFileIO(PyArrowFileIO):
         finally:
             session.session.close()
 
+    def try_to_write_exclusive(self, path: str, content: str) -> bool:
+        """Create an OSS object only if absent; never use the rename fallback."""
+        uri = urlparse(path)
+        if uri.scheme != 'oss' or self._extract_oss_bucket(path) != self._oss_bucket:
+            raise ValueError("Exclusive write must target the configured OSS bucket")
+        key = self._extract_oss_object_key(path)
+        if not key or key == '.' or key.endswith('/'):
+            raise ValueError("Exclusive write requires an OSS object path")
+
+        try:
+            import oss2
+        except ImportError as error:
+            raise ImportError(
+                "OSS exclusive writes require oss2. Install pypaimon[oss] "
+                "or pypaimon[jindo].") from error
+
+        session = oss2.Session()
+        try:
+            bucket = self._create_oss_bucket(session)
+            # Check afresh: the cached capability used by metadata writes may
+            # predate a bucket versioning change. Unknown status must fail closed.
+            try:
+                versioning = bucket.get_bucket_versioning().status
+            except oss2.exceptions.ServerError as error:
+                if error.status == 403 and error.code == 'AccessDenied':
+                    raise NotImplementedError(
+                        "OSS exclusive writes require permission to query "
+                        "bucket versioning.") from error
+                raise
+            if versioning is not None:
+                raise NotImplementedError(
+                    "OSS exclusive writes require bucket versioning to be disabled.")
+
+            headers = self._sse_headers()
+            headers['x-oss-forbid-overwrite'] = 'true'
+            try:
+                bucket.put_object(key, content.encode('utf-8'), headers=headers)
+                return True
+            except oss2.exceptions.ServerError as error:
+                if error.code == 'FileAlreadyExists':
+                    return False
+                raise
+        except oss2.exceptions.OssError as error:
+            raise OSError("Failed to exclusively write {}".format(path)) from error
+        finally:
+            session.session.close()
+
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         try:
             import oss2
