@@ -411,12 +411,6 @@ under the License.
             <td>When incremental size is bigger than this threshold, force a full compaction.</td>
         </tr>
         <tr>
-            <td><h5>continuous-compaction.initial-scan-mode</h5></td>
-            <td style="word-wrap: break-word;">earliest</td>
-            <td><p>Enum</p></td>
-            <td>Initial snapshot mode for dedicated streaming compaction. When set to 'earliest' (the default), compaction starts from the earliest available snapshot if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. When set to 'latest', the latest snapshot is read in ALL mode as the initial baseline and subsequent scans start from the next snapshot. The 'latest' mode skips historical snapshot changes and should only be used when historical changelog replay is not required.<br /><br />Possible values:<ul><li>"earliest": Read snapshots from the earliest available snapshot.</li><li>"latest": Read the latest snapshot as the initial full baseline.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
@@ -507,6 +501,12 @@ under the License.
             <td>Specify the consumer consistency mode for table.<br /><br />Possible values:<ul><li>"exactly-once": Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed.</li><li>"at-least-once": Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>continuous-compaction.initial-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">earliest</td>
+            <td><p>Enum</p></td>
+            <td>Initial snapshot mode for dedicated streaming compaction. When set to 'earliest' (the default), compaction starts from the earliest available snapshot if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. When set to 'latest', the latest snapshot is read in ALL mode as the initial baseline and subsequent scans start from the next snapshot. The 'latest' mode skips historical snapshot changes and should only be used when historical changelog replay is not required.<br /><br />Possible values:<ul><li>"earliest": Read snapshots from the earliest available snapshot.</li><li>"latest": Read the latest snapshot as the initial full baseline.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>
@@ -577,6 +577,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to reuse a disk-persisted match result between deterministic UPDATE and INSERT actions on data evolution tables without DELETE actions or dedicated BLOB/VECTOR columns. This replaces the two action joins with a full outer join and trades repeated target scans for shuffle and executor-local disk storage. Requires Spark adaptive query execution and adaptive partition coalescing; otherwise the original join path is used.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.merge-into.join-reuse.narrow-source.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether Spark MERGE join reuse excludes INSERT-only source columns from the shared result and reads them again from a pinned source snapshot. Requires join reuse, a simple Paimon append source and an INT or BIGINT equality key. It reduces shared shuffle and cache size at the cost of another source scan. Unsupported sources use the original shared result.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.merge-into.source-persist</h5></td>

@@ -2822,6 +2822,17 @@ public class CoreOptions implements Serializable {
                                     + "Requires Spark adaptive query execution and adaptive partition "
                                     + "coalescing; otherwise the original join path is used.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_NARROW_SOURCE =
+            key("data-evolution.merge-into.join-reuse.narrow-source.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether Spark MERGE join reuse excludes INSERT-only source columns from "
+                                    + "the shared result and reads them again from a pinned source snapshot. "
+                                    + "Requires join reuse, a simple Paimon append source and an INT or BIGINT "
+                                    + "equality key. It reduces shared shuffle and cache size at the cost of "
+                                    + "another source scan. Unsupported sources use the original shared result.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
                     .booleanType()
@@ -4861,6 +4872,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionMergeIntoJoinReuse() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE);
+    }
+
+    public boolean dataEvolutionMergeIntoNarrowSource() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_NARROW_SOURCE);
     }
 
     public boolean blobCompactionEnabled() {

@@ -233,6 +233,30 @@ joins that can broadcast a small input. Compare complete SQL execution time and
 executor disk usage with representative data before enabling it. The shared
 result is released after the command, including when execution fails.
 
+For a Paimon append source with large columns used only by INSERT, Spark can
+keep those columns out of the shared result:
+
+```sql
+ALTER TABLE target_table SET TBLPROPERTIES (
+    'data-evolution.merge-into.join-reuse' = 'true',
+    'data-evolution.merge-into.join-reuse.narrow-source.enabled' = 'true'
+);
+```
+
+The narrow-source option is disabled by default. It requires a single INT or
+BIGINT equality key and a direct source table or a projection of its columns.
+Spark pins the source snapshot before reading it and retrieves INSERT columns
+with another source scan. Source duplicates and NULL keys retain the original
+MERGE semantics. Unsupported statements, sources without a snapshot, and
+statements using `data-evolution.merge-into.source-persist` keep the original
+execution path. Schema-only changes newer than the data snapshot and retained
+tags without a numbered snapshot file also use the original path.
+Composite fallback/primary-branch sources also keep the original execution path.
+This can reduce shuffle and disk cache size for wide sources,
+but the extra scan and membership join can increase elapsed time. Compare
+complete SQL execution time for the expected UPDATE/INSERT mix before enabling
+it. This option does not perform positional source reads.
+
 ### Flink SQL
 
 Use the `data_evolution_merge_into` procedure for matched updates. It runs in
