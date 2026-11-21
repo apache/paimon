@@ -16,7 +16,10 @@
 
 import json
 import io
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -26,7 +29,9 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.common.file_io import FileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
+from pypaimon.multimodal.lerobot.export import _write_v3_episodes
 from pypaimon.tests.lerobot_aggregate_test import source
 
 
@@ -34,6 +39,61 @@ def _open_video_frames(path):
     av = pytest.importorskip("av")
     with av.open(str(path)) as container:
         return len(list(container.decode(video=0)))
+
+
+class MemoryOss(OssFileIO):
+    def __init__(self):
+        self.objects = {}
+        self.writes = []
+        self.lock = threading.Lock()
+        self.atomic = True
+        self.exists_barrier = None
+        self.list_barrier = None
+
+    def exists(self, uri):
+        with self.lock:
+            found = uri in self.objects or any(
+                key.startswith(uri.rstrip("/") + "/") for key in self.objects)
+        if self.exists_barrier and uri == "oss://test-bucket/lerobot/export":
+            self.exists_barrier.wait(timeout=30)
+        return found
+
+    def _create_oss_bucket(self, session):
+        return self
+
+    def _supports_atomic_write(self, bucket):
+        return self.atomic
+
+    def list_objects(self, prefix, max_keys):
+        with self.lock:
+            entries = [key for key in self.objects if key.startswith(prefix)]
+        if self.list_barrier:
+            self.list_barrier.wait(timeout=30)
+        return SimpleNamespace(object_list=entries[:max_keys])
+
+    def try_to_write_atomic(self, uri, content):
+        with self.lock:
+            if uri in self.objects:
+                return False
+            self.objects[uri] = content.encode()
+            self.writes.append(uri)
+            return True
+
+    def new_output_stream(self, uri):
+        store = self
+
+        class Output(io.BytesIO):
+            def close(self):
+                if not self.closed:
+                    with store.lock:
+                        store.objects[uri] = self.getvalue()
+                        store.writes.append(uri)
+                super().close()
+
+        return Output()
+
+    def close(self):
+        pass
 
 
 def test_export_v3_keeps_shared_mp4_and_reimports(tmp_path):
@@ -213,29 +273,6 @@ def test_export_v20_requires_source_statistics(tmp_path):
 
 @pytest.mark.parametrize("version", ["v3.0", "v2.1"])
 def test_export_to_oss_prefix(tmp_path, version):
-    class MemoryOss:
-        def __init__(self):
-            self.objects = {}
-            self.writes = []
-
-        def exists(self, uri):
-            return uri in self.objects or any(
-                key.startswith(uri.rstrip("/") + "/") for key in self.objects)
-
-        def new_output_stream(self, uri):
-            store = self
-
-            class Output(io.BytesIO):
-                def close(self):
-                    store.objects[uri] = self.getvalue()
-                    store.writes.append(uri)
-                    super().close()
-
-            return Output()
-
-        def close(self):
-            pass
-
     original = source(tmp_path / "input", video=True)
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
@@ -260,3 +297,83 @@ def test_export_to_oss_prefix(tmp_path, version):
                 "robot", prefix, version=version,
                 output_options={"fs.oss.endpoint": "test-endpoint"})
         assert len(target.writes) == before
+
+
+def test_export_v3_episode_chunks_share_schema(tmp_path):
+    episodes = [dict(episode_index=i, **{"vendor/note": None})
+                for i in range(1000)]
+    episodes.append(dict(episode_index=1000, **{"vendor/note": "later"}))
+    _write_v3_episodes(tmp_path, episodes)
+
+    paths = sorted((tmp_path / "meta/episodes").glob("**/*.parquet"))
+    assert len(paths) == 2
+    assert all(pq.read_schema(path).field("vendor/note").type == pa.string()
+               for path in paths)
+    table = pq.read_table(tmp_path / "meta/episodes")
+    assert table.num_rows == 1001
+    assert table["vendor/note"].to_pylist()[-1] == "later"
+
+
+@pytest.mark.parametrize("container,marker", [
+    ("info", "is_depth_map"),
+    ("video_info", "is_depth_map"),
+    ("info", "video.is_depth_map"),
+    ("video_info", "has_audio"),
+])
+def test_export_v2_rejects_depth_and_audio_metadata(tmp_path, container, marker):
+    original = Path(source(tmp_path / "input", video=True)[7:])
+    info_path = original / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["camera"].setdefault(container, {})[marker] = True
+    info_path.write_text(json.dumps(info))
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original.as_uri())
+    with pytest.raises(ValueError, match="has depth or audio"):
+        conn.export_to_lerobot("robot", tmp_path / "v2", version="v2.1")
+    assert not (tmp_path / "v2").exists()
+
+
+def test_export_to_oss_requires_atomic_prefix_reservation(tmp_path):
+    original = source(tmp_path / "input")
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original)
+    target = MemoryOss()
+    target.atomic = False
+    original_get = FileIO.get
+    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
+                    side_effect=lambda uri, options=None:
+                    target if uri.startswith("oss://") else original_get(uri, options)):
+        with pytest.raises(ValueError, match="atomic create support"):
+            conn.export_to_lerobot(
+                "robot", "oss://test-bucket/lerobot/export",
+                output_options={"fs.oss.endpoint": "test-endpoint"})
+    assert not target.objects
+
+
+def test_concurrent_export_to_same_oss_prefix_has_one_winner(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("first", source(tmp_path / "first", value=10))
+    conn.load_from_lerobot("second", source(tmp_path / "second", value=20))
+    target = MemoryOss()
+    target.exists_barrier = threading.Barrier(2)
+    target.list_barrier = threading.Barrier(2)
+    prefix = "oss://test-bucket/lerobot/export"
+    original_get = FileIO.get
+    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
+                    side_effect=lambda uri, options=None:
+                    target if uri.startswith("oss://") else original_get(uri, options)):
+        with ThreadPoolExecutor(2) as pool:
+            futures = [pool.submit(
+                conn.export_to_lerobot, name, prefix,
+                output_options={"fs.oss.endpoint": "test-endpoint"})
+                for name in ("first", "second")]
+            results = [future.exception() or future.result() for future in futures]
+    assert sum(result == prefix for result in results) == 1
+    assert sum(isinstance(result, FileExistsError) for result in results) == 1
+    assert target.writes[-1] == prefix + "/meta/info.json"
+    assert len(target.writes) == len(set(target.writes))
+    data = next(value for key, value in target.objects.items()
+                if key.endswith(".parquet") and "/data/" in key)
+    winner = results.index(prefix)
+    assert pq.read_table(io.BytesIO(data))["observation.state"][0].as_py()[0] \
+        == (10 if winner == 0 else 20)

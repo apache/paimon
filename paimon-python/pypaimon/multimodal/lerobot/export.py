@@ -166,8 +166,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
 
 
 def _upload_to_oss(stage, prefix, file_io):
-    if file_io.exists(prefix):
-        raise FileExistsError(prefix)
+    _reserve_oss_prefix(prefix, file_io)
     info = stage / "meta/info.json"
     for path in sorted(stage.rglob("*")):
         if not path.is_file() or path == info:
@@ -175,6 +174,37 @@ def _upload_to_oss(stage, prefix, file_io):
         _upload_file(path, prefix + "/" + path.relative_to(stage).as_posix(),
                      file_io)
     _upload_file(info, prefix + "/meta/info.json", file_io)
+
+
+def _reserve_oss_prefix(prefix, file_io):
+    import oss2
+
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+
+    backend = file_io
+    while not isinstance(backend, OssFileIO):
+        if isinstance(backend, ResolvingFileIO):
+            backend = backend._get_fileio(prefix)
+        elif isinstance(backend, CachingFileIO):
+            backend = backend._delegate
+        else:
+            raise ValueError("OSS export requires an OSS FileIO with atomic create support.")
+
+    session = oss2.Session()
+    try:
+        bucket = backend._create_oss_bucket(session)
+        if not backend._supports_atomic_write(bucket):
+            raise ValueError("OSS export requires atomic create support on the target bucket.")
+        key_prefix = backend._extract_oss_object_key(prefix).rstrip("/") + "/"
+        if bucket.list_objects(prefix=key_prefix, max_keys=1).object_list:
+            raise FileExistsError(prefix)
+        marker = prefix + "/meta/.pypaimon-export-claim"
+        if not backend.try_to_write_atomic(marker, "claimed"):
+            raise FileExistsError(prefix)
+    finally:
+        session.session.close()
 
 
 def _upload_file(path, uri, file_io):
@@ -260,13 +290,15 @@ def _write_dataset(stage, reader, source, info, episodes, version, batch_size):
         if version == "v2.0" and source["stats"] is None:
             raise ValueError("LeRobot v2.0 export requires source-level statistics.")
         for key in video_keys:
-            details = (info["features"][key].get("info") or
-                       info["features"][key].get("video_info") or {})
-            if details.get("video.is_depth_map") or details.get("has_audio") \
-                    or details.get("video.has_audio"):
-                raise ValueError(
-                    "LeRobot v2 export supports RGB video without audio; "
-                    "%s has depth or audio." % key)
+            feature = info["features"][key]
+            for details in (feature, feature.get("info"),
+                            feature.get("video_info")):
+                if isinstance(details, dict) and any(details.get(marker) for marker in (
+                        "is_depth_map", "video.is_depth_map", "has_audio",
+                        "video.has_audio")):
+                    raise ValueError(
+                        "LeRobot v2 export supports RGB video without audio; "
+                        "%s has depth or audio." % key)
         output_info.update(
             codebase_version=version, chunks_size=1000,
             total_chunks=(len(episodes) + 999) // 1000,
@@ -433,21 +465,31 @@ def _write_v3_vocabulary(stage, singular, rows):
 
 
 def _write_v3_episodes(stage, episodes):
-    for begin in range(0, len(episodes), 1000):
+    if not episodes:
+        return
+    names = list(dict.fromkeys(key for episode in episodes for key in episode))
+
+    def chunk_rows(begin):
         rows = []
         for episode in episodes[begin:begin + 1000]:
-            row = dict(episode)
+            row = {key: episode.get(key) for key in names}
             if "meta/episodes/chunk_index" in row:
                 row["meta/episodes/chunk_index"] = begin // 1000
             if "meta/episodes/file_index" in row:
                 row["meta/episodes/file_index"] = 0
             rows.append(row)
-        names = list(dict.fromkeys(key for row in rows for key in row))
+        return rows
+
+    schema = pa.unify_schemas([
+        pa.Table.from_pylist(chunk_rows(begin)).schema
+        for begin in range(0, len(episodes), 1000)
+    ])
+    for begin in range(0, len(episodes), 1000):
         path = stage / ("meta/episodes/chunk-%03d/file-000.parquet" %
                         (begin // 1000))
         path.parent.mkdir(parents=True, exist_ok=True)
-        pq.write_table(pa.Table.from_pylist([
-            {key: row.get(key) for key in names} for row in rows]), path)
+        pq.write_table(pa.Table.from_pylist(chunk_rows(begin), schema=schema),
+                       path)
 
 
 def _safe_path(root, relative):

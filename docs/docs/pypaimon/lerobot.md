@@ -427,8 +427,10 @@ OSS output uses the table's FileIO when it can access the target bucket. Pass
 `fs.oss.accessKeySecret`, and optional `fs.oss.securityToken` when the output
 bucket has separate credentials. The exporter stages files in the worker's
 temporary directory, uploads them to OSS, and writes `meta/info.json` last.
-An incomplete upload leaves its prefix for inspection; choose a new prefix or
-remove it before retrying.
+OSS output requires permission to list the destination prefix and atomically
+create a reservation object. Buckets where atomic creation is unavailable are
+rejected. An incomplete upload leaves its prefix for inspection; choose a new
+prefix or remove it before retrying.
 
 V3.0 keeps source-local indices and copies each encoded MP4 once, including
 videos shared by multiple Episodes. V2.0 and v2.1 write one Parquet and one MP4 per
