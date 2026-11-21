@@ -404,49 +404,23 @@ to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
 ## Export a LeRobot Dataset
 
-Export one source Dataset from a three-table group to a local directory or an
-`oss://bucket/prefix` LeRobot dataset.
-If the group contains multiple Datasets, select one by its `_datasets.id` UUID.
-Pass the same `tag_name` used for training to export a fixed snapshot.
-The destination directory or OSS prefix must not exist.
-On Linux, local export requires libc `renameat2` (glibc 2.28+ or equivalent)
-and kernel/filesystem support for `RENAME_NOREPLACE`. The libc API is checked
-before reading table data.
-Pass the table-group prefix, or the actual Frames table name for a group
-created by `PaimonLeRobotWriter`.
+Export one Dataset to a local directory or OSS. Pass the table-group prefix
+(`PaimonLeRobotWriter` groups use the Frames table name). For groups with
+multiple Datasets, select one by `_datasets.id`; use `tag_name` for a fixed snapshot.
 
 ```python
-conn.export_to_lerobot("robot_data", "/data/export-v3", version="v3.0")
+conn.export_to_lerobot("robot_data", "/data/export", version="v3.0")
 conn.export_to_lerobot(
-    "robot_merged", "/data/export-v21", version="v2.1",
-    dataset_id="019a91e1-f035-79b9-b04b-44734dc2eb74",
+    "robot_merged", "oss://my-bucket/lerobot/export", version="v2.1",
+    dataset_id="<Dataset UUID>",
 )
-# Use version="v2.0" for a LeRobot v2.0 consumer.
-conn.export_to_lerobot("robot_data", "oss://my-bucket/lerobot/export-v3")
 ```
 
-OSS output binds a FileIO to the target bucket using the table's credentials,
-including REST data tokens, when those credentials can access it. Pass
-`output_options` with `fs.oss.endpoint`, `fs.oss.accessKeyId`,
-`fs.oss.accessKeySecret`, and optional `fs.oss.securityToken` when the output
-bucket has separate credentials. The exporter stages files in the worker's
-temporary directory, uploads them to OSS, and writes `meta/info.json` last.
-OSS output requires permission to list the destination prefix and atomically
-create a reservation object. Buckets where atomic creation is unavailable are
-rejected. An incomplete upload leaves its prefix for inspection; choose a new
-prefix or remove it before retrying.
-
-V3.0 keeps source-local indices and copies each encoded MP4 once, including
-videos shared by multiple Episodes. V2.0 and v2.1 write one Parquet and one MP4 per
-Episode and camera; RGB video export requires PyAV and re-encodes selected frames.
-V2 export rejects depth video and video with audio. V2.0 requires source-level
-statistics; v2.1 additionally writes per-Episode statistics.
-Both exports write source Dataset metadata and Episode statistics. The output
-can be opened with the matching LeRobot version.
-`meta/paimon_source.json` preserves the Paimon Dataset ID, optional name, and
-extra dataset text fields, which have no standard LeRobot metadata fields.
-Nullable `subtask_index` values are preserved; older LeRobot readers that
-reject null subtasks will also reject those source frames after export.
+Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
+re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
+OSS uses the table credentials by default; pass `output_options` for separate
+OSS credentials. The destination must not exist. Linux local export requires
+`renameat2(RENAME_NOREPLACE)` (glibc 2.28+ or equivalent).
 
 ## Capture LeRobot frames directly into Paimon
 
