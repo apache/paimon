@@ -216,13 +216,88 @@ def is_blank(s: str) -> bool:
     return True
 
 
+def _atomic_base_type(data_type: AtomicType) -> str:
+    """Return the uppercase atomic type root (for example ``DOUBLE``)."""
+
+    return data_type.type.split("(", 1)[0].split(" ", 1)[0].upper()
+
+
+def _compare_floating(left: Any, right: Any) -> int:
+    """Mirror Java ``Double.compare`` / ``Float.compare`` semantics."""
+
+    import math
+
+    left_value = float(left)
+    right_value = float(right)
+    left_nan = math.isnan(left_value)
+    right_nan = math.isnan(right_value)
+    if left_nan or right_nan:
+        if left_nan and right_nan:
+            return 0
+        return 1 if left_nan else -1
+    if left_value == 0.0 and right_value == 0.0:
+        left_negative = math.copysign(1.0, left_value) < 0
+        right_negative = math.copysign(1.0, right_value) < 0
+        if left_negative == right_negative:
+            return 0
+        return -1 if left_negative else 1
+    return (left_value > right_value) - (left_value < right_value)
+
+
+def _array_sequence_element(value: Any, index: int) -> Any:
+    """Read one ARRAY element from a list-like or InternalArray-like value."""
+
+    if isinstance(value, (list, tuple)):
+        return value[index]
+    getter = getattr(value, "get_element", None)
+    if callable(getter):
+        return getter(index)
+    getter = getattr(value, "get", None)
+    if callable(getter):
+        return getter(index)
+    return value[index]
+
+
+def _array_sequence_size(value: Any) -> int:
+    size = getattr(value, "size", None)
+    if callable(size):
+        return size()
+    if isinstance(size, int):
+        return size
+    return len(value)
+
+
+def _compare_array_values(left: Any, right: Any, array_type: ArrayType) -> int:
+    """Lexicographic ARRAY comparison with NULLS FIRST, matching Java codegen."""
+
+    left_size = _array_sequence_size(left)
+    right_size = _array_sequence_size(right)
+    min_size = left_size if left_size < right_size else right_size
+    element_type = array_type.element
+    for index in range(min_size):
+        cmp = _compare_objects(
+            _array_sequence_element(left, index),
+            _array_sequence_element(right, index),
+            element_type,
+        )
+        if cmp != 0:
+            return cmp
+    if left_size < right_size:
+        return -1
+    if left_size > right_size:
+        return 1
+    return 0
+
+
 def _compare_objects(left: Any, right: Any, data_type: Optional[DataType] = None) -> int:
     """
     Compare two comparable Python objects using Paimon's ordering.
 
     Nulls are ordered before non-null values (Nulls First). ROW values are
-    compared recursively in schema field order. MAP and ARRAY stay on the
-    scalar comparison path.
+    compared recursively in schema field order. ARRAY members of a ROW
+    sequence use element-wise lexicographic comparison. FLOAT/DOUBLE follow
+    Java Float/Double.compare (including NaN and signed zero). MAP stays on
+    the scalar comparison path and is not expanded here.
     """
 
     if left is None:
@@ -233,6 +308,14 @@ def _compare_objects(left: Any, right: Any, data_type: Optional[DataType] = None
 
     if isinstance(data_type, RowType):
         return _compare_row_values(left, right, data_type)
+
+    if isinstance(data_type, ArrayType):
+        return _compare_array_values(left, right, data_type)
+
+    if isinstance(data_type, AtomicType):
+        base = _atomic_base_type(data_type)
+        if base in ("FLOAT", "DOUBLE"):
+            return _compare_floating(left, right)
 
     return (left > right) - (left < right)
 
@@ -1082,6 +1165,8 @@ class FieldNestedUpdateAgg(FieldAggregator):
                 "requires 'fields.<field-name>.nested-key' to be configured."
             )
 
+        # Keep the aggregator-local check identical to the shared table-level
+        # validation so unit construction and public read/write agree.
         overwrite_on_equal_configured = options.options.contains_key(
             f"{CoreOptions.FIELDS_PREFIX}.{field}."
             f"{CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL}"

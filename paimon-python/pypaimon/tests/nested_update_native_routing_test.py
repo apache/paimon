@@ -358,6 +358,150 @@ _ROW_SCHEMA = pa.schema([
 
 @pytest.mark.python_read
 @pytest.mark.python_write
+def test_sequence_field_rejected_with_nested_first_wins(tmp_path):
+    """Outer sequence.field reorders merges; first-wins cannot stay cross-commit consistent."""
+    from pypaimon.read.merge_engine_support import check_nested_update_configuration
+    from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+
+    schema = pa.schema([
+        ('id', pa.int64()),
+        ('ord', pa.int64()),
+        ('updates', pa.list_(_NESTED)),
+    ])
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'seq_ord')})
+    catalog.create_database('default', True)
+    options = _options('false', **{'sequence.field': 'ord'})
+    catalog.create_table(
+        'default.t',
+        Schema.from_pyarrow_schema(schema, primary_keys=['id'], options=options),
+        False)
+    table = catalog.get_table('default.t')
+
+    with pytest.raises(ValueError, match='sequence.field is incompatible'):
+        check_nested_update_configuration(table)
+    with pytest.raises(ValueError, match='sequence.field is incompatible'):
+        table.new_batch_write_builder().new_write()
+    with pytest.raises(ValueError, match='sequence.field is incompatible'):
+        BatchTableWrite(table, 'test')
+    with pytest.raises(ValueError, match='sequence.field is incompatible'):
+        StreamTableWrite(table, 'test')
+    with pytest.raises(ValueError, match='sequence.field is incompatible'):
+        table.new_read_builder().new_read()
+
+    # Compatible: nested_update + sequence.field with overwrite=true stays allowed.
+    compatible = _table(tmp_path, 'true', name='seq_ok', **{'sequence.field': 'id'})
+    check_nested_update_configuration(compatible)
+    writer = compatible.new_batch_write_builder().new_write()
+    writer.close()
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.parametrize('overwrite', ['true', 'false'])
+@pytest.mark.parametrize('via_default_agg', [False, True])
+def test_explicit_overwrite_requires_nested_sequence_before_backend(
+        tmp_path, overwrite, via_default_agg):
+    """Explicit true/false must fail before Native/Python writer backend selection."""
+    from pypaimon.write.backend_dispatch import _prepare_write
+    from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+
+    catalog = CatalogFactory.create({
+        'warehouse': str(tmp_path / ('dep_%s_%s' % (overwrite, via_default_agg))),
+    })
+    catalog.create_database('default', True)
+    options = {
+        'bucket': '1',
+        'file.format': 'parquet',
+        'merge-engine': 'aggregation',
+        'fields.updates.nested-key': 'key',
+        'fields.updates.nested-sequence-overwrite-on-equal': overwrite,
+        'read.native.enabled': 'true',
+        'write.native.enabled': 'true',
+        'commit.native.enabled': 'false',
+    }
+    if via_default_agg:
+        options['fields.default-aggregate-function'] = 'nested_update'
+    else:
+        options['fields.updates.aggregate-function'] = 'nested_update'
+    catalog.create_table(
+        'default.t',
+        Schema.from_pyarrow_schema(_SCHEMA, primary_keys=['id'], options=options),
+        False)
+    table = catalog.get_table('default.t')
+    match = 'nested-sequence-overwrite-on-equal'
+    with pytest.raises(ValueError, match=match):
+        table.new_batch_write_builder().new_write()
+    with pytest.raises(ValueError, match=match):
+        BatchTableWrite(table, 'test')
+    with pytest.raises(ValueError, match=match):
+        StreamTableWrite(table, 'test')
+    with pytest.raises(ValueError, match=match):
+        _prepare_write(table, 'test', None, False, None, False, None)
+    with pytest.raises(ValueError, match=match):
+        table.new_read_builder().new_read()
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.parametrize('overwrite', ['true', 'false'])
+def test_overwrite_option_ignored_for_non_nested_update_fields(tmp_path, overwrite):
+    """Overwrite-on-equal only constrains nested_update (Java factory semantics)."""
+    from pypaimon.read.merge_engine_support import check_nested_update_configuration
+
+    def _non_nested_table(name, **extra):
+        catalog = CatalogFactory.create({'warehouse': str(tmp_path / name)})
+        catalog.create_database('default', True)
+        options = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'merge-engine': 'aggregation',
+            'fields.updates.aggregate-function': 'last_value',
+            'fields.updates.nested-sequence-overwrite-on-equal': overwrite,
+            'sequence.field': 'id',
+            'read.native.enabled': 'true',
+            'write.native.enabled': 'true',
+            'commit.native.enabled': 'false',
+        }
+        options.update(extra)
+        catalog.create_table(
+            'default.t',
+            Schema.from_pyarrow_schema(_SCHEMA, primary_keys=['id'], options=options),
+            False)
+        return catalog.get_table('default.t')
+
+    # Field-level last_value: stray overwrite must not require nested-sequence-field,
+    # and sequence.field + overwrite=false must not be rejected.
+    table = _non_nested_table('ignore_%s' % overwrite)
+    check_nested_update_configuration(table)
+    writer = table.new_batch_write_builder().new_write()
+    writer.close()
+
+    # Default nested_update overridden by field-level last_value: also ignored.
+    table2 = _non_nested_table(
+        'ignore_default_%s' % overwrite,
+        **{
+            'fields.default-aggregate-function': 'nested_update',
+            'fields.updates.aggregate-function': 'last_value',
+        })
+    check_nested_update_configuration(table2)
+    writer2 = table2.new_batch_write_builder().new_write()
+    writer2.close()
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+def test_unset_overwrite_keeps_default_with_sequence_field(tmp_path):
+    """Unset overwrite-on-equal stays default true; sequence.field remains allowed."""
+    from pypaimon.read.merge_engine_support import check_nested_update_configuration
+
+    table = _table(tmp_path, None, name='default_seq', **{'sequence.field': 'id'})
+    check_nested_update_configuration(table)
+    writer = table.new_batch_write_builder().new_write()
+    writer.close()
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
 def test_row_sequence_equal_keeps_first_across_commit(tmp_path):
     """Same nested key and ROW sequence keeps the first payload."""
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'row_seq')})
