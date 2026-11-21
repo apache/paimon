@@ -132,13 +132,10 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
         TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         validateSearch();
 
-        Snapshot snapshot = null;
-        if (table instanceof FileStoreTable) {
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            if (!TimeTravelUtil.tryTravelToSnapshot(fileStoreTable).isPresent()) {
-                snapshot = fileStoreTable.latestSnapshot().orElse(null);
-            }
-        }
+        Snapshot snapshot =
+                table instanceof FileStoreTable
+                        ? TimeTravelUtil.tryTravelOrLatest((FileStoreTable) table)
+                        : null;
         List<Route> routeBuilders = new ArrayList<>(routes.size());
         for (HybridSearchRoute route : routes) {
             if (route.isVector()) {

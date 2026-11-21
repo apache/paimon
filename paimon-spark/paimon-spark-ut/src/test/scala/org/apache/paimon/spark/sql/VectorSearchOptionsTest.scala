@@ -19,10 +19,79 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, HybridSearchRoute, VectorSearch}
+import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
+
+import org.apache.spark.sql.types.StructType
+import org.mockito.Mockito.{spy, when}
+
+import java.util.{Arrays, Collections, Optional}
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
 /** Tests for vector search query-time options. */
 class VectorSearchOptionsTest extends PaimonSparkTestBase {
+
+  Seq("vector", "full-text", "hybrid").foreach {
+    kind =>
+      test(s"$kind search reads rows from its ranking snapshot") {
+        withTable("T") {
+          spark.sql("""
+                      |CREATE TABLE T (id INT, v ARRAY<FLOAT>, content STRING)
+                      |TBLPROPERTIES (
+                      |  'bucket' = '-1',
+                      |  'row-tracking.enabled' = 'true',
+                      |  'data-evolution.enabled' = 'true',
+                      |  'test.vector.dimension' = '2',
+                      |  'test.vector.metric' = 'l2')
+                      |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES (1, array(1.0f, 0.0f), 'apache paimon')").collect()
+          spark
+            .sql(s"CALL sys.create_global_index(table => 'T', index_column => 'v', " +
+              s"index_type => '${TestVectorGlobalIndexerFactory.IDENTIFIER}')")
+            .collect()
+          spark
+            .sql("CALL sys.create_global_index(table => 'T', index_column => 'content', " +
+              "index_type => 'full-text')")
+            .collect()
+          val table = loadTable("T")
+          val rankedSnapshot = table.latestSnapshot().get()
+          spark.sql("INSERT OVERWRITE T VALUES (9, array(0.0f, 1.0f), 'later content')").collect()
+
+          // Ranking sees the earlier snapshot while a separate data scan sees the overwrite.
+          val searchTable = spy(table)
+          when(searchTable.latestSnapshot()).thenReturn(Optional.of(rankedSnapshot))
+          val vector = Array(1.0f, 0.0f)
+          val query = """{"match":{"column":"content","terms":"paimon"}}"""
+          val scan = PaimonScan(
+            searchTable,
+            new StructType().add("id", "int"),
+            Nil,
+            Nil,
+            None,
+            None,
+            pushedVectorSearch =
+              Some(new VectorSearch(vector, 1, "v")).filter(_ => kind == "vector"),
+            pushedHybridSearch = Some(
+              new HybridSearch(
+                Arrays.asList(
+                  new HybridSearchRoute("v", vector, 1, 1.0f),
+                  HybridSearchRoute.fullText("content", query, 1, 1.0f, Collections.emptyMap())),
+                1,
+                "rrf")).filter(_ => kind == "hybrid"),
+            pushedFullTextSearch = Some(new FullTextSearch("content", query, 1))
+              .filter(_ => kind == "full-text")
+          )
+
+          val ids = ListBuffer.empty[Int]
+          val reader = scan.readBuilder.newRead().createReader(scan.inputSplits.toList.asJava)
+          try reader.forEachRemaining(row => ids.append(row.getInt(0)))
+          finally reader.close()
+          assert(ids.toList == List(1))
+        }
+      }
+  }
 
   test("vector search forwards query options to reader") {
     withTable("T") {
