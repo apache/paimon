@@ -147,6 +147,142 @@ class IterArrowTableRowsTest(unittest.TestCase):
             self.assertNotEqual(rows[0][0], rows[1][0])
             self.assertLess(rows[0][0], rows[1][0])
 
+    def test_min_ns_timestamp_not_nat_top_level_and_nested(self):
+        from pypaimon.read.reader.iface.record_batch_reader import (
+            _PhysicalNsTimestamp,
+        )
+
+        min_ns = -(1 << 63)
+        for tz in (None, 'UTC'):
+            with self.subTest(tz=tz):
+                ts_type = pa.timestamp('ns', tz=tz) if tz else pa.timestamp('ns')
+                value_type = pa.struct([
+                    ('value', pa.string()),
+                    ('event_time', ts_type),
+                ])
+                batch = pa.RecordBatch.from_arrays([
+                    pa.array([min_ns, 0], type=ts_type),
+                    pa.array([
+                        [('k', {'value': 'old', 'event_time': min_ns})],
+                        [('k', {'value': 'new', 'event_time': 0})],
+                    ], type=pa.map_(pa.string(), value_type)),
+                ], names=['ts', 'updates'])
+                for source in (_polars_arrow_table(batch),
+                               _TableWithoutToPylist(_polars_arrow_table(batch))):
+                    rows = list(_iter_arrow_table_rows(source))
+                    self.assertIsInstance(rows[0][0], _PhysicalNsTimestamp)
+                    self.assertEqual(rows[0][0].value, min_ns)
+                    self.assertLess(rows[0][0], rows[1][0])
+                    older = rows[0][1][0]['value']['event_time']
+                    newer = rows[1][1][0]['value']['event_time']
+                    self.assertIsInstance(older, _PhysicalNsTimestamp)
+                    self.assertEqual(older.value, min_ns)
+                    self.assertLess(older, newer)
+
+    def test_min_ns_keytime_aggregate_keeps_newer(self):
+        from pypaimon.read.reader.iface.record_batch_reader import (
+            _PhysicalNsTimestamp,
+        )
+        from pypaimon.execution.python.read.reader.aggregate.aggregators import (
+            FieldMergeMapWithKeyTimeAgg,
+        )
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+        from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
+
+        min_ns = _PhysicalNsTimestamp(-(1 << 63))
+        epoch = pa.scalar(0, type=pa.timestamp('ns')).as_py()
+        fields = [
+            DataField(0, 'value', AtomicType('STRING')),
+            DataField(1, 'event_time', AtomicType('TIMESTAMP(9)')),
+        ]
+        map_type = MapType(True, AtomicType('STRING'), RowType(True, fields))
+        options = CoreOptions(Options({
+            'fields.updates.ts-field': 'event_time',
+        }))
+        agg = FieldMergeMapWithKeyTimeAgg('updates', map_type, 'updates', options)
+        acc = agg.agg(None, {'k': {'value': 'old', 'event_time': min_ns}})
+        acc = agg.agg(acc, {'k': {'value': 'new', 'event_time': epoch}})
+        self.assertEqual(acc['k']['value'], 'new')
+        self.assertEqual(acc['k']['event_time'], epoch)
+
+    def test_min_ns_final_result_arrow_roundtrip_keeps_physical_value(self):
+        """Min-ns final keytime winner survives the real Arrow emit path.
+
+        Public ``to_arrow`` rebuilds batches via
+        ``PythonTableRead._emit_overflow_safe_batches`` →
+        ``pyarrow.array(values, type=...)``. Pass the wrapper itself (not
+        ``.value``) through that path. pandas ``to_pylist`` may still show
+        NaT; assert Arrow scalar ``.value`` / ``is_valid``.
+        """
+        from pypaimon.read.reader.iface.record_batch_reader import (
+            _PhysicalNsTimestamp,
+        )
+        from pypaimon.execution.python.read.reader.aggregate.aggregators import (
+            FieldMergeMapWithKeyTimeAgg,
+        )
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+        from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
+
+        min_ns = -(1 << 63)
+        for tz in (None, 'UTC'):
+            with self.subTest(tz=tz):
+                ts_type = pa.timestamp('ns', tz=tz) if tz else pa.timestamp('ns')
+                batch = pa.RecordBatch.from_arrays(
+                    [pa.array([min_ns], type=ts_type)], names=['event_time'])
+                materialized = list(_iter_arrow_table_rows(
+                    _polars_arrow_table(batch)))[0][0]
+                self.assertIsInstance(materialized, _PhysicalNsTimestamp)
+                self.assertEqual(materialized.value, min_ns)
+
+                fields = [
+                    DataField(0, 'value', AtomicType('STRING')),
+                    DataField(1, 'event_time', AtomicType(
+                        'TIMESTAMP_LTZ(9)' if tz else 'TIMESTAMP(9)')),
+                ]
+                map_type = MapType(
+                    True, AtomicType('STRING'), RowType(True, fields))
+                agg = FieldMergeMapWithKeyTimeAgg(
+                    'updates', map_type, 'updates',
+                    CoreOptions(Options({
+                        'fields.updates.ts-field': 'event_time',
+                    })))
+                # Sole input: min-ns is the final keytime winner.
+                acc = agg.agg(None, {
+                    'k': {'value': 'only', 'event_time': materialized}})
+                winner_ts = acc['k']['event_time']
+                self.assertIsInstance(winner_ts, _PhysicalNsTimestamp)
+                self.assertEqual(winner_ts.value, min_ns)
+
+                # Top-level column emit (same helper as PythonTableRead.to_arrow).
+                top_schema = pa.schema([('event_time', ts_type)])
+                top_batches = list(PythonTableRead._emit_overflow_safe_batches(
+                    {'event_time': [winner_ts]}, 1, top_schema))
+                self.assertEqual(len(top_batches), 1)
+                top_scalar = top_batches[0].column(0)[0]
+                self.assertTrue(top_scalar.is_valid)
+                self.assertEqual(top_scalar.value, min_ns)
+
+                # Nested MAP emit: dict-shaped map value carrying the wrapper.
+                map_type_arrow = pa.map_(
+                    pa.string(),
+                    pa.struct([
+                        ('value', pa.string()),
+                        ('event_time', ts_type),
+                    ]))
+                map_schema = pa.schema([('updates', map_type_arrow)])
+                map_batches = list(PythonTableRead._emit_overflow_safe_batches(
+                    {'updates': [{'k': {
+                        'value': 'only', 'event_time': winner_ts}}]},
+                    1, map_schema))
+                self.assertEqual(len(map_batches), 1)
+                nested_ts = map_batches[0].column(0)[0].values[0]['value'][
+                    'event_time']
+                self.assertTrue(nested_ts.is_valid)
+                self.assertEqual(nested_ts.value, min_ns)
+
 
 if __name__ == '__main__':
     unittest.main()

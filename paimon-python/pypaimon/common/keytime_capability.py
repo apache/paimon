@@ -15,13 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Shared Native gates for ``merge_map_with_keytime`` string ordering.
+"""Shared Native gates for ``merge_map_with_keytime``.
 
-Rust Native still compares STRING keytime timestamps as UTF-8 ``&str``
-order while Java/Python use UTF-16 code units. Reader, Writer and MERGE
-source staging share one effective-aggregator resolution so they agree
-with Java Partial Update ``allSequenceFields`` (``sequence.field`` plus
-``fields.*.sequence-group`` ordering fields).
+Rust Native (0.5.0) is unsafe for every effective keytime field:
+
+* CHAR/VARCHAR/STRING: UTF-8 ``&str`` order diverges from Java/Python
+  UTF-16 code units.
+* Every other timestamp type: Native rejects with
+  ``merge_map_with_keytime timestamp ... requires STRING``.
+
+Reader, Writer and MERGE source staging share one effective-aggregator
+resolution so they agree with Java Partial Update ``allSequenceFields``
+(``sequence.field`` plus ``fields.*.sequence-group`` ordering fields).
 """
 
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
@@ -140,6 +145,17 @@ def string_keytime_fields(table):
     return names
 
 
+def native_unsupported_keytime_fields(table):
+    """Effective keytime fields Native 0.5.0 cannot safely merge.
+
+    Includes STRING (UTF-16 mismatch) and every non-STRING timestamp type
+    that Native rejects with ``requires STRING``. Evidence is the installed
+    Rust wheel error string; do not invent additional type families beyond
+    that constraint.
+    """
+    return list(effective_merge_map_keytime_fields(table))
+
+
 def table_uses_merge_map_keytime(table) -> bool:
     return bool(effective_merge_map_keytime_fields(table))
 
@@ -148,13 +164,19 @@ def table_has_string_keytime(table) -> bool:
     return bool(string_keytime_fields(table))
 
 
+def table_has_native_unsupported_keytime(table) -> bool:
+    return bool(native_unsupported_keytime_fields(table))
+
+
 def native_string_keytime_read_supported(table, accessed_field_names=None) -> bool:
     """Whether a Native read may open for the accessed field set.
 
-    Only STRING keytime aggregators are unsafe. When ``accessed_field_names``
-    is None, every table field is treated as accessed (full-table read).
+    Any effective keytime field is unsafe on Native 0.5.0 (STRING order or
+    non-STRING ``requires STRING``). When ``accessed_field_names`` is None,
+    every table field is treated as accessed (full-table read). Unrelated
+    projections that omit keytime fields remain eligible.
     """
-    unsafe = set(string_keytime_fields(table))
+    unsafe = set(native_unsupported_keytime_fields(table))
     if not unsafe:
         return True
     if accessed_field_names is None:
@@ -165,15 +187,19 @@ def native_string_keytime_read_supported(table, accessed_field_names=None) -> bo
 
 
 def native_write_refuses_string_keytime(table) -> bool:
-    """True when Native Writer must not reduce STRING keytime maps."""
-    return table_has_string_keytime(table)
+    """True when Native Writer must not reduce unsafe keytime maps.
+
+    Name kept for call-site stability; refusal covers all Native-unsupported
+    keytime timestamp types, not only STRING.
+    """
+    return table_has_native_unsupported_keytime(table)
 
 
 def native_keytime_timestamp_rejected(error) -> bool:
-    """True when this Native build cannot merge a non-STRING keytime value.
+    """Safety net when Native still rejects a non-STRING keytime mid-read.
 
-    The failure is raised while reading batches, after Native setup succeeds.
-    Callers fall back to the Python reader, which already accepts these types.
+    Prefer ``native_string_keytime_read_supported`` before opening Native;
+    this matcher only recovers if a path bypasses the pre-check.
     """
     text = str(error)
     return 'merge_map_with_keytime' in text and 'requires STRING' in text

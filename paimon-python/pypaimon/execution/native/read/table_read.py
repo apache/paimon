@@ -180,15 +180,16 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
-        # STRING keytime only when this read actually touches those fields.
+        # Unsafe keytime (STRING UTF-16 mismatch or non-STRING requires
+        # STRING) only when this read actually touches those fields.
         # Unrelated projections (e.g. VARIANT) stay on Native.
         if _read_hits_unsafe_string_keytime(read):
             if read.table.options.merge_engine() == MergeEngine.PARTIAL_UPDATE:
                 raise NotImplementedError(
                     _partial_update_keytime_unsupported_message())
             return self._fallback(
-                "merge_map_with_keytime STRING timestamps are not supported "
-                "by the native reader; falling back to Python")
+                "merge_map_with_keytime timestamps are not supported by the "
+                "native reader; falling back to Python")
         try:
             if not self._orc_shared_shredding_supported(splits):
                 return self._fallback("ORC shared-shredding MAP columns require the Python reader")

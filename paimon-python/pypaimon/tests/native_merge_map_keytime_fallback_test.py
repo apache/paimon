@@ -165,26 +165,23 @@ def test_string_keytime_falls_back_before_opening_native(ts_type):
     'BOOLEAN', 'BINARY(4)', 'VARBINARY(8)', 'BYTES',
     'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT',
     'FLOAT', 'DOUBLE',
-    'DATE', 'TIME', 'DECIMAL(10, 2)',
+    'DATE', 'TIME', 'DECIMAL(10, 2)', 'DECIMAL(23, 6)',
     'TIMESTAMP(9)', 'TIMESTAMP_LTZ(9)', 'TIMESTAMP',
 ])
-def test_non_string_keytime_stays_eligible_for_native(ts_type):
+def test_non_string_keytime_falls_back_before_opening_native(ts_type):
+    """Rust 0.5.0 rejects non-STRING keytime with ``requires STRING``."""
     table = _table(_keytime_fields(_value_row(ts_type)), _keytime_options())
-    assert _native_merge_map_keytime_timestamp_supported(table) is True
     assert _table_uses_merge_map_keytime(table) is True
-    batch = pa.record_batch(
-        [pa.array(['1']), pa.array([None], type=pa.map_(
-            pa.string(), pa.struct([
-                ('value', pa.string()), ('event_time', pa.string())])))],
-        names=['id', 'updates'])
-    _assert_stays_on_native(table, batch)
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
+    assert _native_write_refuses_merge_map_keytime(table) is True
+    _assert_falls_back_before_native(table)
 
 
-def test_default_ts_field_string_falls_back_non_string_stays():
+def test_default_ts_field_string_and_non_string_both_fall_back():
     double_last = _table(
         _keytime_fields(_value_row('DOUBLE')),
         _keytime_options(ts_field=None))
-    assert _native_merge_map_keytime_timestamp_supported(double_last) is True
+    assert _native_merge_map_keytime_timestamp_supported(double_last) is False
 
     string_last = _table(
         _keytime_fields(RowType(True, [
@@ -396,13 +393,20 @@ def test_catalog_ascii_string_still_prefers_lexically_newer(tmp_path):
     assert updates['k'][ts_name] == '200'
 
 
-def test_catalog_double_keytime_stays_eligible_and_keeps_newer(tmp_path):
-    """DOUBLE keytime has no UTF-16 mismatch; Native remains eligible."""
+def test_catalog_double_keytime_falls_back_before_native_and_keeps_newer(tmp_path):
+    """DOUBLE keytime is refused by Native 0.5.0; Python keeps the newer."""
     table, pa_schema, ts_name = _create_keytime_table(
         tmp_path, 'double_keytime', pa.float64())
     assert _table_uses_merge_map_keytime(table) is True
-    assert _native_merge_map_keytime_timestamp_supported(table) is True
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
     _write_two_versions(table, pa_schema, ts_name, 9.5, 10.25)
+
+    read = table.new_read_builder().new_read()
+    splits = table.new_read_builder().new_scan().plan().splits()
+    schema = read._output_arrow_schema(splits)
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        assert NativeTableRead(read).read_batches(splits, schema) is None
+    native.assert_not_called()
 
     rows = _public_read(table).to_pylist()
     assert len(rows) == 1
@@ -1209,7 +1213,7 @@ def test_bigint_keytime_variant_projection_gate_allows_native():
     ]
     table = _table(fields, _keytime_options())
     assert _table_uses_merge_map_keytime(table) is True
-    assert _native_merge_map_keytime_timestamp_supported(table) is True
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
     assert _native_merge_map_keytime_timestamp_supported(
         table, ['id', 'payload']) is True
 
@@ -1293,3 +1297,155 @@ def test_bigint_keytime_variant_projection_stays_on_native(tmp_path):
         rows = builder.new_read().to_arrow(
             builder.new_scan().plan().splits()).to_pylist()
     assert rows == [{'id': '1', 'score': 9.5}]
+
+
+# -- DECIMAL keytime: preemptive Native refuse + public API paths ---------
+
+
+def _create_decimal_keytime_table(tmp_path, name, *, write_native='true'):
+    from decimal import Decimal
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    value_type = pa.struct([
+        pa.field('value', pa.string()),
+        pa.field('event_time', pa.decimal128(23, 6)),
+    ])
+    pa_schema = pa.schema([
+        pa.field('id', pa.string(), nullable=False),
+        pa.field('updates', pa.map_(pa.string(), value_type)),
+        pa.field('label', pa.string()),
+    ])
+    options = {
+        'bucket': '1',
+        'merge-engine': 'aggregation',
+        'file.format': 'parquet',
+        'fields.updates.aggregate-function': 'merge_map_with_keytime',
+        'fields.updates.ts-field': 'event_time',
+        'fields.label.aggregate-function': 'last_non_null_value',
+        'read.native.enabled': 'true',
+        'write.native.enabled': write_native,
+        'scan.native-plan.enabled': 'false',
+        'commit.native.enabled': 'false',
+    }
+    catalog.create_table(
+        'default.{}'.format(name),
+        Schema.from_pyarrow_schema(pa_schema, primary_keys=['id'], options=options),
+        False)
+    table = catalog.get_table('default.{}'.format(name))
+    return table, pa_schema, Decimal
+
+
+def test_decimal_keytime_public_apis_fallback_and_keep_newer(tmp_path):
+    """DECIMAL keytime must not open Native; all public read APIs keep newer."""
+    table, pa_schema, Decimal = _create_decimal_keytime_table(
+        tmp_path, 'decimal_keytime_read', write_native='false')
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
+    older = Decimal('9.150001')
+    newer = Decimal('9.150002')
+    for value, ts, label in (
+            ('first', older, 'a'),
+            ('second', newer, 'b'),
+    ):
+        wb = table.new_batch_write_builder()
+        w, c = wb.new_write(), wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist([{
+                'id': '1',
+                'updates': [('k', {'value': value, 'event_time': ts})],
+                'label': label,
+            }], schema=pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
+    reopened = CatalogFactory.create(
+        {'warehouse': str(tmp_path / 'warehouse')}
+    ).get_table('default.decimal_keytime_read')
+    rb = reopened.new_read_builder()
+    splits = rb.new_scan().plan().splits()
+    read = rb.new_read()
+
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        assert NativeTableRead(read).read_batches(
+            splits, read._output_arrow_schema(splits)) is None
+        arrow_rows = read.to_arrow(splits).to_pylist()
+        iter_rows = list(read.to_iterator(splits))
+        batch_rows = read.to_arrow_batch_reader(splits).read_all().to_pylist()
+    native.assert_not_called()
+
+    assert len(arrow_rows) == 1
+    assert dict(arrow_rows[0]['updates'])['k']['value'] == 'second'
+    assert dict(arrow_rows[0]['updates'])['k']['event_time'] == newer
+    assert len(iter_rows) == 1
+    # to_iterator yields OffsetRow; MAP values materialize as plain dicts.
+    iter_updates = iter_rows[0].get_field(1)
+    assert isinstance(iter_updates, dict)
+    assert iter_updates['k']['value'] == 'second'
+    assert iter_updates['k']['event_time'] == newer
+    assert dict(batch_rows[0]['updates'])['k']['value'] == 'second'
+    assert dict(batch_rows[0]['updates'])['k']['event_time'] == newer
+
+
+def test_decimal_keytime_native_writer_refused_python_persists(tmp_path):
+    table, pa_schema, Decimal = _create_decimal_keytime_table(
+        tmp_path, 'decimal_keytime_write', write_native='true')
+    assert _native_write_refuses_merge_map_keytime(table) is True
+    older = Decimal('9.150001')
+    newer = Decimal('9.150002')
+
+    with patch(
+            'pypaimon.execution.native.write.native_write.native_runtime_available',
+            return_value=True), \
+            patch(
+                'pypaimon.execution.native.write.native_write.create_native_write_table'
+            ) as create_table:
+        assert create_native_write(table, 'job') is None
+        create_table.assert_not_called()
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        create_table.assert_not_called()
+        assert not isinstance(writer, NativeTableWrite)
+        assert isinstance(writer._execution, PythonTableWrite)
+        try:
+            writer.write_arrow(pa.Table.from_pylist([
+                {'id': '1', 'updates': [
+                    ('k', {'value': 'first', 'event_time': older})],
+                 'label': 'a'},
+                {'id': '1', 'updates': [
+                    ('k', {'value': 'second', 'event_time': newer})],
+                 'label': 'b'},
+            ], schema=pa_schema))
+            commit = wb.new_commit()
+            try:
+                commit.commit(writer.prepare_commit())
+            finally:
+                commit.close()
+        finally:
+            writer.close()
+        create_table.assert_not_called()
+
+    reopened = CatalogFactory.create(
+        {'warehouse': str(tmp_path / 'warehouse')}
+    ).get_table('default.decimal_keytime_write')
+    rows = _public_read(reopened).to_pylist()
+    assert dict(rows[0]['updates'])['k']['value'] == 'second'
+    assert dict(rows[0]['updates'])['k']['event_time'] == newer
+
+
+def test_decimal_keytime_unrelated_projection_stays_native_eligible():
+    fields = [
+        DataField(0, 'id', AtomicType('STRING')),
+        DataField(1, 'updates', MapType(
+            True, AtomicType('STRING'),
+            RowType(True, [
+                DataField(2, 'value', AtomicType('STRING')),
+                DataField(3, 'event_time', AtomicType('DECIMAL(23, 6)')),
+            ]))),
+        DataField(4, 'label', AtomicType('STRING')),
+    ]
+    table = _table(fields, _keytime_options())
+    assert _native_merge_map_keytime_timestamp_supported(table) is False
+    assert _native_merge_map_keytime_timestamp_supported(
+        table, ['id', 'label']) is True

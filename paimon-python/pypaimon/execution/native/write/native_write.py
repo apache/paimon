@@ -33,8 +33,8 @@ from pypaimon.write.row_utils import (
     require_columns, row_to_named_values, row_values_to_arrow_table, validate_write_columns,
 )
 
-# Native Writer reduces same-batch PK maps with Rust UTF-8 ``&str`` order.
-# Refuse Native when an effective STRING keytime aggregator is present.
+# Native Writer must not reduce keytime maps: STRING uses UTF-8 order, and
+# non-STRING timestamps are rejected with ``requires STRING`` on Rust 0.5.0.
 from pypaimon.common.keytime_capability import (
     native_write_refuses_string_keytime as _native_write_refuses_merge_map_keytime,
 )
