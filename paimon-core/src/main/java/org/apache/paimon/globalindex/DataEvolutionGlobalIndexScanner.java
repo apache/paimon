@@ -153,9 +153,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         Map<List<Integer>, IndexMetaFileGroup> primaryGroups = new LinkedHashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            if (CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
-                continue;
-            }
             int indexFieldId = meta.indexFieldId();
             List<Integer> fieldIds = meta.getIndexedFieldIds();
             IndexMetaFileGroup group = primaryGroups.get(fieldIds);
@@ -387,19 +384,16 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return meta != null && meta.extraFieldIds() != null && meta.extraFieldIds().length > 0;
     }
 
-    /** Dropped indexed columns leave manifest entries that cannot serve the current schema. */
+    /** Checks which indexes can serve field lookups in the current schema. */
     static boolean isIndexInSchema(RowType rowType, IndexFileMeta file) {
-        return file.globalIndexMeta().getIndexedFieldIds().stream()
-                .allMatch(rowType::containsField);
+        GlobalIndexMeta meta = file.globalIndexMeta();
+        return !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                && meta.getIndexedFieldIds().stream().allMatch(rowType::containsField);
     }
 
     private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
                 .filter(indexFile -> indexFile.globalIndexMeta() != null)
-                .filter(
-                        file ->
-                                !CentroidIndexMeta.hasScalarIndexes(
-                                        file.globalIndexMeta().indexMeta()))
                 .collect(Collectors.toList());
     }
 
