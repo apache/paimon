@@ -18,10 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.data.{InternalRow => PaimonRow}
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.data.{BlobData, InternalRow => PaimonRow}
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.operation.metrics.BlobFetchMetrics
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.reader.RecordReader.RecordIterator
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.{PaimonInputPartition, PaimonPartitionReader, PaimonRecordReaderIterator, PaimonSparkTestBase}
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
@@ -47,6 +50,8 @@ import javax.management.ObjectName
 
 import java.io.IOException
 import java.lang.management.ManagementFactory
+
+import scala.collection.JavaConverters._
 
 class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
 
@@ -192,6 +197,77 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
         assert(commitMetric.isDefined, s"V1 commit JMX metric missing: $names")
         assert(server.getAttribute(commitMetric.get, "Value").asInstanceOf[Long] > 0L)
       }
+    }
+  }
+
+  test("Paimon Metric: blob transfer export keeps the latest writer in the same JVM") {
+    val tableName = "t_blob_transfer_metrics_" + System.nanoTime()
+    withTable(tableName) {
+      val schema = Schema
+        .newBuilder()
+        .column("id", DataTypes.INT())
+        .column("payload", DataTypes.BLOB())
+        .option("bucket", "-1")
+        .option("row-tracking.enabled", "true")
+        .option("data-evolution.enabled", "true")
+        .option("write-only", "true")
+        .option("blob-transfer-metrics.enabled", "true")
+        .build()
+      paimonCatalog.createTable(Identifier.create(dbName0, tableName), schema, false)
+      val table = loadTable(tableName)
+      val first = table.newBatchWriteBuilder().newWrite()
+      val second = table.newBatchWriteBuilder().newWrite()
+      val exported = PaimonMetricsSource.metricRegistry
+      val prefix = s"${BlobFetchMetrics.TRANSFER_GROUP_NAME}.sourceKind.inline.table.$tableName."
+      val completedName = prefix + BlobFetchMetrics.TRANSFER_COMPLETED
+      try {
+        first.withMetricRegistry(SparkMetricRegistry())
+        second.withMetricRegistry(SparkMetricRegistry())
+        (1 to 3).foreach(id => first.write(GenericRow.of(id, new BlobData(Array[Byte](1, 2, 3)))))
+        val firstGauge = exported.getGauges.get(completedName)
+        assert(firstGauge != null)
+        assert(firstGauge.getValue == 3L)
+        val metricNames = exported.getNames.asScala.filter(_.startsWith(prefix)).toSet
+
+        second.write(GenericRow.of(4, new BlobData(Array[Byte](4))))
+        val secondGauge = exported.getGauges.get(completedName)
+        assert(secondGauge ne firstGauge)
+        assert(secondGauge.getValue == 1L)
+        assert(exported.getNames.asScala.filter(_.startsWith(prefix)).toSet == metricNames)
+
+        first.write(GenericRow.of(5, new BlobData(Array[Byte](5))))
+        assert(firstGauge.getValue == 4L)
+        assert(exported.getGauges.get(completedName).getValue == 1L)
+        assert(!first.prepareCommit().isEmpty)
+        assert(!second.prepareCommit().isEmpty)
+        assert(exported.getGauges.get(completedName).getValue == 1L)
+      } finally {
+        try first.close()
+        finally second.close()
+        exported.getNames.asScala.filter(_.contains(tableName)).toSeq.foreach(exported.remove)
+      }
+    }
+  }
+
+  test("Paimon Metric: blob transfer histogram exports only its mean") {
+    val tableName = "blob-transfer-histogram-" + System.nanoTime()
+    val group = SparkMetricRegistry()
+      .createTableMetricGroup(BlobFetchMetrics.TRANSFER_GROUP_NAME, tableName)
+    val exported = PaimonMetricsSource.metricRegistry
+    val metricName = s"${BlobFetchMetrics.TRANSFER_GROUP_NAME}.table.$tableName." +
+      BlobFetchMetrics.TRANSFER_LATENCY_MILLIS
+    try {
+      val histogram = group.histogram(BlobFetchMetrics.TRANSFER_LATENCY_MILLIS, 1024)
+      histogram.update(10)
+      histogram.update(30)
+
+      assert(histogram.getCount == 2L)
+      assert(exported.getGauges.get(metricName).getValue == 20.0)
+      assert(!exported.getHistograms.containsKey(metricName))
+      assert(exported.getNames.asScala.filter(_.contains(tableName)).toSet == Set(metricName))
+    } finally {
+      group.close()
+      exported.remove(metricName)
     }
   }
 

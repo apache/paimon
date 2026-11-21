@@ -30,6 +30,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CoreOptionsTest {
 
     @Test
+    void testBlobTransferMetricsAreOptIn() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.blobTransferMetricsEnabled()).isFalse();
+
+        options.set(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED, true);
+        assertThat(core.blobTransferMetricsEnabled()).isTrue();
+
+        options.setString(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED.key(), "false");
+        assertThat(core.blobTransferMetricsEnabled()).isFalse();
+    }
+
+    @Test
     void testCommitLastSafeSnapshotAndStrictMode() {
         Options options = new Options();
         CoreOptions core = new CoreOptions(options);
