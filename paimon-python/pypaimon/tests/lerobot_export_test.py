@@ -31,6 +31,8 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.filesystem.local_file_io import FuseLocalFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot import export as export_module
 from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
@@ -69,6 +71,9 @@ class MemoryOss:
             self.objects[uri] = content.encode()
             self.writes.append(uri)
             return True
+
+    def check_exclusive_write_supported(self, uri):
+        pass
 
     def new_output_stream(self, uri):
         store = self
@@ -372,6 +377,7 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
     target = MemoryOss()
     wrapped = SimpleNamespace(
         exists=target.exists, list_status=target.list_status,
+        check_exclusive_write_supported=target.check_exclusive_write_supported,
         try_to_write_exclusive=target.try_to_write_exclusive,
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
@@ -393,6 +399,18 @@ def test_export_rejects_non_object_table(tmp_path):
     with pytest.raises(ValueError, match="must name an Object Table"):
         conn.export_to_lerobot(
             "robot", output_table="robot_frames", sub_folder="train_001")
+
+
+def test_fuse_object_table_is_rejected_before_reading_source(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    fuse = FuseLocalFileIO(
+        "oss://test-bucket/lerobot", str(tmp_path / "fuse"))
+    rest = RESTTokenFileIO.__new__(RESTTokenFileIO)
+    rest.file_io = lambda: fuse
+    with _target_object_table(conn, rest):
+        with pytest.raises(NotImplementedError, match="Exclusive creation"):
+            conn.export_to_lerobot(
+                "missing_source", output_table="exports", sub_folder="train_001")
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):

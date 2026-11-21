@@ -17,6 +17,7 @@
 
 """Exclusive OSS creation must not inherit metadata-write rename fallbacks."""
 
+import io
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -105,6 +106,24 @@ def test_two_independent_oss_clients_have_one_exclusive_winner():
     assert objects == {"export/meta/.pypaimon-export-claim": b"claimed"}
 
 
+@pytest.mark.parametrize("recorded,won", [
+    (b"this-attempt", True),
+    (b"another-attempt", False),
+])
+def test_exclusive_claim_recovers_lost_put_response(recorded, won):
+    oss2 = pytest.importorskip("oss2")
+    bucket = mock.Mock()
+    bucket.get_bucket_versioning.return_value = SimpleNamespace(status=None)
+    bucket.put_object.side_effect = oss2.exceptions.RequestError(
+        RuntimeError("response lost"))
+    bucket.get_object.return_value = io.BytesIO(recorded)
+
+    with mock.patch.object(oss2, "Session"):
+        assert _oss_io(bucket).try_to_write_exclusive(
+            "oss://test-bucket/export/claim", "this-attempt") is won
+    bucket.get_object.assert_called_once_with("export/claim")
+
+
 def test_exclusive_claim_passes_through_file_io_wrappers():
     target = mock.Mock()
     target.try_to_write_exclusive.return_value = True
@@ -118,3 +137,6 @@ def test_exclusive_claim_passes_through_file_io_wrappers():
     assert rest.try_to_write_exclusive("oss://test-bucket/claim", "claimed")
     target.try_to_write_exclusive.assert_called_once_with(
         "oss://test-bucket/claim", "claimed")
+    rest.check_exclusive_write_supported("oss://test-bucket/claim")
+    target.check_exclusive_write_supported.assert_called_once_with(
+        "oss://test-bucket/claim")

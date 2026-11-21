@@ -418,7 +418,8 @@ conn.export_to_lerobot(
 Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
 re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
 `sub_folder` names the new directory under the target Object Table, such as
-`train_001/`. The directory must not exist.
+`train_001/`. The directory must not exist. Export requires OSS exclusive
+creation; FUSE-routed Object Tables are not supported.
 
 ## Capture LeRobot frames directly into Paimon
 

@@ -22,6 +22,7 @@ import json
 import re
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -80,6 +81,8 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
     if parsed.scheme != "oss" or not parsed.netloc:
         raise ValueError("Object Table output must use OSS storage.")
     target_uri = object_location.rstrip("/") + "/" + sub_folder
+    table.file_io.check_exclusive_write_supported(
+        target_uri + "/meta/.pypaimon-export-claim")
 
     try:
         frames = connection.get_table(table_name)
@@ -163,7 +166,7 @@ def _reserve_object_prefix(prefix, file_io):
     if _prefix_has_files(file_io, prefix):
         raise FileExistsError(prefix)
     if not file_io.try_to_write_exclusive(
-            prefix + "/meta/.pypaimon-export-claim", "claimed"):
+            prefix + "/meta/.pypaimon-export-claim", uuid.uuid4().hex):
         raise FileExistsError(prefix)
 
 
