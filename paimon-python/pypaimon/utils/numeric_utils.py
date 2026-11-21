@@ -15,11 +15,33 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Java numeric text shared by partition paths and value conversions."""
+"""Java-compatible numeric formatting and ordering."""
 
 import math
 import struct
 from decimal import Decimal
+from functools import cmp_to_key
+
+
+def java_float_compare(left: float, right: float) -> int:
+    """Compare non-null floats in Java Float.compare and Double.compare order.
+
+    Negative zero precedes positive zero, and all NaNs tie above positive infinity.
+    """
+    if left == right:
+        if left == 0.0:
+            left_sign = math.copysign(1.0, left)
+            right_sign = math.copysign(1.0, right)
+            return (left_sign > right_sign) - (left_sign < right_sign)
+        return 0
+    if left < right:
+        return -1
+    if left > right:
+        return 1
+    return math.isnan(left) - math.isnan(right)
+
+
+java_floating_sort_key = cmp_to_key(java_float_compare)
 
 
 def java_floating_string(value, single_precision=False) -> str:

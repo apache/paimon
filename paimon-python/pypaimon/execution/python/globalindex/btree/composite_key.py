@@ -25,6 +25,7 @@ from pypaimon.execution.python.globalindex.key_serializer import (
     KeySerializer, create_serializer, _read_var_len_int, _write_var_len_int,
     _parse_precision,
 )
+from pypaimon.utils.numeric_utils import java_float_compare
 
 
 class CompositeKeySerializer(KeySerializer):
@@ -142,12 +143,4 @@ def compare_nullable(left, right, comparator):
 
 
 def _java_float_compare(left, right):
-    left, right = float(left), float(right)
-    if math.isnan(left):
-        return 0 if math.isnan(right) else 1
-    if math.isnan(right):
-        return -1
-    if left == right == 0:
-        return (math.copysign(1, left) > math.copysign(1, right)) - (
-            math.copysign(1, left) < math.copysign(1, right))
-    return (left > right) - (left < right)
+    return java_float_compare(float(left), float(right))

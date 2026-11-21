@@ -15,6 +15,7 @@
 # under the License.
 
 import math
+import struct
 from datetime import datetime
 
 import pyarrow as pa
@@ -72,6 +73,66 @@ def _files(table, changelog=False):
 def _bounds(stats):
     return tuple(GenericRowDeserializer.from_bytes(row.data, row.fields).values
                  for row in (stats.min_values, stats.max_values))
+
+
+@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()], ids=['float', 'double'])
+@pytest.mark.parametrize('values, expected_min, expected_max', [
+    pytest.param([5.0, math.nan], 5.0, math.nan, id='nan-last'),
+    pytest.param([math.nan, 5.0], 5.0, math.nan, id='nan-first'),
+    pytest.param([-0.0, +0.0], -0.0, +0.0, id='negative-zero-first'),
+    pytest.param([+0.0, -0.0], -0.0, +0.0, id='positive-zero-first'),
+    pytest.param([-0.0, -0.0], -0.0, -0.0, id='negative-zero-only'),
+    pytest.param([+0.0, +0.0], +0.0, +0.0, id='positive-zero-only'),
+    pytest.param([math.inf, None, -math.inf], -math.inf, math.inf, id='infinities'),
+    pytest.param([math.inf, math.inf], math.inf, math.inf, id='positive-infinity-only'),
+    pytest.param([-math.inf, -math.inf], -math.inf, -math.inf, id='negative-infinity-only'),
+    pytest.param([None, math.nan, math.inf], math.inf, math.nan, id='nan-and-infinity'),
+    pytest.param([5.0, None, -2.0, None], -2.0, 5.0, id='mixed-numbers-and-nulls'),
+    pytest.param([math.nan, -math.nan], math.nan, math.nan, id='all-nan'),
+    pytest.param([None, -math.nan, None], math.nan, math.nan, id='null-and-nan'),
+    pytest.param([None, None], None, None, id='all-null'),
+])
+def test_manifest_list_floating_partition_bounds(tmp_path, typ, values, expected_min, expected_max):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', False)
+    schema = pa.schema([('id', pa.int32()), ('p', typ), ('seq', pa.int32())])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['p', 'seq'],
+        options={'bucket': '-1', 'write.native.enabled': 'false', 'commit.native.enabled': 'false'}), False)
+    table = catalog.get_table('db.t')
+    builder = table.new_batch_write_builder()
+    messages = []
+    # A distinct partition per entry keeps equal zeros and repeated NULLs in the same commit.
+    for i, value in enumerate(values):
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(pa.table({'id': [i], 'p': [value], 'seq': [i]}, schema=schema))
+            messages.extend(writer.prepare_commit())
+        finally:
+            writer.close()
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+
+    manifest, = ManifestListManager(table).read_delta(table.snapshot_manager().get_latest_snapshot())
+    assert manifest.num_added_files == len(values)
+    entries = ManifestFileManager(table).read(manifest.file_name)
+    assert [entry.partition.get_field(1) for entry in entries] == list(range(len(values)))
+    stats = manifest.partition_stats
+    minimum, maximum = _bounds(stats)
+    assert stats.null_counts == [values.count(None), 0]
+    assert (minimum[1], maximum[1]) == (0, len(values) - 1)
+    encoding = '>f' if typ == pa.float32() else '>d'
+    for actual, expected in ((minimum[0], expected_min), (maximum[0], expected_max)):
+        if expected is None:
+            assert actual is None
+        elif math.isnan(expected):
+            assert math.isnan(actual)
+        else:
+            # Comparing the IEEE bits distinguishes -0.0 from +0.0.
+            assert struct.pack(encoding, actual) == struct.pack(encoding, expected)
 
 
 @pytest.mark.parametrize('mode', [None, 'truncate(16)', 'counts', 'full', 'none'])
