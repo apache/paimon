@@ -46,6 +46,14 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up JDK ${{ matrix.java }}
+        id: setup_java
+        continue-on-error: true
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: temurin
+      - name: Retry JDK setup after a download failure
+        if: ${{ steps.setup_java.outcome == 'failure' }}
         uses: actions/setup-java@v5
         with:
           java-version: ${{ matrix.java }}
