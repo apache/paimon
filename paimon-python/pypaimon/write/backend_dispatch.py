@@ -242,7 +242,8 @@ def load_postpone_bucket_metadata(table):
 
 
 def prepare_native_commit(owner, messages, *, batch=False):
-    if owner._python_commit is not None or not owner.table.options.native_commit_enabled():
+    if (owner._python_commit is not None or getattr(owner, '_commit_condition', None) is not None
+            or not owner.table.options.native_commit_enabled()):
         return None
 
     def prepare():

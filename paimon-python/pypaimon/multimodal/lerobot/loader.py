@@ -90,7 +90,12 @@ def _write_dataset(
 def _commit_messages(table_commit, messages):
     snapshot_recorder = _SnapshotRecorder()
     table_commit.add_commit_callback(snapshot_recorder)
-    table_commit.commit(messages)
+    committed = table_commit.commit(messages)
+    if committed is False:
+        latest = table_commit.table.snapshot_manager().get_latest_snapshot()
+        if latest is None:
+            raise RuntimeError("LeRobot duplicate commit has no snapshot.")
+        return latest.id
     if snapshot_recorder.snapshot_id is None:
         raise RuntimeError(
             "LeRobot append committed without reporting a snapshot id.")
