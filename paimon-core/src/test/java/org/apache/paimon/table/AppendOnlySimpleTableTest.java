@@ -69,6 +69,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -333,6 +334,51 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                     .containsExactlyInAnyOrderElementsOf(
                             isNull ? Collections.singletonList(2) : Arrays.asList(1, 3));
         }
+    }
+
+    @Test
+    public void testLegacyFileBoundsOmittingNaN() throws Exception {
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        RowType.builder()
+                                .field("f", DataTypes.DOUBLE())
+                                .field("id", DataTypes.INT())
+                                .build(),
+                        options -> options.set(FILE_FORMAT, "parquet"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(5.0d, 1));
+            write.write(GenericRow.of(Double.NaN, 2));
+            write.write(GenericRow.of(null, 3));
+            List<CommitMessage> messages = write.prepareCommit();
+            // Simulate a legacy import that copied the finite Parquet footer bounds.
+            DataFileMeta file =
+                    ((CommitMessageImpl) messages.get(0)).newFilesIncrement().newFiles().get(0);
+            file.valueStats().minValues().setDouble(0, 5.0d);
+            file.valueStats().maxValues().setDouble(0, 5.0d);
+            commit.commit(messages);
+        }
+
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        ReadBuilder read = table.newReadBuilder().withFilter(pb.greaterThan(0, 5.0d));
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> rows =
+                read.newRead().executeFilter().createReader(read.newScan().plan())) {
+            rows.forEachRemaining(row -> ids.add(row.getInt(1)));
+        }
+        assertThat(ids).containsExactly(2);
+        assertThat(table.newReadBuilder().withFilter(pb.equal(0, 7.0d)).newScan().plan().splits())
+                .isEmpty();
+        assertThat(
+                        table.newReadBuilder()
+                                .withFilter(
+                                        PredicateBuilder.and(
+                                                pb.equal(1, 42), pb.greaterThan(0, 5.0d)))
+                                .newScan()
+                                .plan()
+                                .splits())
+                .isEmpty();
     }
 
     @Test

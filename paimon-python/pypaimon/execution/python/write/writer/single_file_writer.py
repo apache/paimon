@@ -77,8 +77,10 @@ class SingleFileWriter:
                             value for value in (previous[key], current[key])
                             if value is not None
                         ]
-                        sort_key = floating_sort_key if values and isinstance(values[0], float) else None
-                        current[key] = choose(values, key=sort_key) if values else None
+                        if values and isinstance(values[0], float):
+                            current[key] = choose(values, key=floating_sort_key)
+                        else:
+                            current[key] = choose(values) if values else None
                 self.column_stats[field.name] = current
         except Exception:
             self.abort()

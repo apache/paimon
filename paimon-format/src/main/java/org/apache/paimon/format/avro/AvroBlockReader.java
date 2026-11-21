@@ -54,6 +54,12 @@ public final class AvroBlockReader implements Closeable {
         }
     }
 
+    /** Returns a string-valued attribute of the source OCF header. */
+    @Nullable
+    public String headerMetadata(String key) {
+        return reader.getMetaString(key);
+    }
+
     /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
     public byte[] headerBytes() {
         return reader.headerBytes();

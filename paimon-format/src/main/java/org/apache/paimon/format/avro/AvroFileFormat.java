@@ -45,6 +45,7 @@ import org.apache.avro.io.EncoderFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,16 +99,26 @@ public class AvroFileFormat extends FileFormat {
 
     public AvroBlockWriter createBlockWriter(
             PositionOutputStream out, RowType rowType, String compression) throws IOException {
+        return createBlockWriter(out, rowType, compression, Collections.emptyMap());
+    }
+
+    public AvroBlockWriter createBlockWriter(
+            PositionOutputStream out,
+            RowType rowType,
+            String compression,
+            Map<String, String> headerMetadata)
+            throws IOException {
         // Retain Avro's direct encoder for pre-encoded manifest records. The buffered encoder
         // copies array-backed ByteBuffers into a temporary byte array for each appendEncoded call.
-        return createBlockWriter(out, rowType, compression, false);
+        return createBlockWriter(out, rowType, compression, false, headerMetadata);
     }
 
     private AvroBlockWriter createBlockWriter(
             PositionOutputStream out,
             RowType rowType,
             String compression,
-            boolean useBufferedEncoder)
+            boolean useBufferedEncoder,
+            Map<String, String> headerMetadata)
             throws IOException {
         Schema schema =
                 AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
@@ -118,6 +129,7 @@ public class AvroFileFormat extends FileFormat {
             writer.setEncoder(
                     outputStream -> EncoderFactory.get().binaryEncoder(outputStream, null));
         }
+        headerMetadata.forEach(writer::setMeta);
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
             writer.setSyncInterval(avroSyncInterval(blockSize));
@@ -179,7 +191,7 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            return createBlockWriter(out, rowType, compression, true);
+            return createBlockWriter(out, rowType, compression, true, Collections.emptyMap());
         }
     }
 }

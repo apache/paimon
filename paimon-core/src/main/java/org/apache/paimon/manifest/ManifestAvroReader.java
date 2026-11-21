@@ -70,6 +70,11 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
     }
 
+    @Nullable
+    String headerMetadata(String key) {
+        return blockReader.headerMetadata(key);
+    }
+
     /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
     public byte[] headerBytes() {
         return blockReader.headerBytes();

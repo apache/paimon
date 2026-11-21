@@ -146,7 +146,7 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     private SimpleColStats extractFileStats(
             DataField field,
             MessageType schema,
-            @Nullable Integer leaf,
+            @Nullable Integer columnIndex,
             List<BlockMetaData> groups,
             SimpleColStatsCollector collector) {
         if (!schema.containsField(field.name())) {
@@ -168,7 +168,7 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                     physical);
             long nulls = 0;
             for (BlockMetaData group : groups) {
-                Statistics<?> stats = group.getColumns().get(leaf).getStatistics();
+                Statistics<?> stats = group.getColumns().get(columnIndex).getStatistics();
                 if (stats == null
                         || !stats.isNumNullsSet()
                         || stats.getNumNulls() > group.getRowCount()) {
@@ -180,9 +180,9 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
         }
 
         Statistics<?> merged = null;
-        if (leaf != null) {
+        if (columnIndex != null) {
             for (BlockMetaData group : groups) {
-                Statistics<?> stats = group.getColumns().get(leaf).getStatistics();
+                Statistics<?> stats = group.getColumns().get(columnIndex).getStatistics();
                 if (stats == null || stats.isEmpty()) {
                     return SimpleColStats.NONE;
                 }

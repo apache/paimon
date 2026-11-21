@@ -67,6 +67,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -363,10 +364,13 @@ public class ManifestFileTest {
         return FileStoreTableFactory.create(io, root, schema);
     }
 
-    @Test
-    void testCopyPythonFloatingManifest() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"zstd", "deflate"})
+    void testCopyPythonFloatingManifest(String targetCodec) throws Exception {
         // Produced by the Python committer from partitions 5.0 and NaN in one commit.
-        FileStoreTable table = partitionedTable(DataTypes.DOUBLE());
+        FileStoreTable table =
+                partitionedTable(DataTypes.DOUBLE())
+                        .copy(Collections.singletonMap("manifest.compression", targetCodec));
         java.nio.file.Path dir = Files.createDirectories(tempDir.resolve("manifest"));
         try (java.io.InputStream in =
                 getClass().getResourceAsStream("/interop/python-floating-list.avro")) {
@@ -382,6 +386,7 @@ public class ManifestFileTest {
         ManifestFile manifests = table.store().manifestFileFactory().create();
         ManifestAvroWriter writer = manifests.createAvroWriter();
         try (ManifestAvroReader reader = openManifestReader(legacy)) {
+            assertThat(writer.canReusePartitionStats(legacy, reader)).isFalse();
             writer.writeEncodedManifest(reader, legacy);
         }
         writer.close();
@@ -390,6 +395,13 @@ public class ManifestFileTest {
         assertThat(copy.partitionStats().maxValues().getDouble(0)).isNaN();
         assertThat(manifests.read(copy.fileName()))
                 .containsExactlyElementsOf(manifests.read(legacy.fileName()));
+        ManifestAvroWriter next = manifests.createAvroWriter();
+        try (ManifestAvroReader reader = openManifestReader(copy)) {
+            assertThat(next.canReusePartitionStats(copy, reader)).isTrue();
+            next.writeEncodedManifest(reader, copy);
+        }
+        next.close();
+        assertThat(next.result().get(0).partitionStats()).isEqualTo(copy.partitionStats());
     }
 
     @Test
