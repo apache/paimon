@@ -48,7 +48,7 @@ _V3_DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 _V3_VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
 
-def export_to_lerobot(connection, table_name, *, output_table, export_name,
+def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
                       version="v3.0", dataset_id=None, tag_name=None,
                       batch_size=1024):
     """Export one original Dataset; the destination must not already exist.
@@ -69,9 +69,9 @@ def export_to_lerobot(connection, table_name, *, output_table, export_name,
         _validate_tag_name(tag_name)
     if not isinstance(output_table, str) or not output_table:
         raise ValueError("output_table must name an Object Table.")
-    if (not isinstance(export_name, str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", export_name) is None):
-        raise ValueError("export_name must be one safe directory name.")
+    if (not isinstance(sub_folder, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", sub_folder) is None):
+        raise ValueError("sub_folder must be one safe directory name.")
     table = connection.catalog.get_table(connection._identifier(output_table))
     if not isinstance(table, ObjectTable):
         raise ValueError("output_table must name an Object Table.")
@@ -79,7 +79,7 @@ def export_to_lerobot(connection, table_name, *, output_table, export_name,
     parsed = urlparse(object_location)
     if parsed.scheme != "oss" or not parsed.netloc:
         raise ValueError("Object Table output must use OSS storage.")
-    target_uri = object_location.rstrip("/") + "/" + export_name
+    target_uri = object_location.rstrip("/") + "/" + sub_folder
 
     try:
         frames = connection.get_table(table_name)

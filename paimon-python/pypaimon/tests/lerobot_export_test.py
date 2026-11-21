@@ -103,7 +103,7 @@ def _export_to_disk(conn, table_name, path, **kwargs):
     target = MemoryOss()
     with _target_object_table(conn, target):
         prefix = conn.export_to_lerobot(
-            table_name, output_table="exports", export_name=path.name, **kwargs)
+            table_name, output_table="exports", sub_folder=path.name, **kwargs)
     for uri, payload in target.objects.items():
         destination = path / uri[len(prefix) + 1:]
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -338,7 +338,7 @@ def test_export_to_object_table(tmp_path, version):
     prefix = "oss://test-bucket/lerobot/export"
     with _target_object_table(conn, target):
         assert conn.export_to_lerobot(
-            "robot", output_table="exports", export_name="export",
+            "robot", output_table="exports", sub_folder="export",
             version=version) == prefix
         assert target.writes[-1] == prefix + "/meta/info.json"
         assert len([key for key in target.objects if key.endswith(".mp4")]) == (
@@ -349,7 +349,7 @@ def test_export_to_object_table(tmp_path, version):
         before = len(target.writes)
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", output_table="exports", export_name="export",
+                "robot", output_table="exports", sub_folder="export",
                 version=version)
         assert len(target.writes) == before
 
@@ -370,7 +370,7 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
-            "robot", output_table="exports", export_name="train_001")
+            "robot", output_table="exports", sub_folder="train_001")
     assert output + "/meta/info.json" in target.objects
 
 
@@ -378,7 +378,7 @@ def test_export_rejects_unsafe_name(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     with pytest.raises(ValueError, match="safe directory name"):
         conn.export_to_lerobot(
-            "robot", output_table="exports", export_name="../escape")
+            "robot", output_table="exports", sub_folder="../escape")
 
 
 def test_export_rejects_non_object_table(tmp_path):
@@ -386,7 +386,7 @@ def test_export_rejects_non_object_table(tmp_path):
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     with pytest.raises(ValueError, match="must name an Object Table"):
         conn.export_to_lerobot(
-            "robot", output_table="robot_frames", export_name="train_001")
+            "robot", output_table="robot_frames", sub_folder="train_001")
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):
@@ -432,7 +432,7 @@ def test_export_to_object_table_rejects_existing_name(tmp_path):
     with _target_object_table(conn, target):
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", output_table="exports", export_name="export")
+                "robot", output_table="exports", sub_folder="export")
     assert len(target.objects) == 1
 
 
@@ -446,7 +446,7 @@ def test_concurrent_export_to_same_object_table_name_has_one_winner(tmp_path):
         with ThreadPoolExecutor(2) as pool:
             futures = [pool.submit(
                 conn.export_to_lerobot, name, output_table="exports",
-                export_name="export")
+                sub_folder="export")
                 for name in ("first", "second")]
             results = [future.exception() or future.result() for future in futures]
     assert sum(result == prefix for result in results) == 1

@@ -410,14 +410,14 @@ multiple Datasets, select one by `_datasets.id`; use `tag_name` for a fixed snap
 
 ```python
 conn.export_to_lerobot(
-    "robot_merged", output_table="exports", export_name="train_001",
+    "robot_merged", output_table="exports", sub_folder="train_001",
     version="v2.1", dataset_id="<Dataset UUID>",
 )
 ```
 
 Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
 re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
-`export_name` names the new directory under the target Object Table, such as
+`sub_folder` names the new directory under the target Object Table, such as
 `train_001/`. The directory must not exist.
 
 ## Capture LeRobot frames directly into Paimon

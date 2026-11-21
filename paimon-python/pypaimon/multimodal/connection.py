@@ -198,7 +198,7 @@ class MultimodalConnection:
             table_name: str,
             *,
             output_table: str,
-            export_name: str,
+            sub_folder: str,
             version: str = "v3.0",
             dataset_id: Optional[str] = None,
             tag_name: Optional[str] = None,
@@ -212,7 +212,7 @@ class MultimodalConnection:
         return export_to_lerobot(
             self, table_name, version=version,
             dataset_id=dataset_id, tag_name=tag_name, batch_size=batch_size,
-            output_table=output_table, export_name=export_name)
+            output_table=output_table, sub_folder=sub_folder)
 
     def recover_lerobot_append(self, table_name: str):
         """Recover a three-table group after an interrupted append."""
