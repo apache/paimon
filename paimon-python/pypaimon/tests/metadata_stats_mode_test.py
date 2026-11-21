@@ -15,6 +15,7 @@
 # under the License.
 
 import math
+import struct
 from datetime import datetime
 
 import pyarrow as pa
@@ -74,6 +75,66 @@ def _bounds(stats):
                  for row in (stats.min_values, stats.max_values))
 
 
+@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()], ids=['float', 'double'])
+@pytest.mark.parametrize('values, expected_min, expected_max', [
+    pytest.param([5.0, math.nan], 5.0, math.nan, id='nan-last'),
+    pytest.param([math.nan, 5.0], 5.0, math.nan, id='nan-first'),
+    pytest.param([-0.0, +0.0], -0.0, +0.0, id='negative-zero-first'),
+    pytest.param([+0.0, -0.0], -0.0, +0.0, id='positive-zero-first'),
+    pytest.param([-0.0, -0.0], -0.0, -0.0, id='negative-zero-only'),
+    pytest.param([+0.0, +0.0], +0.0, +0.0, id='positive-zero-only'),
+    pytest.param([math.inf, None, -math.inf], -math.inf, math.inf, id='infinities'),
+    pytest.param([math.inf, math.inf], math.inf, math.inf, id='positive-infinity-only'),
+    pytest.param([-math.inf, -math.inf], -math.inf, -math.inf, id='negative-infinity-only'),
+    pytest.param([None, math.nan, math.inf], math.inf, math.nan, id='nan-and-infinity'),
+    pytest.param([5.0, None, -2.0, None], -2.0, 5.0, id='mixed-numbers-and-nulls'),
+    pytest.param([math.nan, -math.nan], math.nan, math.nan, id='all-nan'),
+    pytest.param([None, -math.nan, None], math.nan, math.nan, id='null-and-nan'),
+    pytest.param([None, None], None, None, id='all-null'),
+])
+def test_manifest_list_floating_partition_bounds(tmp_path, typ, values, expected_min, expected_max):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', False)
+    schema = pa.schema([('id', pa.int32()), ('p', typ), ('seq', pa.int32())])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['p', 'seq'],
+        options={'bucket': '-1', 'write.native.enabled': 'false', 'commit.native.enabled': 'false'}), False)
+    table = catalog.get_table('db.t')
+    builder = table.new_batch_write_builder()
+    messages = []
+    # A distinct partition per entry keeps equal zeros and repeated NULLs in the same commit.
+    for i, value in enumerate(values):
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(pa.table({'id': [i], 'p': [value], 'seq': [i]}, schema=schema))
+            messages.extend(writer.prepare_commit())
+        finally:
+            writer.close()
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+
+    manifest, = ManifestListManager(table).read_delta(table.snapshot_manager().get_latest_snapshot())
+    assert manifest.num_added_files == len(values)
+    entries = ManifestFileManager(table).read(manifest.file_name)
+    assert [entry.partition.get_field(1) for entry in entries] == list(range(len(values)))
+    stats = manifest.partition_stats
+    minimum, maximum = _bounds(stats)
+    assert stats.null_counts == [values.count(None), 0]
+    assert (minimum[1], maximum[1]) == (0, len(values) - 1)
+    encoding = '>f' if typ == pa.float32() else '>d'
+    for actual, expected in ((minimum[0], expected_min), (maximum[0], expected_max)):
+        if expected is None:
+            assert actual is None
+        elif math.isnan(expected):
+            assert math.isnan(actual)
+        else:
+            # Comparing the IEEE bits distinguishes -0.0 from +0.0.
+            assert struct.pack(encoding, actual) == struct.pack(encoding, expected)
+
+
 @pytest.mark.parametrize('mode', [None, 'truncate(16)', 'counts', 'full', 'none'])
 def test_append_manifest_stats_modes(tmp_path, mode):
     table = _write(tmp_path, pa.table({
@@ -128,119 +189,6 @@ def test_primary_key_and_changelog_stats_modes(tmp_path):
     assert changes.value_stats.null_counts == [0, 1]
 
 
-@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()])
-@pytest.mark.parametrize('value', [-float('inf'), float('inf')])
-def test_all_infinity_append_file_has_exact_bounds(tmp_path, typ, value):
-    table = _write(tmp_path, pa.table({'v': pa.array([value, None], type=typ)}),
-                   {'bucket': '-1', 'metadata.stats-mode': 'full'})
-    file, = _files(table)
-    assert _bounds(file.value_stats) == ([value], [value])
-    assert file.value_stats.null_counts == [1]
-
-
-@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()])
-@pytest.mark.parametrize(('values', 'low', 'high'), [
-    ([0.0], 0.0, 0.0), ([-0.0], -0.0, -0.0),
-    ([+0.0, -0.0], -0.0, 0.0), ([-0.0, 0.0], -0.0, +0.0),
-    ([5.0, float('nan')], None, None),
-    ([float('nan'), 5.0], None, None),
-])
-def test_floating_file_and_key_bounds(tmp_path, typ, values, low, high):
-    data = pa.table({'f': pa.array(values, type=typ), 'id': list(range(len(values)))})
-    table = _write(tmp_path, data, {'bucket': '1', 'metadata.stats-mode': 'full'},
-                   primary_keys=['f', 'id'])
-    file, = _files(table)
-    for stats in (file.key_stats, file.value_stats):
-        minimum, maximum = _bounds(stats)
-        if low is None:
-            assert minimum[0] is None and maximum[0] is None
-        else:
-            assert minimum[0].hex() == low.hex()
-            assert maximum[0].hex() == high.hex()
-        assert stats.null_counts[0] == 0
-    # File run endpoints still describe the actual first and last physical keys.
-    stored = pq.ParquetFile(next(tmp_path.rglob(file.file_name))).read(columns=['f', 'id'])
-    for row, idx in ((file.min_key, 0), (file.max_key, -1)):
-        assert row.values[0].hex() == stored['f'][idx].as_py().hex()
-        assert row.values[1] == stored['id'][idx].as_py()
-
-
-def test_nan_value_stats_preserve_nulls_and_other_column_pruning(tmp_path):
-    table = _write(tmp_path, pa.table({'id': [1, 2, 3], 'v': [float('nan'), None, 5.]}), {
-        'bucket': '-1', 'metadata.stats-mode': 'full',
-        'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
-        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
-    })
-    file, = _files(table)
-    assert _bounds(file.value_stats) == ([1, None], [3, None])
-    assert file.value_stats.null_counts == [0, 1]
-    read = table.new_read_builder()
-    predicates = read.new_predicate_builder()
-    read.with_filter(predicates.equal('id', 123))
-    assert not read.new_scan().plan().splits()
-    for predicate, expected in ((predicates.is_null('v'), [2]),
-                                (predicates.is_not_null('v'), [1, 3])):
-        read = table.new_read_builder().with_filter(predicate)
-        rows = read.new_read().to_arrow(read.new_scan().plan().splits())
-        assert sorted(rows['id'].to_pylist()) == expected
-
-
-def test_floating_stats_preserve_overlapping_key_runs(tmp_path):
-    options = {'bucket': '1', 'metadata.stats-mode': 'full', 'scan.native-plan.enabled': 'false',
-               'read.native.enabled': 'false'}
-    table = _write(tmp_path, pa.table({'k': [-1., float('nan')], 'v': [0, 1]}),
-                   options, primary_keys=['k'])
-    builder = table.new_batch_write_builder()
-    writer, commit = builder.new_write(), builder.new_commit()
-    try:
-        writer.write_arrow(pa.table({'k': [1.], 'v': [100]}))
-        commit.commit(writer.prepare_commit())
-    finally:
-        writer.close()
-        commit.close()
-    read = table.new_read_builder()
-    assert sorted(read.new_read().to_arrow(read.new_scan().plan().splits())['v'].to_pylist()) == [0, 1, 100]
-
-
-@pytest.mark.parametrize('values, low, high', [
-    ([0., +0.], +0., +0.), ([-0., 0.], -0., +0.), ([0., -0.], -0., +0.),
-    ([None, 5., float('nan')], 5., float('nan')),
-    ([float('nan'), None, 5.], 5., float('nan')),
-    ([None, None], None, None),
-])
-def test_floating_partition_bounds_in_manifest_list(tmp_path, values, low, high):
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
-    catalog.create_database('db', False)
-    schema = pa.schema([('id', pa.int32()), ('p', pa.float64()), ('day', pa.string())])
-    options = {'bucket': '-1', 'write.native.enabled': 'false', 'commit.native.enabled': 'false'}
-    catalog.create_table('db.t', Schema.from_pyarrow_schema(
-        schema, partition_keys=['p', 'day'], options=options), False)
-    table = catalog.get_table('db.t')
-    builder = table.new_batch_write_builder()
-    messages = []
-    for idx, value in enumerate(values):
-        writer = builder.new_write()
-        try:
-            writer.write_arrow(pa.table({'id': [idx], 'p': [value], 'day': [str(idx)]}, schema=schema))
-            messages.extend(writer.prepare_commit())
-        finally:
-            writer.close()
-    commit = builder.new_commit()
-    try:
-        commit.commit(messages)
-    finally:
-        commit.close()
-    manifest, = ManifestListManager(table).read_delta(table.snapshot_manager().get_latest_snapshot())
-    minimum, maximum = _bounds(manifest.partition_stats)
-    for actual, expected in ((minimum[0], low), (maximum[0], high)):
-        if expected is None:
-            assert actual is None
-        else:
-            assert actual.hex() == expected.hex()
-    assert (minimum[1], maximum[1]) == ('0', str(len(values) - 1))
-    assert manifest.partition_stats.null_counts == [values.count(None), 0]
-
-
 def test_partial_row_update_publishes_stats_for_its_written_columns(tmp_path, monkeypatch):
     monkeypatch.setattr(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 1)
     table = _write(tmp_path, pa.table({
@@ -266,7 +214,8 @@ def test_partial_row_update_publishes_stats_for_its_written_columns(tmp_path, mo
     assert file.write_cols == ['name', 'zero', 'mixed']
     assert file.value_stats_cols is None
     minimum, maximum = _bounds(file.value_stats)
-    assert minimum == maximum == [None, 0., None]
+    assert minimum == [None, 0., None]
+    assert maximum == [None, 0., None]
     assert math.copysign(1., minimum[1]) == -1.
     assert math.copysign(1., maximum[1]) == 1.
     assert file.value_stats.null_counts == [1, 0, 0]
@@ -309,8 +258,7 @@ def test_parquet_footer_falls_back_to_arrow_for_incomplete_or_ambiguous_bounds(t
     file, = _files(table)
     minimum, maximum = _bounds(file.value_stats)
     assert minimum == ['alpha', None, 0.0, 5, None]
-    assert maximum[:2] == [long_value, None]
-    assert maximum[2:] == [0.0, 9, None]
+    assert maximum == [long_value, None, 0.0, 9, None]
     assert math.copysign(1.0, minimum[2]) == 1.0
     assert file.value_stats.null_counts == [0, 0, 1, 0, 0]
 

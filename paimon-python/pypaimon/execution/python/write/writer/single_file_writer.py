@@ -15,13 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 from contextlib import suppress
 
 import pyarrow.parquet as pq
 
-from pypaimon.common.floating_point import floating_sort_key
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.execution.python.write.format_file_writer import parquet_write_data, parquet_write_schema
+
+
+def _float_sort_key(value):
+    return value, math.copysign(1.0, value)
 
 
 class SingleFileWriter:
@@ -77,10 +81,8 @@ class SingleFileWriter:
                             value for value in (previous[key], current[key])
                             if value is not None
                         ]
-                        if values and isinstance(values[0], float):
-                            current[key] = choose(values, key=floating_sort_key)
-                        else:
-                            current[key] = choose(values) if values else None
+                        sort_key = _float_sort_key if values and isinstance(values[0], float) else None
+                        current[key] = choose(values, key=sort_key) if values else None
                 self.column_stats[field.name] = current
         except Exception:
             self.abort()

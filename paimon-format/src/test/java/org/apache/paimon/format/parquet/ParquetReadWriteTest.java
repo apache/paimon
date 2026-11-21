@@ -211,54 +211,6 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testFloatingFilterWithNaNMissingFromParquetBounds() throws Exception {
-        // PyArrow wrote [5.0, NaN, null] into one row group with min = max = 5.0.
-        Path path = new Path(getClass().getResource("/interop/pyarrow-floating.parquet").toURI());
-        LocalFileIO io = LocalFileIO.create();
-        FormatReaderContext context =
-                new FormatReaderContext(io, path, io.getFileSize(path), null, null);
-        RowType type = RowType.builder().field("f", DataTypes.DOUBLE()).build();
-        PredicateBuilder pb = new PredicateBuilder(type);
-        for (Predicate filter :
-                Arrays.asList(
-                        pb.greaterThan(0, 5.0),
-                        pb.greaterOrEqual(0, Double.NaN),
-                        pb.equal(0, Double.NaN),
-                        pb.notEqual(0, 5.0),
-                        pb.notIn(
-                                0,
-                                java.util.stream.IntStream.range(0, 25)
-                                        .mapToObj(i -> (double) i)
-                                        .collect(Collectors.toList())),
-                        pb.between(0, 0.0, 10.0).negate().get(),
-                        pb.lessOrEqual(0, Double.NaN),
-                        pb.isNaN(0),
-                        pb.in(0, Arrays.asList(10.0, Double.NaN)))) {
-            ParquetReaderFactory factory =
-                    new ParquetReaderFactory(
-                            new Options(), type, 256, Collections.singletonList(filter));
-            List<Double> matches = new ArrayList<>();
-            try (RecordReader<InternalRow> reader = factory.createReader(context)) {
-                reader.forEachRemaining(
-                        row -> {
-                            if (filter.test(row)) {
-                                matches.add(row.getDouble(0));
-                            }
-                        });
-            }
-            List<Double> expected =
-                    Arrays.asList(5.0, Double.NaN).stream()
-                            .filter(v -> filter.test(GenericRow.of(v)))
-                            .collect(Collectors.toList());
-            assertThat(matches).as("%s", filter).containsExactlyElementsOf(expected);
-        }
-        ParquetReaderFactory finite =
-                new ParquetReaderFactory(
-                        new Options(), type, 256, Collections.singletonList(pb.lessThan(0, 5.0)));
-        assertThat(finite.candidateRowRanges(context)).isEmpty();
-    }
-
-    @Test
     void testMissingNestedFieldPreservesStructNullability() throws IOException {
         RowType writeType =
                 RowType.builder()

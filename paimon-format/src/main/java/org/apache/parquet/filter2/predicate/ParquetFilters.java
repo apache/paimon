@@ -74,7 +74,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
@@ -115,36 +114,6 @@ public class ParquetFilters {
         private ConvertFilterToParquet(MessageType fileSchema, boolean caseSensitive) {
             this.fileSchema = Objects.requireNonNull(fileSchema, "fileSchema");
             this.caseSensitive = caseSensitive;
-        }
-
-        @Override
-        public FilterPredicate visit(LeafPredicate predicate) {
-            Optional<FieldRef> field = predicate.fieldRefOptional();
-            return field.isPresent()
-                    ? convertLeaf(predicate, field.get())
-                    : visitNonFieldLeaf(predicate);
-        }
-
-        private FilterPredicate convertLeaf(LeafPredicate predicate, FieldRef field) {
-            List<Object> literals = predicate.literals();
-            FilterPredicate filter = predicate.function().visit(this, field, literals);
-            // Parquet bounds can exclude NaN. Keep the NaN branch whenever the
-            // original row predicate accepts it; dictionaries can still rule it out.
-            if (comparisonMatchesNaN(predicate, field, literals)) {
-                return FilterApi.or(filter, visitIsNaN(field));
-            }
-            return filter;
-        }
-
-        private boolean comparisonMatchesNaN(
-                LeafPredicate predicate, FieldRef field, List<Object> literals) {
-            if (literals.isEmpty()) {
-                return false;
-            }
-            return (field.type() instanceof FloatType
-                            && predicate.function().test(field.type(), Float.NaN, literals))
-                    || (field.type() instanceof DoubleType
-                            && predicate.function().test(field.type(), Double.NaN, literals));
         }
 
         @Override
@@ -419,7 +388,7 @@ public class ParquetFilters {
                 throw new UnsupportedOperationException();
             }
             FieldRef pathRef = new FieldRef(UNUSED_INDEX, nested.fieldName(), nested.outputType());
-            return convertLeaf(predicate, pathRef);
+            return predicate.function().visit(this, pathRef, predicate.literals());
         }
 
         private <T> Set<T> convertSets(List<Object> values, Class<T> kclass, FieldRef fieldRef) {

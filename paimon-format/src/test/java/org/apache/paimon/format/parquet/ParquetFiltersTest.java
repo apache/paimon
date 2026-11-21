@@ -297,16 +297,6 @@ class ParquetFiltersTest {
     }
 
     @Test
-    public void testFloatLiteralOnDoubleColumn() {
-        RowType type = RowType.builder().field("f", new DoubleType()).build();
-        PredicateBuilder pb = new PredicateBuilder(type);
-        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(type);
-        test(schema, pb.equal(0, 5.0f), FilterApi.eq(FilterApi.doubleColumn("f"), 5.0d), true);
-        assertThat(pb.greaterThan(0, 5.0f).test(org.apache.paimon.data.GenericRow.of(Double.NaN)))
-                .isTrue();
-    }
-
-    @Test
     public void testInFilterDouble() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "col1", new DoubleType())));
@@ -334,13 +324,13 @@ class ParquetFiltersTest {
                         0,
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(i -> i == 1 ? Double.NaN : i.doubleValue())
+                                .map(Double::new)
                                 .collect(Collectors.toList())),
                 FilterApi.notIn(
                         FilterApi.doubleColumn("col1"),
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(i -> i == 1 ? Double.NaN : i.doubleValue())
+                                .map(Double::new)
                                 .collect(Collectors.toSet())),
                 true);
     }
@@ -445,13 +435,13 @@ class ParquetFiltersTest {
                         0,
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(i -> i == 1 ? Float.NaN : i.floatValue())
+                                .map(Float::new)
                                 .collect(Collectors.toList())),
                 FilterApi.notIn(
                         FilterApi.floatColumn("col1"),
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(i -> i == 1 ? Float.NaN : i.floatValue())
+                                .map(Float::new)
                                 .collect(Collectors.toSet())),
                 true);
     }

@@ -87,19 +87,6 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
                     .toArray(SimpleColStats[]::new);
         }
 
-        SimpleColStats[] stats = statsProducer.extract(fileIO, path, fileSize, writerMetadata());
-        // Readers may order NaN differently. Keep the null count, which excludes NaN.
-        for (int i = 0; i < stats.length; i++) {
-            SimpleColStats column = stats[i];
-            if (isNaN(column.min()) || isNaN(column.max())) {
-                stats[i] = new SimpleColStats(null, null, column.nullCount());
-            }
-        }
-        return stats;
-    }
-
-    private static boolean isNaN(Object value) {
-        return (value instanceof Double && ((Double) value).isNaN())
-                || (value instanceof Float && ((Float) value).isNaN());
+        return statsProducer.extract(fileIO, path, fileSize, writerMetadata());
     }
 }

@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
 import re
 
 import pyarrow as pa
@@ -130,10 +129,8 @@ class _ParquetBounds:
                 return None
             minimum = low if minimum is None else min(minimum, low)
             maximum = high if maximum is None else max(maximum, high)
-        # Parquet normalizes zero signs. Some writers also use a finite sentinel for
-        # the other bound of an all-infinity column. Consult the input in either case.
-        if minimum is None or (pa.types.is_floating(column_type) and (
-                minimum == 0.0 or maximum == 0.0 or not math.isfinite(minimum) or not math.isfinite(maximum))):
+        # Parquet normalizes zero bounds to -0.0/+0.0. Keep exact Arrow signs.
+        if minimum is None or (pa.types.is_floating(column_type) and (minimum == 0.0 or maximum == 0.0)):
             return None
         return minimum, maximum
 
@@ -145,7 +142,7 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
             or pa.types.is_large_binary(column.type)):
         return stats
     if pa.types.is_floating(column.type) and pc.any(pc.is_nan(column)).as_py():
-        # File readers can disagree on where NaN sorts. Preserve only the null count.
+        # Arrow min_max and the Parquet footer can both ignore NaN.
         stats['bounds_unavailable'] = True
         return stats
     if parquet_bounds is not None:
@@ -164,18 +161,6 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
         # pandas treats the minimum signed i64 timestamp as NaT.
         stats['bounds_unavailable'] = True
         return stats
-    if pa.types.is_floating(column.type) and (minimum == 0.0 or maximum == 0.0):
-        # Arrow min_max treats both zeros as equal. Inspect their IEEE bits without
-        # copying the values or losing the validity bitmap of sliced arrays.
-        bits = column.type.bit_width
-        int_type = pa.int32() if bits == 32 else pa.int64()
-        chunks = column.chunks if isinstance(column, pa.ChunkedArray) else (column,)
-        if minimum == 0.0:
-            minimum = -0.0 if any(pc.index(c.view(int_type), -(1 << (bits - 1))).as_py() >= 0
-                                  for c in chunks) else 0.0
-        if maximum == 0.0:
-            maximum = 0.0 if any(pc.index(c.view(int_type), 0).as_py() >= 0
-                                 for c in chunks) else -0.0
     stats['min_values'], stats['max_values'] = minimum, maximum
     return stats
 

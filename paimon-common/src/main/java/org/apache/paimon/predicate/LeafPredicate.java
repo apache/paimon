@@ -26,7 +26,6 @@ import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -81,13 +80,6 @@ public class LeafPredicate implements Predicate {
     public LeafPredicate(Transform transform, LeafFunction function, List<Object> literals) {
         this.transform = transform;
         this.function = function;
-        // A FLOAT literal widens exactly to DOUBLE. Both row evaluation and filter
-        // pushdown must compare values of the same Java type.
-        if (transform.outputType() instanceof DoubleType
-                && literals.stream().anyMatch(Float.class::isInstance)) {
-            literals = new ArrayList<>(literals);
-            literals.replaceAll(v -> v instanceof Float ? ((Float) v).doubleValue() : v);
-        }
         this.literals = literals;
     }
 
