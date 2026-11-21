@@ -18,6 +18,7 @@
 
 from array import array
 import json
+import math
 import numbers
 from pathlib import Path
 
@@ -607,7 +608,7 @@ def _validated_episode_tables(metadata, video_fields=(), check_episode_fps=False
                 % ", ".join(missing))
         if check_episode_fps and _EPISODE_FPS_COLUMN in table.column_names:
             for ordinal, value in enumerate(table[_EPISODE_FPS_COLUMN].to_pylist()):
-                rate = _positive_integer(value, "episode fps")
+                rate = _dataset_fps(value)
                 if rate != metadata["fps"]:
                     raise ValueError(
                         "LeRobot episode %d fps does not match info.fps."
@@ -799,15 +800,16 @@ def _json_value(value):
 
 
 def _dataset_fps(value):
-    if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
-        try:
-            integer = int(value)
-        except (ValueError, OverflowError):
-            pass
-        else:
-            if value == integer:
-                value = integer
-    return _positive_integer(value, "fps")
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return _positive_integer(value, "fps")
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError("LeRobot metadata fps must be a positive number.")
+    fps = float(value)
+    if not math.isfinite(fps) or fps <= 0:
+        raise ValueError("LeRobot metadata fps must be a positive number.")
+    if value != fps:
+        raise ValueError("LeRobot metadata fps loses precision as a Python float.")
+    return int(fps) if fps.is_integer() else fps
 
 
 def _positive_integer(value, name):
