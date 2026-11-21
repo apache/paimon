@@ -198,6 +198,49 @@ To inspect row kinds, including deletes, query the [`audit_log` system table](..
 
 ## Query Optimization
 
+### Runtime Filters on Scalar Indexes
+
+Spark 3.4 and later can send join keys to a Data Evolution table's single-column
+BTree or Bitmap global index. The probe column need not be a partition column.
+For example, an inner join from a filtered, broadcast dimension table can narrow
+the fact-table scan before Spark joins the rows:
+
+```sql
+SELECT /*+ BROADCAST(d) */ f.*
+FROM facts f JOIN dimensions d ON f.id = d.id
+WHERE d.enabled = true;
+```
+
+The index must already exist. Spark still decides whether to produce a dynamic
+pruning filter: the build side needs a selective filter, and the default
+`spark.sql.optimizer.dynamicPartitionPruning.reuseBroadcastOnly=true` requires
+a reusable broadcast exchange. A small build table alone does not enable this
+optimization. The final join preserves duplicate keys and evaluates all join
+conditions.
+
+Runtime index filtering uses the scan's original snapshot and combines join keys
+with its existing filters. It only activates when the index covers the complete
+snapshot and its source metadata confirms that indexed values have not changed.
+Every eligible single-column index definition must cover the snapshot. Columns
+also present in a composite index are excluded because the query planner may
+choose that index after combining static and runtime predicates.
+Incomplete, stale, or legacy indexes keep the ordinary scan and its configured
+search semantics. `global-index.column-update-action=IGNORE` also disables the optimization.
+It does not change `scalar-index.search-mode`.
+
+The initial implementation supports latest-snapshot batch scans and single-column
+boolean, integer, character, and date keys. It accepts at most 10,000 `IN` values
+and 1 MiB of their UTF-8 text representation per filter. Larger filters, unsupported
+types, and scans with pushed LIMIT, TopN, ranked search, or preserved data grouping
+keep their ordinary scan behavior. Inspect the Spark scan's runtime filters and
+output-row metrics to verify the optimization.
+
+Fallback-branch reads keep their existing snapshot selection and do not use this
+optimization. Capability discovery reads the index manifest once; freshness checks
+run only when Spark supplies a usable scalar runtime filter, restricted by the
+scan's static partition filters. Advertising a column does not guarantee that a
+runtime filter will be accepted if its index is stale.
+
 ### Repartition Oversized Scan Output
 
 This optimization is disabled by default. Enable it for the Spark session with:
