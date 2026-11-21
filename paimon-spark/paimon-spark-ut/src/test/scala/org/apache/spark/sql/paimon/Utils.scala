@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon
 
+import org.apache.spark.{MapOutputTrackerMaster, ShuffleDependency, SparkEnv}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.util.{Utils => SparkUtils}
 
@@ -31,4 +32,25 @@ object Utils {
   def waitUntilEventEmpty(spark: SparkSession): Unit = {
     spark.sparkContext.listenerBus.waitUntilEmpty()
   }
+
+  def materializeShuffle(spark: SparkSession, dependency: ShuffleDependency[_, _, _]): Unit = {
+    spark.sparkContext.submitMapStage(dependency).get()
+  }
+
+  def availableShuffleOutputs(shuffleId: Int): Int = {
+    SparkEnv.get.mapOutputTracker
+      .asInstanceOf[MapOutputTrackerMaster]
+      .getNumAvailableOutputs(shuffleId)
+  }
+
+  def invalidateShuffleOutputs(shuffleId: Int, partitions: Seq[Int]): Unit = {
+    val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+    val locations = tracker.shuffleStatuses(shuffleId).withMapStatuses {
+      statuses => partitions.map(index => (index, statuses(index).location))
+    }
+    locations.foreach {
+      case (index, location) => tracker.unregisterMapOutput(shuffleId, index, location)
+    }
+  }
+
 }
