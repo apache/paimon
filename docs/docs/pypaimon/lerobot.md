@@ -409,6 +409,9 @@ Export one source Dataset from a three-table group to a local directory or an
 If the group contains multiple Datasets, select one by its `_datasets.id` UUID.
 Pass the same `tag_name` used for training to export a fixed snapshot.
 The destination directory or OSS prefix must not exist.
+On Linux, local export requires libc `renameat2` (glibc 2.28+ or equivalent)
+and kernel/filesystem support for `RENAME_NOREPLACE`. The libc API is checked
+before reading table data.
 Pass the table-group prefix, or the actual Frames table name for a group
 created by `PaimonLeRobotWriter`.
 

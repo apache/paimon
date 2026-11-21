@@ -214,6 +214,16 @@ def test_local_export_rejects_directory_created_during_export(tmp_path):
     assert not list(tmp_path.glob(".lerobot-export-*"))
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux libc renameat2")
+def test_local_export_checks_renameat2_before_reading(tmp_path):
+    connection = mock.Mock()
+    with mock.patch.object(export_module.ctypes, "CDLL", return_value=SimpleNamespace()):
+        with pytest.raises(OSError, match="glibc 2.28"):
+            export_module.export_to_lerobot(connection, "robot", tmp_path / "output")
+    connection.get_table.assert_not_called()
+    assert not list(tmp_path.glob(".lerobot-export-*"))
+
+
 def test_export_requires_dataset_id_for_multi_source_group(tmp_path):
     first = source(tmp_path / "a")
     second = source(tmp_path / "b", value=20)

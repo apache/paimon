@@ -79,6 +79,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
     if parsed.scheme not in ("", "oss"):
         raise ValueError("output_dir must be a local path or oss:// URI.")
     remote = parsed.scheme == "oss"
+    local_rename = None
     if remote:
         parent_segment = any(part in (".", "..")
                              for part in parsed.path.split("/"))
@@ -94,6 +95,8 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         target = Path(location).expanduser().resolve()
         if target.exists():
             raise FileExistsError(target)
+        if sys.platform == "linux":
+            local_rename = _linux_renameat2()
 
     try:
         frames = connection.get_table(table_name)
@@ -159,7 +162,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         if remote:
             _upload_to_oss(stage, target_uri, output_io)
             return target_uri
-        _publish_local(stage, target)
+        _publish_local(stage, target, local_rename)
         return target
     finally:
         if reader is not None:
@@ -170,17 +173,24 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
             output_io.close()
 
 
-def _publish_local(stage, target):
-    if sys.platform != "linux":
-        stage.rename(target)
-        return
+def _linux_renameat2():
     try:
         renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
     except AttributeError as error:
-        raise OSError(errno.ENOTSUP, "Atomic no-replace rename is unavailable.") from error
+        raise OSError(
+            errno.ENOTSUP,
+            "Linux local export requires libc renameat2 (glibc 2.28+ or equivalent).",
+        ) from error
     renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
                           ctypes.c_char_p, ctypes.c_uint)
     renameat2.restype = ctypes.c_int
+    return renameat2
+
+
+def _publish_local(stage, target, renameat2):
+    if renameat2 is None:
+        stage.rename(target)
+        return
     if renameat2(-100, os.fsencode(stage), -100, os.fsencode(target), 1) != 0:
         code = ctypes.get_errno()
         if code in (errno.EEXIST, errno.ENOTEMPTY):
