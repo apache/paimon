@@ -686,9 +686,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
@@ -737,11 +737,11 @@ public class NativeVectorGlobalIndexTest {
                                     vectorType, options, identifier, fieldName),
                             identifier);
             writeVectors(writer, vectors);
-            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish());
 
             try (NativeVectorGlobalIndexReader reader =
                     new NativeVectorGlobalIndexReader(
-                            createFileReader(indexPath), metas, vectorType, executor)) {
+                            createFileReader(), metas, vectorType, executor)) {
                 ScoredGlobalIndexResult result =
                         reader.visitVectorSearch(new VectorSearch(vectors[0], 2, fieldName))
                                 .join()
@@ -776,9 +776,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
 
@@ -825,8 +825,8 @@ public class NativeVectorGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(6);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
@@ -871,9 +871,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 (NativeVectorGlobalIndexReader)
                         indexer.createReader(fileReader, metas, vectors.length, null, executor)) {
@@ -907,9 +907,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -959,9 +959,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -1014,9 +1014,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -1078,26 +1078,25 @@ public class NativeVectorGlobalIndexTest {
     private GlobalIndexFileWriter createFileWriter(Path path) {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID();
+            public String newFilePath(String prefix) {
+                return new Path(path, prefix + "-" + UUID.randomUUID()).toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                return fileIO.newOutputStream(new Path(path, fileName), false);
+            public PositionOutputStream newOutputStream(String filePath) throws IOException {
+                return fileIO.newOutputStream(new Path(filePath), false);
             }
         };
     }
 
-    private GlobalIndexFileReader createFileReader(Path path) {
-        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    private GlobalIndexFileReader createFileReader() {
+        return meta -> fileIO.newInputStream(meta.filePath());
     }
 
-    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
-            throws IOException {
+    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results) throws IOException {
         assertThat(results).hasSize(1);
         ResultEntry result = results.get(0);
-        Path filePath = new Path(path, result.fileName());
+        Path filePath = new Path(result.filePath());
         return Collections.singletonList(
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta()));
     }

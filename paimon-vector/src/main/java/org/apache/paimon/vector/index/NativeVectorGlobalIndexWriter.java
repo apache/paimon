@@ -310,11 +310,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 if (!centroidShard) {
                     return Collections.emptyList();
                 }
-                String name = fileWriter.newFileName(fileNamePrefix());
-                try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
+                String filePath = fileWriter.newFilePath(fileNamePrefix());
+                try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                     out.write(new byte[] {'P', 'C', 'E', 'M', 'P', 'T', 'Y', '1'});
                 }
-                return Collections.singletonList(new ResultEntry(name, 0, null));
+                return Collections.singletonList(new ResultEntry(filePath, 0, null));
             }
             flushWriteBuffer();
             writeChannel.close();
@@ -353,14 +353,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
             LOG.info("{} write phase started", identifier);
-            String fileName = fileWriter.newFileName(fileNamePrefix());
+            String filePath = fileWriter.newFilePath(fileNamePrefix());
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
             byte[] header =
                     centroidShard && ("ivf-flat".equals(identifier) || "ivf-pq".equals(identifier))
                             ? new byte[64]
                             : null;
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;
@@ -411,7 +411,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 }
             }
             return new ResultEntry(
-                    fileName, !centroidShard ? rowCount : count, descriptor.serialize());
+                    filePath, !centroidShard ? rowCount : count, descriptor.serialize());
         }
     }
 

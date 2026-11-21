@@ -932,8 +932,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
             indexes.add(
                     new IndexFileMeta(
                             "fm",
-                            entry.fileName(),
-                            io.fileSize(entry.fileName()),
+                            new Path(entry.filePath()).getName(),
+                            io.fileSize(entry.filePath()),
                             entry.rowCount(),
                             new GlobalIndexMeta(
                                     100,
@@ -1063,8 +1063,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
             indexes.add(
                     new IndexFileMeta(
                             "fm",
-                            entry.fileName(),
-                            io.fileSize(entry.fileName()),
+                            new Path(entry.filePath()).getName(),
+                            io.fileSize(entry.filePath()),
                             entry.rowCount(),
                             new GlobalIndexMeta(
                                     0, 99, table.rowType().getField("f1").id(), null, entry.meta()),

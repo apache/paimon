@@ -140,7 +140,7 @@ public final class CentroidIndexMeta {
         if (payload != null) {
             out.put(payload);
         }
-        return new ResultEntry(file.fileName(), file.rowCount(), out.array());
+        return new ResultEntry(file.filePath(), file.rowCount(), out.array());
     }
 
     public static GlobalIndexIOMeta file(IndexFileMeta file, IndexPathFactory paths) {

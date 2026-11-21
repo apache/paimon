@@ -104,8 +104,8 @@ public class NativeFullTextGlobalIndexWriter implements GlobalIndexSingleColumnW
     }
 
     private ResultEntry writeIndex() throws IOException {
-        String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
-        try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+        String filePath = fileWriter.newFilePath(FILE_NAME_PREFIX);
+        try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
             writer.writeIndex(
                     new FullTextIndexOutput() {
                         @Override
@@ -121,7 +121,7 @@ public class NativeFullTextGlobalIndexWriter implements GlobalIndexSingleColumnW
                     });
             out.flush();
         }
-        return new ResultEntry(fileName, rowCount, indexOptions.serialize());
+        return new ResultEntry(filePath, rowCount, indexOptions.serialize());
     }
 
     @Override

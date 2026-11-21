@@ -74,7 +74,7 @@ import java.util.zip.CRC32;
  */
 public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
-    private final String fileName;
+    private final String filePath;
     private final PositionOutputStream out;
     private boolean closed;
 
@@ -127,8 +127,8 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeabl
                 || fileVersion > BTreeFileFooter.MAX_SUPPORTED_VERSION) {
             throw new IllegalArgumentException("Unsupported BTree index version: " + fileVersion);
         }
-        this.fileName = indexFileWriter.newFileName(BTreeGlobalIndexerFactory.IDENTIFIER);
-        this.out = indexFileWriter.newOutputStream(this.fileName);
+        this.filePath = indexFileWriter.newFilePath(BTreeGlobalIndexerFactory.IDENTIFIER);
+        this.out = indexFileWriter.newOutputStream(this.filePath);
         try {
             this.keySerializer = keySerializer;
             this.comparator = keySerializer.createComparator();
@@ -230,7 +230,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeabl
                                 lastKey == null ? null : keySerializer.serialize(lastKey),
                                 nullBitmap.initialized())
                         .serialize();
-        return Collections.singletonList(new ResultEntry(fileName, rowCount, metaBytes));
+        return Collections.singletonList(new ResultEntry(filePath, rowCount, metaBytes));
     }
 
     @Nullable

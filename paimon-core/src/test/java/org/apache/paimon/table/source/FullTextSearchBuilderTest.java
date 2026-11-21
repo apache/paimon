@@ -188,7 +188,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> files =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         new Range(0, 0),
                         fields,
@@ -1733,7 +1732,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexFields,
@@ -1772,7 +1770,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         new Range(0, documents.length - 1),
                         Collections.singletonList(textField),
@@ -1844,7 +1841,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexFields,
@@ -1933,7 +1929,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         textField.id(),
@@ -1974,7 +1969,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         idField.id(),
@@ -2016,7 +2010,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         textField.id(),
@@ -2068,7 +2061,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles1 =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange1,
                         textField.id(),
@@ -2091,7 +2083,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<IndexFileMeta> indexFiles2 =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange2,
                         textField.id(),

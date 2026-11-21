@@ -1292,7 +1292,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         vectorField.id(),
@@ -1333,7 +1332,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         Arrays.asList(vectorField, idField),

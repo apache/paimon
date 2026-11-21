@@ -52,6 +52,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -871,7 +873,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
         Path directory = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(directory, fileName);
             }
 
@@ -883,6 +885,11 @@ class BucketedPrimaryKeyIndexMaintainerTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

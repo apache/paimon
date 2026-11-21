@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
@@ -1086,21 +1087,28 @@ public abstract class CatalogTestBase {
         assertThatCode(() -> catalog.dropTable(nonExistingTable, true)).doesNotThrowAnyException();
     }
 
-    @Test
-    public void testDropTableWithExternalPaths() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"%s,%s", " %s , %s ", "%s,%s,", "%s,%s,,"})
+    public void testDropTableWithExternalPaths(String pathFormat) throws Exception {
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "table_with_external_paths");
         java.nio.file.Path dataExternalPath = tempFile.resolve("data-external-path");
+        java.nio.file.Path secondDataPath = tempFile.resolve("data-external-path-2");
         java.nio.file.Path globalIndexExternalPath = tempFile.resolve("global-index-external-path");
+        java.nio.file.Path secondIndexPath = tempFile.resolve("global-index-external-path-2");
         Files.createDirectories(dataExternalPath.resolve("data"));
+        Files.createDirectories(secondDataPath.resolve("data"));
         Files.createDirectories(globalIndexExternalPath.resolve("index"));
+        Files.createDirectories(secondIndexPath.resolve("index"));
 
         Map<String, String> options = new HashMap<>();
         options.put(
-                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), dataExternalPath.toUri().toString());
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                String.format(pathFormat, dataExternalPath.toUri(), secondDataPath.toUri()));
         options.put(
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
-                globalIndexExternalPath.toUri().toString());
+                String.format(
+                        pathFormat, globalIndexExternalPath.toUri(), secondIndexPath.toUri()));
         Schema schema =
                 new Schema(
                         Lists.newArrayList(
@@ -1112,10 +1120,21 @@ public abstract class CatalogTestBase {
                         "");
 
         catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.coreOptions().dataFileExternalPathList())
+                .containsExactly(
+                        new Path(dataExternalPath.toUri().toString()),
+                        new Path(secondDataPath.toUri().toString()));
+        assertThat(table.coreOptions().globalIndexExternalPaths())
+                .containsExactly(
+                        new Path(globalIndexExternalPath.toUri().toString()),
+                        new Path(secondIndexPath.toUri().toString()));
         catalog.dropTable(identifier, false);
 
         assertThat(Files.exists(dataExternalPath)).isFalse();
+        assertThat(Files.exists(secondDataPath)).isFalse();
         assertThat(Files.exists(globalIndexExternalPath)).isFalse();
+        assertThat(Files.exists(secondIndexPath)).isFalse();
     }
 
     @Test

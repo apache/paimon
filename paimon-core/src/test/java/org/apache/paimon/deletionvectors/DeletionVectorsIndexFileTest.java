@@ -31,6 +31,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -448,7 +450,7 @@ public class DeletionVectorsIndexFileTest {
         Path dir = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(dir, fileName);
             }
 
@@ -460,6 +462,11 @@ public class DeletionVectorsIndexFileTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

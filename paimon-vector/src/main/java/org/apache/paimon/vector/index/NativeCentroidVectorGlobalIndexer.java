@@ -62,12 +62,12 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
 
     @Override
     public ResultEntry writeRoutingModel(
-            GlobalIndexFileWriter io, String name, byte[] payload, String modelId)
+            GlobalIndexFileWriter io, String filePath, byte[] payload, String modelId)
             throws IOException {
-        try (OutputStream out = io.newOutputStream(name)) {
+        try (OutputStream out = io.newOutputStream(filePath)) {
             VectorTrainingModelIO.write(out, payload, modelId);
         }
-        return new ResultEntry(name, 0, new VectorIndexMeta(null, metric().trim()).serialize());
+        return new ResultEntry(filePath, 0, new VectorIndexMeta(null, metric().trim()).serialize());
     }
 
     static String storedMetric(GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {

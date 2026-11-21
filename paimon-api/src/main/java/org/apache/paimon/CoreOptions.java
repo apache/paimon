@@ -2908,7 +2908,8 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+                            "Comma-separated global index root directories, new global index files are distributed "
+                                    + "in round-robin order. If not set, global index files are stored under <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -4188,17 +4189,19 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    public Path globalIndexExternalPath() {
+    public List<Path> globalIndexExternalPaths() {
         String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
         if (pathString == null || pathString.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
-        Path path = new Path(pathString);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
+        List<Path> paths = new ArrayList<>();
+        for (String value : pathString.split(",")) {
+            Path path = new Path(value.trim());
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
         }
-        return path;
+        checkArgument(!paths.isEmpty(), "global index external paths is empty");
+        return paths;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
@@ -4471,6 +4474,49 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    /** Returns all configured external data paths without applying the write strategy. */
+    public List<Path> dataFileExternalPathList() {
+        String externalPaths = dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            paths.add(new Path(pathString.trim()));
+        }
+        return paths;
+    }
+
+    /** Returns external data paths eligible for writing under the configured strategy. */
+    public List<Path> createExternalPaths() {
+        String externalPaths = dataFileExternalPaths();
+        ExternalPathStrategy strategy = externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = externalSpecificFS();
+        List<Path> paths = new ArrayList<>();
+        for (Path path : dataFileExternalPathList()) {
+            String scheme = path.toUri().getScheme();
+            checkArgument(scheme != null, "scheme should not be null: %s", path);
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     public ExternalPathStrategy externalPathStrategy() {

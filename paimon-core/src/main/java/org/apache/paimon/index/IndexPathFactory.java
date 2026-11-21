@@ -25,13 +25,14 @@ import javax.annotation.Nullable;
 /** Path factory to create an index path. */
 public interface IndexPathFactory {
 
-    Path toPath(String fileName);
-
+    /** Generates a file name and allocates a path for a new index file. */
     Path newPath();
 
-    default Path toPath(String fileName, @Nullable String externalPath) {
-        return toPath(fileName);
-    }
+    /** Allocates a path for a new index file with the given file name. */
+    Path newPathFromName(String fileName);
+
+    /** Resolves an existing file without allocating an external location. */
+    Path toPath(String fileName, @Nullable String externalPath);
 
     default Path toPath(IndexFileMeta file) {
         return toPath(file.fileName(), file.externalPath());

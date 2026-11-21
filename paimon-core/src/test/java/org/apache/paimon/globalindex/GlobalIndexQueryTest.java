@@ -59,6 +59,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -135,7 +137,7 @@ class GlobalIndexQueryTest {
             files.add(
                     new IndexFileMeta(
                             "ivf-pq",
-                            file.fileName(),
+                            new Path(file.filePath()).getName(),
                             100,
                             file.rowCount(),
                             new GlobalIndexMeta(0, 2, 0, null, file.meta()),
@@ -307,7 +309,7 @@ class GlobalIndexQueryTest {
         IndexPathFactory paths =
                 new IndexPathFactory() {
                     @Override
-                    public Path toPath(String name) {
+                    public Path newPathFromName(String name) {
                         return new Path(tempDir.resolve(name).toString());
                     }
 
@@ -319,6 +321,13 @@ class GlobalIndexQueryTest {
                     @Override
                     public boolean isExternalPath() {
                         return false;
+                    }
+
+                    @Override
+                    public Path toPath(String fileName, @Nullable String externalPath) {
+                        return externalPath == null
+                                ? newPathFromName(fileName)
+                                : new Path(externalPath);
                     }
                 };
         GlobalIndexFileReadWrite io = new GlobalIndexFileReadWrite(fileIO, paths);
@@ -341,8 +350,8 @@ class GlobalIndexQueryTest {
                 files.add(
                         new IndexFileMeta(
                                 indexType,
-                                entry.fileName(),
-                                io.fileSize(entry.fileName()),
+                                new Path(entry.filePath()).getName(),
+                                io.fileSize(entry.filePath()),
                                 entry.rowCount(),
                                 new GlobalIndexMeta(100, 102, 0, null, entry.meta()),
                                 null));
@@ -942,7 +951,7 @@ class GlobalIndexQueryTest {
         IndexPathFactory paths =
                 new IndexPathFactory() {
                     @Override
-                    public Path toPath(String name) {
+                    public Path newPathFromName(String name) {
                         return new Path("index/" + name);
                     }
 
@@ -954,6 +963,13 @@ class GlobalIndexQueryTest {
                     @Override
                     public boolean isExternalPath() {
                         return false;
+                    }
+
+                    @Override
+                    public Path toPath(String fileName, @Nullable String externalPath) {
+                        return externalPath == null
+                                ? newPathFromName(fileName)
+                                : new Path(externalPath);
                     }
                 };
         return GlobalIndexQuery.create(

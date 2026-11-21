@@ -18,37 +18,60 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.generic.GenericGlobalIndexScanner;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for shard computation in {@link GenericIndexTopoBuilder}. */
@@ -231,6 +254,78 @@ class GenericIndexTopoBuilderTest {
         // Clamped: shard 0 starts at 50 (not 0), shard 1 ends at 149 (not 199)
         assertThat(tasks.get(0).rowRanges().get(0)).isEqualTo(new Range(50, 99));
         assertThat(tasks.get(1).rowRanges().get(0)).isEqualTo(new Range(100, 149));
+    }
+
+    @Test
+    void testRoundRobinAcrossShards(@TempDir java.nio.file.Path directory) throws Exception {
+        Path root = new Path(directory.toUri());
+        List<Path> roots = Arrays.asList(new Path(root, "a"), new Path(root, "b"));
+        CoreOptions options =
+                new CoreOptions(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                                roots.get(0) + "," + roots.get(1)));
+        FileStorePathFactory paths = table.store().pathFactory();
+        when(paths.globalIndexFileFactory())
+                .thenAnswer(ignored -> createNonPartFactory(root, roots).globalIndexFileFactory());
+        when(table.fileIO()).thenReturn(new LocalFileIO());
+        when(table.coreOptions()).thenReturn(options);
+        DataField field = new DataField(0, "id", DataTypes.INT());
+        RowType readType =
+                SpecialFields.rowTypeWithRowId(new RowType(Collections.singletonList(field)));
+        ReadBuilder readBuilder = mock(ReadBuilder.class);
+        TableRead read = mock(TableRead.class);
+        when(readBuilder.newRead()).thenReturn(read);
+        List<Committable> commits;
+        try (OneInputStreamOperatorTestHarness<IndexedSplit, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(
+                        new GenericIndexTopoBuilder.BuildIndexOperator(
+                                readBuilder,
+                                table,
+                                "bitmap",
+                                field,
+                                Collections.emptyList(),
+                                readType,
+                                options.toConfiguration(),
+                                null))) {
+            harness.setup(new CommittableTypeInfo().createSerializer(new ExecutionConfig()));
+            harness.open();
+            for (int i = 0; i < 6; i++) {
+                IndexedSplit split =
+                        GenericIndexTopoBuilder.computeShardTasks(
+                                        table,
+                                        Collections.singletonList(
+                                                createEntry(BinaryRow.EMPTY_ROW, (long) i, 1)),
+                                        1)
+                                .get(0);
+                when(read.createReader(split.dataSplit()))
+                        .thenReturn(
+                                new IteratorRecordReader<>(
+                                        Collections.<InternalRow>singletonList(
+                                                        GenericRow.of(i, (long) i))
+                                                .iterator()));
+                harness.processElement(new StreamRecord<>(split));
+            }
+            commits = harness.extractOutputValues();
+        }
+        assertThat(commits).hasSize(6);
+        List<Path> parents = new ArrayList<>();
+        for (Committable commit : commits) {
+            List<IndexFileMeta> files =
+                    ((CommitMessageImpl) commit.commitMessage())
+                            .newFilesIncrement()
+                            .newIndexFiles();
+            assertThat(files).hasSize(1);
+            Path file = new Path(files.get(0).externalPath());
+            assertThat(table.fileIO().exists(file)).isTrue();
+            assertThat(files.get(0).fileName()).isEqualTo(file.getName());
+            parents.add(file.getParent());
+        }
+        assertThat(parents).containsOnlyElementsOf(roots);
+        for (int i = 1; i < parents.size(); i++) {
+            assertThat(parents.get(i)).isNotEqualTo(parents.get(i - 1));
+        }
+        verify(paths, times(1)).globalIndexFileFactory();
     }
 
     // -- Helpers --
