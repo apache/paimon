@@ -324,13 +324,13 @@ class ParquetFiltersTest {
                         0,
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(Double::new)
+                                .map(i -> i == 1 ? Double.NaN : i.doubleValue())
                                 .collect(Collectors.toList())),
                 FilterApi.notIn(
                         FilterApi.doubleColumn("col1"),
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(Double::new)
+                                .map(i -> i == 1 ? Double.NaN : i.doubleValue())
                                 .collect(Collectors.toSet())),
                 true);
     }
@@ -435,13 +435,13 @@ class ParquetFiltersTest {
                         0,
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(Float::new)
+                                .map(i -> i == 1 ? Float.NaN : i.floatValue())
                                 .collect(Collectors.toList())),
                 FilterApi.notIn(
                         FilterApi.floatColumn("col1"),
                         LongStream.range(1L, 22L)
                                 .boxed()
-                                .map(Float::new)
+                                .map(i -> i == 1 ? Float.NaN : i.floatValue())
                                 .collect(Collectors.toSet())),
                 true);
     }
