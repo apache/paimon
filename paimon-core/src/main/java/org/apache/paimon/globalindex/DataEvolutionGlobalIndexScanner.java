@@ -384,11 +384,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return meta != null && meta.extraFieldIds() != null && meta.extraFieldIds().length > 0;
     }
 
-    /** Checks which indexes can serve field lookups in the current schema. */
+    /** Dropped indexed columns leave manifest entries that cannot serve the current schema. */
     static boolean isIndexInSchema(RowType rowType, IndexFileMeta file) {
-        GlobalIndexMeta meta = file.globalIndexMeta();
-        return !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
-                && meta.getIndexedFieldIds().stream().allMatch(rowType::containsField);
+        return file.globalIndexMeta().getIndexedFieldIds().stream()
+                .allMatch(rowType::containsField);
     }
 
     private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {

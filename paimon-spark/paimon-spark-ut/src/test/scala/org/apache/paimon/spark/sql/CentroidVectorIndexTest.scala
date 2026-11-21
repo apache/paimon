@@ -19,9 +19,8 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
-import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta, DataEvolutionGlobalIndexScanner}
+import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta}
 import org.apache.paimon.index.IndexFileMeta
-import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.source.RawVectorSearchSplit
 import org.apache.paimon.vector.index.VectorTrainingModelIO
@@ -110,13 +109,13 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
       assert(files.forall(_.globalIndexMeta().extraFieldIds().length == 1))
       assert(nearest("status IS NULL") == Seq(48))
-      val table = loadTable("T")
-      val statusIsNull = new PredicateBuilder(table.rowType())
-        .isNull(table.rowType().getFieldIndex("status"))
-      assert(!DataEvolutionGlobalIndexScanner.create(table, null, statusIsNull).isPresent)
-      assert(
-        spark.sql("SELECT id FROM T WHERE status IS NULL").collect().map(_.getInt(0)).toSeq ==
-          Seq(48))
+      for (inReader <- Seq(false, true)) {
+        spark.sql(
+          s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled'='$inReader')")
+        assert(
+          spark.sql("SELECT id FROM T WHERE status IS NULL").collect().map(_.getInt(0)).toSeq ==
+            Seq(48))
+      }
 
       intercept[Exception] {
         spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
