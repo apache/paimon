@@ -189,7 +189,12 @@ def to_arrow(
         ordered=True,
     )
     if native_batches is not None:
-        return self._batches_to_arrow(native_batches, schema)
+        try:
+            return self._batches_to_arrow(native_batches, schema)
+        except ValueError as error:
+            from pypaimon.common.keytime_capability import native_keytime_timestamp_rejected
+            if not native_keytime_timestamp_rejected(error):
+                raise
 
     from pypaimon.execution.python.read.table_read import PythonTableRead
     return PythonTableRead(self)._materialize(splits, schema, parallelism, effective_bp)

@@ -23,14 +23,23 @@ import pyarrow
 
 from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
+from pypaimon.common import keytime_capability as _keytime_capability
+from pypaimon.common.keytime_capability import (
+    native_string_keytime_read_supported as _native_merge_map_keytime_timestamp_supported,
+    partial_update_keytime_unsupported_message as _partial_update_keytime_unsupported_message,
+)
 from pypaimon.execution.native.read import builder as native_builder
+from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField, MapType
+
+# Re-export for tests and call sites that probe effective keytime fields.
+_table_uses_merge_map_keytime = _keytime_capability.table_uses_merge_map_keytime
 
 _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC,
@@ -39,6 +48,63 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple('.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
 _NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
+
+
+def _accessed_field_names(read):
+    """Underlying fields this Native read may evaluate.
+
+    Collects projection / adapter / scan types, predicate leaves, nested
+    projection roots and output-projection roots. Returns ``None`` when the
+    dependency set cannot be established so callers stay conservative.
+    """
+    names = set()
+    saw_schema = False
+    for source in (
+            getattr(read, '_scan_read_type', None),
+            getattr(read, 'read_type', None),
+            getattr(read, '_adapter_read_type', None),
+            getattr(read, '_predicate_extra_fields', None),
+    ):
+        if source is None:
+            continue
+        saw_schema = True
+        for field in source:
+            names.add(field.name)
+
+    predicate = getattr(read, 'predicate', None)
+    if predicate is not None:
+        extracted = predicate_field_names(predicate)
+        if not extracted:
+            # Non-empty predicate we cannot attribute to columns: refuse to
+            # narrow past STRING keytime fields.
+            return None
+        names.update(extracted)
+
+    nested_paths = getattr(read, 'nested_name_paths', None)
+    if nested_paths:
+        for path in nested_paths:
+            if path:
+                names.add(path[0])
+
+    output_projection = getattr(read, 'output_projection', None)
+    if output_projection is not None:
+        columns = getattr(output_projection, 'columns', None)
+        if columns is None and hasattr(output_projection, '__iter__'):
+            columns = output_projection
+        if columns is not None:
+            for item in columns:
+                path = item[1] if isinstance(item, tuple) and len(item) > 1 else None
+                if path:
+                    names.add(path[0])
+
+    if not names and not saw_schema:
+        return None
+    return names
+
+
+def _read_hits_unsafe_string_keytime(read) -> bool:
+    return not _native_merge_map_keytime_timestamp_supported(
+        read.table, _accessed_field_names(read))
 
 
 def _prepare_native_read(table, predicate: Optional[Predicate] = None,
@@ -114,6 +180,16 @@ class NativeTableRead:
         if not self._blob_view_supported():
             return self._fallback(
                 "the table uses an unsupported BLOB view")
+        # Unsafe keytime (STRING UTF-16 mismatch or non-STRING requires
+        # STRING) only when this read actually touches those fields.
+        # Unrelated projections (e.g. VARIANT) stay on Native.
+        if _read_hits_unsafe_string_keytime(read):
+            if read.table.options.merge_engine() == MergeEngine.PARTIAL_UPDATE:
+                raise NotImplementedError(
+                    _partial_update_keytime_unsupported_message())
+            return self._fallback(
+                "merge_map_with_keytime timestamps are not supported by the "
+                "native reader; falling back to Python")
         try:
             if not self._orc_shared_shredding_supported(splits):
                 return self._fallback("ORC shared-shredding MAP columns require the Python reader")
