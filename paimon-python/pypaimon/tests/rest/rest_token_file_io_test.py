@@ -37,7 +37,10 @@ from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
+from pypaimon.filesystem.io_cache_routing import Op
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.vortex_utils import to_vortex_specified
 from pypaimon.table.row.blob import BlobDescriptor
 
 _FILE_IO_GET = 'pypaimon.catalog.rest.rest_token_file_io.FileIO.get'
@@ -107,7 +110,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             issued.append(RESTToken(
                 {OssOptions.OSS_SECURITY_TOKEN.key(): "sts-{}".format(len(issued))},
                 (now[0] + 2 * 3600) * 1000))
-            file_io.token = issued[-1]
+            file_io._adopt(issued[-1])
 
         with patch('pypaimon.catalog.rest.rest_token_file_io.time.time',
                    side_effect=lambda: now[0]), \
@@ -388,7 +391,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             if threading.current_thread() in holders:
                 refreshing.set()
                 release.wait(10)
-            file_io.token = self._valid_token("refreshed")
+            file_io._adopt(self._valid_token("refreshed"))
 
         self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'fork-test', None)
         with patch.object(RESTTokenFileIO, '_build_cache_key', return_value='fork-test'), \
@@ -481,7 +484,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         validity = timedelta(hours=requested_hours)
 
         def refresh():
-            file_io.token = new_token
+            file_io._adopt(new_token)
 
         with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now), \
                 patch.object(file_io, '_build_cache_key', return_value='presigning-test'), \
@@ -518,7 +521,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         validity = timedelta(minutes=30)
 
         def refresh():
-            file_io.token = new_token
+            file_io._adopt(new_token)
 
         def presign(*_):
             if now[0] == 1700000000:
@@ -1087,6 +1090,191 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         called_identifier = mock_api.load_table_token.call_args[0][0]
         self.assertEqual(called_identifier.get_object_name(), "my_table")
+
+    _TABLE = "oss://bkt/db1.db/t1"
+    _DATA = _TABLE + "/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+    _IO_CACHE_TOKEN = {
+        OssOptions.OSS_ENDPOINT.key(): "http://cache.example.com",
+        "io-cache.enabled": "true",
+        "io-cache.endpoint": "http://cache.example.com",
+        "io-cache.origin.endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "io-cache.policy": "meta,read",
+        "fs.oss.dlf-cache.consistent-hash.enabled": "true",
+    }
+
+    def _resolve_file_io(self, token, catalog_options=None, path=_TABLE, targets=()):
+        """Returns the FileIO built for the token and the options of every FileIO.get call,
+        after creating the given targets."""
+        file_io = RESTTokenFileIO(self.identifier, path, Options(catalog_options or {}))
+        file_io.token = RESTToken(token, int(time.time() * 1000) + 7_200_000)
+        # The FileIO cache is process-wide; a token equal to the previous call's must not reuse its FileIO.
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
+            get_io.side_effect = lambda location, options: MagicMock(name=location)
+            resolved = file_io.file_io()
+            for target in targets:
+                resolved._file_io(target)
+        for call in get_io.call_args_list:
+            self.assertEqual(path, call[0][0])
+        return resolved, [call[0][1].to_map() for call in get_io.call_args_list]
+
+    def test_io_cache_routing_builds_origin_and_target_file_io(self):
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN)
+        self.assertIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(1, len(created))
+        origin = created[0]
+        self.assertEqual("https://oss-cn-hangzhou-internal.aliyuncs.com", origin[OssOptions.OSS_ENDPOINT.key()])
+        self.assertEqual("true", origin["fs.oss.https.enable"])
+        self.assertNotIn("fs.oss.dlf-cache.consistent-hash.enabled", origin)
+        self.assertEqual("default", resolved._routing.route(Op.READ, self._DATA))
+
+        _, (_, target) = self._resolve_file_io(self._IO_CACHE_TOKEN, targets=["default"])
+        self.assertEqual("http://cache.example.com", target[OssOptions.OSS_ENDPOINT.key()])
+        self.assertEqual("false", target["fs.oss.https.enable"])
+        self.assertEqual("true", target["fs.oss.dlf-cache.consistent-hash.enabled"])
+
+    def test_io_cache_routing_builds_one_file_io_per_target(self):
+        token = dict(self._IO_CACHE_TOKEN, **{
+            "io-cache.targets": "accel,cluster",
+            "io-cache.target.accel.endpoint": "https://accel.example.com",
+            "io-cache.target.cluster.endpoint": "http://10.0.0.1:8080",
+            "io-cache.target.cluster.path-style-access": "true",
+            "io-cache.target.cluster.region": "cn-shanghai",
+            "io-cache.routes": "meta=accel;data=cluster",
+            OssOptions.OSS_REGION.key(): "cn-hangzhou",
+        })
+        resolved, (_, accel, cluster) = self._resolve_file_io(token, targets=["accel", "cluster"])
+        self.assertEqual("cluster", resolved._routing.route(Op.READ, self._DATA))
+        self.assertEqual(("https://accel.example.com", "false", "cn-hangzhou"), (
+            accel[OssOptions.OSS_ENDPOINT.key()], accel["fs.oss.second.level.domain.enable"],
+            accel[OssOptions.OSS_REGION.key()]))
+        self.assertEqual(("http://10.0.0.1:8080", "true", "cn-shanghai"), (
+            cluster[OssOptions.OSS_ENDPOINT.key()], cluster["fs.oss.second.level.domain.enable"],
+            cluster[OssOptions.OSS_REGION.key()]))
+
+    def _token_file_io(self):
+        file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options({}))
+        file_io.token = RESTToken(self._IO_CACHE_TOKEN, int(time.time() * 1000) + 7_200_000)
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        return file_io
+
+    @staticmethod
+    def _patched_file_io_get():
+        return patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get',
+                     side_effect=lambda location, options: MagicMock(name=location))
+
+    def test_io_cache_routing_serves_only_the_table_of_the_token(self):
+        external = "oss://bkt/import/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+        resolved, _ = self._resolve_file_io(self._IO_CACHE_TOKEN)
+        self.assertEqual("default", resolved._routing.route(Op.READ, self._DATA))
+        self.assertIsNone(resolved._routing.route(Op.READ, external))
+
+    def test_table_views_of_the_token_file_io(self):
+        file_io = self._token_file_io()
+        custom = self._TABLE + "/bucket-0/custom-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), self._patched_file_io_get():
+            base = file_io.file_io()
+            origin_only = file_io.origin_only()
+            self.assertIsInstance(origin_only, RESTTokenFileIO)
+            self.assertIs(base._origin, origin_only.file_io())
+            self.assertIs(origin_only, origin_only.for_table(self._TABLE, ["custom-"], "main"))
+
+            view = file_io.for_table(self._TABLE, ["custom-"], "main")
+            self.assertIsInstance(view, RESTTokenFileIO)
+            self.assertIs(view, view.for_table(self._TABLE, ["custom-"], "main"))
+            routed = view.file_io()
+            self.assertIs(routed, view.file_io())
+            self.assertEqual("default", routed._routing.route(Op.READ, custom))
+            self.assertIsNone(base._routing.route(Op.READ, custom))
+        restored = pickle.loads(pickle.dumps(view))
+        self.assertEqual((False, (self._TABLE, ("custom-",), ("main",))), (restored._origin_only, restored._table))
+        self.assertTrue(pickle.loads(pickle.dumps(origin_only))._origin_only)
+
+    def test_branch_views_take_the_prefixes_the_catalog_keeps_for_the_branch(self):
+        branch_file = self._TABLE + "/branch/branch-dev/bucket-0/dev-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.orc"
+        view = self._token_file_io().for_table(self._TABLE, [], "dev")
+        api = MagicMock()
+        api.get_table.return_value = MagicMock(schema=MagicMock(options={"data-file.prefix": "dev-"}))
+        view.api_instance = api
+        # No schema directory in storage: the REST catalog keeps the branch's schema.
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), self._patched_file_io_get(), \
+                patch('pypaimon.schema.schema_manager.SchemaManager.list_all', return_value=[]):
+            routing = view.file_io()._routing
+            self.assertEqual("default", routing.route(Op.READ, branch_file))
+            self.assertEqual("default", routing.route(Op.READ, branch_file))
+        branch = api.get_table.call_args[0][0]
+        self.assertEqual(("default", "test_table", "dev"), (
+            branch.get_database_name(), branch.get_table_name(), branch.get_branch_name()))
+        api.get_table.assert_called_once()
+
+    def test_io_cache_routing_off_without_target(self):
+        token = dict(self._IO_CACHE_TOKEN)
+        del token["io-cache.endpoint"]
+        resolved, created = self._resolve_file_io(token)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual([token], [{key: options[key] for key in token} for options in created])
+
+    def test_io_cache_routing_off_without_enabled(self):
+        token = dict(self._IO_CACHE_TOKEN)
+        del token["io-cache.enabled"]
+        resolved, created = self._resolve_file_io(token)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(["http://cache.example.com"], [options[OssOptions.OSS_ENDPOINT.key()] for options in created])
+
+    def test_catalog_io_cache_enabled_wins_over_token(self):
+        enabled = CatalogOptions.IO_CACHE_ENABLED.key()
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN, {enabled: "False"})
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual("false", created[0][enabled])
+
+        token = dict(self._IO_CACHE_TOKEN)
+        del token[enabled]
+        resolved, _ = self._resolve_file_io(token, {enabled: "TRUE"})
+        self.assertIsInstance(resolved, IoCacheRoutingFileIO)
+
+    def test_merge_token_applies_catalog_io_cache_enabled(self):
+        enabled = CatalogOptions.IO_CACHE_ENABLED.key()
+        token = {enabled: "true", "io-cache.endpoint": "http://cache.example.com"}
+        for catalog_options, expected in (({}, "true"), ({enabled: False}, "false"), ({enabled: "TRUE"}, "true")):
+            with self.subTest(catalog_options=catalog_options):
+                file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options(catalog_options))
+                self.assertEqual(expected, file_io._merge_token_with_catalog_options(token)[enabled])
+        self.assertEqual("true", token[enabled])
+
+    def test_io_cache_routing_needs_an_oss_table(self):
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN, path=self.warehouse_path)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(1, len(created))
+
+    def test_dlf_oss_endpoint_turns_io_cache_routing_off(self):
+        override = "oss-cn-hangzhou.aliyuncs.com"
+        resolved, created = self._resolve_file_io(
+            self._IO_CACHE_TOKEN, {CatalogOptions.DLF_OSS_ENDPOINT.key(): override})
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual([override], [options[OssOptions.OSS_ENDPOINT.key()] for options in created])
+
+    def test_io_cache_routing_hands_vortex_the_origin(self):
+        # Vortex builds its own virtual-hosted client, so it reads the origin even with a path-style IP target.
+        token = dict(self._IO_CACHE_TOKEN, **{
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            "io-cache.endpoint": "http://127.0.0.1:8080",
+            "io-cache.target.default.path-style-access": "true",
+        })
+        path = self._TABLE + "/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.vortex"
+        file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options({}))
+        file_io.token = RESTToken(token, int(time.time() * 1000) + 7_200_000)
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            url, store_kwargs = to_vortex_specified(file_io, path)
+            routed = file_io.file_io()
+
+        self.assertIsInstance(routed, IoCacheRoutingFileIO)
+        self.assertEqual("default", routed._routing.route(Op.READ, path))
+        self.assertEqual({}, routed._targets)
+        self.assertEqual(path.replace("oss://", "s3://"), url)
+        self.assertEqual("https://bkt.oss-cn-hangzhou-internal.aliyuncs.com", store_kwargs['endpoint'])
+        self.assertEqual('true', store_kwargs['virtual_hosted_style_request'])
 
 
 if __name__ == '__main__':

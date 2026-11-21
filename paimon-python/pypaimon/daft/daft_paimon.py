@@ -33,6 +33,10 @@ import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from urllib.parse import urlparse
 
+from pypaimon.filesystem.io_cache_routing import (IoCacheRouting,
+                                                  effective_options,
+                                                  single_endpoint_options)
+
 if TYPE_CHECKING:
     import daft
 
@@ -46,18 +50,23 @@ def _enrich_options_with_rest_token(
     # REST catalogs (DLF) keep OSS STS tokens on table.file_io and the bucket on table.table_path,
     # not in catalog_options; fold both in so Daft's IOConfig routes to OSS with valid credentials.
     if catalog_options.get("metastore") != "rest":
-        return catalog_options
+        return _origin_only(catalog_options)
     file_io = getattr(table, "file_io", None)
     if file_io is None or not hasattr(file_io, "try_to_refresh_token"):
-        return catalog_options
+        return _origin_only(catalog_options)
     file_io.try_to_refresh_token()
     if file_io.token is None:
-        return catalog_options
-    enriched = {**catalog_options, **file_io.token.token}
+        return _origin_only(catalog_options)
+    enriched = single_endpoint_options(effective_options(catalog_options, file_io.token.token))
     parsed = urlparse(getattr(table, "table_path", "") or "")
     if parsed.scheme and parsed.netloc:
         enriched["warehouse"] = f"{parsed.scheme}://{parsed.netloc}"
     return enriched
+
+
+def _origin_only(options: Dict[str, str]) -> Dict[str, str]:
+    # Daft reads with its own client, which cannot use io-cache targets per request.
+    return options if IoCacheRouting.create(options) is None else single_endpoint_options(options)
 
 
 # Time-travel targets are mutually exclusive: at most one may be set.

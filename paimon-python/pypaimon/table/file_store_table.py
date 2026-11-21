@@ -22,6 +22,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.filesystem.io_cache_routing import schema_file_prefixes
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
@@ -34,9 +35,11 @@ from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 class FileStoreTable(Table):
     def __init__(self, file_io: FileIO, identifier: Identifier, table_path: str,
                  table_schema: TableSchema, catalog_environment: Optional[CatalogEnvironment] = None):
-        self.file_io = file_io
         self.identifier = identifier
         self.table_path = table_path
+        # Every table, copy included, tells io-cache routing where its files are and how they are named.
+        self.file_io = file_io.for_table(
+            table_path, schema_file_prefixes(table_schema.options), self.current_branch())
         self.catalog_environment = catalog_environment or CatalogEnvironment.empty()
 
         self.table_schema = table_schema
@@ -56,7 +59,7 @@ class FileStoreTable(Table):
         self.total_buckets = self.options.bucket()
 
         self.schema_manager = SchemaManager(
-            file_io, table_path, branch=self.current_branch())
+            self.file_io, table_path, branch=self.current_branch())
 
     @classmethod
     def from_path(cls, table_path: str, file_io_options: Optional[dict] = None) -> 'FileStoreTable':
