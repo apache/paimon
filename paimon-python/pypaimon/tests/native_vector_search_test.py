@@ -571,21 +571,22 @@ def test_unsupported_conjunct_on_same_indexed_field_is_not_exact(rest_catalog, m
     assert len(_rows(native, _single(native, limit=2).with_filter(is_null).execute_local())) == 1
 
 
-@pytest.mark.parametrize('builder_override', [False, True])
-def test_prefilter_mode_includes_uncovered_scalar_rows(vector_table, builder_override):
+@pytest.mark.parametrize('table_mode, query_options', [
+    ('full', {}),
+    ('fast', {'scalar-index.prefilter.search-mode': 'full'}),
+    ('full', {'scalar-index.prefilter.search-mode': None}),
+])
+def test_prefilter_mode_includes_uncovered_scalar_rows(vector_table, table_mode, query_options):
     vector_table.create_global_index('id', index_type='btree')
     _write(vector_table, [{'id': 7, 'embedding': [3, 3], 'pt': 1}])
     vector_table.create_global_index('embedding', index_type='ivf-flat', options={
         'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
-    option = 'scalar-index.prefilter.search-mode'
     table = vector_table.copy({'vector-index.search-mode': 'fast', 'scalar-index.search-mode': 'fast',
-                               option: 'fast' if builder_override else 'full'})
+                               'scalar-index.prefilter.search-mode': table_mode})
     predicate = table.new_read_builder().new_predicate_builder().equal('id', 7)
     for native in ['false', 'true']:
         read_table = table.copy({'read.native.enabled': native, 'scan.native-plan.enabled': native})
-        builder = _single(read_table, [3, 3], 10).with_filter(predicate)
-        if builder_override:
-            builder.with_options({option: 'full'})
+        builder = _single(read_table, [3, 3], 10).with_filter(predicate).with_options(query_options)
         assert _rows(read_table, builder.execute_local()).column('id').to_pylist() == [7]
 
 

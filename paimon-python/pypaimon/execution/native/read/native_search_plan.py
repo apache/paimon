@@ -39,7 +39,7 @@ def _native_prefilter_options(table, options):
     """Mirror the explicit prefilter mode for native runtimes with only the legacy key."""
     native_options = _options_to_native(options)
     key = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE.key()
-    mode = native_options.get(key, table.table_schema.options.get(key))
+    mode = native_options.get(key, table.options.options.to_map().get(key))
     if mode is not None:
         native_options[CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()] = mode
     return native_options
