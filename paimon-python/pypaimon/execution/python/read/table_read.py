@@ -872,9 +872,8 @@ class PythonTableRead:
         """Read lazily in split order; Python fallback readers remain serial."""
         read = self._read
         validate_read(read)
-        effective = read._effective_parallelism(parallelism, len(splits))
-        if read._should_run_parallel(splits, effective):
-            blob_parallelism = read._cap_blob_parallelism(
-                min(effective, len(splits)), blob_parallelism)
+        # The lazy generator reads one split at a time, regardless of the
+        # requested split parallelism or the number of planned splits.
+        blob_parallelism = read._cap_blob_parallelism(1, blob_parallelism)
         return self._arrow_batch_generator(
             splits, schema, blob_parallelism)

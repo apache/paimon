@@ -220,7 +220,7 @@ def test_native_read_consumes_retained_rust_splits_and_transports_limit():
         predicate=None,
         limit=2,
         read_type=read.read_type,
-        blob_parallelism=1,
+        blob_parallelism=16,
         parallelism=1,
         ordered=True,
     )
@@ -565,25 +565,34 @@ def test_native_read_forwards_one_global_limit(method_name, limit):
 
 
 @pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
-def test_native_read_transports_blob_parallelism_for_one_core_read(method_name):
+@pytest.mark.parametrize(
+    'options, expected',
+    [({}, 16), ({'blob_parallelism': 1}, 1), ({'blob_parallelism': 8}, 8)],
+)
+def test_native_read_transports_blob_parallelism_for_one_core_read(method_name, options, expected):
     read = _table_read()
     splits = [_Split() for _ in range(16)]
     for index, split in enumerate(splits):
         split._native_split = index
     with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch(range(16))]) as native:
-        result = getattr(read, method_name)(splits, parallelism=16, blob_parallelism=16)
+        result = getattr(read, method_name)(splits, parallelism=16, **options)
         if method_name != 'to_arrow':
             result = result.read_all()
     assert result.num_rows == 16
     native.assert_called_once()
     assert native.call_args.args[1] == list(range(16))
     assert native.call_args.kwargs['parallelism'] == 16
-    assert native.call_args.kwargs['blob_parallelism'] == 16
+    assert native.call_args.kwargs['blob_parallelism'] == expected
 
 
-def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():
+@pytest.mark.parametrize(
+    'options, expected',
+    [({}, 16), ({'blob_parallelism': 1}, 1),
+     ({'blob_parallelism': 8}, 8), ({'blob_parallelism': 128}, 64)],
+)
+def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap(options, expected):
     read = _table_read()
-    splits = [_Split() for _ in range(16)]
+    splits = [_Split() for _ in range(64)]
     for index, split in enumerate(splits):
         split._native_split = index
     schema = pa.schema([('id', pa.int32())])
@@ -592,11 +601,11 @@ def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():
             patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator',
                 return_value=iter([_id_batch([1])])) as python_read:
-        result = read.to_arrow_batch_reader(splits, parallelism=16, blob_parallelism=16).read_all()
+        result = read.to_arrow_batch_reader(splits, parallelism=64, **options).read_all()
     assert result.to_pydict() == {'id': [1]}
-    assert native.call_args.kwargs['parallelism'] == 16
-    assert native.call_args.kwargs['blob_parallelism'] == 16
-    python_read.assert_called_once_with(splits, schema, 4)
+    assert native.call_args.kwargs['parallelism'] == 64
+    assert native.call_args.kwargs['blob_parallelism'] == options.get('blob_parallelism', 16)
+    python_read.assert_called_once_with(splits, schema, expected)
 
 
 @pytest.mark.parametrize('ordered', [False, True])
