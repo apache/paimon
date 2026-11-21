@@ -47,6 +47,7 @@ from pypaimon.table.row.generic_row import (GenericRow,
                                             GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.utils.numeric_utils import java_float_compare
 
 
 _MANIFEST_FIELD_NAMES = (
@@ -55,25 +56,25 @@ _MANIFEST_PREFIX_TYPES = ('int', 'int', 'bytes', 'int', 'int')
 
 
 def _floating_partition_bounds(values):
-    """Order partition values like Java Float.compare and Double.compare."""
-    lower = upper = None
-    has_nan = False
+    """Return the min and max of non-null partition values in Java floating-point order."""
+    minimum = maximum = None
     for value in values:
         if value is None:
             continue
         value = float(value)
-        if math.isnan(value):
-            has_nan = True
+        if minimum is None:
+            minimum = maximum = value
             continue
-        # Only equal zeros can have different signs.
-        key = (value, math.copysign(1.0, value))
-        if lower is None or key < lower:
-            lower = key
-        if upper is None or key > upper:
-            upper = key
-    if lower is None:
-        return (math.nan, math.nan) if has_nan else (None, None)
-    return lower[0], math.nan if has_nan else upper[0]
+        compared_to_minimum = java_float_compare(value, minimum)
+        if compared_to_minimum < 0:
+            minimum = value
+        elif compared_to_minimum > 0 and java_float_compare(value, maximum) > 0:
+            maximum = value
+    if minimum is None:
+        return None, None
+    # Store a fixed NaN representation regardless of input order.
+    return (math.nan if math.isnan(minimum) else minimum,
+            math.nan if math.isnan(maximum) else maximum)
 
 
 def _read_manifest_records(buffer, early_entry_filter, partition_filter,
