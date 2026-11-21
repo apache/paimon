@@ -422,7 +422,8 @@ conn.export_to_lerobot(
 conn.export_to_lerobot("robot_data", "oss://my-bucket/lerobot/export-v3")
 ```
 
-OSS output uses the table's FileIO when it can access the target bucket. Pass
+OSS output binds a FileIO to the target bucket using the table's credentials,
+including REST data tokens, when those credentials can access it. Pass
 `output_options` with `fs.oss.endpoint`, `fs.oss.accessKeyId`,
 `fs.oss.accessKeySecret`, and optional `fs.oss.securityToken` when the output
 bucket has separate credentials. The exporter stages files in the worker's

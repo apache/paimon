@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from urllib.parse import urlparse
 
 import numpy as np
 import pyarrow as pa
@@ -28,7 +29,11 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot.export import _write_v3_episodes
@@ -66,7 +71,8 @@ class MemoryOss(OssFileIO):
 
     def list_objects(self, prefix, max_keys):
         with self.lock:
-            entries = [key for key in self.objects if key.startswith(prefix)]
+            entries = [key for key in self.objects
+                       if urlparse(key).path.lstrip("/").startswith(prefix)]
         if self.list_barrier:
             self.list_barrier.wait(timeout=30)
         return SimpleNamespace(object_list=entries[:max_keys])
@@ -297,6 +303,52 @@ def test_export_to_oss_prefix(tmp_path, version):
                 "robot", prefix, version=version,
                 output_options={"fs.oss.endpoint": "test-endpoint"})
         assert len(target.writes) == before
+
+
+def test_export_uses_rest_token_file_io_for_target_bucket(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+    target = MemoryOss()
+    prefix = "oss://target-bucket/lerobot/export"
+    rest = RESTTokenFileIO(
+        Identifier.from_string("default.robot_frames"),
+        "oss://source-bucket/db.db/robot_frames", Options({}))
+    created = []
+    original_get = FileIO.get
+
+    def get_io(path, options=None):
+        if path.startswith("oss://"):
+            created.append(path)
+            return target
+        return original_get(path, options)
+
+    with mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"), \
+            mock.patch("pypaimon.filesystem.local_file_io.LocalFileIO.for_path",
+                       side_effect=lambda path: CachingFileIO(
+                           rest, None).for_path(path)), \
+            mock.patch("pypaimon.catalog.rest.rest_token_file_io.FileIO.get",
+                       side_effect=get_io):
+        assert conn.export_to_lerobot("robot", prefix) == prefix
+    assert created and set(created) == {prefix}
+    assert prefix + "/meta/.pypaimon-export-claim" in target.objects
+    assert prefix + "/meta/info.json" in target.objects
+
+
+def test_oss_file_io_rebinds_cross_bucket_export_target():
+    source_io = OssFileIO.__new__(OssFileIO)
+    source_io._oss_bucket = "source-bucket"
+    source_io.properties = Options({"fs.oss.endpoint": "same-endpoint"})
+    target = MemoryOss()
+    target._oss_bucket = "target-bucket"
+    prefix = "oss://target-bucket/lerobot/export"
+    with mock.patch.object(FileIO, "get", return_value=target) as get_io:
+        output_io = source_io.for_path(prefix)
+    get_io.assert_called_once_with(prefix, source_io.properties)
+    output_io.claim_empty_prefix(prefix, "meta/.pypaimon-export-claim")
+    with output_io.new_output_stream(prefix + "/meta/info.json") as stream:
+        stream.write(b"{}")
+    assert prefix + "/meta/.pypaimon-export-claim" in target.objects
+    assert prefix + "/meta/info.json" in target.objects
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):

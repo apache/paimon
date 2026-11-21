@@ -525,6 +525,15 @@ class FileIO(ABC):
                 self.delete_quietly(temp_path)
         return success
 
+    def for_path(self, path: str) -> 'FileIO':
+        """Create a FileIO bound to ``path`` with the same configuration."""
+        return FileIO.get(path, getattr(self, 'properties', Options({})))
+
+    def claim_empty_prefix(self, path: str, marker: str) -> None:
+        """Atomically reserve an empty object-store prefix for one writer."""
+        raise NotImplementedError(
+            "Atomic prefix reservation is unsupported by this FileIO.")
+
     def write_file(self, path: str, content: str, overwrite: bool = False):
         if not overwrite and self.exists(path):
             raise FileExistsError(f"File {path} already exists and overwrite=False")

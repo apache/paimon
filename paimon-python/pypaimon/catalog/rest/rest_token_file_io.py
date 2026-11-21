@@ -251,6 +251,12 @@ class RESTTokenFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self.file_io().try_to_write_atomic(path, content)
 
+    def for_path(self, path: str) -> FileIO:
+        return RESTTokenFileIO(self.identifier, path, self.catalog_options)
+
+    def claim_empty_prefix(self, path: str, marker: str) -> None:
+        self.file_io().claim_empty_prefix(path, marker)
+
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         if table_root != self.path:
             raise ValueError("Table root does not match RESTTokenFileIO bound table root.")

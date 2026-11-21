@@ -138,7 +138,8 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
     try:
         if remote:
             output_io = (FileIO.get(target_uri, Options(dict(output_options)))
-                         if output_options is not None else read_frames.file_io)
+                         if output_options is not None else
+                         read_frames.file_io.for_path(target_uri))
             if output_io.exists(target_uri):
                 raise FileExistsError(target_uri)
         else:
@@ -161,7 +162,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
             reader.close()
         if stage is not None and stage.exists():
             shutil.rmtree(stage)
-        if output_options is not None and output_io is not None:
+        if output_io is not None:
             output_io.close()
 
 
@@ -177,34 +178,7 @@ def _upload_to_oss(stage, prefix, file_io):
 
 
 def _reserve_oss_prefix(prefix, file_io):
-    import oss2
-
-    from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.filesystem.oss_file_io import OssFileIO
-    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-
-    backend = file_io
-    while not isinstance(backend, OssFileIO):
-        if isinstance(backend, ResolvingFileIO):
-            backend = backend._get_fileio(prefix)
-        elif isinstance(backend, CachingFileIO):
-            backend = backend._delegate
-        else:
-            raise ValueError("OSS export requires an OSS FileIO with atomic create support.")
-
-    session = oss2.Session()
-    try:
-        bucket = backend._create_oss_bucket(session)
-        if not backend._supports_atomic_write(bucket):
-            raise ValueError("OSS export requires atomic create support on the target bucket.")
-        key_prefix = backend._extract_oss_object_key(prefix).rstrip("/") + "/"
-        if bucket.list_objects(prefix=key_prefix, max_keys=1).object_list:
-            raise FileExistsError(prefix)
-        marker = prefix + "/meta/.pypaimon-export-claim"
-        if not backend.try_to_write_atomic(marker, "claimed"):
-            raise FileExistsError(prefix)
-    finally:
-        session.session.close()
+    file_io.claim_empty_prefix(prefix, "meta/.pypaimon-export-claim")
 
 
 def _upload_file(path, uri, file_io):
