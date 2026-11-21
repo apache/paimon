@@ -254,6 +254,9 @@ class RESTTokenFileIO(FileIO):
     def try_to_write_exclusive(self, path: str, content: str) -> bool:
         return self.file_io().try_to_write_exclusive(path, content)
 
+    def upload_file_exclusive(self, source: str, path: str) -> bool:
+        return self.file_io().upload_file_exclusive(source, path)
+
     def check_exclusive_write_supported(self, path: str):
         return self.file_io().check_exclusive_write_supported(path)
 

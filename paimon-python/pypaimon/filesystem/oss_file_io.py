@@ -17,12 +17,17 @@
 
 """OSS-specific operations, reusing the existing Arrow/Jindo FileIO."""
 
+import logging
+import os
 import re
 from contextlib import closing
 from urllib.parse import urlparse
 
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class OssFileIO(PyArrowFileIO):
@@ -114,6 +119,67 @@ class OssFileIO(PyArrowFileIO):
             raise OSError("Failed to exclusively write {}".format(path)) from error
         finally:
             session.session.close()
+
+    def upload_file_exclusive(self, source: str, path: str) -> bool:
+        """Upload a local file with an OSS no-overwrite condition."""
+        key = self._exclusive_object_key(path)
+        try:
+            import oss2
+        except ImportError as error:
+            raise ImportError(
+                "OSS exclusive uploads require oss2. Install pypaimon[oss] "
+                "or pypaimon[jindo].") from error
+
+        session = oss2.Session()
+        try:
+            bucket = self._create_oss_bucket(session)
+            self._check_exclusive_bucket(bucket)
+            headers = self._sse_headers()
+            headers['x-oss-forbid-overwrite'] = 'true'
+            try:
+                if os.path.getsize(source) <= 5 * 1024 ** 3:
+                    bucket.put_object_from_file(key, source, headers=headers)
+                else:
+                    self._upload_multipart_exclusive(bucket, key, source, headers)
+                return True
+            except oss2.exceptions.ServerError as error:
+                if error.code == 'FileAlreadyExists':
+                    return False
+                raise
+        except oss2.exceptions.OssError as error:
+            raise OSError("Failed to exclusively upload {}".format(path)) from error
+        finally:
+            session.session.close()
+
+    @staticmethod
+    def _upload_multipart_exclusive(bucket, key, source, headers):
+        import oss2
+
+        size = os.path.getsize(source)
+        part_size = max(64 * 1024 ** 2, (size + 9999) // 10000)
+        upload_id = None
+        try:
+            upload_id = bucket.init_multipart_upload(
+                key, headers={name: value for name, value in headers.items()
+                              if name != 'x-oss-forbid-overwrite'}).upload_id
+            parts = []
+            with open(source, 'rb') as stream:
+                for number in range(1, (size + part_size - 1) // part_size + 1):
+                    result = bucket.upload_part(
+                        key, upload_id, number, stream.read(part_size))
+                    parts.append(oss2.models.PartInfo(number, result.etag))
+            bucket.complete_multipart_upload(
+                key, upload_id, parts,
+                headers={'x-oss-forbid-overwrite': 'true'})
+            upload_id = None
+        finally:
+            if upload_id is not None:
+                try:
+                    bucket.abort_multipart_upload(key, upload_id)
+                except oss2.exceptions.OssError:
+                    _LOGGER.warning(
+                        "Failed to abort exclusive OSS upload %s", key,
+                        exc_info=True)
 
     def check_exclusive_write_supported(self, path: str):
         """Reject unsupported OSS buckets before preparing an export."""

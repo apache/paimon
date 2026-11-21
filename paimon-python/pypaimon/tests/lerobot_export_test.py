@@ -72,6 +72,14 @@ class MemoryOss:
             self.writes.append(uri)
             return True
 
+    def upload_file_exclusive(self, source, uri):
+        with self.lock:
+            if uri in self.objects:
+                return False
+            self.objects[uri] = Path(source).read_bytes()
+            self.writes.append(uri)
+            return True
+
     def check_exclusive_write_supported(self, uri):
         pass
 
@@ -139,6 +147,30 @@ def test_export_v3_keeps_shared_mp4_and_reimports(tmp_path):
 
     conn.load_from_lerobot("roundtrip", output.as_uri())
     assert conn.get_table("roundtrip_frames").scan().to_arrow().num_rows == 5
+
+
+def test_export_v3_preserves_map_episode_extension(tmp_path):
+    original = Path(source(tmp_path / "input")[7:])
+    episode_path = original / "meta/episodes/chunk-000/file-000.parquet"
+    episodes = pq.read_table(episode_path).append_column(
+        "vendor_map", pa.array(
+            [[("left", 1)], [("right", 2)]],
+            type=pa.map_(pa.string(), pa.int64())))
+    pq.write_table(episodes, episode_path)
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original.as_uri())
+
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
+    restored = pq.read_table(
+        output / "meta/episodes/chunk-000/file-000.parquet")
+    assert restored.schema.field("vendor_map").type == pa.map_(
+        pa.string(), pa.int64())
+    assert restored["vendor_map"].to_pylist() == [
+        [("left", 1)], [("right", 2)]]
+    conn.load_from_lerobot("roundtrip", output.as_uri())
+    roundtrip = conn.get_table("roundtrip_episodes").scan().to_arrow()
+    assert roundtrip.schema.field("vendor_map").type == pa.map_(
+        pa.string(), pa.int64())
 
 
 @pytest.mark.parametrize("version", ["v2.0", "v2.1"])
@@ -379,6 +411,7 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
         exists=target.exists, list_status=target.list_status,
         check_exclusive_write_supported=target.check_exclusive_write_supported,
         try_to_write_exclusive=target.try_to_write_exclusive,
+        upload_file_exclusive=target.upload_file_exclusive,
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
@@ -414,18 +447,24 @@ def test_fuse_object_table_is_rejected_before_reading_source(tmp_path):
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):
-    episodes = [dict(episode_index=i, **{"vendor/note": None})
+    episodes = [{"episode_index": i, "vendor/note": None,
+                 "vendor_map": None}
                 for i in range(1000)]
-    episodes.append(dict(episode_index=1000, **{"vendor/note": "later"}))
-    _write_v3_episodes(tmp_path, episodes)
+    episodes.append(dict(episode_index=1000, **{
+        "vendor/note": "later", "vendor_map": [("last", 7)]}))
+    _write_v3_episodes(tmp_path, episodes, pa.schema([
+        pa.field("vendor_map", pa.map_(pa.string(), pa.int64()))]))
 
     paths = sorted((tmp_path / "meta/episodes").glob("**/*.parquet"))
     assert len(paths) == 2
     assert all(pq.read_schema(path).field("vendor/note").type == pa.string()
                for path in paths)
+    assert all(pq.read_schema(path).field("vendor_map").type ==
+               pa.map_(pa.string(), pa.int64()) for path in paths)
     table = pq.read_table(tmp_path / "meta/episodes")
     assert table.num_rows == 1001
     assert table["vendor/note"].to_pylist()[-1] == "later"
+    assert table["vendor_map"].to_pylist()[-1] == [("last", 7)]
 
 
 @pytest.mark.parametrize("container,marker", [
@@ -458,6 +497,28 @@ def test_export_to_object_table_rejects_existing_name(tmp_path):
             conn.export_to_lerobot(
                 "robot", output_table="exports", sub_folder="export")
     assert len(target.objects) == 1
+
+
+def test_export_does_not_overwrite_object_created_after_claim(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+
+    class RacingOss(MemoryOss):
+        def upload_file_exclusive(self, source, uri):
+            if uri.endswith("meta/paimon_source.json"):
+                with self.lock:
+                    self.objects[uri] = b"external writer"
+            return super().upload_file_exclusive(source, uri)
+
+    target = RacingOss()
+    with _target_object_table(conn, target):
+        with pytest.raises(FileExistsError, match="paimon_source.json"):
+            conn.export_to_lerobot(
+                "robot", output_table="exports", sub_folder="racing")
+    assert target.objects[
+        "oss://test-bucket/lerobot/racing/meta/paimon_source.json"] \
+        == b"external writer"
+    assert not any(uri.endswith("meta/info.json") for uri in target.objects)
 
 
 def test_concurrent_export_to_same_object_table_name_has_one_winner(tmp_path):

@@ -114,6 +114,7 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
     info = json.loads(source["info"])
     info["fps"] = _dataset_fps(info.get("fps"))
     source_episodes = _read_source_episodes(episodes, source["id"])
+    episode_schema = _target_schema(episodes)
     if len(source_episodes) != info["total_episodes"]:
         raise ValueError("LeRobot Episode count disagrees with Dataset metadata.")
     expected = 0
@@ -135,7 +136,7 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
         reader = _PaimonTableFrameReader(
             read_frames, columns=_target_schema(read_frames).names)
         _write_dataset(stage, reader, source, info, source_episodes,
-                       version, batch_size)
+                       episode_schema, version, batch_size)
         reader.close()
         reader = None
         _upload_to_object_table(stage, target_uri, table.file_io)
@@ -171,10 +172,8 @@ def _reserve_object_prefix(prefix, file_io):
 
 
 def _upload_file(path, uri, file_io):
-    if file_io.exists(uri):
+    if not file_io.upload_file_exclusive(str(path), uri):
         raise FileExistsError(uri)
-    with path.open("rb") as source, file_io.new_output_stream(uri) as target:
-        shutil.copyfileobj(source, target, length=1024 * 1024)
 
 
 def _read_source_episodes(table, dataset_id):
@@ -216,7 +215,8 @@ def _read_source_episodes(table, dataset_id):
     return sorted(result, key=lambda row: row["episode_index"])
 
 
-def _write_dataset(stage, reader, source, info, episodes, version, batch_size):
+def _write_dataset(stage, reader, source, info, episodes, episode_schema,
+                   version, batch_size):
     video_keys = [name for name, feature in info["features"].items()
                   if feature.get("dtype") == "video"]
     image_keys = [name for name, feature in info["features"].items()
@@ -399,7 +399,7 @@ def _write_dataset(stage, reader, source, info, episodes, version, batch_size):
             parquet_writer.close()
             parquet_writer = None
         if version == "v3.0":
-            _write_v3_episodes(stage, episodes)
+            _write_v3_episodes(stage, episodes, episode_schema)
             if "total_videos" in output_info:
                 output_info["total_videos"] = sum(
                     len(files) for files in v3_video_files.values())
@@ -427,7 +427,7 @@ def _write_v3_vocabulary(stage, singular, rows):
                    stage / ("meta/%ss.parquet" % singular))
 
 
-def _write_v3_episodes(stage, episodes):
+def _write_v3_episodes(stage, episodes, source_schema=None):
     if not episodes:
         return
     names = list(dict.fromkeys(key for episode in episodes for key in episode))
@@ -443,10 +443,17 @@ def _write_v3_episodes(stage, episodes):
             rows.append(row)
         return rows
 
-    schema = pa.unify_schemas([
-        pa.Table.from_pylist(chunk_rows(begin)).schema
+    preserved = {field.name: field for field in source_schema or []
+                 if field.name in names}
+    inferred_names = [name for name in names if name not in preserved]
+    inferred = pa.unify_schemas([
+        pa.Table.from_pylist([
+            {name: row[name] for name in inferred_names}
+            for row in chunk_rows(begin)]).schema
         for begin in range(0, len(episodes), 1000)
     ])
+    schema = pa.schema([preserved.get(name) or inferred.field(name)
+                        for name in names])
     for begin in range(0, len(episodes), 1000):
         path = stage / ("meta/episodes/chunk-%03d/file-000.parquet" %
                         (begin // 1000))

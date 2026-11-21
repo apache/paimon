@@ -140,3 +140,34 @@ def test_exclusive_claim_passes_through_file_io_wrappers():
     rest.check_exclusive_write_supported("oss://test-bucket/claim")
     target.check_exclusive_write_supported.assert_called_once_with(
         "oss://test-bucket/claim")
+    rest.upload_file_exclusive("/tmp/data.bin", "oss://test-bucket/data.bin")
+    target.upload_file_exclusive.assert_called_once_with(
+        "/tmp/data.bin", "oss://test-bucket/data.bin")
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_large_file_multipart_completion_is_exclusive(tmp_path, conflict):
+    oss2 = pytest.importorskip("oss2")
+    source = tmp_path / "data.bin"
+    source.write_bytes(b"large object")
+    bucket = mock.Mock()
+    bucket.init_multipart_upload.return_value.upload_id = "upload-1"
+    bucket.upload_part.return_value.etag = "etag-1"
+    if conflict:
+        bucket.complete_multipart_upload.side_effect = \
+            oss2.exceptions.ServerError(
+                409, {}, b"", {"Code": "FileAlreadyExists"})
+
+    if conflict:
+        with pytest.raises(oss2.exceptions.ServerError):
+            OssFileIO._upload_multipart_exclusive(
+                bucket, "export/data.bin", str(source),
+                {"x-oss-forbid-overwrite": "true"})
+    else:
+        OssFileIO._upload_multipart_exclusive(
+            bucket, "export/data.bin", str(source),
+            {"x-oss-forbid-overwrite": "true"})
+    bucket.complete_multipart_upload.assert_called_once()
+    assert bucket.complete_multipart_upload.call_args.kwargs["headers"] == {
+        "x-oss-forbid-overwrite": "true"}
+    assert bucket.abort_multipart_upload.called is conflict
