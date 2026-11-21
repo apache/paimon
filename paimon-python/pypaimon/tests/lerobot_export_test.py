@@ -103,7 +103,7 @@ def _export_to_disk(conn, table_name, path, **kwargs):
     target = MemoryOss()
     with _target_object_table(conn, target):
         prefix = conn.export_to_lerobot(
-            table_name, output_table="exports", release=path.name, **kwargs)
+            table_name, output_table="exports", export_name=path.name, **kwargs)
     for uri, payload in target.objects.items():
         destination = path / uri[len(prefix) + 1:]
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -335,10 +335,10 @@ def test_export_to_object_table(tmp_path, version):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    prefix = "oss://test-bucket/lerobot/releases/export"
+    prefix = "oss://test-bucket/lerobot/export"
     with _target_object_table(conn, target):
         assert conn.export_to_lerobot(
-            "robot", output_table="exports", release="export",
+            "robot", output_table="exports", export_name="export",
             version=version) == prefix
         assert target.writes[-1] == prefix + "/meta/info.json"
         assert len([key for key in target.objects if key.endswith(".mp4")]) == (
@@ -349,7 +349,7 @@ def test_export_to_object_table(tmp_path, version):
         before = len(target.writes)
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", output_table="exports", release="export",
+                "robot", output_table="exports", export_name="export",
                 version=version)
         assert len(target.writes) == before
 
@@ -370,15 +370,15 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
-            "robot", output_table="exports", release="train_001")
+            "robot", output_table="exports", export_name="train_001")
     assert output + "/meta/info.json" in target.objects
 
 
-def test_export_rejects_unsafe_release(tmp_path):
+def test_export_rejects_unsafe_name(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     with pytest.raises(ValueError, match="safe directory name"):
         conn.export_to_lerobot(
-            "robot", output_table="exports", release="../escape")
+            "robot", output_table="exports", export_name="../escape")
 
 
 def test_export_rejects_non_object_table(tmp_path):
@@ -386,7 +386,7 @@ def test_export_rejects_non_object_table(tmp_path):
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     with pytest.raises(ValueError, match="must name an Object Table"):
         conn.export_to_lerobot(
-            "robot", output_table="robot_frames", release="train_001")
+            "robot", output_table="robot_frames", export_name="train_001")
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):
@@ -423,30 +423,30 @@ def test_export_v2_rejects_depth_and_audio_metadata(tmp_path, container, marker)
     assert not (tmp_path / "v2").exists()
 
 
-def test_export_to_object_table_rejects_existing_release(tmp_path):
+def test_export_to_object_table_rejects_existing_name(tmp_path):
     original = source(tmp_path / "input")
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    target.objects["oss://test-bucket/lerobot/releases/export/unrelated"] = b"old"
+    target.objects["oss://test-bucket/lerobot/export/unrelated"] = b"old"
     with _target_object_table(conn, target):
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", output_table="exports", release="export")
+                "robot", output_table="exports", export_name="export")
     assert len(target.objects) == 1
 
 
-def test_concurrent_export_to_same_object_table_release_has_one_winner(tmp_path):
+def test_concurrent_export_to_same_object_table_name_has_one_winner(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("first", source(tmp_path / "first", value=10))
     conn.load_from_lerobot("second", source(tmp_path / "second", value=20))
     target = MemoryOss()
-    prefix = "oss://test-bucket/lerobot/releases/export"
+    prefix = "oss://test-bucket/lerobot/export"
     with _target_object_table(conn, target):
         with ThreadPoolExecutor(2) as pool:
             futures = [pool.submit(
                 conn.export_to_lerobot, name, output_table="exports",
-                release="export")
+                export_name="export")
                 for name in ("first", "second")]
             results = [future.exception() or future.result() for future in futures]
     assert sum(result == prefix for result in results) == 1

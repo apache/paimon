@@ -198,12 +198,12 @@ class MultimodalConnection:
             table_name: str,
             *,
             output_table: str,
-            release: str,
+            export_name: str,
             version: str = "v3.0",
             dataset_id: Optional[str] = None,
             tag_name: Optional[str] = None,
             batch_size: int = 1024):
-        """Export one source Dataset into an Object Table release.
+        """Export one source Dataset into a named Object Table directory.
 
         ``version`` is ``v3.0``, ``v2.1``, or ``v2.0``. Multi-source groups require a
         ``dataset_id`` from ``<table_name>_datasets.id``.
@@ -212,7 +212,7 @@ class MultimodalConnection:
         return export_to_lerobot(
             self, table_name, version=version,
             dataset_id=dataset_id, tag_name=tag_name, batch_size=batch_size,
-            output_table=output_table, release=release)
+            output_table=output_table, export_name=export_name)
 
     def recover_lerobot_append(self, table_name: str):
         """Recover a three-table group after an interrupted append."""
