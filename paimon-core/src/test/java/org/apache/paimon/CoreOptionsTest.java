@@ -23,6 +23,9 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -185,6 +188,40 @@ public class CoreOptionsTest {
                 .containsExactlyInAnyOrder(
                         CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE,
                         CoreOptions.PartitionMarkDoneAction.DONE_PARTITION);
+    }
+
+    @Test
+    public void testVectorFieldTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.VECTOR_FIELD, " v1 , v2, v3 ");
+        // An exact field name such as " v3" wins over its trimmed form.
+        List<String> fieldNames = Arrays.asList("v1", "v2", " v3");
+
+        assertThat(new CoreOptions(conf).vectorField(fieldNames))
+                .containsExactlyInAnyOrder("v1", "v2", " v3");
+        assertThat(CoreOptions.vectorField(conf.toMap(), fieldNames))
+                .containsExactlyInAnyOrder("v1", "v2", " v3");
+    }
+
+    @Test
+    public void testNormalizeVectorField() {
+        List<String> fieldNames = Arrays.asList("v1", "v2", " v3");
+
+        assertThat(CoreOptions.normalizeVectorField(" v1 , v2 ", fieldNames)).isEqualTo("v1,v2");
+        // An exact field name such as " v3" is kept as written.
+        assertThat(CoreOptions.normalizeVectorField("v1, v3", fieldNames)).isEqualTo("v1, v3");
+        // Unknown names are kept as written, so validation reports them.
+        assertThat(CoreOptions.normalizeVectorField("v1, v4", fieldNames)).isEqualTo("v1, v4");
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testLegacyVectorField() {
+        Options conf = new Options();
+        conf.set(CoreOptions.VECTOR_FIELD, "v1, v2");
+
+        assertThat(new CoreOptions(conf).vectorField()).containsExactlyInAnyOrder("v1", " v2");
+        assertThat(CoreOptions.vectorField(conf.toMap())).containsExactlyInAnyOrder("v1", " v2");
     }
 
     @Test

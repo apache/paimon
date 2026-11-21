@@ -390,7 +390,7 @@ public class SchemaValidation {
         }
 
         // vector field names must point to vector type
-        Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
+        Set<String> fieldNamesSpecifiedAsVector = options.vectorField(schema.fieldNames());
         schema.fields()
                 .forEach(
                         f ->
