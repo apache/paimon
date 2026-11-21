@@ -19,7 +19,6 @@ import io
 import inspect
 import shutil
 import subprocess
-import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
@@ -33,7 +32,6 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
-import pypaimon.multimodal.lerobot.export as export_module
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
 from pypaimon.table.object.object_table import ObjectTable
@@ -100,6 +98,19 @@ def _target_object_table(conn, file_io):
         else original_get(name))
 
 
+def _export_to_disk(conn, table_name, path, **kwargs):
+    """Exercise Object Table output, then materialize it for reader assertions."""
+    target = MemoryOss()
+    with _target_object_table(conn, target):
+        prefix = conn.export_to_lerobot(
+            table_name, output_table="exports", release=path.name, **kwargs)
+    for uri, payload in target.objects.items():
+        destination = path / uri[len(prefix) + 1:]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+    return path
+
+
 def test_export_v3_keeps_shared_mp4_and_reimports(tmp_path):
     original = Path(source(tmp_path / "input", video=True)[7:])
     episode_path = original / "meta/episodes/chunk-000/file-000.parquet"
@@ -109,7 +120,7 @@ def test_export_v3_keeps_shared_mp4_and_reimports(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original.as_uri())
 
-    output = conn.export_to_lerobot("robot", tmp_path / "v3")
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
     assert output == tmp_path / "v3"
     source_mp4 = original / "videos/camera/chunk-000/file-000.mp4"
     exported_mp4 = output / "videos/camera/chunk-000/file-000.mp4"
@@ -131,7 +142,7 @@ def test_export_v2_creates_one_exact_video_per_episode(tmp_path, version):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
 
-    output = conn.export_to_lerobot("robot", tmp_path / "v2", version=version)
+    output = _export_to_disk(conn, "robot", tmp_path / "v2", version=version)
     info = json.loads((output / "meta/info.json").read_text())
     assert info["codebase_version"] == version
     assert info["total_videos"] == 2
@@ -152,7 +163,7 @@ def test_export_v2_preserves_fractional_fps(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
 
-    output = conn.export_to_lerobot("robot", tmp_path / "v2", version="v2.1")
+    output = _export_to_disk(conn, "robot", tmp_path / "v2", version="v2.1")
     info = json.loads((output / "meta/info.json").read_text())
     assert info["fps"] == pytest.approx(float(rate))
     assert info["features"]["camera"]["info"]["video.fps"] == pytest.approx(float(rate))
@@ -187,44 +198,16 @@ def test_safe_path_on_python36(tmp_path):
     subprocess.run([python36, "-c", script], check=True, capture_output=True)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux no-replace rename")
-def test_local_export_rejects_directory_created_during_export(tmp_path):
-    original = source(tmp_path / "input")
-    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    conn.load_from_lerobot("robot", original)
-    target = tmp_path / "output"
-    write_dataset = export_module._write_dataset
-
-    def write_and_claim(*args, **kwargs):
-        write_dataset(*args, **kwargs)
-        target.mkdir()
-
-    with mock.patch.object(export_module, "_write_dataset", side_effect=write_and_claim):
-        with pytest.raises(FileExistsError):
-            conn.export_to_lerobot("robot", target)
-    assert target.is_dir() and not list(target.iterdir())
-    assert not list(tmp_path.glob(".lerobot-export-*"))
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux libc renameat2")
-def test_local_export_checks_renameat2_before_reading(tmp_path):
-    connection = mock.Mock()
-    with mock.patch.object(export_module.ctypes, "CDLL", return_value=SimpleNamespace()):
-        with pytest.raises(OSError, match="glibc 2.28"):
-            export_module.export_to_lerobot(connection, "robot", tmp_path / "output")
-    connection.get_table.assert_not_called()
-    assert not list(tmp_path.glob(".lerobot-export-*"))
-
-
 def test_export_requires_dataset_id_for_multi_source_group(tmp_path):
     first = source(tmp_path / "a")
     second = source(tmp_path / "b", value=20)
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", [first, second])
     with pytest.raises(ValueError, match="dataset_id is required"):
-        conn.export_to_lerobot("robot", tmp_path / "ambiguous")
+        _export_to_disk(conn, "robot", tmp_path / "ambiguous")
     ids = conn.get_table("robot_datasets").scan().to_arrow()["id"].to_pylist()
-    output = conn.export_to_lerobot("robot", tmp_path / "selected", dataset_id=ids[1])
+    output = _export_to_disk(
+        conn, "robot", tmp_path / "selected", dataset_id=ids[1])
     assert pq.read_table(output / "data/chunk-000/file-000.parquet")[
         "observation.state"][0].as_py()[0] == 20.0
     assert not (tmp_path / "ambiguous").exists()
@@ -241,7 +224,7 @@ def test_export_v3_remuxed_episode_videos(tmp_path):
         "robot", original.as_uri(),
         options={"write.lerobot.remux-episodes": "true"})
 
-    output = conn.export_to_lerobot("robot", tmp_path / "v3")
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
     assert sorted(path.relative_to(output).as_posix()
                   for path in output.glob("videos/**/*.mp4")) == [
         "videos/camera/chunk-000/file-000.mp4",
@@ -260,8 +243,8 @@ def test_export_reads_one_tagged_group_snapshot(tmp_path):
     conn.create_lerobot_tag("robot", "before-append")
     conn.append_to_lerobot("robot", second)
 
-    output = conn.export_to_lerobot(
-        "robot", tmp_path / "before", tag_name="before-append")
+    output = _export_to_disk(
+        conn, "robot", tmp_path / "before", tag_name="before-append")
     assert json.loads((output / "meta/info.json").read_text())["total_frames"] == 5
     assert pq.read_table(output / "data/chunk-000/file-000.parquet").num_rows == 5
 
@@ -286,7 +269,7 @@ def test_export_image_feature_roundtrip(tmp_path):
 
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original.as_uri())
-    output = conn.export_to_lerobot("robot", tmp_path / "v3")
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
     images = pq.read_table(output / "data/chunk-000/file-000.parquet")[
         "camera.image"].to_pylist()
     assert [value["bytes"] for value in images] == [payload] * 5
@@ -307,8 +290,8 @@ def test_export_direct_writer_group(tmp_path):
     writer.finalize()
 
     for version in ("v3.0", "v2.1", "v2.0"):
-        output = conn.export_to_lerobot(
-            "robot_frames", tmp_path / version, version=version)
+        output = _export_to_disk(
+            conn, "robot_frames", tmp_path / version, version=version)
         assert pq.read_table(next(output.glob("data/**/*.parquet"))).num_rows == 1
         if version == "v3.0":
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -328,7 +311,7 @@ def test_export_preserves_extra_dataset_text(tmp_path):
         "robot", original.as_uri(), dataset_name="source A",
         extra_dataset_fields={"notes": "notes.txt"})
 
-    output = conn.export_to_lerobot("robot", tmp_path / "v3")
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
     identity = json.loads((output / "meta/paimon_source.json").read_text())
     assert identity["name"] == "source A"
     assert identity["notes"] == "operator note\n"
@@ -342,7 +325,7 @@ def test_export_v20_requires_source_statistics(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original.as_uri())
     with pytest.raises(ValueError, match="requires source-level statistics"):
-        conn.export_to_lerobot("robot", tmp_path / "v20", version="v2.0")
+        _export_to_disk(conn, "robot", tmp_path / "v20", version="v2.0")
     assert not (tmp_path / "v20").exists()
 
 
@@ -373,7 +356,7 @@ def test_export_to_object_table(tmp_path, version):
 
 def test_export_rejects_plain_oss_uri(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    with pytest.raises(ValueError, match="must be a local path"):
+    with pytest.raises(TypeError):
         conn.export_to_lerobot("robot", "oss://target-bucket/lerobot/export")
 
 
@@ -436,7 +419,7 @@ def test_export_v2_rejects_depth_and_audio_metadata(tmp_path, container, marker)
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original.as_uri())
     with pytest.raises(ValueError, match="has depth or audio"):
-        conn.export_to_lerobot("robot", tmp_path / "v2", version="v2.1")
+        _export_to_disk(conn, "robot", tmp_path / "v2", version="v2.1")
     assert not (tmp_path / "v2").exists()
 
 

@@ -17,14 +17,10 @@
 """Export a source Dataset from Paimon to LeRobot v2.0, v2.1, or v3.0."""
 
 import copy
-import ctypes
-import errno
 import hashlib
 import json
-import os
 import re
 import shutil
-import sys
 import tempfile
 from fractions import Fraction
 from pathlib import Path
@@ -52,9 +48,9 @@ _V3_DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 _V3_VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
 
-def export_to_lerobot(connection, table_name, output_dir=None, *, version="v3.0",
-                      dataset_id=None, tag_name=None, batch_size=1024,
-                      output_table=None, release=None):
+def export_to_lerobot(connection, table_name, *, output_table, release,
+                      version="v3.0", dataset_id=None, tag_name=None,
+                      batch_size=1024):
     """Export one original Dataset; the destination must not already exist.
 
     The v3 exporter copies each encoded video payload once. The v2 exporter
@@ -71,35 +67,19 @@ def export_to_lerobot(connection, table_name, output_dir=None, *, version="v3.0"
         raise ValueError("dataset_id must be a non-empty string.")
     if tag_name is not None:
         _validate_tag_name(tag_name)
-    remote = output_table is not None
-    local_rename = None
-    if remote:
-        if output_dir is not None:
-            raise ValueError("Specify output_dir or output_table, not both.")
-        if not isinstance(output_table, str) or not output_table:
-            raise ValueError("output_table must name an Object Table.")
-        if (not isinstance(release, str)
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", release) is None):
-            raise ValueError("release must be one safe directory name.")
-        table = connection.catalog.get_table(connection._identifier(output_table))
-        if not isinstance(table, ObjectTable):
-            raise ValueError("output_table must name an Object Table.")
-        object_location = table.location()
-        parsed = urlparse(object_location)
-        if parsed.scheme != "oss" or not parsed.netloc:
-            raise ValueError("Object Table output must use OSS storage.")
-        target_uri = object_location.rstrip("/") + "/releases/" + release
-    else:
-        if output_dir is None or release is not None:
-            raise ValueError("Local export requires output_dir and no release.")
-        location = os.fspath(output_dir)
-        if not isinstance(location, str) or urlparse(location).scheme:
-            raise ValueError("output_dir must be a local path.")
-        target = Path(location).expanduser().resolve()
-        if target.exists():
-            raise FileExistsError(target)
-        if sys.platform == "linux":
-            local_rename = _linux_renameat2()
+    if not isinstance(output_table, str) or not output_table:
+        raise ValueError("output_table must name an Object Table.")
+    if (not isinstance(release, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", release) is None):
+        raise ValueError("release must be one safe directory name.")
+    table = connection.catalog.get_table(connection._identifier(output_table))
+    if not isinstance(table, ObjectTable):
+        raise ValueError("output_table must name an Object Table.")
+    object_location = table.location()
+    parsed = urlparse(object_location)
+    if parsed.scheme != "oss" or not parsed.netloc:
+        raise ValueError("Object Table output must use OSS storage.")
+    target_uri = object_location.rstrip("/") + "/releases/" + release
 
     try:
         frames = connection.get_table(table_name)
@@ -145,54 +125,22 @@ def export_to_lerobot(connection, table_name, output_dir=None, *, version="v3.0"
     stage = None
     reader = None
     try:
-        if remote:
-            if _prefix_has_files(table.file_io, target_uri):
-                raise FileExistsError(target_uri)
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-        stage = Path(tempfile.mkdtemp(
-            prefix=".lerobot-export-", dir=None if remote else target.parent))
+        if _prefix_has_files(table.file_io, target_uri):
+            raise FileExistsError(target_uri)
+        stage = Path(tempfile.mkdtemp(prefix=".lerobot-export-"))
         reader = _PaimonTableFrameReader(
             read_frames, columns=_target_schema(read_frames).names)
         _write_dataset(stage, reader, source, info, source_episodes,
                        version, batch_size)
         reader.close()
         reader = None
-        if remote:
-            _upload_to_object_table(stage, target_uri, table.file_io)
-            return target_uri
-        _publish_local(stage, target, local_rename)
-        return target
+        _upload_to_object_table(stage, target_uri, table.file_io)
+        return target_uri
     finally:
         if reader is not None:
             reader.close()
         if stage is not None and stage.exists():
             shutil.rmtree(stage)
-
-
-def _linux_renameat2():
-    try:
-        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
-    except AttributeError as error:
-        raise OSError(
-            errno.ENOTSUP,
-            "Linux local export requires libc renameat2 (glibc 2.28+ or equivalent).",
-        ) from error
-    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
-                          ctypes.c_char_p, ctypes.c_uint)
-    renameat2.restype = ctypes.c_int
-    return renameat2
-
-
-def _publish_local(stage, target, renameat2):
-    if renameat2 is None:
-        stage.rename(target)
-        return
-    if renameat2(-100, os.fsencode(stage), -100, os.fsencode(target), 1) != 0:
-        code = ctypes.get_errno()
-        if code in (errno.EEXIST, errno.ENOTEMPTY):
-            raise FileExistsError(code, os.strerror(code), str(target))
-        raise OSError(code, os.strerror(code), str(target))
 
 
 def _upload_to_object_table(stage, prefix, file_io):

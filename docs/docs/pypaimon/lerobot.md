@@ -404,12 +404,11 @@ to 64 MiB and 65,536 packets; unsupported timestamps fail the import.
 
 ## Export a LeRobot Dataset
 
-Export one Dataset to a local directory or an existing Object Table. Pass the table-group prefix
+Export one Dataset to an existing Object Table. Pass the table-group prefix
 (`PaimonLeRobotWriter` groups use the Frames table name). For groups with
 multiple Datasets, select one by `_datasets.id`; use `tag_name` for a fixed snapshot.
 
 ```python
-conn.export_to_lerobot("robot_data", "/data/export", version="v3.0")
 conn.export_to_lerobot(
     "robot_merged", output_table="exports", release="train_001",
     version="v2.1", dataset_id="<Dataset UUID>",
@@ -418,10 +417,8 @@ conn.export_to_lerobot(
 
 Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
 re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
-Object Table output writes to `releases/<release>` under the target table's
-OSS location, using that table's FileIO. The release must not exist.
-Linux local export requires
-`renameat2(RENAME_NOREPLACE)` (glibc 2.28+ or equivalent).
+Output goes to `releases/<release>` under the target table's OSS location,
+using that table's FileIO. The release must not exist.
 
 ## Capture LeRobot frames directly into Paimon
 
