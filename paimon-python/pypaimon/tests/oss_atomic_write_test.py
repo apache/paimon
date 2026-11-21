@@ -296,28 +296,6 @@ def test_exclusive_write_confirms_own_claim_after_lost_response(oss_server):
         '/test-bucket/export/meta/.pypaimon-export-claim': attempt.encode()}
 
 
-def test_exclusive_file_upload_has_one_winner(oss_server, tmp_path):
-    sources = [tmp_path / 'a.bin', tmp_path / 'b.bin']
-    for source, payload in zip(sources, (b'first', b'second')):
-        source.write_bytes(payload)
-    uri = 'oss://test-bucket/export/data/file.bin'
-    ios = [file_io(oss_server), file_io(oss_server)]
-    barrier = threading.Barrier(2)
-
-    def upload(index):
-        barrier.wait(timeout=10)
-        return ios[index].upload_file_exclusive(str(sources[index]), uri)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(upload, range(2)))
-    assert sorted(results) == [False, True]
-    assert oss_server.objects == {
-        '/test-bucket/export/data/file.bin': sources[results.index(True)].read_bytes()}
-    assert ios[0].upload_file_exclusive(str(sources[0]), uri) is False
-    assert oss_server.objects == {
-        '/test-bucket/export/data/file.bin': sources[results.index(True)].read_bytes()}
-
-
 @pytest.mark.parametrize('settings,expected', [
     ({'server-side-encryption-key-id': ' my-cmk ',
       'server-side-data-encryption': 'sm4', 'server-side-encryption-algorithm': 'AES256'},

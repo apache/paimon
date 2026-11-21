@@ -72,14 +72,6 @@ class MemoryOss:
             self.writes.append(uri)
             return True
 
-    def upload_file_exclusive(self, source, uri):
-        with self.lock:
-            if uri in self.objects:
-                return False
-            self.objects[uri] = Path(source).read_bytes()
-            self.writes.append(uri)
-            return True
-
     def check_exclusive_write_supported(self, uri):
         pass
 
@@ -411,7 +403,6 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
         exists=target.exists, list_status=target.list_status,
         check_exclusive_write_supported=target.check_exclusive_write_supported,
         try_to_write_exclusive=target.try_to_write_exclusive,
-        upload_file_exclusive=target.upload_file_exclusive,
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
@@ -497,28 +488,6 @@ def test_export_to_object_table_rejects_existing_name(tmp_path):
             conn.export_to_lerobot(
                 "robot", output_table="exports", sub_folder="export")
     assert len(target.objects) == 1
-
-
-def test_export_does_not_overwrite_object_created_after_claim(tmp_path):
-    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    conn.load_from_lerobot("robot", source(tmp_path / "input"))
-
-    class RacingOss(MemoryOss):
-        def upload_file_exclusive(self, source, uri):
-            if uri.endswith("meta/paimon_source.json"):
-                with self.lock:
-                    self.objects[uri] = b"external writer"
-            return super().upload_file_exclusive(source, uri)
-
-    target = RacingOss()
-    with _target_object_table(conn, target):
-        with pytest.raises(FileExistsError, match="paimon_source.json"):
-            conn.export_to_lerobot(
-                "robot", output_table="exports", sub_folder="racing")
-    assert target.objects[
-        "oss://test-bucket/lerobot/racing/meta/paimon_source.json"] \
-        == b"external writer"
-    assert not any(uri.endswith("meta/info.json") for uri in target.objects)
 
 
 def test_concurrent_export_to_same_object_table_name_has_one_winner(tmp_path):

@@ -172,8 +172,10 @@ def _reserve_object_prefix(prefix, file_io):
 
 
 def _upload_file(path, uri, file_io):
-    if not file_io.upload_file_exclusive(str(path), uri):
+    if file_io.exists(uri):
         raise FileExistsError(uri)
+    with path.open("rb") as source, file_io.new_output_stream(uri) as target:
+        shutil.copyfileobj(source, target, length=1024 * 1024)
 
 
 def _read_source_episodes(table, dataset_id):

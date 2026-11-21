@@ -543,9 +543,6 @@ class CachingFileIO(FileIO):
     def try_to_write_exclusive(self, *args, **kwargs):
         return self._delegate.try_to_write_exclusive(*args, **kwargs)
 
-    def upload_file_exclusive(self, *args, **kwargs):
-        return self._delegate.upload_file_exclusive(*args, **kwargs)
-
     def check_exclusive_write_supported(self, path: str):
         return self._delegate.check_exclusive_write_supported(path)
 

@@ -535,12 +535,6 @@ class FileIO(ABC):
             "Exclusive creation is not supported by {}.".format(
                 type(self).__name__))
 
-    def upload_file_exclusive(self, source: str, path: str) -> bool:
-        """Upload a local file only if the destination is absent."""
-        raise NotImplementedError(
-            "Exclusive upload is not supported by {}.".format(
-                type(self).__name__))
-
     def check_exclusive_write_supported(self, path: str):
         """Check exclusive-create support without creating an object."""
         raise NotImplementedError(
