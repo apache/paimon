@@ -34,12 +34,14 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
+import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -226,6 +228,60 @@ public class SparkPartitionMetadataAuthTest {
                     "null".equals(mode)
                             ? Collections.emptyList()
                             : Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
+        }
+    }
+
+    @Test
+    public void testDynamicPartitionPruningOnMaskedJoinKey(@TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            setPolicy(spark, false, "constant", "id,region,dt");
+            spark.sql(
+                    "CREATE TABLE spark_test.default.D (region STRING, dt STRING, k INT) "
+                            + "USING paimon TBLPROPERTIES ('bucket'='-1')");
+            spark.sql("INSERT INTO spark_test.default.D VALUES ('CN','***',1),('US','other',0)");
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", true);
+
+            String join = "FROM spark_test.default.T l JOIN spark_test.default.D r ON l.dt = r.dt ";
+            assertRows(
+                    spark,
+                    "SELECT l.id " + join + "WHERE r.k = 1",
+                    Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
+
+            // The fact scan receives a runtime filter on region even though dt is masked.
+            Dataset<Row> result =
+                    spark.sql(
+                            "SELECT /*+ BROADCAST(r) */ l.id "
+                                    + join
+                                    + "AND l.region = r.region WHERE r.k = 1");
+            assertThat(result.collectAsList()).containsExactly(RowFactory.create(1));
+            assertThat(result.queryExecution().executedPlan().toString())
+                    .contains("PaimonScan: [T], RuntimePartitionFilters: [Equal(region, CN)]");
+        }
+    }
+
+    @Test
+    public void testRuntimeFilterAttributesDoNotPlanSplits(@TempDir Path warehouse)
+            throws IOException, NoSuchTableException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            setPolicy(spark, false, "constant", "id,payload,seq,region,dt");
+            spark.sql(
+                    "ALTER TABLE spark_test.default.T SET TBLPROPERTIES "
+                            + "('scan.plan-auto-tag-for-read.time-retained'='1 h')");
+
+            SparkCatalog catalog =
+                    (SparkCatalog) spark.sessionState().catalogManager().catalog("spark_test");
+            Identifier id = Identifier.of(new String[] {"default"}, "T");
+            SparkTable table = (SparkTable) catalog.loadTable(id);
+            PaimonBaseScan scan =
+                    (PaimonBaseScan) table.newScanBuilder(CaseInsensitiveStringMap.empty()).build();
+
+            assertThat(scan.filterAttributes())
+                    .extracting(reference -> reference.fieldNames()[0])
+                    .containsExactly("region");
+            assertThat(((FileStoreTable) table.table()).tagManager().allTagNames()).isEmpty();
         }
     }
 
