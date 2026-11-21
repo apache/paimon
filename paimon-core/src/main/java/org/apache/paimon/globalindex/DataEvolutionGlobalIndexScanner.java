@@ -253,7 +253,17 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
-        @Nullable Snapshot snapshot = tryTravelOrLatest(table);
+        return createForPredicate(table, tryTravelOrLatest(table), partitionFilter, filter);
+    }
+
+    static Optional<DataEvolutionGlobalIndexScanner> createForPredicate(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter) {
+        if (snapshot == null) {
+            return Optional.empty();
+        }
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
                         .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
@@ -285,10 +295,20 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         if (!isSupportedTopN(topN)) {
             return Optional.empty();
         }
+        return createForTopN(table, tryTravelOrLatest(table), partitionFilter, topN);
+    }
+
+    static Optional<DataEvolutionGlobalIndexScanner> createForTopN(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            TopN topN) {
+        if (snapshot == null || !isSupportedTopN(topN)) {
+            return Optional.empty();
+        }
 
         DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
         int fieldId = indexField.id();
-        @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
                         .scan(snapshot, topNIndexFileFilter(partitionFilter, fieldId)).stream()
