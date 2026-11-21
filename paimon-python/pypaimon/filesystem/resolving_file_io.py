@@ -102,12 +102,6 @@ class ResolvingFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._get_fileio(path).try_to_write_atomic(path, content)
 
-    def for_path(self, path: str) -> FileIO:
-        return FileIO.get(path, self._options)
-
-    def claim_empty_prefix(self, path: str, marker: str) -> None:
-        self._get_fileio(path).claim_empty_prefix(path, marker)
-
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         return self._get_fileio(descriptor.uri).create_blob_presigned_url(
             table_root, descriptor, validity)

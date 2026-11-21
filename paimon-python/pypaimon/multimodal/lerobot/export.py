@@ -22,10 +22,10 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Mapping
 from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlparse
@@ -35,7 +35,6 @@ import pyarrow.parquet as pq
 
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.options import Options
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.dataset import _component_table, _read_arrow
 from pypaimon.multimodal.lerobot.metadata import (
@@ -43,8 +42,8 @@ from pypaimon.multimodal.lerobot.metadata import (
 )
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.table import _target_schema
-from pypaimon.common.file_io import FileIO
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+from pypaimon.table.object.object_table import ObjectTable
 
 
 _V2_DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
@@ -53,9 +52,9 @@ _V3_DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 _V3_VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
 
-def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
+def export_to_lerobot(connection, table_name, output_dir=None, *, version="v3.0",
                       dataset_id=None, tag_name=None, batch_size=1024,
-                      output_options=None):
+                      output_table=None, release=None):
     """Export one original Dataset; the destination must not already exist.
 
     The v3 exporter copies each encoded video payload once. The v2 exporter
@@ -72,26 +71,30 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         raise ValueError("dataset_id must be a non-empty string.")
     if tag_name is not None:
         _validate_tag_name(tag_name)
-    location = os.fspath(output_dir)
-    if not isinstance(location, str):
-        raise ValueError("output_dir must be a local path or oss:// URI.")
-    parsed = urlparse(location)
-    if parsed.scheme not in ("", "oss"):
-        raise ValueError("output_dir must be a local path or oss:// URI.")
-    remote = parsed.scheme == "oss"
+    remote = output_table is not None
     local_rename = None
     if remote:
-        parent_segment = any(part in (".", "..")
-                             for part in parsed.path.split("/"))
-        if (not parsed.netloc or not parsed.path.strip("/") or parsed.query
-                or parsed.fragment or parent_segment):
-            raise ValueError("output_dir must be an OSS bucket and a nonempty prefix.")
-        target_uri = location.rstrip("/")
-        if output_options is not None and not isinstance(output_options, Mapping):
-            raise ValueError("output_options must be a mapping.")
+        if output_dir is not None:
+            raise ValueError("Specify output_dir or output_table, not both.")
+        if not isinstance(output_table, str) or not output_table:
+            raise ValueError("output_table must name an Object Table.")
+        if (not isinstance(release, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", release) is None):
+            raise ValueError("release must be one safe directory name.")
+        table = connection.catalog.get_table(connection._identifier(output_table))
+        if not isinstance(table, ObjectTable):
+            raise ValueError("output_table must name an Object Table.")
+        object_location = table.location()
+        parsed = urlparse(object_location)
+        if parsed.scheme != "oss" or not parsed.netloc:
+            raise ValueError("Object Table output must use OSS storage.")
+        target_uri = object_location.rstrip("/") + "/releases/" + release
     else:
-        if output_options is not None:
-            raise ValueError("output_options is only used with OSS output.")
+        if output_dir is None or release is not None:
+            raise ValueError("Local export requires output_dir and no release.")
+        location = os.fspath(output_dir)
+        if not isinstance(location, str) or urlparse(location).scheme:
+            raise ValueError("output_dir must be a local path.")
         target = Path(location).expanduser().resolve()
         if target.exists():
             raise FileExistsError(target)
@@ -141,13 +144,9 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
 
     stage = None
     reader = None
-    output_io = None
     try:
         if remote:
-            output_io = (FileIO.get(target_uri, Options(dict(output_options)))
-                         if output_options is not None else
-                         read_frames.file_io.for_path(target_uri))
-            if output_io.exists(target_uri):
+            if _prefix_has_files(table.file_io, target_uri):
                 raise FileExistsError(target_uri)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +159,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         reader.close()
         reader = None
         if remote:
-            _upload_to_oss(stage, target_uri, output_io)
+            _upload_to_object_table(stage, target_uri, table.file_io)
             return target_uri
         _publish_local(stage, target, local_rename)
         return target
@@ -169,8 +168,6 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
             reader.close()
         if stage is not None and stage.exists():
             shutil.rmtree(stage)
-        if output_io is not None:
-            output_io.close()
 
 
 def _linux_renameat2():
@@ -198,8 +195,8 @@ def _publish_local(stage, target, renameat2):
         raise OSError(code, os.strerror(code), str(target))
 
 
-def _upload_to_oss(stage, prefix, file_io):
-    _reserve_oss_prefix(prefix, file_io)
+def _upload_to_object_table(stage, prefix, file_io):
+    _reserve_object_prefix(prefix, file_io)
     info = stage / "meta/info.json"
     for path in sorted(stage.rglob("*")):
         if not path.is_file() or path == info:
@@ -209,8 +206,16 @@ def _upload_to_oss(stage, prefix, file_io):
     _upload_file(info, prefix + "/meta/info.json", file_io)
 
 
-def _reserve_oss_prefix(prefix, file_io):
-    file_io.claim_empty_prefix(prefix, "meta/.pypaimon-export-claim")
+def _prefix_has_files(file_io, prefix):
+    return file_io.exists(prefix) or bool(file_io.list_status(prefix))
+
+
+def _reserve_object_prefix(prefix, file_io):
+    if _prefix_has_files(file_io, prefix):
+        raise FileExistsError(prefix)
+    if not file_io.try_to_write_atomic(
+            prefix + "/meta/.pypaimon-export-claim", "claimed"):
+        raise FileExistsError(prefix)
 
 
 def _upload_file(path, uri, file_io):

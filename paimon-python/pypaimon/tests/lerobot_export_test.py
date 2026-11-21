@@ -26,7 +26,6 @@ from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-from urllib.parse import urlparse
 
 import numpy as np
 import pyarrow as pa
@@ -35,14 +34,9 @@ import pytest
 
 import pypaimon.multimodal as pm
 import pypaimon.multimodal.lerobot.export as export_module
-from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import Identifier
-from pypaimon.common.options import Options
-from pypaimon.filesystem.caching_file_io import CachingFileIO
-from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
+from pypaimon.table.object.object_table import ObjectTable
 from pypaimon.tests.lerobot_aggregate_test import source
 
 
@@ -52,36 +46,23 @@ def _open_video_frames(path):
         return len(list(container.decode(video=0)))
 
 
-class MemoryOss(OssFileIO):
+class MemoryOss:
     def __init__(self):
         self.objects = {}
         self.writes = []
         self.lock = threading.Lock()
-        self.atomic = True
-        self.exists_barrier = None
-        self.list_barrier = None
 
     def exists(self, uri):
         with self.lock:
             found = uri in self.objects or any(
                 key.startswith(uri.rstrip("/") + "/") for key in self.objects)
-        if self.exists_barrier and uri == "oss://test-bucket/lerobot/export":
-            self.exists_barrier.wait(timeout=30)
         return found
 
-    def _create_oss_bucket(self, session):
-        return self
-
-    def _supports_atomic_write(self, bucket):
-        return self.atomic
-
-    def list_objects(self, prefix, max_keys):
+    def list_status(self, uri):
         with self.lock:
             entries = [key for key in self.objects
-                       if urlparse(key).path.lstrip("/").startswith(prefix)]
-        if self.list_barrier:
-            self.list_barrier.wait(timeout=30)
-        return SimpleNamespace(object_list=entries[:max_keys])
+                       if key.startswith(uri.rstrip("/") + "/")]
+        return entries
 
     def try_to_write_atomic(self, uri, content):
         with self.lock:
@@ -106,6 +87,17 @@ class MemoryOss(OssFileIO):
 
     def close(self):
         pass
+
+
+def _target_object_table(conn, file_io):
+    table = mock.Mock(spec=ObjectTable)
+    table.location.return_value = "oss://test-bucket/lerobot"
+    table.file_io = file_io
+    original_get = conn.catalog.get_table
+    return mock.patch.object(
+        conn.catalog, "get_table",
+        side_effect=lambda name: table if str(name) == "default.exports"
+        else original_get(name))
 
 
 def test_export_v3_keeps_shared_mp4_and_reimports(tmp_path):
@@ -355,19 +347,16 @@ def test_export_v20_requires_source_statistics(tmp_path):
 
 
 @pytest.mark.parametrize("version", ["v3.0", "v2.1"])
-def test_export_to_oss_prefix(tmp_path, version):
+def test_export_to_object_table(tmp_path, version):
     original = source(tmp_path / "input", video=True)
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    prefix = "oss://test-bucket/lerobot/export"
-    original_get = FileIO.get
-    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
-                    side_effect=lambda uri, options=None:
-                    target if uri.startswith("oss://") else original_get(uri, options)):
+    prefix = "oss://test-bucket/lerobot/releases/export"
+    with _target_object_table(conn, target):
         assert conn.export_to_lerobot(
-            "robot", prefix, version=version,
-            output_options={"fs.oss.endpoint": "test-endpoint"}) == prefix
+            "robot", output_table="exports", release="export",
+            version=version) == prefix
         assert target.writes[-1] == prefix + "/meta/info.json"
         assert len([key for key in target.objects if key.endswith(".mp4")]) == (
             1 if version == "v3.0" else 2)
@@ -377,55 +366,44 @@ def test_export_to_oss_prefix(tmp_path, version):
         before = len(target.writes)
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", prefix, version=version,
-                output_options={"fs.oss.endpoint": "test-endpoint"})
+                "robot", output_table="exports", release="export",
+                version=version)
         assert len(target.writes) == before
 
 
-def test_export_uses_rest_token_file_io_for_target_bucket(tmp_path):
+def test_export_rejects_plain_oss_uri(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    with pytest.raises(ValueError, match="must be a local path"):
+        conn.export_to_lerobot("robot", "oss://target-bucket/lerobot/export")
+
+
+def test_export_uses_object_table_wrapped_file_io(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     target = MemoryOss()
-    prefix = "oss://target-bucket/lerobot/export"
-    rest = RESTTokenFileIO(
-        Identifier.from_string("default.robot_frames"),
-        "oss://source-bucket/db.db/robot_frames", Options({}))
-    created = []
-    original_get = FileIO.get
-
-    def get_io(path, options=None):
-        if path.startswith("oss://"):
-            created.append(path)
-            return target
-        return original_get(path, options)
-
-    with mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"), \
-            mock.patch("pypaimon.filesystem.local_file_io.LocalFileIO.for_path",
-                       side_effect=lambda path: CachingFileIO(
-                           rest, None).for_path(path)), \
-            mock.patch("pypaimon.catalog.rest.rest_token_file_io.FileIO.get",
-                       side_effect=get_io):
-        assert conn.export_to_lerobot("robot", prefix) == prefix
-    assert created and set(created) == {prefix}
-    assert prefix + "/meta/.pypaimon-export-claim" in target.objects
-    assert prefix + "/meta/info.json" in target.objects
+    wrapped = SimpleNamespace(
+        exists=target.exists, list_status=target.list_status,
+        try_to_write_atomic=target.try_to_write_atomic,
+        new_output_stream=target.new_output_stream)
+    with _target_object_table(conn, wrapped):
+        output = conn.export_to_lerobot(
+            "robot", output_table="exports", release="train_001")
+    assert output + "/meta/info.json" in target.objects
 
 
-def test_oss_file_io_rebinds_cross_bucket_export_target():
-    source_io = OssFileIO.__new__(OssFileIO)
-    source_io._oss_bucket = "source-bucket"
-    source_io.properties = Options({"fs.oss.endpoint": "same-endpoint"})
-    target = MemoryOss()
-    target._oss_bucket = "target-bucket"
-    prefix = "oss://target-bucket/lerobot/export"
-    with mock.patch.object(FileIO, "get", return_value=target) as get_io:
-        output_io = source_io.for_path(prefix)
-    get_io.assert_called_once_with(prefix, source_io.properties)
-    output_io.claim_empty_prefix(prefix, "meta/.pypaimon-export-claim")
-    with output_io.new_output_stream(prefix + "/meta/info.json") as stream:
-        stream.write(b"{}")
-    assert prefix + "/meta/.pypaimon-export-claim" in target.objects
-    assert prefix + "/meta/info.json" in target.objects
+def test_export_rejects_unsafe_release(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    with pytest.raises(ValueError, match="safe directory name"):
+        conn.export_to_lerobot(
+            "robot", output_table="exports", release="../escape")
+
+
+def test_export_rejects_non_object_table(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+    with pytest.raises(ValueError, match="must name an Object Table"):
+        conn.export_to_lerobot(
+            "robot", output_table="robot_frames", release="train_001")
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):
@@ -462,39 +440,30 @@ def test_export_v2_rejects_depth_and_audio_metadata(tmp_path, container, marker)
     assert not (tmp_path / "v2").exists()
 
 
-def test_export_to_oss_requires_atomic_prefix_reservation(tmp_path):
+def test_export_to_object_table_rejects_existing_release(tmp_path):
     original = source(tmp_path / "input")
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    target.atomic = False
-    original_get = FileIO.get
-    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
-                    side_effect=lambda uri, options=None:
-                    target if uri.startswith("oss://") else original_get(uri, options)):
-        with pytest.raises(ValueError, match="atomic create support"):
+    target.objects["oss://test-bucket/lerobot/releases/export/unrelated"] = b"old"
+    with _target_object_table(conn, target):
+        with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", "oss://test-bucket/lerobot/export",
-                output_options={"fs.oss.endpoint": "test-endpoint"})
-    assert not target.objects
+                "robot", output_table="exports", release="export")
+    assert len(target.objects) == 1
 
 
-def test_concurrent_export_to_same_oss_prefix_has_one_winner(tmp_path):
+def test_concurrent_export_to_same_object_table_release_has_one_winner(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("first", source(tmp_path / "first", value=10))
     conn.load_from_lerobot("second", source(tmp_path / "second", value=20))
     target = MemoryOss()
-    target.exists_barrier = threading.Barrier(2)
-    target.list_barrier = threading.Barrier(2)
-    prefix = "oss://test-bucket/lerobot/export"
-    original_get = FileIO.get
-    with mock.patch("pypaimon.multimodal.lerobot.export.FileIO.get",
-                    side_effect=lambda uri, options=None:
-                    target if uri.startswith("oss://") else original_get(uri, options)):
+    prefix = "oss://test-bucket/lerobot/releases/export"
+    with _target_object_table(conn, target):
         with ThreadPoolExecutor(2) as pool:
             futures = [pool.submit(
-                conn.export_to_lerobot, name, prefix,
-                output_options={"fs.oss.endpoint": "test-endpoint"})
+                conn.export_to_lerobot, name, output_table="exports",
+                release="export")
                 for name in ("first", "second")]
             results = [future.exception() or future.result() for future in futures]
     assert sum(result == prefix for result in results) == 1

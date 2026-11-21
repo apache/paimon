@@ -540,12 +540,6 @@ class CachingFileIO(FileIO):
     def try_to_write_atomic(self, *args, **kwargs):
         return self._delegate.try_to_write_atomic(*args, **kwargs)
 
-    def for_path(self, path: str) -> FileIO:
-        return self._delegate.for_path(path)
-
-    def claim_empty_prefix(self, path: str, marker: str) -> None:
-        self._delegate.claim_empty_prefix(path, marker)
-
     def create_blob_presigned_url(self, *args, **kwargs):
         return self._delegate.create_blob_presigned_url(*args, **kwargs)
 

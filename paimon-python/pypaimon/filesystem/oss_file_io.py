@@ -33,30 +33,6 @@ class OssFileIO(PyArrowFileIO):
     # cache, preserving its value under the same stability assumption.
     _atomic_write_supported = None
 
-    def claim_empty_prefix(self, path: str, marker: str) -> None:
-        """Reserve an unused prefix with OSS forbid-overwrite semantics."""
-        try:
-            import oss2
-        except ImportError as error:
-            raise ImportError("OSS prefix reservation requires oss2.") from error
-
-        bucket_name = self._extract_oss_bucket(path)
-        if getattr(self, '_oss_bucket', None) not in (None, bucket_name):
-            raise ValueError("OSS prefix reservation must use a target-bound FileIO")
-        session = oss2.Session()
-        try:
-            bucket = self._create_oss_bucket(session)
-            if not self._supports_atomic_write(bucket):
-                raise ValueError(
-                    "OSS export requires atomic create support on the target bucket.")
-            key_prefix = self._extract_oss_object_key(path).rstrip('/') + '/'
-            if bucket.list_objects(prefix=key_prefix, max_keys=1).object_list:
-                raise FileExistsError(path)
-            if not self.try_to_write_atomic(path.rstrip('/') + '/' + marker, "claimed"):
-                raise FileExistsError(path)
-        finally:
-            session.session.close()
-
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         uri = urlparse(path)
         if uri.scheme:
