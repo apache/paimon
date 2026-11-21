@@ -24,11 +24,12 @@ import javax.annotation.Nullable;
 
 import java.util.Objects;
 
-/** A router or shard with its underlying index metadata unpacked by Paimon. */
+/** A router, vector shard or scalar bitmap file in a centroid index. */
 public final class CentroidIndexFile extends GlobalIndexIOMeta {
 
     private final String modelId;
     private final boolean routingModel;
+    private final boolean scalarIndex;
     private final int countOrId;
 
     public CentroidIndexFile(
@@ -39,9 +40,22 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
             String modelId,
             boolean routingModel,
             int countOrId) {
+        this(path, size, rows, payload, modelId, routingModel, false, countOrId);
+    }
+
+    public CentroidIndexFile(
+            Path path,
+            long size,
+            long rows,
+            @Nullable byte[] payload,
+            String modelId,
+            boolean routingModel,
+            boolean scalarIndex,
+            int countOrId) {
         super(path, size, rows, payload);
         this.modelId = modelId;
         this.routingModel = routingModel;
+        this.scalarIndex = scalarIndex;
         this.countOrId = countOrId;
     }
 
@@ -51,6 +65,10 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
 
     public boolean routingModel() {
         return routingModel;
+    }
+
+    public boolean scalarIndex() {
+        return scalarIndex;
     }
 
     /** Number of centroids in this router. */
@@ -76,12 +94,13 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
         }
         CentroidIndexFile file = (CentroidIndexFile) other;
         return routingModel == file.routingModel
+                && scalarIndex == file.scalarIndex
                 && countOrId == file.countOrId
                 && modelId.equals(file.modelId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), modelId, routingModel, countOrId);
+        return Objects.hash(super.hashCode(), modelId, routingModel, scalarIndex, countOrId);
     }
 }
