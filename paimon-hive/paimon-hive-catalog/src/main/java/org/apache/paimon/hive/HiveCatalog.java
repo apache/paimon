@@ -32,6 +32,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
@@ -488,7 +489,43 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
+        dropPartitions(
+                identifier,
+                this.loadTableSchema(identifier),
+                partitions,
+                () -> super.dropPartitions(identifier, partitions));
+    }
+
+    @Override
+    public void dropBinaryPartitions(Identifier identifier, List<BinaryRow> partitions)
+            throws TableNotExistException {
         TableSchema schema = this.loadTableSchema(identifier);
+        CoreOptions options = CoreOptions.fromMap(schema.options());
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        schema.logicalPartitionType(),
+                        schema.partitionKeys().toArray(new String[0]),
+                        options.legacyPartitionName());
+        List<Map<String, String>> partitionSpecs = new ArrayList<>(partitions.size());
+        for (BinaryRow partition : partitions) {
+            partitionSpecs.add(partitionComputer.generatePartValues(partition));
+        }
+        // The metastore keeps partitions by their stored names, but the data is dropped by the
+        // partition rows: a stored name is not always parsed back to the same partition.
+        dropPartitions(
+                identifier,
+                schema,
+                partitionSpecs,
+                () -> super.dropBinaryPartitions(identifier, partitions));
+    }
+
+    private void dropPartitions(
+            Identifier identifier,
+            TableSchema schema,
+            List<Map<String, String>> partitions,
+            PartitionDataDropper dataDropper)
+            throws TableNotExistException {
         boolean tagToPart = CoreOptions.fromMap(schema.options()).tagToPartitionField() != null;
         boolean metastorePartitioned = metastorePartitioned(schema);
         if (metastorePartitioned) {
@@ -500,11 +537,17 @@ public class HiveCatalog extends AbstractCatalog {
                     schema);
         }
         if (!tagToPart) {
-            super.dropPartitions(identifier, partitions);
+            dataDropper.drop();
             if (metastorePartitioned) {
                 dropDonePartitions(identifier, partitions, schema);
             }
         }
+    }
+
+    /** Drops the data of the partitions after their metastore partitions. */
+    @FunctionalInterface
+    private interface PartitionDataDropper {
+        void drop() throws TableNotExistException;
     }
 
     private void dropDonePartitions(

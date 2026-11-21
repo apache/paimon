@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.operation.Lock;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
@@ -1150,6 +1152,38 @@ public interface Catalog extends AutoCloseable {
         Table table = getTable(identifier);
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Drop partitions of the specify table given by their partition rows. Ignore non-existent
+     * partitions.
+     *
+     * <p>Unlike {@link #dropPartitions(Identifier, List)}, the data is dropped by the exact
+     * partition rows rather than by partition specs parsed back from strings. A partition name is
+     * not always parsed back to the same partition, e.g. when it equals the default partition name
+     * or is a TIMESTAMP_LTZ value. Partition metadata kept by name (e.g. in a metastore) is still
+     * dropped by the stored partition names.
+     *
+     * @param identifier path of the table to drop partitions
+     * @param partitions partition rows to be deleted, in the partition type of the table
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void dropBinaryPartitions(Identifier identifier, List<BinaryRow> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            if (!(commit instanceof TableCommitImpl)) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Table %s does not support dropping partitions by partition rows.",
+                                identifier));
+            }
+            ((TableCommitImpl) commit).truncateBinaryPartitions(partitions);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

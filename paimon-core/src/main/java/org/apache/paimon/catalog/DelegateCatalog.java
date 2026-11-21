@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.operation.Lock;
@@ -376,6 +377,12 @@ public abstract class DelegateCatalog implements Catalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.dropPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void dropBinaryPartitions(Identifier identifier, List<BinaryRow> partitions)
+            throws TableNotExistException {
+        wrapped.dropBinaryPartitions(identifier, partitions);
     }
 
     @Override
