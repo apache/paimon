@@ -19,6 +19,7 @@ import re
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.common.floating_point import floating_array_sort_key
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -141,9 +142,17 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
     if (not bounds or column.null_count == len(column) or pa.types.is_nested(column.type)
             or pa.types.is_large_binary(column.type)):
         return stats
-    if pa.types.is_floating(column.type) and pc.any(pc.is_nan(column)).as_py():
-        # Arrow min_max and the Parquet footer can both ignore NaN.
-        stats['bounds_unavailable'] = True
+    if pa.types.is_floating(column.type):
+        # Footer and Arrow numeric bounds can omit NaN or lose the sign of zero.
+        if parquet_bounds is not None and not pc.any(pc.is_nan(column)).as_py():
+            bounds_from_footer = parquet_bounds.bounds(name, column.type)
+            if bounds_from_footer is not None:
+                stats['min_values'], stats['max_values'] = bounds_from_footer
+                return stats
+        keys = floating_array_sort_key(column)
+        extrema = pc.min_max(keys).as_py()
+        stats['min_values'] = column[pc.index(keys, extrema['min']).as_py()].as_py()
+        stats['max_values'] = column[pc.index(keys, extrema['max']).as_py()].as_py()
         return stats
     if parquet_bounds is not None:
         file_bounds = parquet_bounds.bounds(name, column.type)

@@ -20,6 +20,7 @@
 import math
 import struct
 
+from pypaimon.common.floating_point import floating_sort_key
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.execution.python.globalindex.key_serializer import (
     KeySerializer, create_serializer, _read_var_len_int, _write_var_len_int,
@@ -142,12 +143,5 @@ def compare_nullable(left, right, comparator):
 
 
 def _java_float_compare(left, right):
-    left, right = float(left), float(right)
-    if math.isnan(left):
-        return 0 if math.isnan(right) else 1
-    if math.isnan(right):
-        return -1
-    if left == right == 0:
-        return (math.copysign(1, left) > math.copysign(1, right)) - (
-            math.copysign(1, left) < math.copysign(1, right))
+    left, right = floating_sort_key(left), floating_sort_key(right)
     return (left > right) - (left < right)

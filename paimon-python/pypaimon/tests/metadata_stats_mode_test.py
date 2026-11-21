@@ -128,6 +128,78 @@ def test_primary_key_and_changelog_stats_modes(tmp_path):
     assert changes.value_stats.null_counts == [0, 1]
 
 
+@pytest.mark.parametrize('typ', [pa.float32(), pa.float64()])
+@pytest.mark.parametrize(('values', 'low', 'high'), [
+    ([0.0], 0.0, 0.0), ([-0.0], -0.0, -0.0),
+    ([+0.0, -0.0], -0.0, 0.0), ([-0.0, 0.0], -0.0, +0.0),
+    ([5.0, float('nan')], 5.0, float('nan')),
+    ([float('nan'), 5.0], 5.0, float('nan')),
+])
+def test_floating_file_and_key_bounds(tmp_path, typ, values, low, high):
+    data = pa.table({'f': pa.array(values, type=typ), 'id': list(range(len(values)))})
+    table = _write(tmp_path, data, {'bucket': '1', 'metadata.stats-mode': 'full'},
+                   primary_keys=['f', 'id'])
+    file, = _files(table)
+    for stats in (file.key_stats, file.value_stats):
+        minimum, maximum = _bounds(stats)
+        assert float(minimum[0]).hex() == low.hex()
+        assert float(maximum[0]).hex() == high.hex()
+        assert stats.null_counts[0] == 0
+    # The leading float of each sorted composite key must agree with its scalar bounds.
+    for row, expected, pick in ((file.min_key, low, min), (file.max_key, high, max)):
+        assert row.values[1] == pick(i for i, v in enumerate(values) if v.hex() == expected.hex())
+        assert row.values[0].hex() == expected.hex()
+
+
+def test_floating_key_identity_used_for_file_bounds(tmp_path):
+    table = _write(tmp_path, pa.table({'k': [0., -0., +0., float('nan'), -float('nan')],
+                                      'v': [1, 2, 3, 4, 5]}),
+                   {'bucket': '1', 'metadata.stats-mode': 'full'}, primary_keys=['k'])
+    file, = _files(table)
+    assert file.row_count == 3
+    assert file.min_key.values[0].hex() == (-0.).hex()
+    assert math.isnan(file.max_key.values[0])
+
+
+@pytest.mark.parametrize('values, low, high', [
+    ([0., +0.], +0., +0.), ([-0., 0.], -0., +0.), ([0., -0.], -0., +0.),
+    ([None, 5., float('nan')], 5., float('nan')),
+    ([float('nan'), None, 5.], 5., float('nan')),
+    ([None, None], None, None),
+])
+def test_floating_partition_bounds_in_manifest_list(tmp_path, values, low, high):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', False)
+    schema = pa.schema([('id', pa.int32()), ('p', pa.float64()), ('day', pa.string())])
+    options = {'bucket': '-1', 'write.native.enabled': 'false', 'commit.native.enabled': 'false'}
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['p', 'day'], options=options), False)
+    table = catalog.get_table('db.t')
+    builder = table.new_batch_write_builder()
+    messages = []
+    for idx, value in enumerate(values):
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(pa.table({'id': [idx], 'p': [value], 'day': [str(idx)]}, schema=schema))
+            messages.extend(writer.prepare_commit())
+        finally:
+            writer.close()
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    manifest, = ManifestListManager(table).read_delta(table.snapshot_manager().get_latest_snapshot())
+    minimum, maximum = _bounds(manifest.partition_stats)
+    for actual, expected in ((minimum[0], low), (maximum[0], high)):
+        if expected is None:
+            assert actual is None
+        else:
+            assert actual.hex() == expected.hex()
+    assert (minimum[1], maximum[1]) == ('0', str(len(values) - 1))
+    assert manifest.partition_stats.null_counts == [values.count(None), 0]
+
+
 def test_partial_row_update_publishes_stats_for_its_written_columns(tmp_path, monkeypatch):
     monkeypatch.setattr(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 1)
     table = _write(tmp_path, pa.table({
@@ -153,8 +225,9 @@ def test_partial_row_update_publishes_stats_for_its_written_columns(tmp_path, mo
     assert file.write_cols == ['name', 'zero', 'mixed']
     assert file.value_stats_cols is None
     minimum, maximum = _bounds(file.value_stats)
-    assert minimum == [None, 0., None]
-    assert maximum == [None, 0., None]
+    assert minimum == [None, 0., 1.]
+    assert maximum[:2] == [None, 0.]
+    assert math.isnan(maximum[2])
     assert math.copysign(1., minimum[1]) == -1.
     assert math.copysign(1., maximum[1]) == 1.
     assert file.value_stats.null_counts == [1, 0, 0]
@@ -196,8 +269,9 @@ def test_parquet_footer_falls_back_to_arrow_for_incomplete_or_ambiguous_bounds(t
     }), {'metadata.stats-mode': 'full'})
     file, = _files(table)
     minimum, maximum = _bounds(file.value_stats)
-    assert minimum == ['alpha', None, 0.0, 5, None]
-    assert maximum == [long_value, None, 0.0, 9, None]
+    assert minimum == ['alpha', 1., 0.0, 5, None]
+    assert maximum[0] == long_value and math.isnan(maximum[1])
+    assert maximum[2:] == [0.0, 9, None]
     assert math.copysign(1.0, minimum[2]) == 1.0
     assert file.value_stats.null_counts == [0, 0, 1, 0, 0]
 

@@ -17,12 +17,12 @@
 
 from typing import List, Union
 
-import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.execution.python.read.reader.deduplicate_merge_function import (DeduplicateMergeFunction)
+from pypaimon.common.floating_point import floating_array_sort_key, floating_sort_key
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.table.special_fields import SpecialFields
@@ -272,7 +272,8 @@ class KeyValueDataWriter(DataWriter):
 
     @staticmethod
     def _key_tuple(row: dict, col_names: List[str], key_arity: int) -> tuple:
-        return tuple(row[col_names[i]] for i in range(key_arity))
+        return tuple(floating_sort_key(value) if isinstance(value, float) else value
+                     for value in (row[col_names[i]] for i in range(key_arity)))
 
     @staticmethod
     def _row_to_tuple(row: dict, col_names: List[str]) -> tuple:
@@ -333,6 +334,8 @@ class KeyValueDataWriter(DataWriter):
         # Table, so this serves both the per-batch entry path (legacy)
         # and the buffer-wide sort path (used by ``_flush_all``).
         sort_columns = [data.column(key) for key in self.trimmed_primary_keys]
+        sort_columns = [floating_array_sort_key(col) if pa.types.is_floating(col.type) else col
+                        for col in sort_columns]
         sort_orders = ['ascending'] * len(sort_columns)
         sequence_fields = self.options.sequence_field()
         if sequence_fields:
@@ -341,7 +344,7 @@ class KeyValueDataWriter(DataWriter):
             for field in sequence_fields:
                 column = data.column(field)
                 if pa.types.is_floating(column.type):
-                    column = self._floating_sequence_sort_key(column)
+                    column = floating_array_sort_key(column)
                 sort_columns.append(column)
                 sort_orders.append(sequence_order)
         if '_SEQUENCE_NUMBER' in data.schema.names:
@@ -357,17 +360,3 @@ class KeyValueDataWriter(DataWriter):
             pa.table(sort_columns, names=names),
             sort_keys=list(zip(names, sort_orders)), null_placement='at_start')
         return data.take(sorted_indices)
-
-    @staticmethod
-    def _floating_sequence_sort_key(column):
-        """Unsigned keys in Java Float/Double.compare order, preserving nulls."""
-        # The NumPy protocol supports Array and older ChunkedArray APIs alike.
-        values = np.asarray(column)
-        bits = values.view(np.dtype('uint{}'.format(column.type.bit_width)))
-        sign_bit = np.array(1 << (column.type.bit_width - 1), dtype=bits.dtype)
-        # Invert negative IEEE bits, flip the sign bit for nonnegative values.
-        # This orders -0.0 before +0.0, unlike Arrow's floating-point sort.
-        keys = np.where(bits & sign_bit, ~bits, bits ^ sign_bit)
-        # All NaN signs/payloads compare equal, above positive infinity.
-        keys[np.isnan(values)] = np.iinfo(bits.dtype).max
-        return pa.array(keys, mask=np.asarray(column.is_null()))

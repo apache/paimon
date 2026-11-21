@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Avro writer for manifest entries.
@@ -64,6 +65,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
+    private static final RowType PARTITION_PROJECTION =
+            ManifestEntry.MANIFEST_ROW_TYPE.project(ManifestEntry.PARTITION);
+
     private final RowType partitionType;
     private final AvroFileFormat avroFileFormat;
     private final ObjectSerializer<ManifestEntry> serializer;
@@ -174,11 +178,19 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
         try {
             FileWriter fileWriter = currentWriter();
+            boolean reusePartitionStats = canReusePartitionStats(metadata);
             long copiedRecords = 0;
             while (reader.hasNext()) {
                 ManifestAvroReader.RawBlock block = reader.next();
                 fileWriter.ensureOpen();
                 fileWriter.writer.addEncodedBlock(block.encodedBlock());
+                if (!reusePartitionStats) {
+                    ManifestAvroReader.RowIterator rows = block.toRows(PARTITION_PROJECTION);
+                    while (rows.hasNext()) {
+                        fileWriter.partitionStatsCollector.collect(
+                                deserializeBinaryRow(rows.next().getBinary(0)));
+                    }
+                }
                 copiedRecords = Math.addExact(copiedRecords, block.recordCount());
             }
             long metadataRecords =
@@ -190,11 +202,45 @@ public final class ManifestAvroWriter implements AutoCloseable {
                                 metadataRecords, copiedRecords));
             }
             fileWriter.collectStats(metadata);
+            if (reusePartitionStats) {
+                fileWriter.collectCopiedPartitionStats(metadata.partitionStats());
+            }
             afterWrite(copiedRecords, true);
         } catch (IOException | RuntimeException | Error failure) {
             abort(failure);
             throw failure;
         }
+    }
+
+    private boolean canReusePartitionStats(ManifestFileMeta manifest) {
+        SimpleStats stats = manifest.partitionStats();
+        int fields = partitionType.getFieldCount();
+        if (stats.minValues().getFieldCount() != fields
+                || stats.maxValues().getFieldCount() != fields
+                || stats.nullCounts().size() != fields) {
+            return false;
+        }
+        long entries = Math.addExact(manifest.numAddedFiles(), manifest.numDeletedFiles());
+        for (int i = 0; i < fields; i++) {
+            switch (partitionType.getTypeAt(i).getTypeRoot()) {
+                case FLOAT:
+                case DOUBLE:
+                    // Older writers can report finite bounds for partitions containing NaN.
+                    return false;
+                default:
+            }
+            if (stats.nullCounts().isNullAt(i)) {
+                return false;
+            }
+            long nulls = stats.nullCounts().getLong(i);
+            if (nulls < 0
+                    || nulls > entries
+                    || stats.minValues().isNullAt(i) != (nulls == entries)
+                    || stats.maxValues().isNullAt(i) != (nulls == entries)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private FileWriter currentWriter() {
@@ -574,8 +620,6 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     rowIdStats.collectRange(manifest.minRowId(), manifest.maxRowId());
                 }
             }
-
-            collectCopiedPartitionStats(manifest.partitionStats());
         }
 
         private void collectTotalBuckets(@Nullable Integer candidate) {

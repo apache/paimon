@@ -65,6 +65,25 @@ public class ParquetInMemoryStatsTest {
     private final FileIO fileIO = new LocalFileIO();
 
     @Test
+    public void testImportedPyArrowFloatStats() throws Exception {
+        // PyArrow wrote [5, NaN, null] with footer bounds [5, 5].
+        java.nio.file.Path local = tempDir.resolve("external.parquet");
+        try (java.io.InputStream in =
+                getClass().getResourceAsStream("/interop/pyarrow-floating.parquet")) {
+            java.nio.file.Files.copy(in, local);
+        }
+        RowType type = RowType.builder().field("f", new DoubleType()).build();
+        Path path = new Path(local.toUri());
+        SimpleColStats[] stats =
+                FileFormat.fromIdentifier("parquet", new Options())
+                        .createStatsExtractor(
+                                type, SimpleColStatsCollector.createFullStatsFactories(1))
+                        .get()
+                        .extract(fileIO, path, fileIO.getFileSize(path));
+        assertThat(stats).containsExactly(new SimpleColStats(null, null, 1L));
+    }
+
+    @Test
     public void testInMemoryStatsMatchFileStats() throws Exception {
         RowType rowType =
                 RowType.builder()
@@ -137,8 +156,16 @@ public class ParquetInMemoryStatsTest {
         // Extract stats from in-memory metadata (new path)
         SimpleColStats[] fromMemory = extractor.extract(fileIO, path, fileSize, writerMetadata);
 
-        // They should be exactly the same
-        assertThat(fromMemory).isEqualTo(fromFile);
+        for (int i = 0; i < fromFile.length; i++) {
+            if (i == 6 || i == 7) {
+                assertThat(fromFile[i])
+                        .isEqualTo(new SimpleColStats(null, null, fromMemory[i].nullCount()));
+                assertThat(fromMemory[i].min()).isNotNull();
+                assertThat(fromMemory[i].max()).isNotNull();
+            } else {
+                assertThat(fromFile[i]).isEqualTo(fromMemory[i]);
+            }
+        }
 
         // Also verify the stats are correct
         assertThat(fromFile[0].min()).isEqualTo(BinaryString.fromString("value_0"));

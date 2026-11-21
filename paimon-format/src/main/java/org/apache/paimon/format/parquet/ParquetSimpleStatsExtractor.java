@@ -42,6 +42,9 @@ import org.apache.parquet.column.statistics.FloatStatistics;
 import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
@@ -51,6 +54,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -104,21 +108,49 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     @Override
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) throws IOException {
-        Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
-                ParquetUtil.extractColumnStats(fileIO, path, length, options);
-        SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
-        return Pair.of(
-                IntStream.range(0, rowType.getFieldCount())
-                        .mapToObj(
-                                i -> {
-                                    DataField field = rowType.getFields().get(i);
-                                    return toFieldStats(
-                                            field,
-                                            statsPair.getLeft().get(field.name()),
-                                            collectors[i]);
-                                })
-                        .toArray(SimpleColStats[]::new),
-                statsPair.getRight());
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(fileIO, path, length, options)) {
+            ParquetMetadata footer = reader.getFooter();
+            // Files produced by other writers may omit NaN from their bounds. Sum known null
+            // counts before extractColumnStats merges the row group statistics in place.
+            Map<String, Long> floatNulls = new HashMap<>();
+            for (BlockMetaData group : footer.getBlocks()) {
+                for (ColumnChunkMetaData column : group.getColumns()) {
+                    PrimitiveType.PrimitiveTypeName type = column.getType();
+                    if (column.getPath().size() == 1
+                            && (type == PrimitiveType.PrimitiveTypeName.FLOAT
+                                    || type == PrimitiveType.PrimitiveTypeName.DOUBLE)) {
+                        String name = column.getPath().toDotString();
+                        Long count = floatNulls.getOrDefault(name, 0L);
+                        Statistics<?> stats = column.getStatistics();
+                        floatNulls.put(
+                                name,
+                                count != null && stats != null && stats.isNumNullsSet()
+                                        ? Math.addExact(count, stats.getNumNulls())
+                                        : null);
+                    }
+                }
+            }
+            Map<String, Statistics<?>> columnStats = ParquetUtil.extractColumnStats(footer);
+            SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
+            SimpleColStats[] result = new SimpleColStats[rowType.getFieldCount()];
+            for (int i = 0; i < result.length; i++) {
+                DataField field = rowType.getFields().get(i);
+                switch (field.type().getTypeRoot()) {
+                    case FLOAT:
+                    case DOUBLE:
+                        result[i] =
+                                collectors[i].convert(
+                                        new SimpleColStats(
+                                                null, null, floatNulls.get(field.name())));
+                        break;
+                    default:
+                        result[i] =
+                                toFieldStats(field, columnStats.get(field.name()), collectors[i]);
+                }
+            }
+            return Pair.of(result, new FileInfo(reader.getRecordCount()));
+        }
     }
 
     private SimpleColStats toFieldStats(

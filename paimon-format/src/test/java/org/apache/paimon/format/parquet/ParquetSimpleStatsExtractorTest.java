@@ -81,6 +81,9 @@ public class ParquetSimpleStatsExtractorTest extends SimpleColStatsExtractorTest
     @Override
     protected SimpleColStats regenerate(SimpleColStats stats, DataType type) {
         switch (type.getTypeRoot()) {
+            case FLOAT:
+            case DOUBLE:
+                return new SimpleColStats(null, null, stats.nullCount());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 if (timestampType.getPrecision() > 6) {

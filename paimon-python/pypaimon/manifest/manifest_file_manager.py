@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - supported fastavro versions provide th
 
 from datetime import datetime, timezone
 
+from pypaimon.common.floating_point import floating_sort_key
 from pypaimon.filesystem.caching_file_io import (
     CachingInputStream, _open_input_stream_with_known_size)
 from pypaimon.manifest.manifest_sidecar import (
@@ -488,12 +489,12 @@ class ManifestFileManager:
 
         partition_columns = list(zip(*(entry.partition.values for entry in entries))) if entries else []
         partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
-        partition_min_stats = [
-            min((v for v in col if v is not None), default=None) for col in partition_columns
-        ]
-        partition_max_stats = [
-            max((v for v in col if v is not None), default=None) for col in partition_columns
-        ]
+        partition_min_stats, partition_max_stats = [], []
+        for field, col in zip(self.table.partition_keys_fields, partition_columns):
+            key = (floating_sort_key if getattr(field.type, 'type', '').upper() in
+                   ('FLOAT', 'REAL', 'DOUBLE', 'DOUBLE PRECISION') else None)
+            partition_min_stats.append(min((v for v in col if v is not None), key=key, default=None))
+            partition_max_stats.append(max((v for v in col if v is not None), key=key, default=None))
 
         min_row_id = None
         max_row_id = None
