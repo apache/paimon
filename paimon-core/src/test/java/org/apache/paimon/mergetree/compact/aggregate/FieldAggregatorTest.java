@@ -965,6 +965,27 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductDecimalRetractNonTerminating() {
+        int precision = 10;
+        int scale = 2;
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new DecimalType(precision, scale));
+        Decimal ten = Decimal.fromBigDecimal(new BigDecimal("10.00"), precision, scale);
+        Decimal three = Decimal.fromBigDecimal(new BigDecimal("3.00"), precision, scale);
+        Decimal expected = Decimal.fromBigDecimal(new BigDecimal("3.33"), precision, scale);
+        assertThat(fieldProductAgg.retract(ten, three)).isEqualTo(expected);
+    }
+
+    @Test
+    public void testFieldProductDecimalRetractRounding() {
+        FieldProductAgg fieldProductAgg = new FieldProductAggFactory().create(new DecimalType());
+        Decimal ten = Decimal.fromBigDecimal(new BigDecimal("10"), 10, 0);
+        Decimal four = Decimal.fromBigDecimal(new BigDecimal("4"), 10, 0);
+        Decimal expected = Decimal.fromBigDecimal(new BigDecimal("3"), 10, 0);
+        assertThat(fieldProductAgg.retract(ten, four)).isEqualTo(expected);
+    }
+
+    @Test
     public void testFieldSumDecimalAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType());
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
