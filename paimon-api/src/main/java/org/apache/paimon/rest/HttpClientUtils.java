@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.data.BlobIngestObservations;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
@@ -232,7 +233,7 @@ public class HttpClientUtils {
 
     private static int headStatusCode(String uri) throws IOException {
         HttpHead httpHead = newHttpHead(uri);
-        try (CloseableHttpResponse response = execute(httpHead, uri)) {
+        try (CloseableHttpResponse response = execute(httpHead, uri, RequestKind.HEAD_PROBE)) {
             return response.getCode();
         }
     }
@@ -240,7 +241,7 @@ public class HttpClientUtils {
     private static int getRangeStatusCode(String uri) throws IOException {
         HttpGet httpGet = newHttpGet(uri);
         httpGet.addHeader("Range", "bytes=0-0");
-        try (CloseableHttpResponse response = execute(httpGet, uri)) {
+        try (CloseableHttpResponse response = execute(httpGet, uri, RequestKind.RANGE_PROBE)) {
             return response.getCode();
         }
     }
@@ -250,14 +251,51 @@ public class HttpClientUtils {
      * neither the original message nor cause. Redirect and protocol errors (e.g. "Circular redirect
      * to &lt;Location&gt;") echo the target URL, which for a signed URL is a credential; only the
      * sanitized request URI is reported.
+     *
+     * <p>Each execution is one Paimon-visible attempt. The HTTP client may handle redirects or
+     * retries internally before returning a response.
      */
-    private static CloseableHttpResponse execute(ClassicHttpRequest request, String uri)
-            throws IOException {
+    private static CloseableHttpResponse execute(
+            ClassicHttpRequest request, String uri, RequestKind kind) throws IOException {
+        boolean observe = BlobIngestObservations.inBlob();
+        if (observe) {
+            BlobIngestObservations.record("http_attempt", kind.label, 1);
+            if (kind.retry) {
+                BlobIngestObservations.record("http_retry", kind.label, 1);
+            }
+        }
+
+        CloseableHttpResponse response;
         try {
-            return DEFAULT_HTTP_CLIENT.execute(request);
+            response = DEFAULT_HTTP_CLIENT.execute(request);
         } catch (IOException | RuntimeException e) {
+            if (observe) {
+                BlobIngestObservations.record("http_response", kind.label + "_no_response", 1);
+            }
             throw new IOException(
                     "HTTP request failed for uri: " + SensitiveConfigUtils.sanitizeUri(uri));
+        }
+        if (observe) {
+            BlobIngestObservations.record(
+                    "http_response", kind.label + "_" + response.getCode(), 1);
+        }
+        return response;
+    }
+
+    private enum RequestKind {
+        INITIAL_GET("initial_get", false),
+        HEAD_PROBE("head_probe", false),
+        RANGE_PROBE("range_probe", false),
+        RANGE_RESUME("range_resume", true),
+        FULL_REPLAY("full_replay", true),
+        DECODED_RETRY("decoded_retry", true);
+
+        private final String label;
+        private final boolean retry;
+
+        RequestKind(String label, boolean retry) {
+            this.label = label;
+            this.retry = retry;
         }
     }
 
@@ -320,7 +358,7 @@ public class HttpClientUtils {
 
         private ResumableHttpInputStream(String uri) throws IOException {
             this.uri = uri;
-            openInitialResponse();
+            openFullResponse(RequestKind.INITIAL_GET);
         }
 
         @Override
@@ -405,9 +443,9 @@ public class HttpClientUtils {
             }
         }
 
-        private void openInitialResponse() throws IOException {
+        private void openFullResponse(RequestKind kind) throws IOException {
             HttpGet request = newBodyGet(uri);
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, kind);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() == HttpStatus.SC_NOT_ACCEPTABLE) {
@@ -478,7 +516,7 @@ public class HttpClientUtils {
             discardCurrentResponse();
 
             if (position == 0) {
-                openInitialResponse();
+                openFullResponse(RequestKind.FULL_REPLAY);
                 return;
             }
             if (!identityEncoded) {
@@ -493,7 +531,7 @@ public class HttpClientUtils {
             request.addHeader(HttpHeaders.RANGE, "bytes=" + position + "-");
             request.addHeader(HttpHeaders.IF_RANGE, strongEtag);
 
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, RequestKind.RANGE_RESUME);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() != HttpStatus.SC_PARTIAL_CONTENT) {
@@ -549,7 +587,7 @@ public class HttpClientUtils {
             byte[] expectedPrefixDigest = digestSnapshot(deliveredDigest);
             while (true) {
                 HttpGet request = newBodyGet(uri);
-                CloseableHttpResponse newResponse = execute(request, uri);
+                CloseableHttpResponse newResponse = execute(request, uri, RequestKind.FULL_REPLAY);
                 boolean accepted = false;
                 try {
                     if (newResponse.getCode() != HttpStatus.SC_OK) {
@@ -629,7 +667,7 @@ public class HttpClientUtils {
          */
         private void openContentDecodedResponse() throws IOException {
             HttpGet request = newHttpGet(uri);
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, RequestKind.DECODED_RETRY);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() != HttpStatus.SC_OK) {

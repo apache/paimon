@@ -97,28 +97,31 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
                 return writeNullElement();
             }
 
-            BlobFetchResult fetchResult = getBlob(() -> row.getBlob(0));
-            if (fetchResult.fetchFailure()) {
-                return writeNullElement();
-            }
-            Blob blob = fetchResult.blob();
-            if (blob == BlobPlaceholder.INSTANCE) {
-                return writePlaceholderElement();
-            }
+            try (BlobObservation ignored = observeBlob()) {
+                BlobFetchResult fetchResult = getBlob(() -> row.getBlob(0));
+                if (fetchResult.fetchFailure()) {
+                    return writeNullElement();
+                }
+                Blob blob = fetchResult.blob();
+                if (blob == BlobPlaceholder.INSTANCE) {
+                    return writePlaceholderElement();
+                }
 
-            BlobCopySource source = prepareBlobSource(blob);
-            if (source == null) {
-                return writeNullElement();
-            }
+                BlobCopySource source = prepareBlobSource(blob);
+                if (source == null) {
+                    return writeNullElement();
+                }
 
-            long recordPosition = startRecord();
-            BlobDescriptor descriptor = writeBlobData(source);
-            long recordLength = finishRecord(recordPosition);
-            if (accept(descriptor)) {
-                flush();
+                long recordPosition = startRecord();
+                BlobDescriptor descriptor = writeBlobData(source);
+                long recordLength = finishRecord(recordPosition);
+                if (accept(descriptor)) {
+                    flush();
+                }
+                recordSuccess(descriptor.length());
+                completeBlob();
+                return recordLength;
             }
-            recordSuccess(descriptor.length());
-            return recordLength;
         }
     }
 

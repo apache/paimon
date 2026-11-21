@@ -96,6 +96,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
             <td>paimon.table.&lt;table_name&gt;.blobFetch</td>
         </tr>
         <tr>
+            <td>Native Blob Ingest Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.blobIngest</td>
+        </tr>
+        <tr>
             <td>Compaction Metrics</td>
             <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
             <td>paimon.table.&lt;table_name&gt;.partition.&lt;partition_string&gt;.bucket.&lt;bucket_index&gt;.compaction</td>
@@ -419,6 +424,78 @@ Lookup metrics are available for local partial lookup. They are reported at look
         </tr>
     </tbody>
 </table>
+
+### Native Blob Ingest and Snapshot Publication
+
+Set the table option `blob-ingest-observation.enabled` to `true` to opt into the
+`blobIngest` group. It defaults to false, requires `data-evolution.enabled=true`,
+and requires a `MetricRegistry` on the native writer and committer. Missing or
+invalid observation option values leave observation disabled. Recreate both
+writer and committer when changing the option. Disabling the option does not
+change the existing `blobFetch` counters.
+
+The table factory configures `TableWriteImpl` and `TableCommitImpl`. The Flink
+sink's `StoreSinkWriteImpl` and `StoreCommitter` already supply `FlinkMetricRegistry`;
+no additional monitoring service is needed. The registry adds the `paimon`,
+`table=<table name>`, `blobIngest` groups. Reporter-specific prefixes and naming
+must be verified in the deployed operator. No source/target IDC or network QoS
+labels are supplied here.
+
+All metrics below are nonnegative cumulative counters, named `stage_outcome`.
+Reset handling must precede aggregation when the exporter preserves producer identity
+and lifecycle. The registry bridge reuses the existing engine adapters and does not
+add writer identity. The Flink bridge has a native registry test, but this does not
+establish deployed reporter coverage or consistent names across all engines. In
+particular, same-JVM, same-table Spark writers can share or replace a registry key;
+these counters do not establish a concurrent-writer total or per-writer reset-aware
+rates for that backend. Check the actual registry and exporter lifecycle before
+aggregating multiple writers.
+
+| Stage | Outcomes | Unit and boundary |
+| --- | --- | --- |
+| `blob_source` | `http`, `inline`, `file`, `custom`, `unknown` | Number of logical reads, classified by actual reader API. |
+| `blob_read` | `started`, `completed`, `failed`, `downgraded_null` | One started logical read has one terminal outcome in the synchronous native path. |
+| `blob_read_elapsed_nanos` | `completed`, `failed`, `downgraded_null` | Cumulative elapsed ns; divide by the matching terminal counter for a mean. |
+| `blob_skipped` | `null`, `premarked_missing`, `placeholder` | Skipped payloads; no HTTP request is invented. |
+| `blob_failure` | `source_get`, `source_prepare`, `source_open`, `source_read`, `source_close`, `destination_write`, `record_finish`, `flush` | Failure boundary, independent from the received HTTP response. |
+| `http_attempt` | `initial_get`, `range_resume`, `full_replay`, `decoded_retry`, `head_probe`, `range_probe` | Actual calls entering the Paimon HTTP client, not hidden client-internal retries. |
+| `http_response` | request kind followed by HTTP status or `no_response` | Actual response at the same client boundary; a 200 body may subsequently fail. |
+| `http_retry` | `range_resume`, `full_replay`, `decoded_retry` | Actual subsequent Paimon-visible recovery calls. |
+| `payload_read`, `payload_written` | `observed`, `completed`, `incomplete` | Bytes returned by source reads / successful destination writes; completed and incomplete partition observed bytes. |
+| `payload_write_unconfirmed` | `requested` | Requested bytes of a throwing write; actual destination change remains unknown. |
+| `file_close`, `file_close_elapsed_nanos` | `succeeded`, `failed` | Actual Blob file close count and elapsed ns, distinct from publishing a snapshot. |
+| `file_prepared`, `file_prepared_elapsed_nanos` | `succeeded` | Blob files returned in prepareCommit messages and cumulative prepare elapsed ns. |
+| `commit_publish` | `attempt`, `committed`, `rejected`, `unknown`, `reconciled` | Calls to the bound atomic SnapshotCommit API, response outcomes, and later identity-matched publication evidence. |
+| `commit`, `commit_elapsed_nanos` | `committed`, `no_op`, `unknown`, `failed` | Native logical commit outcomes and cumulative ns; filtered replay is no_op without a new publication. |
+
+`blob_read_elapsed_nanos` measures the logical operation for one non-null Blob,
+not just its payload-copy loop. It includes source lookup/preparation/open/read,
+the destination payload writes and the per-Blob descriptor callback. For a raw
+BLOB it also includes that record's footer and any callback-requested flush. For
+ARRAY/MAP elements the scope ends before the containing record's index/footer
+and final flush; failures there do not retroactively change completed element
+observations. A completed Blob therefore does not prove that the containing
+record/file has closed, that prepare has succeeded, or that a snapshot committed.
+Use the separate file, prepare, logical-commit and publication outcomes for those
+boundaries; do not treat `completed` as `commit_publish_committed`.
+
+Observation preserves `SnapshotCommit`'s existing bound lock and atomic commit
+semantics. A publication exception records unknown even if a snapshot may have
+been published; a later
+retry only records reconciliation after matching commit user, identifier and kind.
+A replay filtered before publication is not a second publication. Independent
+snapshot-pinned readback belongs to acceptance tooling and is not a live metric.
+
+Payload counters measure application reads/writes, including buffering, and exclude
+file framing, protocol overhead and physical NIC bytes. The `completed`/`incomplete`
+subsets follow the logical Blob outcome: a full source body can still be classified
+as incomplete when a later destination write or callback fails. Observed and its
+subsets must not be added together. Reads and writes are different hops, not unique
+payload.
+The current scope is the native Data Evolution append path; external SDK retries,
+other writer implementations and network topology need their own evidence.
+Observation adds no business HEAD/GET or commit. Reporter runtime failures are
+best effort and do not replace the original data-processing outcome.
 
 ### Compaction Metrics
 

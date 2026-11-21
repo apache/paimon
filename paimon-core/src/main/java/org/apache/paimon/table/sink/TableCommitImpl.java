@@ -22,12 +22,15 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobIngestObservations;
+import org.apache.paimon.data.BlobIngestObservations.Scope;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.metrics.BlobIngestMetrics;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
@@ -93,6 +96,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Nullable private Map<String, String> overwritePartitionSpec = null;
     @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
+    @Nullable private BlobIngestMetrics blobIngestMetrics;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -205,9 +209,17 @@ public class TableCommitImpl implements InnerTableCommit {
         return this;
     }
 
+    public TableCommitImpl withBlobIngestObservation(String tableName) {
+        blobIngestMetrics = new BlobIngestMetrics(tableName);
+        return this;
+    }
+
     @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
+        if (blobIngestMetrics != null) {
+            blobIngestMetrics.withMetricRegistry(registry);
+        }
         return this;
     }
 
@@ -289,8 +301,10 @@ public class TableCommitImpl implements InnerTableCommit {
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
-            for (ManifestCommittable committable : committables) {
-                newSnapshots += commit.commit(committable, checkAppendFiles);
+            try (Scope ignored = observeBlobIngest()) {
+                for (ManifestCommittable committable : committables) {
+                    newSnapshots += commit.commit(committable, checkAppendFiles);
+                }
             }
             if (!committables.isEmpty()) {
                 maintain(
@@ -312,11 +326,14 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            int newSnapshots =
-                    overwriteStaticPartitions == null
-                            ? commit.overwritePartition(overwritePartitionSpec, committable)
-                            : commit.overwriteStaticPartitions(
-                                    overwriteStaticPartitions, committable);
+            int newSnapshots;
+            try (Scope ignored = observeBlobIngest()) {
+                newSnapshots =
+                        overwriteStaticPartitions == null
+                                ? commit.overwritePartition(overwritePartitionSpec, committable)
+                                : commit.overwriteStaticPartitions(
+                                        overwriteStaticPartitions, committable);
+            }
             maintain(
                     committable.identifier(),
                     maintainExecutor,
@@ -335,13 +352,22 @@ public class TableCommitImpl implements InnerTableCommit {
                         // identifier must be in increasing order
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
-        List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
+        List<ManifestCommittable> retryCommittables;
+        try (Scope ignored = observeBlobIngest()) {
+            retryCommittables = commit.filterCommitted(sortedCommittables);
+        }
 
         if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
             commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
+    }
+
+    private Scope observeBlobIngest() {
+        return blobIngestMetrics == null
+                ? BlobIngestObservations.observe(null)
+                : blobIngestMetrics.open();
     }
 
     private void checkFilesExistence(List<ManifestCommittable> committables) {
@@ -467,8 +493,14 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void close() throws Exception {
-        commit.close();
-        maintainExecutor.shutdownNow();
+        try {
+            commit.close();
+            maintainExecutor.shutdownNow();
+        } finally {
+            if (blobIngestMetrics != null) {
+                blobIngestMetrics.close();
+            }
+        }
     }
 
     @Override

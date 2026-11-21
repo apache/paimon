@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobIngestObservations;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -117,6 +118,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.Semaphore;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -355,6 +357,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     result.add(committable);
                 } else {
                     commitCallbacks.forEach(callback -> callback.retry(committable));
+                    BlobIngestObservations.record("commit", "no_op", 1);
                 }
             }
             return result;
@@ -366,6 +369,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public int commit(ManifestCommittable committable, boolean checkAppendFiles) {
+        if (!BlobIngestObservations.enabled()) {
+            return commitInternal(committable, checkAppendFiles);
+        }
+        return observeCommit(() -> commitInternal(committable, checkAppendFiles));
+    }
+
+    private int commitInternal(ManifestCommittable committable, boolean checkAppendFiles) {
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
@@ -479,6 +489,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return generatedSnapshot;
     }
 
+    private int observeCommit(IntSupplier operation) {
+        long started = System.nanoTime();
+        long possiblePublications = possiblePublications();
+        String outcome = "failed";
+        try {
+            int snapshots = operation.getAsInt();
+            outcome = snapshots == 0 ? "no_op" : "committed";
+            return snapshots;
+        } catch (RuntimeException | Error e) {
+            // A failed logical commit may still have published all or part of its files.
+            if (possiblePublications() > possiblePublications) {
+                outcome = "unknown";
+            }
+            throw e;
+        } finally {
+            BlobIngestObservations.record("commit", outcome, 1);
+            BlobIngestObservations.record(
+                    "commit_elapsed_nanos", outcome, System.nanoTime() - started);
+        }
+    }
+
+    private long possiblePublications() {
+        return BlobIngestObservations.total("commit_publish", "committed")
+                + BlobIngestObservations.total("commit_publish", "unknown")
+                + BlobIngestObservations.total("commit_publish", "reconciled");
+    }
+
     private void reportCommit(
             List<ManifestEntry> appendTableFiles,
             List<ManifestEntry> appendChangelogFiles,
@@ -550,6 +587,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private int overwritePartition(
+            Supplier<PartitionPredicate> staticPartitionFilter, ManifestCommittable committable) {
+        if (!BlobIngestObservations.enabled()) {
+            return overwritePartitionInternal(staticPartitionFilter, committable);
+        }
+        return observeCommit(() -> overwritePartitionInternal(staticPartitionFilter, committable));
+    }
+
+    private int overwritePartitionInternal(
             Supplier<PartitionPredicate> staticPartitionFilter, ManifestCommittable committable) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
@@ -1360,6 +1405,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
                     lastCommittedSnapshotId = snapshot.id();
+                    BlobIngestObservations.record("commit_publish", "reconciled", 1);
                     return new SuccessCommitResult();
                 }
             }
@@ -2140,11 +2186,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
-            return snapshotCommit.commit(
-                    baseSnapshot == null ? null : baseSnapshot.uuid(),
-                    newSnapshot,
-                    options.branch(),
-                    statistics);
+            BlobIngestObservations.record("commit_publish", "attempt", 1);
+            try {
+                boolean committed =
+                        snapshotCommit.commit(
+                                baseSnapshot == null ? null : baseSnapshot.uuid(),
+                                newSnapshot,
+                                options.branch(),
+                                statistics);
+                BlobIngestObservations.record(
+                        "commit_publish", committed ? "committed" : "rejected", 1);
+                return committed;
+            } catch (Throwable e) {
+                BlobIngestObservations.record("commit_publish", "unknown", 1);
+                throw e;
+            }
         } catch (Throwable e) {
             // exception when performing the atomic rename,
             // we cannot clean up because we can't determine the success

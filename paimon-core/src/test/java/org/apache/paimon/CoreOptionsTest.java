@@ -30,6 +30,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CoreOptionsTest {
 
     @Test
+    void testBlobObservationDefaultsAndInvalidOptions() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.blobIngestObservationEnabled()).isFalse();
+        options.setString("blob-ingest-observation.enabled", "true");
+        assertThat(core.blobIngestObservationEnabled()).isFalse();
+        options.setString("data-evolution.enabled", "true");
+        options.setString("blob-ingest-observation.enabled", "not-a-boolean");
+        assertThat(core.blobIngestObservationEnabled()).isFalse();
+        options.setString("blob-ingest-observation.enabled", "true");
+        assertThat(core.blobIngestObservationEnabled()).isTrue();
+    }
+
+    @Test
     void testCommitLastSafeSnapshotAndStrictMode() {
         Options options = new Options();
         CoreOptions core = new CoreOptions(options);

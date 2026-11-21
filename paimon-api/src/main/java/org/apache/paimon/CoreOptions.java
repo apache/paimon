@@ -3084,6 +3084,14 @@ public class CoreOptions implements Serializable {
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
                                     + "When false, the write fails when the descriptor is read.");
 
+    public static final ConfigOption<Boolean> BLOB_INGEST_OBSERVATION_ENABLED =
+            key("blob-ingest-observation.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Collect native Blob ingest observations when a metric registry is "
+                                    + "provided. Applies to data evolution writes and commits.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -5043,6 +5051,11 @@ public class CoreOptions implements Serializable {
 
     public boolean blobWriteNullOnFetchFailure() {
         return options.get(BLOB_WRITE_NULL_ON_FETCH_FAILURE);
+    }
+
+    public boolean blobIngestObservationEnabled() {
+        return dataEvolutionEnabled()
+                && "true".equalsIgnoreCase(options.get(BLOB_INGEST_OBSERVATION_ENABLED.key()));
     }
 
     public boolean postponeBatchWriteFixedBucket() {

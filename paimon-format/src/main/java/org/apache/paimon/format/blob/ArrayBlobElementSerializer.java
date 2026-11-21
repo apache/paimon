@@ -110,6 +110,7 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
         @Override
         public long write(InternalRow row) throws IOException {
             if (row.isNullAt(0)) {
+                recordSkippedBlob("null");
                 return writeNullElement();
             }
 
@@ -127,26 +128,33 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
             boolean flush = false;
             for (int i = 0; i < array.size(); i++) {
                 if (array.isNullAt(i)) {
+                    recordSkippedBlob("null");
                     elementLengths[i] = NULL_ELEMENT_LENGTH;
                     continue;
                 }
 
                 final int position = i;
-                BlobFetchResult fetchResult = getBlob(() -> array.getBlob(position));
-                Blob blob = fetchResult.blob();
-                if (fetchResult.fetchFailure() || blob == null) {
-                    elementLengths[i] = NULL_ELEMENT_LENGTH;
-                    continue;
+                try (BlobObservation ignored = observeBlob()) {
+                    BlobFetchResult fetchResult = getBlob(() -> array.getBlob(position));
+                    Blob blob = fetchResult.blob();
+                    if (fetchResult.fetchFailure() || blob == null) {
+                        if (!fetchResult.fetchFailure()) {
+                            recordSkippedBlob("null");
+                        }
+                        elementLengths[i] = NULL_ELEMENT_LENGTH;
+                        continue;
+                    }
+                    BlobCopySource source = prepareBlobSource(blob);
+                    if (source == null) {
+                        elementLengths[i] = NULL_ELEMENT_LENGTH;
+                        continue;
+                    }
+                    BlobDescriptor descriptor = writeBlobData(source);
+                    elementLengths[i] = descriptor.length();
+                    flush |= accept(descriptor);
+                    recordSuccess(descriptor.length());
+                    completeBlob();
                 }
-                BlobCopySource source = prepareBlobSource(blob);
-                if (source == null) {
-                    elementLengths[i] = NULL_ELEMENT_LENGTH;
-                    continue;
-                }
-                BlobDescriptor descriptor = writeBlobData(source);
-                elementLengths[i] = descriptor.length();
-                flush |= accept(descriptor);
-                recordSuccess(descriptor.length());
             }
 
             byte[] indexBytes = DeltaVarintCompressor.compress(elementLengths);

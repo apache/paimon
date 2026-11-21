@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BlobIngestObservations;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -111,7 +112,28 @@ public class MultipleBlobFileWriter implements Closeable {
                                     pathFactory.isExternalPath(),
                                     singletonList(blobFieldName),
                                     null,
-                                    null);
+                                    null) {
+                                @Override
+                                public void close() throws IOException {
+                                    boolean observe =
+                                            !video && !closed && BlobIngestObservations.enabled();
+                                    long started = observe ? System.nanoTime() : 0;
+                                    boolean succeeded = false;
+                                    try {
+                                        super.close();
+                                        succeeded = true;
+                                    } finally {
+                                        if (observe) {
+                                            String outcome = succeeded ? "succeeded" : "failed";
+                                            BlobIngestObservations.record("file_close", outcome, 1);
+                                            BlobIngestObservations.record(
+                                                    "file_close_elapsed_nanos",
+                                                    outcome,
+                                                    System.nanoTime() - started);
+                                        }
+                                    }
+                                }
+                            };
             RollingFileWriterImpl<InternalRow, DataFileMeta> rollingWriter =
                     video
                             ? new VideoRollingFileWriter<>(writerFactory, targetFileSize)
