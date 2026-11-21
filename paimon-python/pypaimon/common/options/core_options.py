@@ -423,8 +423,8 @@ class CoreOptions:
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
-        .default_value("none")
-        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+        .default_value("truncate(16)")
+        .with_description("Metadata statistics mode: none, counts, full or truncate(N).")
     )
 
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
@@ -1450,9 +1450,6 @@ class CoreOptions:
 
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
-
-    def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)

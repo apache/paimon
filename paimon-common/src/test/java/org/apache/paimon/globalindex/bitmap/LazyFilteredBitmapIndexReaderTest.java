@@ -34,8 +34,11 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
@@ -47,6 +50,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -75,6 +79,77 @@ public class LazyFilteredBitmapIndexReaderTest {
     private BitmapGlobalIndexer globalIndexer;
 
     @TempDir java.nio.file.Path tempPath;
+
+    @Test
+    void centroidBitmapSectionsPreserveSparseRowIdsAndNulls() throws IOException {
+        DataField state = new DataField(5, "state", DataTypes.INT());
+        RowType fields = RowType.of(dataField, state);
+        CentroidBitmapIndex.ColumnRows tags =
+                column -> {
+                    column.write(BinaryString.fromString("blue"), 90);
+                    column.write(BinaryString.fromString("red"), 90_000);
+                };
+        byte[] originalMeta;
+        try (BitmapGlobalIndexWriter standalone = globalIndexer.createWriter(fileWriter)) {
+            tags.writeTo(standalone);
+            originalMeta = standalone.finish().get(0).meta();
+        }
+        ResultEntry result;
+        try (CentroidBitmapIndex.Writer writer =
+                new CentroidBitmapIndex.Writer(fileWriter, 9, 2, 2)) {
+            writer.writeColumn(
+                    state,
+                    new Options(),
+                    column -> {
+                        column.write(1, 90);
+                        column.write(null, 90_000);
+                    });
+            writer.writeColumn(dataField, new Options(), tags);
+            result = writer.finish();
+        }
+        assertThat(CentroidBitmapIndex.schemaId(result.meta())).isEqualTo(9L);
+        Path path = new Path(basePath, result.fileName());
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
+        ByteBuffer directory = ByteBuffer.wrap(result.meta());
+        directory.position(Long.BYTES);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        long stateLength = directory.getLong();
+        int stateMetaLength = directory.getInt();
+        directory.position(directory.position() + stateMetaLength);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        assertThat(directory.getLong()).isEqualTo(meta.fileSize() - stateLength);
+        assertThat(directory.getInt()).isEqualTo(originalMeta.length);
+        byte[] storedMeta = new byte[directory.remaining()];
+        directory.get(storedMeta);
+        assertThat(storedMeta).isEqualTo(originalMeta);
+
+        int[] extraFieldIds = {state.id(), dataField.id()};
+        PredicateBuilder builder = new PredicateBuilder(fields);
+        List<LeafPredicate> predicates =
+                Arrays.asList(
+                        (LeafPredicate) builder.equal(0, BinaryString.fromString("red")),
+                        (LeafPredicate) builder.isNull(1));
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader, meta, extraFieldIds, fields, fields, predicates))
+                .containsExactly(90_000L);
+        GlobalIndexIOMeta incomplete =
+                new GlobalIndexIOMeta(path, meta.fileSize() - 1, 2, result.meta());
+        assertThatThrownBy(
+                        () ->
+                                CentroidBitmapIndex.match(
+                                        file -> {
+                                            throw new AssertionError(
+                                                    "Invalid manifest opened a file.");
+                                        },
+                                        incomplete,
+                                        extraFieldIds,
+                                        fields,
+                                        fields,
+                                        predicates))
+                .hasMessageContaining("Invalid centroid bitmap section");
+    }
 
     @BeforeEach
     public void setUp() {

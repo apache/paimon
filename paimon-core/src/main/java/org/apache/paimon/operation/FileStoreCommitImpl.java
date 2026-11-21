@@ -1498,6 +1498,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw exception.get();
             }
         }
+        if (latestSnapshot != null) {
+            conflictDetection.checkRetainedGlobalIndexes(
+                    latestSnapshot, deltaFiles, indexFiles, commitKind);
+        }
 
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
