@@ -39,10 +39,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +53,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link NativeFullTextGlobalIndexWriter} and {@link NativeFullTextGlobalIndexReader}. */
 public class NativeFullTextGlobalIndexTest {
@@ -482,6 +486,133 @@ public class NativeFullTextGlobalIndexTest {
 
     private static String matchQuery(String terms) {
         return "{\"match\":{\"query\":\"" + terms + "\"}}";
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{\"match\":{\"column\":\"content\",\"terms\":\"content\"}}",
+                "{\"phrase\":{\"column\":\"content\",\"terms\":\"content\"}}",
+                "{\"boolean\":{\"must\":[{\"match\":{\"column\":\"content\",\"terms\":\"content\"}}]}}",
+                "{\"boost\":{\"positive\":{\"match\":{\"column\":\"content\",\"terms\":\"content\"}},"
+                        + "\"negative\":{\"match\":{\"column\":\"content\",\"terms\":\"vector\"}},\"negative_boost\":0.5}}",
+                "{\"multi_match\":{\"columns\":[\"content\"],\"terms\":\"content\"}}"
+            })
+    public void testSearchWithTableColumnName(String query) throws IOException {
+        NativeFullTextGlobalIndexWriter writer =
+                new NativeFullTextGlobalIndexWriter(createFileWriter(indexPath));
+        writer.write(BinaryString.fromString("content paimon lake"), 0);
+        writer.write(BinaryString.fromString("vector indexing"), 1);
+        writer.write(BinaryString.fromString("content full text"), 2);
+        List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+
+        try (NativeFullTextGlobalIndexReader reader = createReader(createFileReader(), metas)) {
+            FullTextSearch search = new FullTextSearch("content", query, 10);
+            ScoredGlobalIndexResult result = reader.visitFullTextSearch(search).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(2);
+            assertThat(result.results().contains(0L)).isTrue();
+            assertThat(result.results().contains(2L)).isTrue();
+
+            ScoredGlobalIndexResult baseline =
+                    reader.visitFullTextSearch(
+                                    new FullTextSearch("content", matchQuery("content"), 10))
+                            .join()
+                            .get();
+            assertThat(result.scoreGetter().score(0L)).isEqualTo(baseline.scoreGetter().score(0L));
+            assertThat(result.scoreGetter().score(2L)).isEqualTo(baseline.scoreGetter().score(2L));
+
+            RoaringNavigableMap64 included = new RoaringNavigableMap64();
+            included.add(2L);
+            result = reader.visitFullTextSearch(search.withIncludeRowIds(included)).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(1);
+            assertThat(result.results().contains(2L)).isTrue();
+            assertThat(result.scoreGetter().score(2L)).isEqualTo(baseline.scoreGetter().score(2L));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "text-field",
+                "text-fields",
+                "columns",
+                "text_fields",
+                "fulltext.text-field",
+                "tantivy.text-field"
+            })
+    public void testSearchWithCustomNativeField(String option) throws IOException {
+        assertSearchWithCustomNativeField(Collections.singletonMap(option, "body"));
+    }
+
+    @Test
+    public void testSearchWithNativeFieldListAndPrecedence() throws IOException {
+        for (String option : new String[] {"text-fields", "columns"}) {
+            for (String fields : new String[] {"body,title", " ; body ; title, body ; "}) {
+                assertSearchWithCustomNativeField(Collections.singletonMap(option, fields));
+                for (boolean listFirst : new boolean[] {true, false}) {
+                    Map<String, String> options = new LinkedHashMap<>();
+                    if (listFirst) {
+                        options.put(option, fields);
+                        options.put("text-field", "unused");
+                    } else {
+                        options.put("text-field", "unused");
+                        options.put(option, fields);
+                    }
+                    assertSearchWithCustomNativeField(options);
+                }
+            }
+        }
+    }
+
+    private void assertSearchWithCustomNativeField(Map<String, String> nativeOptions)
+            throws IOException {
+        NativeFullTextIndexOptions options = new NativeFullTextIndexOptions(nativeOptions);
+        NativeFullTextGlobalIndexWriter writer =
+                new NativeFullTextGlobalIndexWriter(createFileWriter(indexPath), options);
+        writer.write(BinaryString.fromString("content paimon"), 0);
+        List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+        try (NativeFullTextGlobalIndexReader reader = createReader(createFileReader(), metas)) {
+            for (String column : new String[] {"content", "text"}) {
+                for (String query :
+                        new String[] {
+                            "{\"match\":{\"column\":\"" + column + "\",\"terms\":\"content\"}}",
+                            "{\"multi_match\":{\"columns\":[\""
+                                    + column
+                                    + "\"],\"terms\":\"content\"}}",
+                            "{\"match\":{\"column\":\"body\",\"terms\":\"content\"}}",
+                            matchQuery("content")
+                        }) {
+                    ScoredGlobalIndexResult result =
+                            reader.visitFullTextSearch(new FullTextSearch(column, query, 10))
+                                    .join()
+                                    .get();
+                    assertThat(result.results().getLongCardinality()).isEqualTo(1);
+                    assertThat(result.results().contains(0L)).isTrue();
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{\"match\":{\"column\":\"other\",\"terms\":\"content\"}}",
+                "{\"multi_match\":{\"columns\":[\"content\",\"other\"],\"terms\":\"content\"}}"
+            })
+    public void testSearchRejectsUnrelatedColumn(String query) throws IOException {
+        NativeFullTextGlobalIndexWriter writer =
+                new NativeFullTextGlobalIndexWriter(createFileWriter(indexPath));
+        writer.write(BinaryString.fromString("content"), 0);
+        List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+        try (NativeFullTextGlobalIndexReader reader = createReader(createFileReader(), metas)) {
+            assertThatThrownBy(
+                            () ->
+                                    reader.visitFullTextSearch(
+                                                    new FullTextSearch("content", query, 10))
+                                            .join())
+                    .hasRootCauseMessage(
+                            "invalid query: full-text query column 'other' is not configured for this index");
+        }
     }
 
     private static String boostQuery(String positive, String negative, float negativeBoost) {

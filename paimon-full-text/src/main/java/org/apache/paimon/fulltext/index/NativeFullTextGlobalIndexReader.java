@@ -30,11 +30,20 @@ import org.apache.paimon.index.fulltext.FullTextSearchResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.TextNode;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -78,20 +87,87 @@ public class NativeFullTextGlobalIndexReader implements GlobalIndexReader {
                             return Optional.of(ScoredGlobalIndexResult.createEmpty());
                         }
                         byte[] filter = includeRowIds == null ? null : includeRowIds.serialize();
+                        String query = nativeQuery(fullTextSearch);
                         FullTextSearchResult result =
                                 filter == null
-                                        ? reader.search(
-                                                fullTextSearch.query(), fullTextSearch.limit())
-                                        : reader.search(
-                                                fullTextSearch.query(),
-                                                fullTextSearch.limit(),
-                                                filter);
+                                        ? reader.search(query, fullTextSearch.limit())
+                                        : reader.search(query, fullTextSearch.limit(), filter);
                         return Optional.of(toScoredResult(result));
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to search native full-text index", e);
                     }
                 },
                 executor);
+    }
+
+    private String nativeQuery(FullTextSearch search) throws IOException {
+        String nativeField = nativeTextField();
+        if (nativeField.equals(search.column())) {
+            return search.query();
+        }
+        // Archives use native field names, independently of the table column name.
+        JsonNode query = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(search.query());
+        rewriteColumn(query, search.column(), nativeField);
+        return JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.writeValueAsString(query);
+    }
+
+    private String nativeTextField() throws IOException {
+        byte[] metadata = ioMeta.metadata();
+        if (metadata == null || metadata.length == 0) {
+            return "text";
+        }
+        JsonNode options = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(metadata);
+        String field = "text";
+        String fields = null;
+        Iterator<Map.Entry<String, JsonNode>> entries = options.fields();
+        while (entries.hasNext()) {
+            Map.Entry<String, JsonNode> entry = entries.next();
+            String key = entry.getKey();
+            if (key.startsWith("fulltext.")) {
+                key = key.substring("fulltext.".length());
+            } else if (key.startsWith("tantivy.")) {
+                key = key.substring("tantivy.".length());
+            }
+            key = key.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+            if ("text-field".equals(key)) {
+                field = entry.getValue().asText().trim();
+            } else if ("text-fields".equals(key) || "columns".equals(key)) {
+                fields = entry.getValue().asText();
+            }
+        }
+        // addDocument(rowId, text) writes to the first configured native text field.
+        if (fields != null) {
+            for (String name : fields.split("[,;]")) {
+                if (!name.trim().isEmpty()) {
+                    return name.trim();
+                }
+            }
+        }
+        return field;
+    }
+
+    private static void rewriteColumn(JsonNode node, String column, String nativeField) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            JsonNode name = node.get("column");
+            if (name != null && name.isTextual() && column.equals(name.asText())) {
+                ((ObjectNode) node).put("column", nativeField);
+            }
+            JsonNode columns = node.get("columns");
+            if (columns != null && columns.isArray()) {
+                ArrayNode names = (ArrayNode) columns;
+                for (int i = 0; i < names.size(); i++) {
+                    if (names.get(i).isTextual() && column.equals(names.get(i).asText())) {
+                        names.set(i, TextNode.valueOf(nativeField));
+                    }
+                }
+            }
+        }
+        for (JsonNode child : node) {
+            rewriteColumn(child, column, nativeField);
+        }
     }
 
     private ScoredGlobalIndexResult toScoredResult(FullTextSearchResult result) {
