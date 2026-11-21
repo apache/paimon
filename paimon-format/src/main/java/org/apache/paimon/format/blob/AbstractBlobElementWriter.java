@@ -22,6 +22,8 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.data.BlobIngestObservations;
+import org.apache.paimon.data.BlobIngestSource;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.ReusingBlobRefStreamProvider;
@@ -60,6 +62,9 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private final ReusingBlobRefStreamProvider reuseSource;
 
     private String pathString;
+    private long ingestReadBytes;
+    private long ingestWrittenBytes;
+    private @Nullable BlobObservation observation;
 
     AbstractBlobElementWriter(
             PositionOutputStream out,
@@ -90,6 +95,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     }
 
     protected final long startRecord() throws IOException {
+        observeStage("destination_write");
         long position = out.getPos();
         crc32.reset();
         write(BlobFormatWriter.MAGIC_NUMBER_BYTES);
@@ -97,6 +103,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     }
 
     protected final long finishRecord(long recordPosition) throws IOException {
+        observeStage("record_finish");
         long recordLength = out.getPos() - recordPosition + 12;
         write(longToLittleEndian(recordLength));
         out.write(intToLittleEndian((int) crc32.getValue()));
@@ -105,22 +112,47 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
 
     protected final long writeNullElement() throws IOException {
         if (writeConsumer != null) {
-            writeConsumer.accept(blobFieldName, null);
+            try {
+                writeConsumer.accept(blobFieldName, null);
+            } catch (RuntimeException | Error e) {
+                if (observation != null) {
+                    observation.downgraded = false;
+                    observeStage("record_finish");
+                }
+                throw e;
+            }
         }
         return BlobFormatWriter.NULL_LENGTH;
     }
 
     protected final long writePlaceholderElement() {
+        recordSkippedBlob("placeholder");
         return BlobFormatWriter.PLACE_HOLDER_LENGTH;
+    }
+
+    protected final @Nullable BlobObservation observeBlob() {
+        if (!BlobIngestObservations.enabled()) {
+            return null;
+        }
+        ingestReadBytes = 0;
+        ingestWrittenBytes = 0;
+        observation = new BlobObservation();
+        return observation;
+    }
+
+    protected final void recordSkippedBlob(String reason) {
+        BlobIngestObservations.record("blob_skipped", reason, 1);
     }
 
     protected final BlobFetchResult getBlob(BlobGetter getter) {
         try {
             return new BlobFetchResult(getter.get(), false);
         } catch (RuntimeException e) {
+            startBlobObservation("source_get", null);
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, null);
                 blobFetchMetricReporter.recordFetchFailureNullWritten(e);
+                observeDowngrade();
                 return new BlobFetchResult(null, true);
             }
             blobFetchMetricReporter.recordFetchFailure(e);
@@ -134,6 +166,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
      * (bounded to the descriptor); other blobs open their own stream and read until EOF.
      */
     protected final @Nullable BlobCopySource prepareBlobSource(Blob blob) throws IOException {
+        startBlobObservation("source_prepare", blob);
         // Exact class only: subclasses may override newInputStream() and must not be bypassed.
         if (blob != null && blob.getClass() == BlobRef.class) {
             BlobRef ref = (BlobRef) blob;
@@ -159,10 +192,12 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
 
     @Nullable
     private SeekableInputStream openStream(Blob blob, StreamOpener opener) throws IOException {
+        observeStage("source_open");
         try {
             return opener.open();
         } catch (IOException | RuntimeException e) {
             if (handleFetchFailure(e, blob)) {
+                observeDowngrade();
                 return null;
             }
             throw e;
@@ -190,10 +225,15 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     }
 
     protected final BlobDescriptor writeBlobData(BlobCopySource source) throws IOException {
+        observeStage("destination_write");
         long blobPosition = out.getPos();
         if (source.reused()) {
             try {
-                copyExactly(source.stream(), source.length());
+                if (observation != null) {
+                    copyExactlyObserved(source.stream(), source.length());
+                } else {
+                    copyExactly(source.stream(), source.length());
+                }
             } catch (IOException | RuntimeException e) {
                 blobFetchMetricReporter.recordFetchFailure(e);
                 // Source is at an unknown position now; drop it so the next blob reopens.
@@ -202,16 +242,22 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             }
         } else {
             try (SeekableInputStream stream = source.stream()) {
-                int bytesRead = stream.read(copyBuffer);
-                while (bytesRead >= 0) {
-                    write(copyBuffer, bytesRead);
-                    bytesRead = stream.read(copyBuffer);
+                if (observation != null) {
+                    copyUntilEndObserved(stream);
+                } else {
+                    int bytesRead = stream.read(copyBuffer);
+                    while (bytesRead >= 0) {
+                        write(copyBuffer, bytesRead);
+                        bytesRead = stream.read(copyBuffer);
+                    }
                 }
+                observeStage("source_close");
             } catch (IOException | RuntimeException e) {
                 blobFetchMetricReporter.recordFetchFailure(e);
                 throw e;
             }
         }
+        observeStage("destination_write");
         return new BlobDescriptor(pathString, blobPosition, out.getPos() - blobPosition);
     }
 
@@ -238,11 +284,67 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         }
     }
 
+    // Keep accounting out of the disabled copy loops. Locals are published even when I/O fails.
+    private void copyExactlyObserved(SeekableInputStream stream, long length) throws IOException {
+        long readBytes = 0;
+        long writtenBytes = 0;
+        try {
+            long remaining = length;
+            while (remaining > 0) {
+                int toRead = (int) Math.min(copyBuffer.length, remaining);
+                observeStage("source_read");
+                int bytesRead = stream.read(copyBuffer, 0, toRead);
+                if (bytesRead < 0) {
+                    throw new EOFException(
+                            String.format(
+                                    "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                            + "bytes but source ended %d bytes early.",
+                                    blobFieldName, length, remaining));
+                }
+                if (bytesRead == 0) {
+                    throw new IOException(
+                            "Source returned 0 bytes while copying BLOB payload for field "
+                                    + blobFieldName);
+                }
+                readBytes += bytesRead;
+                observeStage("destination_write");
+                write(copyBuffer, bytesRead);
+                writtenBytes += bytesRead;
+                remaining -= bytesRead;
+            }
+        } finally {
+            ingestReadBytes = readBytes;
+            ingestWrittenBytes = writtenBytes;
+        }
+    }
+
+    private void copyUntilEndObserved(SeekableInputStream stream) throws IOException {
+        long readBytes = 0;
+        long writtenBytes = 0;
+        try {
+            observeStage("source_read");
+            int bytesRead = stream.read(copyBuffer);
+            while (bytesRead >= 0) {
+                readBytes += bytesRead;
+                observeStage("destination_write");
+                write(copyBuffer, bytesRead);
+                writtenBytes += bytesRead;
+                observeStage("source_read");
+                bytesRead = stream.read(copyBuffer);
+            }
+        } finally {
+            ingestReadBytes = readBytes;
+            ingestWrittenBytes = writtenBytes;
+        }
+    }
+
     protected final boolean accept(BlobDescriptor descriptor) throws IOException {
+        observeStage("record_finish");
         return writeConsumer != null && writeConsumer.accept(blobFieldName, descriptor);
     }
 
     protected final void flush() throws IOException {
+        observeStage("flush");
         out.flush();
     }
 
@@ -250,15 +352,45 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         blobFetchMetricReporter.recordSuccess(length);
     }
 
+    protected final void completeBlob() {
+        if (observation != null) {
+            observation.completed = true;
+        }
+    }
+
+    private void startBlobObservation(String stage, @Nullable Blob blob) {
+        if (observation != null) {
+            observation.stage = stage;
+            observation.started = true;
+            BlobIngestObservations.record("blob_read", "started", 1);
+            BlobIngestObservations.record(
+                    "blob_source", BlobIngestSource.classify(blob).metricValue(), 1);
+        }
+    }
+
+    private void observeStage(String stage) {
+        if (observation != null) {
+            observation.stage = stage;
+        }
+    }
+
+    private void observeDowngrade() {
+        if (observation != null) {
+            observation.downgraded = true;
+        }
+    }
+
     protected final void recordPreCheckedMissingFileNull(InternalRow row) {
-        if (!writeNullOnMissingFile) {
-            return;
+        if (writeNullOnMissingFile) {
+            Blob blob = row.getBlob(0);
+            if (blob instanceof BlobRef) {
+                BlobDescriptor descriptor = ((BlobRef) blob).toDescriptor();
+                blobFetchMetricReporter.recordMissingFileNullWritten(isHttpUri(descriptor.uri()));
+                recordSkippedBlob("premarked_missing");
+                return;
+            }
         }
-        Blob blob = row.getBlob(0);
-        if (blob instanceof BlobRef) {
-            BlobDescriptor descriptor = ((BlobRef) blob).toDescriptor();
-            blobFetchMetricReporter.recordMissingFileNullWritten(isHttpUri(descriptor.uri()));
-        }
+        recordSkippedBlob("null");
     }
 
     protected final void write(byte[] bytes) throws IOException {
@@ -314,6 +446,54 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     @Override
     public final void close() throws IOException {
         reuseSource.close();
+    }
+
+    protected final class BlobObservation implements AutoCloseable {
+
+        private final BlobIngestObservations.Scope scope = BlobIngestObservations.enterBlob();
+        private final long startNanos = System.nanoTime();
+        private boolean started;
+        private boolean completed;
+        private boolean downgraded;
+        private String stage;
+
+        @Override
+        public void close() {
+            try {
+                if (started) {
+                    String outcome = "failed";
+                    if (completed) {
+                        outcome = "completed";
+                    } else if (downgraded) {
+                        outcome = "downgraded_null";
+                    }
+                    long elapsed = System.nanoTime() - startNanos;
+                    BlobIngestObservations.record("blob_read", outcome, 1);
+                    BlobIngestObservations.record("blob_read_elapsed_nanos", outcome, elapsed);
+                    if (!completed) {
+                        BlobIngestObservations.record("blob_failure", stage, 1);
+                    }
+                    String subset = completed ? "completed" : "incomplete";
+                    recordPayload("payload_read", subset, ingestReadBytes);
+                    // Successful calls can be buffered. A throwing write has unknown side effects.
+                    recordPayload("payload_written", subset, ingestWrittenBytes);
+                    if ("destination_write".equals(stage) && ingestReadBytes > ingestWrittenBytes) {
+                        BlobIngestObservations.record(
+                                "payload_write_unconfirmed",
+                                "requested",
+                                ingestReadBytes - ingestWrittenBytes);
+                    }
+                }
+            } finally {
+                observation = null;
+                scope.close();
+            }
+        }
+
+        private void recordPayload(String stage, String subset, long bytes) {
+            BlobIngestObservations.record(stage, "observed", bytes);
+            BlobIngestObservations.record(stage, subset, bytes);
+        }
     }
 
     @FunctionalInterface

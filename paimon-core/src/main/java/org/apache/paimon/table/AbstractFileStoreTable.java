@@ -627,17 +627,23 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommitImpl newCommit(String commitUser) {
         CoreOptions options = coreOptions();
-        return new TableCommitImpl(
-                store().newCommit(commitUser, this),
-                newExpireRunnable(),
-                options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagAutoManager(this),
-                options.writeOnly() ? null : CoreOptions.fromMap(options()).consumerExpireTime(),
-                new ConsumerManager(fileIO, path, snapshotManager().branch()),
-                options.snapshotExpireExecutionMode(),
-                name(),
-                options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+        TableCommitImpl commit =
+                new TableCommitImpl(
+                        store().newCommit(commitUser, this),
+                        newExpireRunnable(),
+                        options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
+                        options.writeOnly() ? null : store().newTagAutoManager(this),
+                        options.writeOnly()
+                                ? null
+                                : CoreOptions.fromMap(options()).consumerExpireTime(),
+                        new ConsumerManager(fileIO, path, snapshotManager().branch()),
+                        options.snapshotExpireExecutionMode(),
+                        name(),
+                        options.forceCreatingSnapshot(),
+                        options.fileOperationThreadNum());
+        return options.blobIngestObservationEnabled()
+                ? commit.withBlobIngestObservation(name())
+                : commit;
     }
 
     @Override

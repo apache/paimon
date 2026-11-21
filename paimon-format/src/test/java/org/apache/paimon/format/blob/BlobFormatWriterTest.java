@@ -24,6 +24,7 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.data.BlobIngestObservations;
 import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
@@ -417,6 +418,69 @@ public class BlobFormatWriterTest {
     }
 
     @Test
+    public void testIngestPreservesConfirmedBytesOnDestinationFailure(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        TestingBlobFetchMetricReporter reporter = new TestingBlobFetchMetricReporter();
+        Map<String, Long> observed = new HashMap<>();
+        String uri = "mem://source";
+        RecordingUriReader reader = new RecordingUriReader(singleFile(uri, new byte[9]));
+        try (BlobIngestObservations.Scope ignored =
+                        BlobIngestObservations.observe(
+                                (stage, outcome, value) ->
+                                        observed.merge(stage + "/" + outcome, value, Long::sum));
+                PositionOutputStream out =
+                        new PositionOutputStreamWrapper(
+                                new LocalFileIO.LocalPositionOutputStream(
+                                        tempDir.resolve("bounded-failed.out").toFile())) {
+                            private boolean failed;
+
+                            @Override
+                            public void write(byte[] b, int off, int len) throws IOException {
+                                if (!failed && getPos() >= 7) {
+                                    failed = true;
+                                    // A throwing write can have side effects. Only returned writes
+                                    // are known.
+                                    super.write(b, off, 1);
+                                    throw new IOException("bounded destination failed");
+                                }
+                                super.write(b, off, len);
+                            }
+                        }) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out, null, RowType.of(DataTypes.BLOB()), false, true, reporter, 3);
+            try {
+                assertThatThrownBy(
+                                () ->
+                                        writer.addElement(
+                                                GenericRow.of(
+                                                        new BlobRef(
+                                                                reader,
+                                                                new BlobDescriptor(uri, 0, 9)))))
+                        .isInstanceOf(IOException.class)
+                        .hasMessage("bounded destination failed");
+            } finally {
+                writer.close();
+            }
+        }
+        assertThat(reporter.fetchFailureNullWritten).isZero();
+        assertThat(reader.opened.get(0).closeCount).isEqualTo(1);
+        assertThat(observed)
+                .containsEntry("blob_read/started", 1L)
+                .containsEntry("blob_read/failed", 1L)
+                .containsEntry("blob_failure/destination_write", 1L)
+                .containsEntry("payload_read/observed", 6L)
+                .containsEntry("payload_read/incomplete", 6L)
+                .containsEntry("payload_written/observed", 3L)
+                .containsEntry("payload_written/incomplete", 3L)
+                .containsEntry("payload_write_unconfirmed/requested", 3L)
+                .doesNotContainKeys(
+                        "blob_read/completed",
+                        "blob_read/downgraded_null",
+                        "payload_written/completed");
+    }
+
+    @Test
     public void testBlobFetchMetricReporterForPreCheckedMissingFile(
             @TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.BLOB());
@@ -428,8 +492,17 @@ public class BlobFormatWriterTest {
         BlobFormatWriter writer =
                 newWriter(tempDir.resolve("blob.out"), rowType, true, false, metricReporter);
 
-        writer.addElement(new DescriptorBytesRow(descriptorBytes, uriReaderFactory, true));
-        writer.close();
+        Map<String, Long> observed = new HashMap<>();
+        try (BlobIngestObservations.Scope ignored =
+                BlobIngestObservations.observe(
+                        (stage, outcome, value) -> observed.put(stage + "/" + outcome, value))) {
+            writer.addElement(new DescriptorBytesRow(descriptorBytes, uriReaderFactory, true));
+            writer.close();
+        }
+
+        assertThat(observed)
+                .containsExactlyEntriesOf(
+                        java.util.Collections.singletonMap("blob_skipped/premarked_missing", 1L));
 
         assertThat(metricReporter.missingFileNullWritten).isEqualTo(1);
         assertThat(metricReporter.httpNotFound).isEqualTo(1);

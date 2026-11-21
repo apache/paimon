@@ -177,19 +177,24 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser, @Nullable Integer writeId) {
         BaseAppendFileStoreWrite writer = store().newWrite(commitUser, writeId);
-        return new TableWriteImpl<>(
-                rowType(),
-                writer,
-                this::createRowKeyExtractor,
-                (record, rowKind) -> {
-                    Preconditions.checkState(
-                            rowKind.isAdd(),
-                            "Append only writer can not accept row with RowKind %s",
-                            rowKind);
-                    return record.row();
-                },
-                rowKindGenerator(),
-                RowKindFilter.of(coreOptions()));
+        CoreOptions options = coreOptions();
+        TableWriteImpl<InternalRow> tableWrite =
+                new TableWriteImpl<>(
+                        rowType(),
+                        writer,
+                        this::createRowKeyExtractor,
+                        (record, rowKind) -> {
+                            Preconditions.checkState(
+                                    rowKind.isAdd(),
+                                    "Append only writer can not accept row with RowKind %s",
+                                    rowKind);
+                            return record.row();
+                        },
+                        rowKindGenerator(),
+                        RowKindFilter.of(options));
+        return options.blobIngestObservationEnabled()
+                ? tableWrite.withBlobIngestObservation(name())
+                : tableWrite;
     }
 
     @Override
