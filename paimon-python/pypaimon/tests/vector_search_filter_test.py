@@ -2104,7 +2104,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         self.assertEqual([1], sorted(evaluation.result.results()))
         self.assertEqual([Range(5, 9)], fallback)
 
-    def test_extra_field_groups_union_matches_without_padding(self):
+    def test_scalar_reader_uses_only_the_primary_field(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2114,15 +2114,13 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        # Mocked non-BTree readers exercise shared extra-field reader grouping.
         short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
         short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="bitmap",
-                      file_name="b-c.index",
+        long = _entry(None, field_id=2, index_type="bitmap",
+                      file_name="c.index",
                       row_range_start=0, row_range_end=9).index_file
-        long.global_index_meta.extra_field_ids = [2]
 
         class _StubReader(GlobalIndexReader):
             def __init__(self_inner, file_name):
@@ -2163,12 +2161,10 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 scanner.close()
 
         self.assertIsNotNone(result)
-        # Java unions both groups: row 4 survives from the short group. Rows
-        # 5, 6 and 9 were not returned by either index and must not be added.
-        self.assertEqual([1, 3, 4, 7, 8], sorted(list(result.results())))
+        self.assertEqual([1, 3, 7, 8], sorted(list(result.results())))
         self.assertTrue(result.is_exact())
 
-    def test_extra_field_groups_do_not_turn_missing_coverage_into_hits(self):
+    def test_scalar_reader_unions_disjoint_primary_field_shards(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2178,15 +2174,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        # Reader stubs exercise disjoint coverage independently of BTree support.
-        a_early = _entry(None, field_id=0, index_type="bitmap",
-                         file_name="a-c-early.index",
+        c_early = _entry(None, field_id=2, index_type="bitmap",
+                         file_name="c-early.index",
                          row_range_start=2, row_range_end=3).index_file
-        a_early.global_index_meta.extra_field_ids = [2]
-        a_late = _entry(None, field_id=0, index_type="bitmap",
-                        file_name="a-c-late.index",
+        c_late = _entry(None, field_id=2, index_type="bitmap",
+                        file_name="c-late.index",
                         row_range_start=7, row_range_end=9).index_file
-        a_late.global_index_meta.extra_field_ids = [2]
         b_full = _entry(None, field_id=1, index_type="bitmap",
                         file_name="b-c-full.index",
                         row_range_start=0, row_range_end=9).index_file
@@ -2198,9 +2191,9 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
             def visit_equal(self_inner, field_ref, literal):
                 bm = RoaringBitmap64()
-                if self_inner._file_name == "a-c-early.index":
+                if self_inner._file_name == "c-early.index":
                     bm.add(0)  # global 2 after offset
-                elif self_inner._file_name == "a-c-late.index":
+                elif self_inner._file_name == "c-late.index":
                     for row_id in [0, 1]:  # global 7, 8 after offset
                         bm.add(row_id)
                 else:
@@ -2223,7 +2216,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 fields=[a_field, b_field, c_field],
                 file_io=object(),
                 index_path="/unused",
-                index_files=[a_early, a_late, b_full],
+                index_files=[c_early, c_late, b_full],
             )
             try:
                 result = scanner.scan(
@@ -2233,12 +2226,10 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 scanner.close()
 
         self.assertIsNotNone(result)
-        # Coverage gaps in the first group are not matches. Only real hits
-        # from either group participate in the union, as in Java.
-        self.assertEqual([1, 2, 5, 7, 8], sorted(list(result.results())))
+        self.assertEqual([2, 7, 8], sorted(list(result.results())))
         self.assertTrue(result.is_exact())
 
-    def test_extra_field_groups_preserve_unknown_results(self):
+    def test_scalar_shards_preserve_unknown_results(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2248,14 +2239,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b", "STRING")
         c_field = _field(2, "c", "STRING")
 
-        short = _entry(None, field_id=0, index_type="bitmap",
-                       file_name="a-c.index",
+        short = _entry(None, field_id=2, index_type="bitmap",
+                       file_name="c-short.index",
                        row_range_start=0, row_range_end=4).index_file
-        short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="bitmap",
-                      file_name="b-c.index",
-                      row_range_start=0, row_range_end=9).index_file
-        long.global_index_meta.extra_field_ids = [2]
+        long = _entry(None, field_id=2, index_type="bitmap",
+                       file_name="c-long.index",
+                       row_range_start=5, row_range_end=9).index_file
 
         class _StubReader(GlobalIndexReader):
             def visit_contains(self_inner, field_ref, literal):
@@ -2431,7 +2420,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         self.assertEqual([Range(5, 9)], result.results().to_range_list())
 
-    def test_scanner_create_excludes_composite_btree_extra_fields(self):
+    def test_scanner_create_does_not_match_extra_fields(self):
         from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
         )
@@ -2452,15 +2441,15 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         )
         _patch_snapshot(self, table._entries)
 
-        with mock.patch(
-                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
-                "_create_inner_readers") as create_readers:
-            scanner = DataEvolutionGlobalIndexScanner.create(
-                table,
-                predicate=Predicate(method="equal", index=1, field="id", literals=[3]),
-            )
-            self.assertIsNone(scanner)
-            create_readers.assert_not_called()
+        predicate = Predicate(method="equal", index=1, field="id", literals=[3])
+        for index_type in ("btree", "bitmap"):
+            with self.subTest(index_type=index_type):
+                multi.index_type = index_type
+                scanner = DataEvolutionGlobalIndexScanner.create(
+                    table, predicate=predicate, allow_composite=True)
+                if scanner is not None:
+                    scanner.close()
+                self.assertIsNone(scanner)
 
 
 class VectorSearchPartitionedFilterTest(unittest.TestCase):
