@@ -16,8 +16,12 @@
 
 import json
 import io
+import inspect
+import shutil
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -36,7 +40,7 @@ from pypaimon.common.options import Options
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
-from pypaimon.multimodal.lerobot.export import _write_v3_episodes
+from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
 from pypaimon.tests.lerobot_aggregate_test import source
 
 
@@ -145,6 +149,48 @@ def test_export_v2_creates_one_exact_video_per_episode(tmp_path, version):
     assert _open_video_frames(output / "videos/chunk-000/camera/episode_000001.mp4") == 3
     assert pq.read_table(output / "data/chunk-000/episode_000000.parquet").num_rows == 2
     assert pq.read_table(output / "data/chunk-000/episode_000001.parquet").num_rows == 3
+
+
+def test_export_v2_preserves_fractional_fps(tmp_path):
+    av = pytest.importorskip("av")
+    rate = Fraction(30000, 1001)
+    original = source(tmp_path / "input", video=True, fps=rate, frames=10)
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original)
+
+    output = conn.export_to_lerobot("robot", tmp_path / "v2", version="v2.1")
+    info = json.loads((output / "meta/info.json").read_text())
+    assert info["fps"] == pytest.approx(float(rate))
+    assert info["features"]["camera"]["info"]["video.fps"] == pytest.approx(float(rate))
+    for episode_index in range(2):
+        path = output / ("videos/chunk-000/camera/episode_%06d.mp4" % episode_index)
+        with av.open(str(path)) as container:
+            video = container.streams.video[0]
+            frames = list(container.decode(video=0))
+            assert video.average_rate == rate
+            assert len(frames) == 5
+            assert (frames[1].pts - frames[0].pts) * frames[0].time_base == 1 / rate
+
+
+def test_safe_path_on_python36(tmp_path):
+    assert _safe_path(tmp_path, "data/file.parquet") == (
+        tmp_path / "data/file.parquet").resolve()
+    with pytest.raises(ValueError, match="escapes the output directory"):
+        _safe_path(tmp_path, "../outside.parquet")
+
+    python36 = shutil.which("python3.6")
+    if python36 is None:
+        pytest.skip("Python 3.6 interpreter is unavailable")
+    script = "from pathlib import Path\n" + inspect.getsource(_safe_path) + "\n" + (
+        "root = Path(%r)\n"
+        "assert _safe_path(root, 'data/file.parquet') == (root / 'data/file.parquet').resolve()\n"
+        "try:\n"
+        "    _safe_path(root, '../outside.parquet')\n"
+        "except ValueError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('path traversal accepted')\n" % str(tmp_path))
+    subprocess.run([python36, "-c", script], check=True, capture_output=True)
 
 
 def test_export_requires_dataset_id_for_multi_source_group(tmp_path):

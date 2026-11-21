@@ -23,6 +23,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping
+from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -286,7 +287,7 @@ def _write_dataset(stage, reader, source, info, episodes, version, batch_size):
                 if not isinstance(details, dict):
                     continue
                 details.update({"video.codec": "h264",
-                                "video.fps": int(info["fps"]),
+                                "video.fps": info["fps"],
                                 "video.pix_fmt": "yuv420p",
                                 "has_audio": False})
                 for stale in ("video.gop_size", "video.bit_rate",
@@ -381,7 +382,7 @@ def _write_dataset(stage, reader, source, info, episodes, version, batch_size):
                     if not cached.exists():
                         _copy_video(reader.file_io, payload, cached)
                     _encode_episode_video(cached, video_path, descriptors,
-                                          int(info["fps"]))
+                                          info["fps"])
                 else:
                     payload = descriptors[0].payload_descriptor
                     identity = (payload.uri, payload.offset, payload.length)
@@ -467,9 +468,13 @@ def _write_v3_episodes(stage, episodes):
 
 
 def _safe_path(root, relative):
+    root = root.resolve()
     path = (root / relative).resolve()
-    if not path.is_relative_to(root.resolve()):
-        raise ValueError("LeRobot metadata path escapes the output directory.")
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise ValueError(
+            "LeRobot metadata path escapes the output directory.") from None
     return path
 
 
@@ -526,7 +531,8 @@ def _encode_episode_video(source_path, output_path, descriptors, fps):
     with av.open(str(source_path)) as source, \
             av.open(str(output_path), mode="w", format="mp4") as target:
         video = source.streams.video[0]
-        stream = target.add_stream("libx264", rate=fps)
+        stream = target.add_stream(
+            "libx264", rate=Fraction(str(fps)).limit_denominator(1000000))
         stream.width, stream.height = video.width, video.height
         stream.pix_fmt = "yuv420p"
         stream.options = {"crf": "18", "threads": "4"}

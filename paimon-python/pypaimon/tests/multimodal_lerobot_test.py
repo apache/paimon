@@ -194,13 +194,14 @@ def _configure_uint8_transform_worker(unused_worker_id):
 
 class LeRobotValidationTest(unittest.TestCase):
 
-    def test_dataset_fps_accepts_integral_numbers(self):
+    def test_dataset_fps_accepts_positive_numbers(self):
         for value in (30, 30.0, np.int64(30), np.float32(30), np.float64(30), np.longdouble(30)):
             with self.subTest(value=value):
                 self.assertEqual(30, _dataset_fps(value))
                 self.assertIsInstance(_dataset_fps(value), int)
+        self.assertAlmostEqual(29.97, _dataset_fps(29.97))
         for value in (True, np.bool_(True), "30", None, 0, -1, 0.0, -30.0,
-                      29.97, float("nan"), float("inf"), -float("inf")):
+                      float("nan"), float("inf"), -float("inf")):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     _dataset_fps(value)

@@ -1498,7 +1498,7 @@ def _source_dataset_fps(metadata, fps, total_episodes):
             raise ValueError("LeRobot source dataset %d is missing fps." % ordinal)
         rate = _dataset_fps(source_info.get("fps"))
         dataset = datasets[ordinal]
-        if "fps" in dataset and _positive_integer(dataset["fps"], "source dataset %d fps" % ordinal) != rate:
+        if "fps" in dataset and _dataset_fps(dataset["fps"]) != rate:
             raise ValueError("LeRobot source dataset %d has inconsistent fps." % ordinal)
         if fps is not None and rate != fps:
             raise ValueError("LeRobot source dataset %d fps does not match info.fps." % ordinal)

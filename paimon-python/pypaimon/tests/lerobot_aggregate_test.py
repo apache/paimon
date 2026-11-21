@@ -19,6 +19,7 @@ import sys
 import uuid
 from contextlib import nullcontext
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import patch
 
@@ -46,6 +47,7 @@ def variant_value(value):
 
 def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=False, value=0, fps=10, frames=5):
     root.mkdir(parents=True)
+    metadata_fps = float(fps) if isinstance(fps, Fraction) else fps
     meta = root / "meta"
     (meta / "episodes/chunk-000").mkdir(parents=True)
     (root / "data/chunk-000").mkdir(parents=True)
@@ -57,7 +59,7 @@ def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=Fal
     if video:
         features["camera"] = {"dtype": "video", "shape": [16, 16, 3],
                               "names": ["height", "width", "channels"],
-                              "info": {"video.fps": fps}}
+                              "info": {"video.fps": metadata_fps}}
         av = pytest.importorskip("av")
         path = root / "videos/camera/chunk-000/file-000.mp4"
         path.parent.mkdir(parents=True)
@@ -71,7 +73,7 @@ def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=Fal
                     container.mux(packet)
             for packet in stream.encode():
                 container.mux(packet)
-    info = dict(codebase_version="v3.0", fps=fps, robot_type="test", total_frames=frames,
+    info = dict(codebase_version="v3.0", fps=metadata_fps, robot_type="test", total_frames=frames,
                 total_episodes=2, total_tasks=2, features=features, splits={"train": "0:2"},
                 data_path="data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
                 video_path="videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4")
@@ -82,7 +84,7 @@ def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=Fal
         ep_rows = []
         for index in range(start, end):
             row = dict(index=index, episode_index=ep, frame_index=index-start,
-                       timestamp=(index-start)/fps, task_index=ep, subtask_index=index % 2)
+                       timestamp=(index-start)/metadata_fps, task_index=ep, subtask_index=index % 2)
             row["observation.state"] = [float(value + index), float(index)]
             row["action"] = [float(index), -float(index)]
             ep_rows.append(row)
@@ -92,8 +94,8 @@ def source(root, tasks=("pick", "place"), subtasks=("reach", "grasp"), video=Fal
         episode.update({"data/chunk_index": 0, "data/file_index": 0})
         if video:
             episode.update({"videos/camera/chunk_index": 0, "videos/camera/file_index": 0,
-                            "videos/camera/from_timestamp": start/fps,
-                            "videos/camera/to_timestamp": end/fps})
+                            "videos/camera/from_timestamp": start/metadata_fps,
+                            "videos/camera/to_timestamp": end/metadata_fps})
         for name in ("index", "episode_index", "task_index", "subtask_index"):
             stats = _batch_stats([r[name] for r in ep_rows])
             for stat, v in stats.items():
@@ -1363,7 +1365,7 @@ def test_merge_nullable_subtask_import(setup, tmp_path, import_parallelism, all_
         assert second["subtask_index"][0].item() == 0
 
 
-@pytest.mark.parametrize("rate", [None, 0, -1, True, 10.5])
+@pytest.mark.parametrize("rate", [None, 0, -1, True, float("nan"), float("inf")])
 @pytest.mark.parametrize("setup", [20], indirect=True)
 def test_reader_rejects_invalid_source_fps(setup, rate):
 
