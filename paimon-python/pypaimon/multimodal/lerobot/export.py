@@ -17,10 +17,13 @@
 """Export a source Dataset from Paimon to LeRobot v2.0, v2.1, or v3.0."""
 
 import copy
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Mapping
 from fractions import Fraction
@@ -156,7 +159,7 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
         if remote:
             _upload_to_oss(stage, target_uri, output_io)
             return target_uri
-        stage.rename(target)
+        _publish_local(stage, target)
         return target
     finally:
         if reader is not None:
@@ -165,6 +168,24 @@ def export_to_lerobot(connection, table_name, output_dir, *, version="v3.0",
             shutil.rmtree(stage)
         if output_io is not None:
             output_io.close()
+
+
+def _publish_local(stage, target):
+    if sys.platform != "linux":
+        stage.rename(target)
+        return
+    try:
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as error:
+        raise OSError(errno.ENOTSUP, "Atomic no-replace rename is unavailable.") from error
+    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                          ctypes.c_char_p, ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    if renameat2(-100, os.fsencode(stage), -100, os.fsencode(target), 1) != 0:
+        code = ctypes.get_errno()
+        if code in (errno.EEXIST, errno.ENOTEMPTY):
+            raise FileExistsError(code, os.strerror(code), str(target))
+        raise OSError(code, os.strerror(code), str(target))
 
 
 def _upload_to_oss(stage, prefix, file_io):

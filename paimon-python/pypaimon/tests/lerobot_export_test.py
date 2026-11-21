@@ -19,6 +19,7 @@ import io
 import inspect
 import shutil
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
@@ -33,6 +34,7 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
+import pypaimon.multimodal.lerobot.export as export_module
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -191,6 +193,25 @@ def test_safe_path_on_python36(tmp_path):
         "else:\n"
         "    raise AssertionError('path traversal accepted')\n" % str(tmp_path))
     subprocess.run([python36, "-c", script], check=True, capture_output=True)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux no-replace rename")
+def test_local_export_rejects_directory_created_during_export(tmp_path):
+    original = source(tmp_path / "input")
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original)
+    target = tmp_path / "output"
+    write_dataset = export_module._write_dataset
+
+    def write_and_claim(*args, **kwargs):
+        write_dataset(*args, **kwargs)
+        target.mkdir()
+
+    with mock.patch.object(export_module, "_write_dataset", side_effect=write_and_claim):
+        with pytest.raises(FileExistsError):
+            conn.export_to_lerobot("robot", target)
+    assert target.is_dir() and not list(target.iterdir())
+    assert not list(tmp_path.glob(".lerobot-export-*"))
 
 
 def test_export_requires_dataset_id_for_multi_source_group(tmp_path):
