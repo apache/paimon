@@ -521,7 +521,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+                DataEvolutionGlobalIndexScanner.createForPredicate(
+                        table, batchScan.prepareSnapshot(), partitionFilter, globalIndexFilter);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -560,7 +561,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.createForTopN(table, partitionFilter, topN);
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                        table, batchScan.prepareSnapshot(), partitionFilter, topN);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
