@@ -274,6 +274,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                     "Option 'postpone.merge-on-read' is not supported for lookup reads.");
         }
 
+        if (CoreOptions.fromMap(table.options()).changelogOnRead()) {
+            throw new UnsupportedOperationException(
+                    "Lookup join is not supported for tables with changelog-producer=on-read.");
+        }
+
         if (limit != null) {
             throw new RuntimeException(
                     "Limit push down should not happen in Lookup source, but it is " + limit);

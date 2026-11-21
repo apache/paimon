@@ -41,6 +41,7 @@ public class FileStoreSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
+    private final TableRead tableRead;
     private final IOManager ioManager;
 
     private long lastConsumeSnapshotId = Long.MIN_VALUE;
@@ -68,6 +69,7 @@ public class FileStoreSourceReader
                                 readerContext, element, output, state, metrics, rowData),
                 readerContext.getConfiguration(),
                 readerContext);
+        this.tableRead = tableRead;
         this.ioManager = ioManager;
     }
 
@@ -116,7 +118,14 @@ public class FileStoreSourceReader
 
     @Override
     public void close() throws Exception {
-        super.close();
-        ioManager.close();
+        try {
+            super.close();
+        } finally {
+            try {
+                tableRead.close();
+            } finally {
+                ioManager.close();
+            }
+        }
     }
 }

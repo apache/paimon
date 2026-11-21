@@ -43,8 +43,10 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -149,6 +151,49 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 (lookupKey, level0) -> lookupLevel0(lookupKey, level0, context));
     }
 
+    /** Lookup all records for a key instead of stopping at the first matching level. */
+    public List<T> lookupAll(InternalRow key) throws IOException {
+        List<T> result = new ArrayList<>();
+        for (DataFileMeta file : levels.level0()) {
+            if (keyComparator.compare(file.maxKey(), key) >= 0
+                    && keyComparator.compare(file.minKey(), key) <= 0) {
+                T value = lookup(key, file, null);
+                if (value != null) {
+                    result.add(value);
+                }
+            }
+        }
+        for (int level = 1; level < levels.numberOfLevels(); level++) {
+            T value = lookup(key, levels.runOfLevel(level), null);
+            if (value != null) {
+                result.add(value);
+            }
+        }
+        return result;
+    }
+
+    /** Prepare local lookup files before records are consumed. */
+    public void prepareLookupFiles(List<DataFileMeta> files) throws IOException {
+        for (DataFileMeta file : files) {
+            String fileName = file.fileName();
+            LookupFile lookupFile = lookupFileCache.getIfPresent(fileName);
+            if (lookupFile != null && !lookupFile.isClosed()) {
+                continue;
+            }
+
+            Object lock = lookupFileLock(fileName);
+            synchronized (lock) {
+                lookupFile = lookupFileCache.getIfPresent(fileName);
+                if (lookupFile != null && !lookupFile.isClosed()) {
+                    continue;
+                }
+
+                lookupFile = createLookupFile(file);
+                addLocalFile(file, lookupFile);
+            }
+        }
+    }
+
     @Nullable
     private T lookupLevel0(
             InternalRow key, TreeSet<DataFileMeta> level0, @Nullable LookupContext context)
@@ -174,10 +219,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return null;
         }
 
+        // A cached SST can outlive a file upgrade; use the level from the current read view.
         return readFromDisk(
                 getOrCreateProcessor(lookupResult.schemaId, lookupResult.serVersion),
                 key,
-                lookupResult.level,
+                file.level(),
                 valueBytes,
                 file.fileName());
     }
@@ -248,21 +294,18 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     private static class LookupResult {
 
-        private final int level;
         private final long schemaId;
         private final String serVersion;
         private final byte[] valueBytes;
 
-        private LookupResult(int level, long schemaId, String serVersion, byte[] valueBytes) {
-            this.level = level;
+        private LookupResult(long schemaId, String serVersion, byte[] valueBytes) {
             this.schemaId = schemaId;
             this.serVersion = serVersion;
             this.valueBytes = valueBytes;
         }
 
         private static LookupResult of(LookupFile lookupFile, byte[] valueBytes) {
-            return new LookupResult(
-                    lookupFile.level(), lookupFile.schemaId(), lookupFile.serVersion(), valueBytes);
+            return new LookupResult(lookupFile.schemaId(), lookupFile.serVersion(), valueBytes);
         }
     }
 
