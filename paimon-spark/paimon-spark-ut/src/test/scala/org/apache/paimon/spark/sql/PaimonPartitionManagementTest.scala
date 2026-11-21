@@ -18,9 +18,20 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.data.{GenericRow, Timestamp}
+import org.apache.paimon.partition.PartitionStatistics
+import org.apache.paimon.schema.Schema
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory, PartitionModification}
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.unsafe.types.UTF8String
+
+import java.time.LocalDateTime
+import java.util.{ArrayList => JArrayList, List => JList, Map => JMap}
 
 import scala.collection.JavaConverters._
 
@@ -285,6 +296,84 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       assert(partitions.sorted == Seq("a", "b"))
       spark.sql("TRUNCATE TABLE T PARTITION (p = 'a')")
       assert(partitions == Seq("b"))
+    }
+  }
+
+  test("Paimon Partition Management: drop and truncate leave expired partitions alone") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, dt STRING) PARTITIONED BY (dt)")
+      spark.sql("INSERT INTO T VALUES (1, '2020-01-01'), (2, '2099-01-01'), (3, '2099-01-02')")
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES ('partition.expiration-time' = '7 d', " +
+          "'partition.expiration-check-interval' = '0 s', " +
+          "'partition.timestamp-pattern' = '$dt', 'partition.timestamp-formatter' = 'yyyy-MM-dd')")
+      spark.sql("TRUNCATE TABLE T PARTITION (dt = '2099-01-01')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(1) :: Row(3) :: Nil)
+      spark.sql("ALTER TABLE T DROP PARTITION (dt = '2099-01-02')")
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(1) :: Nil)
+    }
+  }
+
+  test("Paimon Partition Management: drop partitions through the catalog's partition handler") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, p STRING) PARTITIONED BY (p)")
+      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+      val dropped = new JArrayList[JMap[String, String]]()
+      val handler = new PartitionModification {
+        override def createPartitions(partitions: JList[JMap[String, String]]): Unit = {}
+        override def dropPartitions(partitions: JList[JMap[String, String]]): Unit =
+          dropped.addAll(partitions)
+        override def alterPartitions(partitions: JList[PartitionStatistics]): Unit = {}
+        override def close(): Unit = {}
+      }
+      // A catalog with a partition handler and none of the Hive options.
+      val environment = new CatalogEnvironment(null, null, null, null, null, null, false, true) {
+        override def partitionModification(): PartitionModification = handler
+      }
+      val table = loadTable("T")
+      val sparkTable = SparkTable(
+        FileStoreTableFactory.create(table.fileIO(), table.location(), table.schema(), environment))
+      sparkTable.dropPartitions(Array(InternalRow(UTF8String.fromString("a"))))
+      assert(dropped.asScala.map(_.asScala.toMap) == Seq(Map("p" -> "a")))
+      // The handler drops nothing, so the rows are still there.
+      checkAnswer(spark.sql("SELECT a FROM T"), Row(1) :: Row(2) :: Nil)
+      intercept[IllegalArgumentException] {
+        sparkTable.dropPartitions(Array(InternalRow(UTF8String.fromString(" "))))
+      }
+      assert(dropped.size == 1)
+    }
+  }
+
+  test("Paimon Partition Management: drop a timestamp partition at its stored precision") {
+    withTimeZone("UTC") {
+      withTable("T") {
+        val schema = Schema
+          .newBuilder()
+          .column("a", DataTypes.INT())
+          .column("p", DataTypes.TIMESTAMP(9))
+          .partitionKeys("p")
+          .option("partition.legacy-name", "false")
+          .build()
+        paimonCatalog.createTable(Identifier.create(dbName0, "T"), schema, false)
+        val builder = loadTable("T").newBatchWriteBuilder()
+        val write = builder.newWrite()
+        Seq(1 -> "2024-06-01T00:00:00.123456", 2 -> "2024-06-01T00:00:00.123456789").foreach {
+          case (a, p) =>
+            write.write(
+              GenericRow
+                .of(Integer.valueOf(a), Timestamp.fromLocalDateTime(LocalDateTime.parse(p))))
+        }
+        val commit = builder.newCommit()
+        try {
+          commit.commit(write.prepareCommit())
+        } finally {
+          write.close()
+          commit.close()
+        }
+        // Spark holds microseconds, which both partitions share.
+        spark.sql("ALTER TABLE T DROP PARTITION (p = '2024-06-01 00:00:00.123456')")
+        checkAnswer(spark.sql("SELECT a FROM T"), Row(2) :: Nil)
+      }
     }
   }
 

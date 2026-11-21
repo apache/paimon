@@ -154,19 +154,16 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
             Seq("(1, ' ')", "(2, NULL)", "(3, 'a')").foreach {
               row => spark.sql(s"INSERT INTO paimon_db.blank_tbl VALUES $row")
             }
-            val drop = "ALTER TABLE paimon_db.blank_tbl DROP PARTITION (p = ' ')"
-            if (inMetastore.toBoolean) {
-              // The metastore names a blank partition as it names the null one.
-              val e = intercept[IllegalArgumentException](spark.sql(drop))
-              assert(e.getMessage.contains("does not parse back"))
-              assert(!e.getMessage.contains("= NULL"))
-              checkAnswer(
-                spark.sql("SELECT a FROM paimon_db.blank_tbl"),
-                Row(1) :: Row(2) :: Row(3) :: Nil)
-            } else {
-              spark.sql(drop)
-              checkAnswer(spark.sql("SELECT a FROM paimon_db.blank_tbl"), Row(2) :: Row(3) :: Nil)
+            // The Hive catalog drops partitions by name, and a blank partition is named as the
+            // null one is, with or without metastore partitions.
+            val e = intercept[IllegalArgumentException] {
+              spark.sql("ALTER TABLE paimon_db.blank_tbl DROP PARTITION (p = ' ')")
             }
+            assert(e.getMessage.contains("does not parse back"))
+            assert(!e.getMessage.contains("= NULL"))
+            checkAnswer(
+              spark.sql("SELECT a FROM paimon_db.blank_tbl"),
+              Row(1) :: Row(2) :: Row(3) :: Nil)
           }
       }
     }

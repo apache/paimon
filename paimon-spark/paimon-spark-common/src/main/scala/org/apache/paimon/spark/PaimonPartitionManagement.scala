@@ -18,14 +18,16 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.{CoreOptions, Snapshot}
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.data.{GenericRow, InternalRow => PaimonInternalRow, Timestamp}
+import org.apache.paimon.data.serializer.InternalRowSerializer
 import org.apache.paimon.options.Options
-import org.apache.paimon.partition.PartitionStatistics
+import org.apache.paimon.partition.{PartitionPredicate, PartitionStatistics}
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.table.{FileStoreTable, FormatTable, Table}
-import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.ScanMode
-import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
+import org.apache.paimon.types.{DataTypeChecks, RowType}
+import org.apache.paimon.utils.{DateTimeUtils, InternalRowPartitionComputer, TypeUtils}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.Row
@@ -35,9 +37,8 @@ import org.apache.spark.sql.connector.catalog.{SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.unsafe.types.UTF8String
 
-import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.util.{ArrayList => JArrayList, Collections, List => JList, Map => JMap, Objects}
+import java.util.{Arrays, LinkedHashMap => JLinkedHashMap, Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
 
@@ -137,19 +138,65 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   /**
-   * The first `numFields` values of a partition row, as a key that compares them the way
-   * `listPartitionIdentifiers` does: `equals` per value, and BINARY values by content.
+   * The Paimon values of the partition columns each row holds, the first ones of the table, with
+   * timestamps at the column's precision.
    */
-  private def partitionKey(row: InternalRow, numFields: Int): JList[AnyRef] = {
-    val values = (0 until numFields).map {
-      i =>
-        row.get(i, partitionSchema.fields(i).dataType) match {
-          case bytes: Array[Byte] => ByteBuffer.wrap(bytes)
-          case value => value
-        }
-    }
-    new JArrayList[AnyRef](values.asJava)
+  private def toPaimonPartitionValues(rows: Seq[InternalRow]): Seq[Array[AnyRef]] = {
+    val converters = rows
+      .map(_.numFields)
+      .distinct
+      .map {
+        numFields =>
+          val names = table.partitionKeys().asScala.toSeq.take(numFields)
+          val rowType = TypeUtils.project(table.rowType, names.asJava)
+          val toScala = CatalystTypeConverters.createToScalaConverter(
+            CharVarcharUtils.replaceCharVarcharWithString(
+              SparkTypeUtils.fromPaimonRowType(rowType)))
+          val getters = rowType.getFields.asScala.zipWithIndex.map {
+            case (field, i) =>
+              field.`type`() -> PaimonInternalRow.createFieldGetter(field.`type`(), i)
+          }
+          numFields -> {
+            (row: InternalRow) =>
+              val paimonRow = new SparkRow(rowType, toScala(row).asInstanceOf[Row])
+              getters.map {
+                case (dataType, getter) =>
+                  getter.getFieldOrNull(paimonRow) match {
+                    case timestamp: Timestamp =>
+                      DateTimeUtils.truncate(timestamp, DataTypeChecks.getPrecision(dataType))
+                    case other => other
+                  }
+              }.toArray
+          }
+      }
+      .toMap
+    rows.map(row => converters(row.numFields)(row))
   }
+
+  /**
+   * The partitions `values` address, compared by value: full values address their own partition, a
+   * prefix every partition under it.
+   */
+  private def toPartitionPredicate(values: Seq[Array[AnyRef]]): PartitionPredicate = {
+    if (values.forall(_.length == partitionRowType.getFieldCount)) {
+      val serializer = new InternalRowSerializer(partitionRowType)
+      PartitionPredicate.fromMultiple(
+        partitionRowType,
+        values.map(v => serializer.toBinaryRow(GenericRow.of(v: _*)).copy()).asJava)
+    } else {
+      val names = partitionRowType.getFieldNames
+      val predicates = values.map {
+        v =>
+          val spec = new JLinkedHashMap[String, AnyRef]()
+          v.indices.foreach(i => spec.put(names.get(i), v(i)))
+          PartitionPredicate.createPartitionPredicate(partitionRowType, spec)
+      }
+      PartitionPredicate.fromPredicate(partitionRowType, PredicateBuilder.or(predicates.asJava))
+    }
+  }
+
+  private def toPartitionPredicate(row: InternalRow): PartitionPredicate =
+    toPartitionPredicate(toPaimonPartitionValues(Seq(row)))
 
   /** The specs of the partitions to drop by name; each must address its own partition. */
   private def toRemovedPaimonPartitions(rows: Array[InternalRow]): Array[JMap[String, String]] = {
@@ -173,79 +220,47 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   /**
-   * Removes the data of the partitions in the latest snapshot that the rows address, matched by
-   * value: a full row addresses its own partition, a prefix row every partition under it.
+   * Removes the data of the partitions the rows address. The commit matches them by value in the
+   * snapshot it commits on, as it matches a partition spec.
    */
-  private def truncateStoredPartitions(
+  private def truncatePartitionsByValue(
       fileStoreTable: FileStoreTable,
       rows: Array[InternalRow]): Unit = {
     if (rows.isEmpty) {
       return
     }
-    // A batch scan can hide files, such as level 0 of a deletion-vector primary-key table; the
-    // snapshot reader lists every partition of the latest snapshot.
-    val stored = fileStoreTable
-      .newSnapshotReader()
-      .withMode(ScanMode.ALL)
-      .partitions()
-      .asScala
-      .map(partition => (partition, DataConverter.fromPaimon(partition, partitionRowType)))
-    val storedByPrefix = rows
-      .map(_.numFields)
-      .distinct
-      .map {
-        numFields =>
-          numFields -> stored.groupBy { case (_, values) => partitionKey(values, numFields) }
-      }
-      .toMap
-    val partitions = rows.toSeq.flatMap {
+    rows.foreach {
       row =>
-        val matched = storedByPrefix(row.numFields)
-          .getOrElse(partitionKey(row, row.numFields), Seq.empty)
-          .map(_._1)
-        if (matched.isEmpty) {
-          columnHoldingDefaultPartitionName(row).foreach {
-            name =>
+        columnHoldingDefaultPartitionName(row).foreach {
+          name =>
+            val reader = fileStoreTable.newSnapshotReader().withMode(ScanMode.ALL)
+            if (reader.withPartitionFilter(toPartitionPredicate(row)).partitions().isEmpty) {
               throw new IllegalArgumentException(
                 s"No partition of table ${table.name()} has the default partition name as the " +
                   s"value of partition column $name. If you meant the NULL partition, use " +
                   s"$name = NULL.")
-          }
+            }
         }
-        matched
-    }.distinct
-    if (partitions.nonEmpty) {
-      logInfo(
-        "Try to remove the data of partitions: " + partitions
-          .map(InternalRowPartitionComputer.partToSimpleString(partitionRowType, _, "/", 200))
-          .mkString(","))
-      // A static overwrite with no data removes the data of the given partitions.
-      val target =
-        fileStoreTable.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> "false").asJava)
-      val commit = target.newCommit(CoreOptions.createCommitUser(new Options(target.options())))
-      try {
-        commit
-          .withOperation(Snapshot.Operation.TRUNCATE)
-          .withOverwriteStaticPartitions(partitions.asJava)
-          .commit(Collections.emptyList[CommitMessage]())
-      } finally {
-        commit.close()
-      }
+    }
+    val values = toPaimonPartitionValues(rows.toSeq)
+    logInfo(
+      s"Try to truncate the partitions of table ${table.name()} matching " +
+        values.map(v => Arrays.deepToString(v)).mkString(", "))
+    val commit =
+      fileStoreTable.newCommit(CoreOptions.createCommitUser(new Options(fileStoreTable.options())))
+    try {
+      commit.truncatePartitions(toPartitionPredicate(values))
+    } finally {
+      commit.close()
     }
   }
 
   override def dropPartitions(rows: Array[InternalRow]): Boolean = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        // The catalog drops the partitions it keeps in a metastore by name.
-        val options = fileStoreTable.coreOptions()
-        val partitionModification =
-          if (options.partitionedTableInMetastore() || options.tagToPartitionField() != null) {
-            fileStoreTable.catalogEnvironment().partitionModification()
-          } else {
-            null
-          }
+        val partitionModification = fileStoreTable.catalogEnvironment().partitionModification()
         if (partitionModification != null) {
+          // The catalog drops partitions by name.
           try {
             val partitions = toRemovedPaimonPartitions(rows).toSeq.asJava
             logInfo("Try to drop partitions: " + partitions.asScala.mkString(","))
@@ -254,7 +269,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
             partitionModification.close()
           }
         } else {
-          truncateStoredPartitions(fileStoreTable, rows)
+          truncatePartitionsByValue(fileStoreTable, rows)
         }
         true
 
@@ -266,7 +281,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        truncateStoredPartitions(fileStoreTable, idents)
+        truncatePartitionsByValue(fileStoreTable, idents)
       case _ =>
         val partitions = toPaimonPartitions(idents).toSeq.asJava
         val commit = table.newBatchWriteBuilder().newCommit()
@@ -292,18 +307,13 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val partitionSpec = toPaimonPartitions(Array(ident)).head
-        val reader = fileStoreTable.newSnapshotReader().withMode(ScanMode.ALL)
-        val partitionEntry = if (columnNotParsedBack(ident, partitionSpec).isEmpty) {
-          reader.withPartitionFilter(partitionSpec).partitionEntries().asScala.headOption
-        } else {
-          // The spec may select another partition or none, so match the partitions by value.
-          reader.partitionEntries().asScala.find {
-            entry =>
-              val partition = DataConverter.fromPaimon(entry.partition(), partitionRowType)
-              partitionKey(partition, ident.numFields) == partitionKey(ident, ident.numFields)
-          }
-        }
+        val partitionEntry = fileStoreTable
+          .newSnapshotReader()
+          .withMode(ScanMode.ALL)
+          .withPartitionFilter(toPartitionPredicate(ident))
+          .partitionEntries()
+          .asScala
+          .headOption
 
         partitionEntry match {
           case Some(entry) =>
