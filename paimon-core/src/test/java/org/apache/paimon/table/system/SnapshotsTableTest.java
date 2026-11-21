@@ -45,6 +45,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -52,9 +53,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -106,6 +104,12 @@ public class SnapshotsTableTest extends TableTestBase {
 
     @Test
     public void testReadSnapshotsFromLatest() throws Exception {
+        assertThat(snapshotsTable.rowType().getField(5))
+                .isEqualTo(
+                        new DataField(
+                                5,
+                                "commit_time",
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).notNull()));
         List<InternalRow> expectedRow = getExpectedResult(new long[] {1, 2});
         List<InternalRow> result = read(snapshotsTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
@@ -278,10 +282,7 @@ public class SnapshotsTableTest extends TableTestBase {
                             BinaryString.fromString(snapshot.commitUser()),
                             snapshot.commitIdentifier(),
                             BinaryString.fromString(snapshot.commitKind().toString()),
-                            Timestamp.fromLocalDateTime(
-                                    LocalDateTime.ofInstant(
-                                            Instant.ofEpochMilli(snapshot.timeMillis()),
-                                            ZoneId.systemDefault())),
+                            Timestamp.fromEpochMillis(snapshot.timeMillis()),
                             BinaryString.fromString(snapshot.baseManifestList()),
                             BinaryString.fromString(snapshot.deltaManifestList()),
                             BinaryString.fromString(snapshot.changelogManifestList()),

@@ -35,8 +35,8 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TagManager;
 
@@ -95,6 +95,12 @@ class TagsTableTest extends TableTestBase {
 
     @Test
     void testTagsTable() throws Exception {
+        assertThat(tagsTable.rowType().getField(3))
+                .isEqualTo(
+                        new DataField(
+                                3,
+                                "commit_time",
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).notNull()));
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(tagsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
@@ -208,8 +214,7 @@ class TagsTableTest extends TableTestBase {
                             BinaryString.fromString(tagName),
                             tag.id(),
                             tag.schemaId(),
-                            Timestamp.fromLocalDateTime(
-                                    DateTimeUtils.toLocalDateTime(tag.timeMillis())),
+                            Timestamp.fromEpochMillis(tag.timeMillis()),
                             tag.totalRecordCount(),
                             tag.getTagCreateTime() == null
                                     ? null
