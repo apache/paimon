@@ -22,6 +22,11 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorRewriteTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorRewriteTask.Serializer;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -32,10 +37,13 @@ import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.RetryWaiter;
 
+import org.apache.spark.TaskContext;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.util.TaskCompletionListener;
+import org.apache.spark.util.TaskFailureListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -314,16 +322,33 @@ final class DataEvolutionRewriteExecutor {
             }
 
             List<CommitMessage> preparedMessages = new ArrayList<>(attemptMessages);
-            List<CommitMessage> preparationArtifacts =
-                    new DataEvolutionCompactionCommitPreparation(table, attemptSnapshot)
-                            .prepare(preparedMessages);
+            DataEvolutionCompactionCommitPreparation preparation =
+                    new DataEvolutionCompactionCommitPreparation(table, attemptSnapshot);
+            List<CommitMessage> preparationArtifacts = new ArrayList<>();
+            try {
+                preparationArtifacts.addAll(
+                        rewriteDeletionVectors(
+                                table,
+                                preparation.planDeletionVectorRewrites(attemptMessages),
+                                sparkSession));
+            } catch (Exception failure) {
+                RuntimeException preparationFailure =
+                        failure instanceof RuntimeException
+                                ? (RuntimeException) failure
+                                : new RuntimeException(
+                                        "Prepare deletion vector rewrites failed.", failure);
+                List<CommitMessage> staged = new ArrayList<>(retryArtifacts);
+                staged.addAll(preparationArtifacts);
+                abortRetryArtifacts(table, commitUser, staged, preparationFailure);
+                throw preparationFailure;
+            }
             preparedMessages.addAll(preparationArtifacts);
             List<CommitMessage> abortMessages = new ArrayList<>(retryArtifacts);
             abortMessages.addAll(preparationArtifacts);
             try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                commitConfigurer.configure(commit);
-                commitConfigurer.prepareMessages(attemptSnapshot, preparedMessages);
                 try {
+                    commitConfigurer.configure(commit);
+                    commitConfigurer.prepareMessages(attemptSnapshot, preparedMessages);
                     commit.commit(preparedMessages);
                 } catch (RuntimeException conflict) {
                     if (commitConfigurer == RANGE_SORT_COMMIT) {
@@ -362,6 +387,102 @@ final class DataEvolutionRewriteExecutor {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    private static List<CommitMessage> rewriteDeletionVectors(
+            FileStoreTable table,
+            List<DataEvolutionDeletionVectorRewriteTask> tasks,
+            SparkSession sparkSession) {
+        if (tasks.isEmpty()) {
+            return new ArrayList<>();
+        }
+        Serializer serializer = new Serializer();
+        List<byte[]> serializedTasks = new ArrayList<>(tasks.size());
+        try {
+            for (DataEvolutionDeletionVectorRewriteTask task : tasks) {
+                serializedTasks.add(serializer.serialize(task));
+            }
+            int parallelism = readParallelism(serializedTasks, sparkSession);
+            LOG.info(
+                    "Rewriting deletion vectors for table {} in {} tasks with parallelism {}.",
+                    table.fullName(),
+                    tasks.size(),
+                    parallelism);
+            JavaRDD<byte[]> rewritten =
+                    JavaSparkContext.fromSparkContext(sparkSession.sparkContext())
+                            .parallelize(serializedTasks, parallelism)
+                            .mapPartitions(
+                                    iterator ->
+                                            rewriteDeletionVectorPartition(
+                                                            table, iterator, TaskContext.get())
+                                                    .iterator());
+            // Successful tasks cannot observe a later failure elsewhere in the job. Their
+            // uncommitted files, and outputs lost with an executor, need orphan cleanup.
+            List<byte[]> messages = new ArrayList<>(rewritten.collect());
+            return deserializeCommitMessagesAndReleaseSerializedBytes(
+                    new CommitMessageSerializer(), messages);
+        } catch (IOException e) {
+            throw new RuntimeException("Serialize deletion vector rewrite messages failed.", e);
+        }
+    }
+
+    static List<byte[]> rewriteDeletionVectorPartition(
+            FileStoreTable table, Iterator<byte[]> iterator, @Nullable TaskContext context)
+            throws IOException {
+        List<Path> outputs = new ArrayList<>();
+        Runnable cleanup =
+                () -> {
+                    for (Path output : outputs) {
+                        try {
+                            table.fileIO().deleteQuietly(output);
+                        } catch (RuntimeException failure) {
+                            LOG.warn(
+                                    "Failed to delete uncommitted DV index file {}.",
+                                    output,
+                                    failure);
+                        }
+                    }
+                    outputs.clear();
+                };
+        if (context != null) {
+            context.addTaskFailureListener(
+                    (TaskFailureListener) (failed, failure) -> cleanup.run());
+            context.addTaskCompletionListener(
+                    (TaskCompletionListener)
+                            completed -> {
+                                if (completed.isInterrupted()) {
+                                    cleanup.run();
+                                }
+                            });
+        }
+        Serializer taskSerializer = new Serializer();
+        CommitMessageSerializer messageSerializer = new CommitMessageSerializer();
+        List<byte[]> results = new ArrayList<>();
+        try {
+            while (iterator.hasNext()) {
+                if (context != null) {
+                    context.killTaskIfInterrupted();
+                }
+                DataEvolutionDeletionVectorRewriteTask task =
+                        taskSerializer.deserialize(taskSerializer.getVersion(), iterator.next());
+                CommitMessageImpl message = (CommitMessageImpl) task.execute(table);
+                IndexPathFactory paths =
+                        table.store()
+                                .pathFactory()
+                                .indexFileFactory(message.partition(), message.bucket());
+                for (IndexFileMeta file : message.compactIncrement().newIndexFiles()) {
+                    outputs.add(paths.toPath(file));
+                }
+                results.add(messageSerializer.serialize(message));
+            }
+            if (context != null) {
+                context.killTaskIfInterrupted();
+            }
+            return results;
+        } catch (IOException | RuntimeException failure) {
+            cleanup.run();
+            throw failure;
         }
     }
 
