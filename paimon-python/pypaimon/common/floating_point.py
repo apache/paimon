@@ -17,9 +17,6 @@
 
 import math
 
-import numpy as np
-import pyarrow as pa
-
 
 def floating_sort_key(value):
     """Java Float/Double.compare order for a non-null scalar."""
@@ -27,17 +24,3 @@ def floating_sort_key(value):
     if math.isnan(value):
         return True, 0.0, 0.0
     return False, value, math.copysign(1.0, value)
-
-
-def floating_array_sort_key(column):
-    """Unsigned keys in Java Float/Double.compare order, preserving nulls."""
-    # The NumPy protocol supports Array and older ChunkedArray APIs alike.
-    values = np.asarray(column)
-    bits = values.view(np.dtype('uint{}'.format(column.type.bit_width)))
-    sign_bit = np.array(1 << (column.type.bit_width - 1), dtype=bits.dtype)
-    # Invert negative IEEE bits, flip the sign bit for nonnegative values.
-    # This orders -0.0 before +0.0, unlike Arrow's floating-point sort.
-    keys = np.where(bits & sign_bit, ~bits, bits ^ sign_bit)
-    # All NaN signs/payloads compare equal, above positive infinity.
-    keys[np.isnan(values)] = np.iinfo(bits.dtype).max
-    return pa.array(keys, mask=np.asarray(column.is_null()))

@@ -142,8 +142,8 @@ def test_all_infinity_append_file_has_exact_bounds(tmp_path, typ, value):
 @pytest.mark.parametrize(('values', 'low', 'high'), [
     ([0.0], 0.0, 0.0), ([-0.0], -0.0, -0.0),
     ([+0.0, -0.0], -0.0, 0.0), ([-0.0, 0.0], -0.0, +0.0),
-    ([5.0, float('nan')], 5.0, float('nan')),
-    ([float('nan'), 5.0], 5.0, float('nan')),
+    ([5.0, float('nan')], None, None),
+    ([float('nan'), 5.0], None, None),
 ])
 def test_floating_file_and_key_bounds(tmp_path, typ, values, low, high):
     data = pa.table({'f': pa.array(values, type=typ), 'id': list(range(len(values)))})
@@ -152,14 +152,37 @@ def test_floating_file_and_key_bounds(tmp_path, typ, values, low, high):
     file, = _files(table)
     for stats in (file.key_stats, file.value_stats):
         minimum, maximum = _bounds(stats)
-        assert float(minimum[0]).hex() == low.hex()
-        assert float(maximum[0]).hex() == high.hex()
+        if low is None:
+            assert minimum[0] is None and maximum[0] is None
+        else:
+            assert minimum[0].hex() == low.hex()
+            assert maximum[0].hex() == high.hex()
         assert stats.null_counts[0] == 0
     # File run endpoints still describe the actual first and last physical keys.
     stored = pq.ParquetFile(next(tmp_path.rglob(file.file_name))).read(columns=['f', 'id'])
     for row, idx in ((file.min_key, 0), (file.max_key, -1)):
         assert row.values[0].hex() == stored['f'][idx].as_py().hex()
         assert row.values[1] == stored['id'][idx].as_py()
+
+
+def test_nan_value_stats_preserve_nulls_and_other_column_pruning(tmp_path):
+    table = _write(tmp_path, pa.table({'id': [1, 2, 3], 'v': [float('nan'), None, 5.]}), {
+        'bucket': '-1', 'metadata.stats-mode': 'full',
+        'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+    })
+    file, = _files(table)
+    assert _bounds(file.value_stats) == ([1, None], [3, None])
+    assert file.value_stats.null_counts == [0, 1]
+    read = table.new_read_builder()
+    predicates = read.new_predicate_builder()
+    read.with_filter(predicates.equal('id', 123))
+    assert not read.new_scan().plan().splits()
+    for predicate, expected in ((predicates.is_null('v'), [2]),
+                                (predicates.is_not_null('v'), [1, 3])):
+        read = table.new_read_builder().with_filter(predicate)
+        rows = read.new_read().to_arrow(read.new_scan().plan().splits())
+        assert sorted(rows['id'].to_pylist()) == expected
 
 
 def test_floating_stats_preserve_overlapping_key_runs(tmp_path):
@@ -243,9 +266,7 @@ def test_partial_row_update_publishes_stats_for_its_written_columns(tmp_path, mo
     assert file.write_cols == ['name', 'zero', 'mixed']
     assert file.value_stats_cols is None
     minimum, maximum = _bounds(file.value_stats)
-    assert minimum == [None, 0., 1.]
-    assert maximum[:2] == [None, 0.]
-    assert math.isnan(maximum[2])
+    assert minimum == maximum == [None, 0., None]
     assert math.copysign(1., minimum[1]) == -1.
     assert math.copysign(1., maximum[1]) == 1.
     assert file.value_stats.null_counts == [1, 0, 0]
@@ -287,8 +308,8 @@ def test_parquet_footer_falls_back_to_arrow_for_incomplete_or_ambiguous_bounds(t
     }), {'metadata.stats-mode': 'full'})
     file, = _files(table)
     minimum, maximum = _bounds(file.value_stats)
-    assert minimum == ['alpha', 1., 0.0, 5, None]
-    assert maximum[0] == long_value and math.isnan(maximum[1])
+    assert minimum == ['alpha', None, 0.0, 5, None]
+    assert maximum[:2] == [long_value, None]
     assert maximum[2:] == [0.0, 9, None]
     assert math.copysign(1.0, minimum[2]) == 1.0
     assert file.value_stats.null_counts == [0, 0, 1, 0, 0]

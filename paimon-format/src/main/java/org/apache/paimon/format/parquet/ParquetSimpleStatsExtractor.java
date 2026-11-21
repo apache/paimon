@@ -45,7 +45,6 @@ import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
@@ -58,6 +57,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -114,64 +114,86 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
         try (ParquetFileReader reader =
                 ParquetUtil.getParquetReader(fileIO, path, length, options)) {
             ParquetMetadata footer = reader.getFooter();
-            // Files produced by other writers may omit NaN from their bounds. Sum known null
-            // counts before extractColumnStats merges the row group statistics in place.
-            Map<String, Long> floatNulls = new HashMap<>();
-            for (BlockMetaData group : footer.getBlocks()) {
-                for (ColumnChunkMetaData column : group.getColumns()) {
-                    PrimitiveType.PrimitiveTypeName type = column.getType();
-                    if (column.getPath().size() == 1
-                            && (type == PrimitiveType.PrimitiveTypeName.FLOAT
-                                    || type == PrimitiveType.PrimitiveTypeName.DOUBLE)) {
-                        String name = column.getPath().toDotString();
-                        Long count = floatNulls.getOrDefault(name, 0L);
-                        Statistics<?> stats = column.getStatistics();
-                        floatNulls.put(
-                                name,
-                                count != null && stats != null && stats.isNumNullsSet()
-                                        ? Math.addExact(count, stats.getNumNulls())
-                                        : null);
+            SimpleColStats[] result = new SimpleColStats[rowType.getFieldCount()];
+            if (result.length > 0) {
+                MessageType schema = footer.getFileMetaData().getSchema();
+                // Row groups use the physical leaf order, which can differ from the table schema.
+                Map<String, Integer> leaves = new HashMap<>();
+                List<String[]> paths = schema.getPaths();
+                for (int i = 0; i < paths.size(); i++) {
+                    String[] leaf = paths.get(i);
+                    if (leaf.length == 1) {
+                        leaves.put(leaf[0], i);
                     }
                 }
-            }
-            Map<String, Statistics<?>> columnStats = ParquetUtil.extractColumnStats(footer);
-            SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
-            SimpleColStats[] result = new SimpleColStats[rowType.getFieldCount()];
-            for (int i = 0; i < result.length; i++) {
-                DataField field = rowType.getFields().get(i);
-                switch (field.type().getTypeRoot()) {
-                    case FLOAT:
-                    case DOUBLE:
-                        validateFloatingColumn(field, footer.getFileMetaData().getSchema());
-                        result[i] =
-                                collectors[i].convert(
-                                        new SimpleColStats(
-                                                null, null, floatNulls.get(field.name())));
-                        break;
-                    default:
-                        result[i] =
-                                toFieldStats(field, columnStats.get(field.name()), collectors[i]);
+                SimpleColStatsCollector[] collectors =
+                        SimpleColStatsCollector.create(statsCollectors);
+                for (int i = 0; i < result.length; i++) {
+                    DataField field = rowType.getFields().get(i);
+                    result[i] =
+                            extractFileStats(
+                                    field,
+                                    schema,
+                                    leaves.get(field.name()),
+                                    footer.getBlocks(),
+                                    collectors[i]);
                 }
             }
             return Pair.of(result, new FileInfo(reader.getRecordCount()));
         }
     }
 
-    private static void validateFloatingColumn(DataField field, MessageType schema) {
-        if (schema.containsField(field.name())) {
+    private SimpleColStats extractFileStats(
+            DataField field,
+            MessageType schema,
+            @Nullable Integer leaf,
+            List<BlockMetaData> groups,
+            SimpleColStatsCollector collector) {
+        if (!schema.containsField(field.name())) {
+            return SimpleColStats.NONE;
+        }
+        DataTypeRoot root = field.type().getTypeRoot();
+        if (root == DataTypeRoot.FLOAT || root == DataTypeRoot.DOUBLE) {
+            // External Parquet bounds can omit NaN. Width conversions preserve scalar null counts.
             Type physical = schema.getType(field.name());
-            PrimitiveType.PrimitiveTypeName expected =
-                    field.type().getTypeRoot() == DataTypeRoot.FLOAT
-                            ? PrimitiveType.PrimitiveTypeName.FLOAT
-                            : PrimitiveType.PrimitiveTypeName.DOUBLE;
             Preconditions.checkArgument(
                     physical.isPrimitive()
-                            && physical.asPrimitiveType().getPrimitiveTypeName() == expected,
-                    "Expected Parquet %s for field %s, found %s",
-                    expected,
+                            && !physical.isRepetition(Type.Repetition.REPEATED)
+                            && (physical.asPrimitiveType().getPrimitiveTypeName()
+                                            == PrimitiveType.PrimitiveTypeName.FLOAT
+                                    || physical.asPrimitiveType().getPrimitiveTypeName()
+                                            == PrimitiveType.PrimitiveTypeName.DOUBLE),
+                    "Expected a scalar Parquet FLOAT or DOUBLE for field %s, found %s",
                     field.name(),
                     physical);
+            long nulls = 0;
+            for (BlockMetaData group : groups) {
+                Statistics<?> stats = group.getColumns().get(leaf).getStatistics();
+                if (stats == null
+                        || !stats.isNumNullsSet()
+                        || stats.getNumNulls() > group.getRowCount()) {
+                    return SimpleColStats.NONE;
+                }
+                nulls = Math.addExact(nulls, stats.getNumNulls());
+            }
+            return collector.convert(new SimpleColStats(null, null, nulls));
         }
+
+        Statistics<?> merged = null;
+        if (leaf != null) {
+            for (BlockMetaData group : groups) {
+                Statistics<?> stats = group.getColumns().get(leaf).getStatistics();
+                if (stats == null || stats.isEmpty()) {
+                    return SimpleColStats.NONE;
+                }
+                if (merged == null) {
+                    merged = stats.copy();
+                } else {
+                    merged.mergeStatistics(stats);
+                }
+            }
+        }
+        return toFieldStats(field, merged, collector);
     }
 
     private SimpleColStats toFieldStats(

@@ -64,6 +64,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -72,6 +73,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PushDownUtils;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -281,6 +283,55 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             GenericRow.of(
                                     GenericRow.of(GenericRow.of(2)), GenericRow.of(1, true), 1),
                             GenericRow.of(null, GenericRow.of(null, null), 3));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "avro", "orc"})
+    public void testNaNFileBoundsPreserveNullCount(String format) throws Exception {
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        RowType.builder()
+                                .field("v", DataTypes.DOUBLE())
+                                .field("id", DataTypes.INT())
+                                .build(),
+                        options -> options.set(FILE_FORMAT, format));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(Double.NaN, 1));
+            write.write(GenericRow.of(null, 2));
+            write.write(GenericRow.of(5.0d, 3));
+            commit.commit(write.prepareCommit());
+        }
+        DataSplit split = (DataSplit) table.newReadBuilder().newScan().plan().splits().get(0);
+        DataFileMeta file = split.dataFiles().get(0);
+        assertThat(file.rowCount()).isEqualTo(3);
+        assertThat(file.valueStats().nullCounts().getLong(0)).isEqualTo(1);
+        assertThat(file.valueStats().minValues().isNullAt(0)).isTrue();
+        assertThat(file.valueStats().maxValues().isNullAt(0)).isTrue();
+        assertThat(file.valueStats().minValues().getInt(1)).isEqualTo(1);
+        assertThat(file.valueStats().maxValues().getInt(1)).isEqualTo(3);
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        id -> table.schemaManager().schema(id).fields(), table.schema().id());
+        assertThat(
+                        PushDownUtils.minmaxAvailable(
+                                split, Collections.singleton("v"), table.rowType(), evolutions))
+                .as("MIN/MAX must read rows when the column contains NaN")
+                .isFalse();
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        for (boolean isNull : new boolean[] {false, true}) {
+            ReadBuilder read =
+                    table.newReadBuilder().withFilter(isNull ? pb.isNull(0) : pb.isNotNull(0));
+            List<Integer> ids = new ArrayList<>();
+            try (RecordReader<InternalRow> rows =
+                    read.newRead().executeFilter().createReader(read.newScan().plan())) {
+                rows.forEachRemaining(row -> ids.add(row.getInt(1)));
+            }
+            assertThat(ids)
+                    .containsExactlyInAnyOrderElementsOf(
+                            isNull ? Collections.singletonList(2) : Arrays.asList(1, 3));
         }
     }
 

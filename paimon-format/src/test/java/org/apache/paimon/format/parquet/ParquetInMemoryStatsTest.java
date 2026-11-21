@@ -44,11 +44,22 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.example.data.Group;
+import org.apache.parquet.example.data.simple.SimpleGroupFactory;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.MessageTypeParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,15 +94,88 @@ public class ParquetInMemoryStatsTest {
                         .extract(fileIO, path, fileIO.getFileSize(path));
         assertThat(stats).containsExactly(new SimpleColStats(null, null, 1L));
 
-        RowType wrongType = RowType.builder().field("f", new FloatType()).build();
-        SimpleStatsExtractor wrong =
-                FileFormat.fromIdentifier("parquet", new Options())
-                        .createStatsExtractor(
-                                wrongType, SimpleColStatsCollector.createFullStatsFactories(1))
-                        .get();
-        assertThatThrownBy(() -> wrong.extract(fileIO, path, fileIO.getFileSize(path)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Expected Parquet FLOAT");
+        RowType narrower = RowType.builder().field("f", new FloatType()).build();
+        assertThat(
+                        new ParquetSimpleStatsExtractor(
+                                        new Options(),
+                                        narrower,
+                                        SimpleColStatsCollector.createFullStatsFactories(1))
+                                .extract(fileIO, path, fileIO.getFileSize(path)))
+                .containsExactly(stats[0]);
+    }
+
+    @Test
+    public void testImportedFloatNullCountsAcrossRowGroups() throws Exception {
+        MessageType physical =
+                MessageTypeParser.parseMessageType("message root { optional float f; }");
+        RowType target = RowType.builder().field("f", new DoubleType()).build();
+        SimpleStatsExtractor extractor =
+                new ParquetSimpleStatsExtractor(
+                        new Options(), target, SimpleColStatsCollector.createFullStatsFactories(1));
+        Configuration conf = new Configuration();
+        for (boolean complete : new boolean[] {true, false}) {
+            Path dest = new Path(tempDir.resolve("combined-" + complete).toUri());
+            try (ParquetFileWriter combined =
+                    new ParquetFileWriter(
+                            HadoopOutputFile.fromPath(
+                                    new org.apache.hadoop.fs.Path(dest.toUri()), conf),
+                            physical,
+                            ParquetFileWriter.Mode.CREATE,
+                            1024,
+                            0)) {
+                combined.start();
+                for (int i = 0; i < 2; i++) {
+                    org.apache.hadoop.fs.Path part =
+                            new org.apache.hadoop.fs.Path(
+                                    tempDir.resolve("part-" + complete + "-" + i).toUri());
+                    SimpleGroupFactory groups = new SimpleGroupFactory(physical);
+                    try (ParquetWriter<Group> writer =
+                            ExampleParquetWriter.builder(HadoopOutputFile.fromPath(part, conf))
+                                    .withType(physical)
+                                    .withConf(conf)
+                                    .withStatisticsEnabled(complete || i == 0)
+                                    .build()) {
+                        writer.write(groups.newGroup());
+                        writer.write(groups.newGroup().append("f", Float.NaN));
+                    }
+                    Path source = new Path(part.toUri());
+                    try (ParquetFileReader reader =
+                            ParquetUtil.getParquetReader(
+                                    fileIO, source, fileIO.getFileSize(source), new Options())) {
+                        reader.appendTo(combined);
+                    }
+                }
+                combined.end(Collections.emptyMap());
+            }
+            assertThat(extractor.extract(fileIO, dest, fileIO.getFileSize(dest)))
+                    .containsExactly(new SimpleColStats(null, null, complete ? 2L : null));
+        }
+    }
+
+    @Test
+    public void testRejectIncompatibleFloatImports() throws Exception {
+        RowType target = RowType.builder().field("f", new FloatType()).build();
+        SimpleStatsExtractor extractor =
+                new ParquetSimpleStatsExtractor(
+                        new Options(), target, SimpleColStatsCollector.createFullStatsFactories(1));
+        for (String field : new String[] {"optional binary f", "repeated float f"}) {
+            MessageType physical =
+                    MessageTypeParser.parseMessageType("message root { " + field + "; }");
+            Path path = new Path(tempDir.resolve(field.replace(' ', '-')).toUri());
+            Configuration conf = new Configuration();
+            try (ParquetWriter<Group> writer =
+                    ExampleParquetWriter.builder(
+                                    HadoopOutputFile.fromPath(
+                                            new org.apache.hadoop.fs.Path(path.toUri()), conf))
+                            .withType(physical)
+                            .withConf(conf)
+                            .build()) {
+                writer.write(new SimpleGroupFactory(physical).newGroup());
+            }
+            assertThatThrownBy(() -> extractor.extract(fileIO, path, fileIO.getFileSize(path)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("scalar Parquet FLOAT or DOUBLE");
+        }
     }
 
     @Test

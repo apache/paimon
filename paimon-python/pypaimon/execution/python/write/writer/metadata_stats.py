@@ -20,7 +20,6 @@ import re
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.common.floating_point import floating_array_sort_key
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -145,20 +144,9 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
     if (not bounds or column.null_count == len(column) or pa.types.is_nested(column.type)
             or pa.types.is_large_binary(column.type)):
         return stats
-    if pa.types.is_floating(column.type):
-        # Footer and Arrow numeric bounds can omit NaN or lose the sign of zero.
-        if not pc.any(pc.is_nan(column)).as_py():
-            limits = parquet_bounds.bounds(name, column.type) if parquet_bounds is not None else None
-            if limits is None:
-                extrema = pc.min_max(column).as_py()
-                limits = extrema['min'], extrema['max']
-            if limits[0] != 0.0 and limits[1] != 0.0:
-                stats['min_values'], stats['max_values'] = limits
-                return stats
-        keys = floating_array_sort_key(column)
-        extrema = pc.min_max(keys).as_py()
-        stats['min_values'] = column[pc.index(keys, extrema['min']).as_py()].as_py()
-        stats['max_values'] = column[pc.index(keys, extrema['max']).as_py()].as_py()
+    if pa.types.is_floating(column.type) and pc.any(pc.is_nan(column)).as_py():
+        # File readers can disagree on where NaN sorts. Preserve only the null count.
+        stats['bounds_unavailable'] = True
         return stats
     if parquet_bounds is not None:
         file_bounds = parquet_bounds.bounds(name, column.type)
@@ -176,6 +164,18 @@ def column_stats(data, name, bounds=True, parquet_bounds=None):
         # pandas treats the minimum signed i64 timestamp as NaT.
         stats['bounds_unavailable'] = True
         return stats
+    if pa.types.is_floating(column.type) and (minimum == 0.0 or maximum == 0.0):
+        # Arrow min_max treats both zeros as equal. Inspect their IEEE bits without
+        # copying the values or losing the validity bitmap of sliced arrays.
+        bits = column.type.bit_width
+        int_type = pa.int32() if bits == 32 else pa.int64()
+        chunks = column.chunks if isinstance(column, pa.ChunkedArray) else (column,)
+        if minimum == 0.0:
+            minimum = -0.0 if any(pc.index(c.view(int_type), -(1 << (bits - 1))).as_py() >= 0
+                                  for c in chunks) else 0.0
+        if maximum == 0.0:
+            maximum = 0.0 if any(pc.index(c.view(int_type), 0).as_py() >= 0
+                                 for c in chunks) else -0.0
     stats['min_values'], stats['max_values'] = minimum, maximum
     return stats
 
