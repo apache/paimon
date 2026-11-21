@@ -56,6 +56,15 @@ public class FieldSumAgg extends FieldAggregator {
                                 inFieldDD,
                                 mergeFieldDD.precision(),
                                 mergeFieldDD.scale());
+                if (sum == null) {
+                    throw new ArithmeticException(
+                            String.format(
+                                    "Decimal overflow: %s + %s (precision=%d, scale=%d)",
+                                    mergeFieldDD.toBigDecimal(),
+                                    inFieldDD.toBigDecimal(),
+                                    mergeFieldDD.precision(),
+                                    mergeFieldDD.scale()));
+                }
                 break;
             case TINYINT:
                 sum = addByte((byte) accumulator, (byte) inputField);
@@ -106,6 +115,15 @@ public class FieldSumAgg extends FieldAggregator {
                                 inFieldDD,
                                 mergeFieldDD.precision(),
                                 mergeFieldDD.scale());
+                if (sum == null) {
+                    throw new ArithmeticException(
+                            String.format(
+                                    "Decimal overflow: %s - %s (precision=%d, scale=%d)",
+                                    mergeFieldDD.toBigDecimal(),
+                                    inFieldDD.toBigDecimal(),
+                                    mergeFieldDD.precision(),
+                                    mergeFieldDD.scale()));
+                }
                 break;
             case TINYINT:
                 sum = subtractByte((byte) accumulator, (byte) inputField);

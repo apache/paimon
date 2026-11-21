@@ -58,7 +58,9 @@ public class DecimalUtils {
             try {
                 long ls =
                         Math.addExact(v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
-                return Decimal.fromUnscaledLong(ls, precision, scale);
+                if (ls < POW10[precision] && ls > -POW10[precision]) {
+                    return Decimal.fromUnscaledLong(ls, precision, scale);
+                }
             } catch (ArithmeticException e) {
                 // overflow, fall through
             }
@@ -77,7 +79,9 @@ public class DecimalUtils {
                 long ls =
                         Math.subtractExact(
                                 v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
-                return fromUnscaledLong(ls, precision, scale);
+                if (ls < POW10[precision] && ls > -POW10[precision]) {
+                    return fromUnscaledLong(ls, precision, scale);
+                }
             } catch (ArithmeticException e) {
                 // overflow, fall through
             }
