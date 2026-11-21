@@ -707,6 +707,14 @@ Set `aggregation.remove-record-on-delete = true` to remove the whole row on `DEL
 per-field retraction. The default is `false`. `UPDATE_BEFORE` still retracts individual fields.
 This option cannot be combined with per-field `ignore-retract`.
 
+Records written for the same key after a `DELETE` start a new aggregate, but only when the
+`DELETE` is merged together with the older records of that key, such as during a read or a full
+compaction. A merged result is stored as a single record per key, so it cannot record that older
+values must be discarded. If the `DELETE` and the later records are merged before the older
+records are, the older aggregate is kept and the later records are aggregated onto it. This
+happens when the `DELETE` and the later records are written in the same commit (for example the
+same Flink checkpoint), or when a compaction merges their files without the older files.
+
 ### Field Retraction Behavior
 
 `last_value` always clears the field on retraction. `last_non_null_value` clears it only when
