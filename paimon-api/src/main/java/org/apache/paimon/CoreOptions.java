@@ -92,6 +92,9 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
 
+    public static final String NESTED_SEQUENCE_OVERWRITE_ON_EQUAL =
+            "nested-sequence-overwrite-on-equal";
+
     public static final String COUNT_LIMIT = "count-limit";
 
     public static final String DISTINCT = "distinct";
@@ -3665,6 +3668,20 @@ public class CoreOptions implements Serializable {
             return Collections.emptyList();
         }
         return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public boolean fieldNestedUpdateAggNestedSequenceOverwriteOnEqual(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_SEQUENCE_OVERWRITE_ON_EQUAL)
+                        .booleanType()
+                        .defaultValue(true)
+                        .withDescription(
+                                "For nested_update with nested-sequence-field, overwrite the "
+                                        + "accumulated nested ROW with the input ROW when their "
+                                        + "sequence values are equal. Multi-field sequences are "
+                                        + "compared lexicographically in configuration order. "
+                                        + "When false, the input ROW overwrites only if its "
+                                        + "sequence is strictly greater."));
     }
 
     public int fieldNestedUpdateAggCountLimit(String fieldName) {

@@ -216,11 +216,88 @@ def is_blank(s: str) -> bool:
     return True
 
 
-def _compare_objects(left: Any, right: Any) -> int:
+def _atomic_base_type(data_type: AtomicType) -> str:
+    """Return the uppercase atomic type root (for example ``DOUBLE``)."""
+
+    return data_type.type.split("(", 1)[0].split(" ", 1)[0].upper()
+
+
+def _compare_floating(left: Any, right: Any) -> int:
+    """Mirror Java ``Double.compare`` / ``Float.compare`` semantics."""
+
+    import math
+
+    left_value = float(left)
+    right_value = float(right)
+    left_nan = math.isnan(left_value)
+    right_nan = math.isnan(right_value)
+    if left_nan or right_nan:
+        if left_nan and right_nan:
+            return 0
+        return 1 if left_nan else -1
+    if left_value == 0.0 and right_value == 0.0:
+        left_negative = math.copysign(1.0, left_value) < 0
+        right_negative = math.copysign(1.0, right_value) < 0
+        if left_negative == right_negative:
+            return 0
+        return -1 if left_negative else 1
+    return (left_value > right_value) - (left_value < right_value)
+
+
+def _array_sequence_element(value: Any, index: int) -> Any:
+    """Read one ARRAY element from a list-like or InternalArray-like value."""
+
+    if isinstance(value, (list, tuple)):
+        return value[index]
+    getter = getattr(value, "get_element", None)
+    if callable(getter):
+        return getter(index)
+    getter = getattr(value, "get", None)
+    if callable(getter):
+        return getter(index)
+    return value[index]
+
+
+def _array_sequence_size(value: Any) -> int:
+    size = getattr(value, "size", None)
+    if callable(size):
+        return size()
+    if isinstance(size, int):
+        return size
+    return len(value)
+
+
+def _compare_array_values(left: Any, right: Any, array_type: ArrayType) -> int:
+    """Lexicographic ARRAY comparison with NULLS FIRST, matching Java codegen."""
+
+    left_size = _array_sequence_size(left)
+    right_size = _array_sequence_size(right)
+    min_size = left_size if left_size < right_size else right_size
+    element_type = array_type.element
+    for index in range(min_size):
+        cmp = _compare_objects(
+            _array_sequence_element(left, index),
+            _array_sequence_element(right, index),
+            element_type,
+        )
+        if cmp != 0:
+            return cmp
+    if left_size < right_size:
+        return -1
+    if left_size > right_size:
+        return 1
+    return 0
+
+
+def _compare_objects(left: Any, right: Any, data_type: Optional[DataType] = None) -> int:
     """
     Compare two comparable Python objects using Paimon's ordering.
 
-    Nulls are ordered before non-null values (Nulls First).
+    Nulls are ordered before non-null values (Nulls First). ROW values are
+    compared recursively in schema field order. ARRAY members of a ROW
+    sequence use element-wise lexicographic comparison. FLOAT/DOUBLE follow
+    Java Float/Double.compare (including NaN and signed zero). MAP stays on
+    the scalar comparison path and is not expanded here.
     """
 
     if left is None:
@@ -229,16 +306,64 @@ def _compare_objects(left: Any, right: Any) -> int:
     if right is None:
         return 1
 
+    if isinstance(data_type, RowType):
+        return _compare_row_values(left, right, data_type)
+
+    if isinstance(data_type, ArrayType):
+        return _compare_array_values(left, right, data_type)
+
+    if isinstance(data_type, AtomicType):
+        base = _atomic_base_type(data_type)
+        if base in ("FLOAT", "DOUBLE"):
+            return _compare_floating(left, right)
+
     return (left > right) - (left < right)
 
 
-def _compare_tuple(left: Tuple[Any, ...], right: Tuple[Any, ...]) -> int:
+def _compare_row_values(left: Any, right: Any, row_type: RowType) -> int:
+    """Compare ROW sequence values field-by-field in schema order."""
+
+    for index, field in enumerate(row_type.fields):
+        cmp = _compare_objects(
+            _row_sequence_field(left, field, index),
+            _row_sequence_field(right, field, index),
+            field.type,
+        )
+        if cmp != 0:
+            return cmp
+    return 0
+
+
+def _row_sequence_field(value: Any, field, index: int) -> Any:
+    """Read one ROW field by schema name, then by schema position."""
+
+    if isinstance(value, dict):
+        return value.get(field.name)
+    if isinstance(value, InternalRow):
+        named_fields = getattr(value, "fields", None)
+        if named_fields is not None:
+            for position, candidate in enumerate(named_fields):
+                if candidate.name == field.name:
+                    return value.get_field(position)
+        return value.get_field(index)
+    raise TypeError(
+        "Cannot compare ROW sequence value of type '{}'."
+        .format(type(value).__name__)
+    )
+
+
+def _compare_tuple(
+        left: Tuple[Any, ...],
+        right: Tuple[Any, ...],
+        field_types: Optional[List[DataType]] = None,
+) -> int:
     """
     Lexicographical comparison with Nulls First.
     """
 
-    for l, r in zip(left, right):
-        cmp = _compare_objects(l, r)
+    for index, (l, r) in enumerate(zip(left, right)):
+        data_type = None if field_types is None else field_types[index]
+        cmp = _compare_objects(l, r, data_type)
         if cmp != 0:
             return cmp
 
@@ -930,6 +1055,9 @@ class FieldNestedUpdateAgg(FieldAggregator):
         self.nested_key = options.field_nested_update_agg_nested_key(field_name)
         self.nested_key_null_strategy = options.field_nested_update_agg_nested_key_null_strategy(field_name)
         self.nested_sequence_field = options.field_nested_update_agg_nested_sequence_field(field_name)
+        self.overwrite_on_equal_sequence = (
+            options.field_nested_update_agg_nested_sequence_overwrite_on_equal(field_name)
+        )
         self.count_limit = options.field_nested_update_agg_count_limit(field_name)
 
         if self.nested_key:
@@ -941,13 +1069,20 @@ class FieldNestedUpdateAgg(FieldAggregator):
             self.key_projection = None
 
         if self.nested_sequence_field:
+            sequence_indexes = [
+                nested_type.get_field_index(name) for name in self.nested_sequence_field
+            ]
             self.sequence_projection = FieldProjection.from_fields(
-                [nested_type.get_field_index(name) for name in self.nested_sequence_field],
+                sequence_indexes,
                 self.nested_sequence_field
             )
+            self.sequence_field_types = [
+                nested_type.fields[index].type for index in sequence_indexes
+            ]
             self.has_sequence_field = True
         else:
             self.sequence_projection = None
+            self.sequence_field_types = None
             self.has_sequence_field = False
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
@@ -1021,14 +1156,32 @@ class FieldNestedUpdateAgg(FieldAggregator):
                 "requires 'fields.<field-name>.nested-key' to be configured."
             )
 
-        if (
-                options.field_nested_update_agg_nested_sequence_field(field)
-                and not nested_key
-        ):
+        nested_sequence_field = (
+            options.field_nested_update_agg_nested_sequence_field(field)
+        )
+        if nested_sequence_field and not nested_key:
             raise ValueError(
                 "Option 'fields.<field-name>.nested-sequence-field' "
                 "requires 'fields.<field-name>.nested-key' to be configured."
             )
+
+        # Keep the aggregator-local check identical to the shared table-level
+        # validation so unit construction and public read/write agree.
+        overwrite_on_equal_configured = options.options.contains_key(
+            f"{CoreOptions.FIELDS_PREFIX}.{field}."
+            f"{CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL}"
+        )
+        if overwrite_on_equal_configured and not nested_sequence_field:
+            raise ValueError(
+                "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' "
+                "requires 'fields.<field-name>.nested-sequence-field' to be configured."
+            )
+
+    def _should_update(self, new_row: Record, old_row: Record) -> bool:
+        if not self.has_sequence_field:
+            return True
+        comparison = self._compare_sequence(new_row, old_row)
+        return comparison > 0 or (comparison == 0 and self.overwrite_on_equal_sequence)
 
     def _compare_sequence(self, new_row: Record, old_row: Record) -> int:
         if not self.has_sequence_field:
@@ -1039,7 +1192,7 @@ class FieldNestedUpdateAgg(FieldAggregator):
         new_seq_key = self.sequence_projection.apply(new_row)
         old_seq_key = self.sequence_projection.apply(old_row)
 
-        return _compare_tuple(new_seq_key, old_seq_key)
+        return _compare_tuple(new_seq_key, old_seq_key, self.sequence_field_types)
 
     def _add_non_null_rows(
             self,
@@ -1086,7 +1239,7 @@ class FieldNestedUpdateAgg(FieldAggregator):
 
             exists = row_map.get(key)
             if exists is not None:
-                if not self.has_sequence_field or self._compare_sequence(row, exists) >= 0:
+                if self._should_update(row, exists):
                     row_map[key] = row
             elif not limit_new_keys or len(row_map) < self.count_limit:
                 row_map[key] = row

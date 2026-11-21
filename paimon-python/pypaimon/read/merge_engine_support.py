@@ -19,7 +19,70 @@
 
 from typing import Set
 
-from pypaimon.common.options.core_options import MergeEngine
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+
+
+_FIELDS_PREFIX = CoreOptions.FIELDS_PREFIX + "."
+_AGG_SUFFIX = ".aggregate-function"
+_DEFAULT_AGG_KEY = _FIELDS_PREFIX + "default-aggregate-function"
+_OVERWRITE_SUFFIX = "." + CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL
+_NESTED_UPDATE = "nested_update"
+_DEFAULT_AGG_FALLBACK = "last_non_null_value"
+
+
+def _effective_aggregate_function(raw, field: str) -> str:
+    """Resolve the aggregator that will actually run for ``field``."""
+
+    return (
+        raw.get(_FIELDS_PREFIX + field + _AGG_SUFFIX)
+        or raw.get(_DEFAULT_AGG_KEY)
+        or _DEFAULT_AGG_FALLBACK
+    )
+
+
+def check_nested_update_configuration(table) -> None:
+    """Validate nested_update option dependencies before backend selection.
+
+    Mirrors Java ``FieldNestedUpdateAggFactory``: overwrite-on-equal options
+    only apply when the field's effective aggregator is ``nested_update``.
+    For those fields, an explicit ``nested-sequence-overwrite-on-equal``
+    (true or false) requires ``nested-sequence-field``. Equal-sequence
+    first-wins (``=false``) cannot stay consistent across commits when outer
+    ``sequence.field`` reorders merge inputs, so that combination is rejected.
+    """
+    options = table.options
+    raw = options.options.to_map()
+    sequence_fields = options.sequence_field()
+
+    for key in raw:
+        if not (key.startswith(_FIELDS_PREFIX) and key.endswith(_OVERWRITE_SUFFIX)):
+            continue
+        field = key[len(_FIELDS_PREFIX):-len(_OVERWRITE_SUFFIX)]
+        # Same gate as Native eligibility and Java's nested_update factory:
+        # ignore overwrite-on-equal options on non-nested_update fields.
+        if _effective_aggregate_function(raw, field) != _NESTED_UPDATE:
+            continue
+        nested_sequence_field = (
+            options.field_nested_update_agg_nested_sequence_field(field)
+        )
+        if not nested_sequence_field:
+            raise ValueError(
+                "Option 'fields.<field-name>.nested-sequence-overwrite-on-equal' "
+                "requires 'fields.<field-name>.nested-sequence-field' to be "
+                "configured."
+            )
+        if options.field_nested_update_agg_nested_sequence_overwrite_on_equal(field):
+            continue
+        if sequence_fields:
+            raise ValueError(
+                "sequence.field is incompatible with "
+                "fields.{0}.nested-sequence-overwrite-on-equal=false for "
+                "nested_update. Equal nested-sequence first-wins depends on "
+                "merge input order, which sequence.field can reorder across "
+                "commits; omit sequence.field or set "
+                "nested-sequence-overwrite-on-equal=true."
+                .format(field)
+            )
 
 
 def _unsupported_sequence_fields(table) -> Set[str]:
@@ -60,7 +123,13 @@ def check_sequence_field_valid(table) -> None:
        sequence ordering.
     5. ``sequence.field`` together with cross-partition update (the PK
        does not include all partition fields).
+
+    Also validates nested_update option dependencies before any
+    Native/Python backend is selected.
     """
+    # nested_update checks are independent of whether sequence.field is set.
+    check_nested_update_configuration(table)
+
     sequence_fields = table.options.sequence_field()
     if not sequence_fields:
         return

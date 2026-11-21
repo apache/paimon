@@ -37,6 +37,10 @@ from pypaimon.write.row_utils import (
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
+    from pypaimon.common.native_compatibility import require_native_compatible
+    # nested-sequence-overwrite-on-equal=false is not implemented by Native 0.5.x.
+    if require_native_compatible(table.options, allow_python_fallback=True) is not None:
+        return None
     # DV tables flush normal level-0 files using the configured merge engine.
     # Batch visibility is controlled by deletion-vectors.merge-on-read.
     if (not native_runtime_available()

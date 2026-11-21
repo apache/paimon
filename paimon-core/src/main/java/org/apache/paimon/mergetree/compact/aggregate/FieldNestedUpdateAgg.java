@@ -59,6 +59,7 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final Projection sequenceProjection;
     @Nullable private final RecordComparator sequenceComparator;
     private final boolean hasSequenceField;
+    private final boolean overwriteOnEqualSequence;
 
     private final CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy;
     private final int countLimit;
@@ -69,6 +70,24 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             List<String> nestedKey,
             CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy,
             List<String> nestedSequenceField,
+            int countLimit) {
+        this(
+                name,
+                dataType,
+                nestedKey,
+                nestedKeyNullStrategy,
+                nestedSequenceField,
+                true,
+                countLimit);
+    }
+
+    public FieldNestedUpdateAgg(
+            String name,
+            ArrayType dataType,
+            List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy,
+            List<String> nestedSequenceField,
+            boolean overwriteOnEqualSequence,
             int countLimit) {
         super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
@@ -82,9 +101,11 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         }
 
         this.nestedKeyNullStrategy = nestedKeyNullStrategy;
+        this.overwriteOnEqualSequence = overwriteOnEqualSequence;
 
         // If nestedSequenceField is set, we need to compare sequence fields to determine
-        // whether to update. Only update when the new sequence is greater than the old one.
+        // whether to update. Only update when the new sequence is greater than the old one,
+        // or equal when overwriteOnEqualSequence is true.
         if (!nestedSequenceField.isEmpty()) {
             this.sequenceProjection = newProjection(nestedType, nestedSequenceField);
             this.hasSequenceField = true;
@@ -196,6 +217,14 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         }
     }
 
+    private boolean shouldUpdate(InternalRow newRow, InternalRow oldRow) {
+        if (!hasSequenceField) {
+            return true;
+        }
+        int comparison = compareSequence(newRow, oldRow);
+        return comparison > 0 || (comparison == 0 && overwriteOnEqualSequence);
+    }
+
     private int compareSequence(InternalRow newRow, InternalRow oldRow) {
         checkNotNull(
                 sequenceComparator,
@@ -253,7 +282,7 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
             InternalRow existing = rows.get(key);
             if (existing != null) {
-                if (!hasSequenceField || compareSequence(row, existing) >= 0) {
+                if (shouldUpdate(row, existing)) {
                     rows.put(key, row);
                 }
             } else if (!limitNewKeys || rows.size() < countLimit) {

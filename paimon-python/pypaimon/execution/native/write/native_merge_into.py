@@ -62,6 +62,11 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                 or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
                        for key in source.table_schema.options)):
             return None
+        # Target write eligibility does not cover a Paimon source read.
+        # Return before any Native source exists so Python fallback still runs.
+        from pypaimon.common.native_compatibility import require_native_compatible
+        if require_native_compatible(source.options, allow_python_fallback=True) is not None:
+            return None
         from pypaimon.schema.data_types import PyarrowFieldParser
         projection = list(dict.fromkeys(list(source.field_names) + source_keys))
         source_fields = source.new_read_builder().with_projection(projection).read_type()
