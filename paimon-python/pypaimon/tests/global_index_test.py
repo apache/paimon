@@ -191,9 +191,9 @@ class _CoverageSnapshot:
         self.next_row_id = next_row_id
 
 
-def _coverage_index_file(field_id, start, end, extra_field_ids=None):
+def _coverage_index_file(field_id, start, end, extra_field_ids=None, index_type="btree"):
     return IndexFileMeta(
-        index_type="btree",
+        index_type=index_type,
         file_name="idx-%s-%s-%s" % (field_id, start, end),
         file_size=1,
         row_count=end - start + 1,
@@ -298,6 +298,23 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         )
 
         self.assertEqual([Range(0, 9)], coverage.unindexed_ranges(1))
+
+    def test_extra_field_does_not_extend_dedicated_scalar_coverage(self):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
+
+        coverage = DataEvolutionGlobalIndexCoverage(
+            _CoverageTable("full"),
+            _CoverageSnapshot(10),
+            None,
+            [
+                _coverage_index_file(1, 0, 4),
+                _coverage_index_file(0, 5, 9, extra_field_ids=[1], index_type="bitmap"),
+            ],
+        )
+
+        self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
         from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (

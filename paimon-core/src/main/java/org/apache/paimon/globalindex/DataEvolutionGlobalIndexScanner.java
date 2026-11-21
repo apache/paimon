@@ -167,15 +167,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         for (IndexMetaFileGroup group : primaryGroups.values()) {
             groupsByField.computeIfAbsent(group.indexFieldId, k -> new ArrayList<>()).add(group);
         }
-        for (IndexMetaFileGroup group : primaryGroups.values()) {
-            for (int fieldId : group.fieldIds.subList(1, group.fieldIds.size())) {
-                List<IndexMetaFileGroup> groups =
-                        groupsByField.computeIfAbsent(fieldId, k -> new ArrayList<>());
-                if (!groups.contains(group)) {
-                    groups.add(group);
-                }
-            }
-        }
         return groupsByField;
     }
 
@@ -362,19 +353,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                             || !isIndexInSchema(table.rowType(), entry.indexFile())) {
                         return false;
                     }
-                    // Collect indexes whose primary column is filtered, and also multi-column
-                    // indexes that have a filtered column as an extra.
-                    if (filterFieldIds.contains(globalIndex.indexFieldId())) {
-                        return true;
-                    }
-                    if (globalIndex.extraFieldIds() != null) {
-                        for (int id : globalIndex.extraFieldIds()) {
-                            if (filterFieldIds.contains(id)) {
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
+                    return filterFieldIds.contains(globalIndex.indexFieldId());
                 };
         return indexFileFilter;
     }
