@@ -155,7 +155,10 @@ def to_arrow(
         parallelism: optional runtime override of the
             ``read.parallelism`` table option. ``None`` (default) falls
             back to the table option; when that is also unset the read
-            auto-scales to ``min(number of splits, CPU count)``. ``1``
+            auto-scales to ``min(number of splits, CPU count)``. Native filtered
+            Data Evolution BLOB reads without a limit instead use
+            ``min(number of splits, 32)`` for payloads or
+            ``min(number of splits, 64)`` for descriptors. ``1``
             keeps reads serial; ``>= 2`` caps the thread pool that reads
             byte-balanced contiguous split groups concurrently and
             assembles the final table in input order. An unfiltered row
@@ -181,6 +184,8 @@ def to_arrow(
         schema = self._add_row_kind_to_schema(schema)
 
     native = _native_read_execution(self)
+    if native is not None:
+        effective = self._resolve_parallelism(parallelism, len(splits), materialized_native=True)
     native_batches = None if native is None else native.read_batches(
         splits,
         schema,
