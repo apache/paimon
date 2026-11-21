@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -56,6 +57,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -186,6 +188,11 @@ public class GlobalIndexBuilderUtils {
             entries.add(entry);
         }
         return entries;
+    }
+
+    public static Predicate<IndexManifestEntry> compatibleIndexSchema(FileStoreTable table) {
+        BTreeIndexSchema schema = new BTreeIndexSchema(table);
+        return entry -> schema.isCompatible(entry.indexFile());
     }
 
     public static List<Pair<Range, Split>> splitByRowRangeIndex(
@@ -639,12 +646,11 @@ public class GlobalIndexBuilderUtils {
             FileStoreTable table, String indexType, List<DataField> indexFields, Options options)
             throws IOException {
         GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
-        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
-    }
-
-    private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        return new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory);
+        long buildSchemaId =
+                BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexType) ? table.schema().id() : -1;
+        return globalIndexer.createWriter(
+                new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory, buildSchemaId));
     }
 
     @Nullable
