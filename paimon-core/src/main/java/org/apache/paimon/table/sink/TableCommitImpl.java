@@ -275,6 +275,9 @@ public class TableCommitImpl implements InnerTableCommit {
 
     private ManifestCommittable createManifestCommittable(
             long identifier, List<CommitMessage> commitMessages) {
+        if (commitMessages instanceof CommitMessageList) {
+            return new ManifestCommittable(identifier, null, commitMessages);
+        }
         ManifestCommittable committable = new ManifestCommittable(identifier);
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);

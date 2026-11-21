@@ -18,14 +18,18 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /** Tests for {@link DataFileMetaSerializer}. */
 public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
@@ -57,6 +61,79 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
         assertWriteColsSequences(file.copy(Collections.emptyList()));
         assertWriteColsSequences(file.newExternalPath("external/renamed.parquet"));
         assertWriteColsSequences(file.copy(new byte[] {1}));
+        assertWriteColsSequences(file.withWriteCols(Arrays.asList("first", "second")));
+    }
+
+    @Test
+    void testWriteColumnCopyPreservesMetadataAndSerialization() {
+        DataFileMeta original = metadataWithAllFields();
+        List<String> sharedNames = new ArrayList<>(Arrays.asList("f0", "nested.f1", "f0", "F0"));
+        DataFileMeta copy = original.withWriteCols(sharedNames);
+        assertThat(copy).isEqualTo(original);
+        assertThat(copy.hashCode()).isEqualTo(original.hashCode());
+        assertThat(copy.writeCols()).isNotSameAs(original.writeCols());
+        assertThat(copy.writeCols().get(0)).isSameAs(sharedNames.get(0));
+        assertThat(copy.writeColsSequences()).containsExactly(3L, 42L, 43L, 50L);
+        assertThat(serializer().fromRow(serializer().toRow(copy))).isEqualTo(original);
+        assertThat(copy.withWriteCols(null).writeCols()).isNull();
+        assertThat(copy.withWriteCols(Collections.emptyList()).writeCols()).isEmpty();
+        copy.writeCols().set(0, "changed");
+        assertThat(original.writeCols()).containsExactly("f0", "nested.f1", "f0", "F0");
+    }
+
+    @Test
+    void testDefaultWriteColumnCopyMatchesPojo() {
+        DataFileMeta original = metadataWithAllFields();
+        DataFileMeta external =
+                mock(
+                        DataFileMeta.class,
+                        invocation -> {
+                            if (invocation.getMethod().getName().equals("withWriteCols")) {
+                                return invocation.callRealMethod();
+                            }
+                            return invocation
+                                    .getMethod()
+                                    .invoke(original, invocation.getArguments());
+                        });
+        for (List<String> names :
+                Arrays.<List<String>>asList(
+                        null,
+                        Collections.emptyList(),
+                        Arrays.asList("f0", "nested.f1", "f0", "F0"))) {
+            DataFileMeta copy = external.withWriteCols(names);
+            assertThat(copy).isEqualTo(original.withWriteCols(names));
+            assertThat(serializer().fromRow(serializer().toRow(copy))).isEqualTo(copy);
+        }
+    }
+
+    private DataFileMeta metadataWithAllFields() {
+        DataFileMeta template = object();
+        return DataFileMeta.create(
+                "columns.parquet",
+                123L,
+                5L,
+                template.minKey(),
+                template.maxKey(),
+                template.keyStats(),
+                template.valueStats(),
+                11L,
+                99L,
+                7L,
+                2,
+                Arrays.asList("extra-1", "extra-2"),
+                template.creationTime(),
+                1L,
+                new byte[] {1, 2},
+                FileSource.COMPACT,
+                Collections.singletonList("stats-column"),
+                "external/columns.parquet",
+                100L,
+                Arrays.asList(
+                        new String("f0"),
+                        new String("nested.f1"),
+                        new String("f0"),
+                        new String("F0")),
+                new long[] {3L, 42L, 43L, 50L});
     }
 
     @Test

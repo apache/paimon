@@ -24,6 +24,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -185,6 +186,14 @@ public interface ReadBuilder extends Serializable {
 
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();
+
+    /**
+     * Creates a Driver-side batch scan with a custom snapshot reader. The factory is used only
+     * during this call and must not become part of this serializable builder.
+     */
+    default TableScan newScan(FileStoreTable.SnapshotReaderFactory snapshotReaderFactory) {
+        throw new UnsupportedOperationException("Custom snapshot readers are not supported.");
+    }
 
     /** Create a {@link TableScan} to perform streaming planning. */
     StreamTableScan newStreamScan();

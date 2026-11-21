@@ -71,6 +71,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -79,6 +80,7 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -87,6 +89,54 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMergeOutOfMemoryIsNotFormattedAsConflict(boolean failInBase) {
+        OutOfMemoryError failure = new OutOfMemoryError("metadata allocation failed");
+        AtomicInteger formatted = new AtomicInteger();
+        SimpleFileEntry entry =
+                new SimpleFileEntry(
+                        ADD,
+                        EMPTY_ROW,
+                        0,
+                        1,
+                        0,
+                        "allocation-failure",
+                        Collections.emptyList(),
+                        null,
+                        EMPTY_ROW,
+                        EMPTY_ROW,
+                        null,
+                        0L,
+                        null) {
+                    @Override
+                    public FileEntry.Identifier identifier() {
+                        throw failure;
+                    }
+
+                    @Override
+                    public String toStringWithPartition(String partition) {
+                        formatted.incrementAndGet();
+                        return super.toStringWithPartition(partition);
+                    }
+                };
+        List<SimpleFileEntry> failing = Collections.singletonList(entry);
+        List<SimpleFileEntry> empty = Collections.emptyList();
+        ConflictDetection detection = createConflictDetection(null, false, false);
+
+        assertThatThrownBy(
+                        () ->
+                                detection.checkConflicts(
+                                        snapshot(1),
+                                        failInBase ? failing : empty,
+                                        failInBase ? empty : failing,
+                                        Collections.emptyList(),
+                                        null,
+                                        Snapshot.CommitKind.APPEND))
+                .isSameAs(failure);
+        assertThat(formatted.get()).isZero();
+    }
 
     @Test
     void testFileEntryWithDVToStringPreservesOriginalOutput() {

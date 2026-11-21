@@ -18,9 +18,11 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.errors.ErrorMessages;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
@@ -33,6 +35,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.FileEntryMergeBuffer;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -44,6 +47,9 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.ThrowingConsumer;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +85,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final SnapshotManager snapshotManager;
     private final IndexFileHandler indexFileHandler;
     private final boolean nestedFieldEnabled;
+    private final boolean streamingConflictsSupported;
 
     private @Nullable Long rowIdCheckFromSnapshot;
     private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
@@ -108,6 +115,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         this.snapshotManager = snapshotManager;
         this.indexFileHandler = indexFileHandler;
         this.nestedFieldEnabled = nestedFieldEnabled;
+        this.streamingConflictsSupported = !deletionVectorsEnabled;
     }
 
     @Override
@@ -363,6 +371,150 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                         .values());
     }
 
+    /**
+     * Produces the ordinary DE base scan's input without retaining its complete metadata. Returns
+     * whether the caller must keep the first base record per identity, matching the supplemental
+     * scan branch's left-first deduplication. Range and referenced-name state still grow with the
+     * changes; the consumer must not retain the entire decoded base.
+     */
+    public boolean forEachBaseDataFile(
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            ThrowingConsumer<SimpleFileEntry, Exception> consumer)
+            throws Exception {
+        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
+        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
+        if (changedRowRanges.isEmpty()) {
+            if (!referencedDataFiles.isEmpty()) {
+                commitScanner()
+                        .forEachEntryFromDataFiles(
+                                latestSnapshot, changedPartitions, referencedDataFiles, consumer);
+            }
+            return false;
+        }
+
+        commitScanner()
+                .forEachEntryFromChangedRowRanges(
+                        latestSnapshot,
+                        changedPartitions,
+                        changedRowRanges,
+                        entry -> {
+                            referencedDataFiles.remove(entry.fileName());
+                            consumer.accept(entry);
+                        });
+        if (referencedDataFiles.isEmpty()) {
+            return false;
+        }
+        commitScanner()
+                .forEachEntryFromDataFiles(
+                        latestSnapshot, changedPartitions, referencedDataFiles, consumer);
+        // Selecting this branch triggers deduplication even when the second scan emits no rows.
+        return true;
+    }
+
+    public boolean supportsStreamingConflicts() {
+        return streamingConflictsSupported;
+    }
+
+    /**
+     * Checks the no-DV successful path without complete base/delta/merged metadata collections.
+     * Possible conflicts fall back to the original checker after closing spill resources,
+     * preserving its diagnostics, error priority and throw/return contract. That diagnostic path
+     * retains the original memory boundary. Buffers too small for both sorters also use that
+     * boundary instead of increasing the configured sort-buffer budget. Callback and DV callers
+     * keep the ordinary path.
+     */
+    public Optional<RuntimeException> checkConflictsStreaming(
+            CoreOptions options,
+            @Nullable IOManager ioManager,
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            @Nullable RowIdConflictChecker rowIdConflictChecker,
+            CommitKind commitKind) {
+        boolean ordinary =
+                !supportsStreamingConflicts() || !FileEntryMergeBuffer.supportsBufferSize(options);
+        if (!ordinary) {
+            boolean globalIndexes =
+                    indexFiles.stream()
+                            .anyMatch(
+                                    entry ->
+                                            entry.kind() == FileKind.ADD
+                                                    && entry.indexFile().globalIndexMeta() != null);
+            DataEvolutionStreamingChecks checks =
+                    new DataEvolutionStreamingChecks(
+                            commitKind,
+                            rowIdCheckFromSnapshot != null || commitKind == CommitKind.COMPACT,
+                            globalIndexes);
+            try (FileEntryMergeBuffer buffer = new FileEntryMergeBuffer(options, ioManager)) {
+                boolean deduplicate =
+                        forEachBaseDataFile(
+                                latestSnapshot,
+                                changedPartitions,
+                                deltaFiles,
+                                indexFiles,
+                                entry -> {
+                                    checks.addRawBase(entry);
+                                    buffer.writeBase(entry);
+                                });
+                for (ManifestEntry entry : deltaFiles) {
+                    buffer.writeDelta(SimpleFileEntry.from(entry));
+                }
+                try {
+                    buffer.forEachMerged(deduplicate, checks::addBase, checks::addMerged);
+                } catch (IllegalStateException invalidIdentity) {
+                    // The original checker selects bucket errors before identity errors and
+                    // distinguishes delta exceptions from combined conflict return values.
+                    ordinary = true;
+                }
+                ordinary =
+                        ordinary
+                                || checks.mayConflict(
+                                        deduplicate,
+                                        deltaFiles,
+                                        indexFiles,
+                                        latestSnapshot.nextRowId());
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed streaming data evolution conflict check.", e);
+            } finally {
+                checks.clear();
+            }
+        }
+        if (ordinary) {
+            List<SimpleFileEntry> base =
+                    scanBaseDataFiles(
+                            latestSnapshot,
+                            changedPartitions,
+                            deltaFiles,
+                            indexFiles,
+                            commitKind,
+                            null,
+                            false);
+            return checkConflicts(
+                    latestSnapshot,
+                    base,
+                    SimpleFileEntry.from(deltaFiles),
+                    indexFiles,
+                    rowIdConflictChecker,
+                    commitKind);
+        }
+        Optional<RuntimeException> exception =
+                checkCentroidSourceChanges(latestSnapshot, indexFiles);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        return checkForRowIdFromSnapshot(
+                latestSnapshot,
+                Lists.transform(deltaFiles, SimpleFileEntry::from),
+                indexFiles,
+                rowIdConflictChecker);
+    }
+
     private Set<String> referencedDataFiles(
             List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
         // Include ADD files to detect replay even if their row IDs have changed or are unassigned.
@@ -606,7 +758,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 boolean nestedFieldEnabled) {
             return RowIdColumnConflictChecker.fromDataFiles(
                     schemaManager,
-                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()),
+                    Lists.transform(deltaFiles, ManifestEntry::file),
                     nestedFieldEnabled);
         }
 
@@ -925,7 +1077,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 mergeAdjacent);
     }
 
-    private static boolean dedicatedStorageFile(String fileName) {
+    static boolean dedicatedStorageFile(String fileName) {
         return isBlobFile(fileName) || isVectorStoreFile(fileName);
     }
 }

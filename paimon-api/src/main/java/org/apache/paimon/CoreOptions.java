@@ -2684,6 +2684,26 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<DataEvolutionMetadataMemoryMode>
+            DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE =
+                    key("data-evolution.metadata-memory-optimization.mode")
+                            .enumType(DataEvolutionMetadataMemoryMode.class)
+                            .defaultValue(DataEvolutionMetadataMemoryMode.OFF)
+                            .withDescription(
+                                    "Metadata memory mode for Spark data evolution operations: off, "
+                                            + "lightweight or streaming. Enable manually for tables "
+                                            + "with many files. Repeated decoding, sorting and disk I/O "
+                                            + "may increase execution time.");
+
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_METADATA_MEMORY_MAX_DISK_SIZE =
+            key("data-evolution.metadata-memory-optimization.max-disk-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription(
+                            "Maximum encoded data and offset-index bytes per metadata replay store "
+                                    + "in streaming mode. Excludes external-sort spill files, "
+                                    + "filesystem allocation overhead and other concurrent plans.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED =
             key("data-evolution.write-cols-optimization.enabled")
                     .booleanType()
@@ -4800,6 +4820,31 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_ENABLED);
     }
 
+    public boolean dataEvolutionMetadataMemoryOptimizationEnabled() {
+        return dataEvolutionMetadataMemoryMode() != DataEvolutionMetadataMemoryMode.OFF;
+    }
+
+    public DataEvolutionMetadataMemoryMode dataEvolutionMetadataMemoryMode() {
+        if (!dataEvolutionEnabled()) {
+            return DataEvolutionMetadataMemoryMode.OFF;
+        }
+        return options.get(DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE);
+    }
+
+    public boolean dataEvolutionMetadataStreamingEnabled() {
+        return dataEvolutionMetadataMemoryMode() == DataEvolutionMetadataMemoryMode.STREAMING;
+    }
+
+    public long dataEvolutionMetadataMaxDiskSize() {
+        long bytes = options.get(DATA_EVOLUTION_METADATA_MEMORY_MAX_DISK_SIZE).getBytes();
+        checkArgument(
+                bytes >= Long.BYTES,
+                "%s must be at least %s bytes.",
+                DATA_EVOLUTION_METADATA_MEMORY_MAX_DISK_SIZE.key(),
+                Long.BYTES);
+        return bytes;
+    }
+
     public boolean dataEvolutionWriteColsOptimizationEnabled() {
         return options.get(DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED);
     }
@@ -5616,6 +5661,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         CompactionInitialScanMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Manually selected metadata retention strategy for Spark data evolution operations. */
+    public enum DataEvolutionMetadataMemoryMode implements DescribedEnum {
+        OFF("off", "Use the ordinary metadata path."),
+        LIGHTWEIGHT("lightweight", "Reduce metadata copies and retained decoded objects."),
+        STREAMING("streaming", "Incrementally produce and replay file metadata.");
+
+        private final String value;
+        private final String description;
+
+        DataEvolutionMetadataMemoryMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

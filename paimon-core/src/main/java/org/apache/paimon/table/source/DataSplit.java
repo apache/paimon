@@ -336,6 +336,70 @@ public class DataSplit implements Split {
         return Optional.of(split);
     }
 
+    /**
+     * Filters files into one fresh caller-owned replay store without retaining decoded metadata.
+     * The caller must keep the store open through every use of the returned splits. A failed filter
+     * discards its partial output; an already-used store is rejected without closing it.
+     */
+    public static List<DataSplit> filterDataFiles(
+            List<DataSplit> splits, Predicate<DataFileMeta> filter, DataFileMetaStore store)
+            throws IOException {
+        store.requireFresh();
+        try {
+            List<FilteredSplit> selected = new ArrayList<>();
+            int nextFile = 0;
+            for (DataSplit source : splits) {
+                int start = nextFile;
+                List<DeletionFile> deletions =
+                        source.dataDeletionFiles == null ? null : new ArrayList<>();
+                int index = 0;
+                for (DataFileMeta file : source.dataFiles) {
+                    if (filter.test(file)) {
+                        store.append(file);
+                        nextFile++;
+                        if (deletions != null) {
+                            deletions.add(source.dataDeletionFiles.get(index));
+                        }
+                    }
+                    index++;
+                }
+                if (nextFile > start) {
+                    DataSplit split = new DataSplit();
+                    split.assign(source);
+                    split.dataFiles = null;
+                    split.dataDeletionFiles = deletions;
+                    selected.add(new FilteredSplit(split, start, nextFile));
+                }
+            }
+            store.seal();
+            List<DataSplit> result = new ArrayList<>(selected.size());
+            for (FilteredSplit selectedSplit : selected) {
+                selectedSplit.split.dataFiles = store.slice(selectedSplit.start, selectedSplit.end);
+                result.add(selectedSplit.split);
+            }
+            return result;
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                store.close();
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private static final class FilteredSplit {
+        private final DataSplit split;
+        private final int start;
+        private final int end;
+
+        private FilteredSplit(DataSplit split, int start, int end) {
+            this.split = split;
+            this.start = start;
+            this.end = end;
+        }
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -568,7 +632,7 @@ public class DataSplit implements Split {
         }
 
         public Builder withDataFiles(List<DataFileMeta> dataFiles) {
-            this.split.dataFiles = new ArrayList<>(dataFiles);
+            this.split.dataFiles = DataFileMetaStore.retainOrCopy(dataFiles);
             return this;
         }
 

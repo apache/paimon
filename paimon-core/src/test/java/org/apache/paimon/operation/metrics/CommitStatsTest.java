@@ -24,8 +24,10 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -34,6 +36,48 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link org.apache.paimon.operation.metrics.CommitStats}. */
 public class CommitStatsTest {
+    @Test
+    public void testConsumesEachChangeListOnce() {
+        CountingList append = new CountingList(appendDataFiles);
+        CountingList appendLog = new CountingList(appendChangelogFiles);
+        CountingList compact = new CountingList(compactDataFiles);
+        CountingList compactLog = new CountingList(compactChangelogFiles);
+        CommitStats actual = new CommitStats(append, appendLog, compact, compactLog, 10, 2, 3, 4);
+        assertThat(actual.getTableFilesAdded()).isEqualTo(4);
+        assertThat(actual.getTableFilesDeleted()).isEqualTo(1);
+        assertThat(actual.getNumPartitionsWritten()).isEqualTo(3);
+        assertThat(actual.getNumBucketsWritten()).isEqualTo(3);
+        assertThat(append.traversals).isEqualTo(1);
+        assertThat(appendLog.traversals).isEqualTo(1);
+        assertThat(compact.traversals).isEqualTo(1);
+        assertThat(compactLog.traversals).isEqualTo(1);
+    }
+
+    private static class CountingList extends AbstractList<ManifestEntry> {
+        private final List<ManifestEntry> entries;
+        private int traversals;
+
+        private CountingList(List<ManifestEntry> entries) {
+            this.entries = entries;
+        }
+
+        @Override
+        public int size() {
+            return entries.size();
+        }
+
+        @Override
+        public ManifestEntry get(int index) {
+            return entries.get(index);
+        }
+
+        @Override
+        public Iterator<ManifestEntry> iterator() {
+            traversals++;
+            return entries.iterator();
+        }
+    }
+
     private static List<ManifestEntry> files = new ArrayList<>();
     private static List<ManifestEntry> appendDataFiles = new ArrayList<>();
     private static List<ManifestEntry> appendChangelogFiles = new ArrayList<>();

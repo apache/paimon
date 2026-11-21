@@ -46,6 +46,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -221,15 +222,46 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * materialized with the complete manifest schema.
      */
     public CloseableIterator<ProjectedManifestEntry> scan(String fileName, Projection projection) {
+        return scan(fileName, projection, null, null, null);
+    }
+
+    /** Streams selected blocks while retaining the ordinary partition and bucket pushdown. */
+    public CloseableIterator<ProjectedManifestEntry> scan(
+            ManifestFileMeta manifest,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            @Nullable ManifestSidecar.Selection selected) {
+        return scan(manifest.fileName(), projection, partitionFilter, bucketFilter, selected);
+    }
+
+    private CloseableIterator<ProjectedManifestEntry> scan(
+            String fileName,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            @Nullable ManifestSidecar.Selection selected) {
+        if (selected != null && selected.blocks().isEmpty()) {
+            return CloseableIterator.adapterForIterator(Collections.emptyIterator());
+        }
+        CacheMetrics metrics = cacheMetrics;
+        ManifestSidecar.CacheStatus cacheStatus =
+                selected != null && cache != null && metrics != null
+                        ? new ManifestSidecar.CacheStatus()
+                        : null;
         try {
             CloseableIterator<InternalRow> rows =
                     createManifestIterator(
                             fileIO,
                             pathFactory.toPath(fileName),
                             projection.projectedType(),
-                            null,
-                            null);
+                            partitionFilter,
+                            bucketFilter,
+                            selected,
+                            cache == null ? null : cache.segmentsCache(),
+                            cacheStatus);
             return new CloseableIterator<ProjectedManifestEntry>() {
+                private boolean closed;
 
                 @Override
                 public boolean hasNext() {
@@ -243,7 +275,20 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
                 @Override
                 public void close() throws Exception {
-                    rows.close();
+                    if (!closed) {
+                        closed = true;
+                        try {
+                            rows.close();
+                        } finally {
+                            if (cacheStatus != null) {
+                                if (cacheStatus.hit()) {
+                                    metrics.increaseHitObject();
+                                } else {
+                                    metrics.increaseMissedObject();
+                                }
+                            }
+                        }
+                    }
                 }
             };
         } catch (IOException e) {

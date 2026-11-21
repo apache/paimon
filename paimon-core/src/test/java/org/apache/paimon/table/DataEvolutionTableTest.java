@@ -19,9 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.TableRollback;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
@@ -36,6 +38,10 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -51,6 +57,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -63,11 +70,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +91,123 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Test for table with data evolution. */
 public class DataEvolutionTableTest extends DataEvolutionTestBase {
+
+    @Test
+    public void testStreamingCommitConflictPathEnforcesEncodedBudget() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 1);
+        long before = table.snapshotManager().latestSnapshot().id();
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE.key(), "streaming");
+        options.put(CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_MAX_DISK_SIZE.key(), "8 b");
+        FileStoreTable streaming = table.copy(options);
+        BatchWriteBuilder builder = streaming.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Collections.singletonList("f2")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("updated")));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+            CommitMessageImpl update =
+                    ((CommitMessageImpl) messages.get(0)).withCheckFromSnapshot(before);
+            assertThatThrownBy(() -> commit.commit(Collections.singletonList(update)))
+                    .hasStackTraceContaining("Metadata merge encoded limit");
+        }
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before);
+    }
+
+    @Test
+    public void testStreamingCommitEntriesPinSnapshotAndReadDelta() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        List<String> firstNames =
+                writeOneFullRowAndCollectNewFiles(table).stream()
+                        .map(DataFileMeta::fileName)
+                        .collect(Collectors.toList());
+        Snapshot firstSnapshot = table.snapshotManager().latestSnapshot();
+        List<String> secondNames = new ArrayList<>();
+        List<String> scannedNames = new ArrayList<>();
+        FileStoreScan initiallyLatest = table.store().newScan();
+
+        initiallyLatest.forEachSimpleEntry(
+                entry -> {
+                    scannedNames.add(entry.fileName());
+                    if (secondNames.isEmpty()) {
+                        secondNames.addAll(
+                                writeOneFullRowAndCollectNewFiles(table).stream()
+                                        .map(DataFileMeta::fileName)
+                                        .collect(Collectors.toList()));
+                    }
+                });
+
+        Snapshot secondSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(secondSnapshot.id()).isEqualTo(firstSnapshot.id() + 1);
+        assertThat(scannedNames).isEqualTo(firstNames);
+        List<SimpleFileEntry> pinned = new ArrayList<>();
+        table.store().newScan().withSnapshot(firstSnapshot).forEachSimpleEntry(pinned::add);
+        assertThat(pinned.stream().map(SimpleFileEntry::fileName).collect(Collectors.toList()))
+                .isEqualTo(firstNames);
+
+        List<SimpleFileEntry> delta = new ArrayList<>();
+        table.store()
+                .newScan()
+                .withSnapshot(secondSnapshot)
+                .withKind(ScanMode.DELTA)
+                .forEachSimpleEntry(delta::add);
+        assertThat(delta.stream().map(SimpleFileEntry::fileName).collect(Collectors.toList()))
+                .isEqualTo(secondNames);
+        assertThat(delta)
+                .isEqualTo(
+                        table.store()
+                                .newScan()
+                                .withSnapshot(secondSnapshot)
+                                .withKind(ScanMode.DELTA)
+                                .readSimpleEntries());
+        assertThat(table.store().newScan().readSimpleEntries().size())
+                .isEqualTo(firstNames.size() + secondNames.size());
+
+        CommitScanner commitScanner =
+                new CommitScanner(
+                        table.store()::newScan,
+                        ((AbstractFileStoreTable) table).schemaManager(),
+                        table.snapshotManager(),
+                        null,
+                        new CoreOptions(table.schema().options()));
+        List<BinaryRow> partitions = Collections.singletonList(BinaryRow.EMPTY_ROW);
+        List<Range> firstRange = Collections.singletonList(pinned.get(0).nonNullRowIdRange());
+        List<SimpleFileEntry> scoped = new ArrayList<>();
+        commitScanner.forEachEntryFromChangedRowRanges(
+                secondSnapshot, partitions, firstRange, scoped::add);
+        assertThat(scoped.stream().map(SimpleFileEntry::fileName).collect(Collectors.toList()))
+                .isEqualTo(firstNames);
+
+        IOException failure = new IOException("scoped metadata consumer stopped");
+        assertThatThrownBy(
+                        () ->
+                                commitScanner.forEachEntryFromDataFiles(
+                                        secondSnapshot,
+                                        partitions,
+                                        new HashSet<>(secondNames),
+                                        entry -> {
+                                            throw failure;
+                                        }))
+                .isSameAs(failure);
+        scoped.clear();
+        commitScanner.forEachEntryFromDataFiles(
+                secondSnapshot, partitions, new HashSet<>(secondNames), scoped::add);
+        assertThat(scoped.stream().map(SimpleFileEntry::fileName).collect(Collectors.toList()))
+                .isEqualTo(secondNames);
+
+        scoped.clear();
+        commitScanner.forEachEntryFromChangedRowRanges(
+                secondSnapshot, partitions, firstRange, scoped::add);
+        assertThat(scoped.stream().map(SimpleFileEntry::fileName).collect(Collectors.toList()))
+                .isEqualTo(firstNames);
+    }
 
     @Test
     public void testRowSidecarDisabledByDefault() throws Exception {
@@ -2752,17 +2878,174 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(plannedFileCount(table, RowType.of(SpecialFields.ROW_ID), null)).isEqualTo(2);
     }
 
-    @Test
-    public void testDropStatsWithoutFilterOrReadType() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSharedWriteColumnNamesKeepFileListsIndependent(boolean enabled)
+            throws Exception {
         write(5);
+        FileStoreTable original = getTableDefault();
+        BatchWriteBuilder builder = original.newBatchWriteBuilder();
+        RowType partial = schemaDefault().rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite writer = builder.newWrite().withWriteType(partial)) {
+            writer.write(GenericRow.of(BinaryString.fromString("updated")));
+            List<CommitMessage> messages = writer.prepareCommit();
+            setFirstRowId(messages, 1L);
+            builder.newCommit().commit(messages);
+        }
+        FileStoreTable table =
+                original.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE.key(),
+                                enabled ? "lightweight" : "off"));
+        for (int mode = 0; mode < 3; mode++) {
+            DataEvolutionFileStoreScan scan = (DataEvolutionFileStoreScan) table.store().newScan();
+            if (mode == 1) {
+                scan.dropStats();
+            } else {
+                scan.keepStats();
+            }
+            if (mode == 2) {
+                scan.withFilter(new PredicateBuilder(schemaDefault().rowType()).equal(0, 2));
+            }
+            List<DataFileMeta> files =
+                    scan.plan().files().stream()
+                            .map(ManifestEntry::file)
+                            .filter(f -> Collections.singletonList("f2").equals(f.writeCols()))
+                            .collect(Collectors.toList());
+            assertThat(files.size()).isEqualTo(2);
+            assertThat(files.get(0).writeCols()).isNotSameAs(files.get(1).writeCols());
+            if (enabled) {
+                assertThat(files.get(0).writeCols().get(0))
+                        .isSameAs(files.get(1).writeCols().get(0));
+            } else {
+                assertThat(files.get(0).writeCols().get(0))
+                        .isNotSameAs(files.get(1).writeCols().get(0));
+            }
+            for (DataFileMeta file : files) {
+                if (mode == 1) {
+                    assertThat(file.valueStats()).isEqualTo(EMPTY_STATS);
+                } else {
+                    assertThat(file.valueStats()).isNotEqualTo(EMPTY_STATS);
+                }
+            }
+            files.get(0).writeCols().set(0, "mutated");
+            assertThat(files.get(1).writeCols()).isEqualTo(Collections.singletonList("f2"));
+            List<ManifestEntry> reread = table.store().newScan().plan().files();
+            assertThat(
+                            reread.stream()
+                                    .filter(
+                                            e ->
+                                                    Collections.singletonList("f2")
+                                                            .equals(e.file().writeCols()))
+                                    .count())
+                    .isEqualTo(2L);
+        }
+    }
 
-        List<ManifestEntry> entries =
-                getTableDefault().store().newScan().dropStats().plan().files();
+    @Test
+    public void testSharedColumnNamesPreserveHistoricalNamesAfterRename() throws Exception {
+        write(5);
+        catalog.alterTable(identifier(), SchemaChange.renameColumn("f2", "f3"), false);
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE
+                                                .key(),
+                                        "lightweight"));
+        List<ManifestEntry> entries = table.store().newScan().keepStats().plan().files();
+        assertThat(
+                        entries.stream()
+                                .anyMatch(
+                                        e ->
+                                                Collections.singletonList("f2")
+                                                        .equals(e.file().writeCols())))
+                .isTrue();
+        List<String> rows = new ArrayList<>();
+        ReadBuilder read = table.newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                read.newRead().createReader(read.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getInt(0)
+                                            + "|"
+                                            + row.getString(1)
+                                            + "|"
+                                            + row.getString(2)));
+        }
+        Collections.sort(rows);
+        assertThat(rows)
+                .isEqualTo(Arrays.asList("0|a0|b0", "1|a1|b1", "2|a2|b2", "3|a3|b3", "4|a4|b4"));
+    }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDropStatsWithoutFilterOrReadType(boolean enabled) throws Exception {
+        write(5);
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE
+                                                .key(),
+                                        enabled ? "lightweight" : "off"));
+        assertThat(table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled())
+                .isEqualTo(enabled);
+        DataEvolutionFileStoreScan scan = (DataEvolutionFileStoreScan) table.store().newScan();
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.latestSnapshot().get());
+        assertThat(manifests.isEmpty()).isFalse();
+        scan.dropStats();
+        for (ManifestFileMeta manifest : manifests) {
+            List<ManifestEntry> retained =
+                    table.store()
+                            .manifestFileFactory()
+                            .create()
+                            .read(manifest.fileName(), manifest.fileSize());
+            assertThat(retained.isEmpty()).isFalse();
+            for (ManifestEntry entry : retained) {
+                assertThat(entry.file().valueStats()).isNotEqualTo(EMPTY_STATS);
+            }
+            assertThat(scan.readManifest(manifest))
+                    .isEqualTo(
+                            retained.stream()
+                                    .map(e -> enabled ? e.copyWithoutStats() : e)
+                                    .collect(Collectors.toList()));
+            scan.withFilter(new PredicateBuilder(schemaDefault().rowType()).equal(0, 99));
+            scan.keepStats();
+            scan.withFilter(null);
+            assertThat(scan.readManifest(manifest)).isEqualTo(retained);
+            scan.dropStats();
+        }
+
+        List<ManifestEntry> entries = scan.plan().files();
         assertThat(entries.isEmpty()).isFalse();
         for (ManifestEntry entry : entries) {
             assertThat(entry.file().valueStats()).isEqualTo(EMPTY_STATS);
         }
+        PredicateBuilder predicates = new PredicateBuilder(schemaDefault().rowType());
+        scan.withFilter(predicates.equal(0, 99));
+        assertThat(scan.plan().files().isEmpty()).isTrue();
+        scan.withFilter(predicates.equal(0, 2));
+        assertThat(scan.plan().files().size()).isEqualTo(2);
+        ReadBuilder filtered = table.newReadBuilder().withFilter(predicates.equal(0, 2));
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                filtered.newRead().executeFilter().createReader(filtered.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getInt(0)
+                                            + "|"
+                                            + row.getString(1)
+                                            + "|"
+                                            + row.getString(2)));
+        }
+        assertThat(rows).isEqualTo(Collections.singletonList("2|a2|b2"));
     }
 
     private List<DataFileMeta> writeOneFullRowAndCollectNewFiles(FileStoreTable table)

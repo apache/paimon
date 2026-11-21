@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.DataEvolutionMetadataMemoryMode;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -35,13 +36,17 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -2157,6 +2162,118 @@ public class ManifestFileTest {
                 }
             };
         }
+    }
+
+    @ParameterizedTest
+    @MethodSource("dataEvolutionMetadataModes")
+    void testDataEvolutionDropsUnneededStatsBeforeManifestResults(
+            Boolean enabled, String cacheMode) {
+        Options options = dataEvolutionMetadataOptions(enabled);
+        RecordingFileIO io = new RecordingFileIO();
+        ManifestFile.Factory factory = dataEvolutionMetadataFactory(options, cacheMode, io);
+        ManifestFile manifests = factory.create();
+        ManifestEntry entry = gen.next();
+        assertThat(entry.file().valueStats()).isNotEqualTo(SimpleStats.EMPTY_STATS);
+        ManifestFileMeta meta = manifests.write(Collections.singletonList(entry)).get(0);
+        assertThat(manifests.read(meta.fileName(), meta.fileSize())).containsExactly(entry);
+
+        DataEvolutionFileStoreScan scan = dataEvolutionMetadataScan(factory, options);
+        scan.dropStats();
+        io.reset();
+        assertThat(scan.readManifest(meta))
+                .containsExactly(Boolean.TRUE.equals(enabled) ? entry.copyWithoutStats() : entry);
+        if ("cached".equals(cacheMode)) {
+            assertThat(io.opened).isEmpty();
+        } else {
+            assertThat(io.opened).isNotEmpty();
+        }
+        // A low-retention consumer must not remove statistics from the shared cache.
+        assertThat(manifests.read(meta.fileName(), meta.fileSize())).containsExactly(entry);
+    }
+
+    @ParameterizedTest
+    @MethodSource("dataEvolutionMetadataCacheModes")
+    void testDataEvolutionRestoresStatsForFiltersAndKeepStats(String cacheMode) {
+        Options options = dataEvolutionMetadataOptions(true);
+        RecordingFileIO io = new RecordingFileIO();
+        ManifestFile.Factory factory = dataEvolutionMetadataFactory(options, cacheMode, io);
+        ManifestFile manifests = factory.create();
+        ManifestEntry entry = gen.next();
+        assertThat(entry.file().valueStats()).isNotEqualTo(SimpleStats.EMPTY_STATS);
+        ManifestFileMeta meta = manifests.write(Collections.singletonList(entry)).get(0);
+        DataEvolutionFileStoreScan scan = dataEvolutionMetadataScan(factory, options);
+        assertThat(scan.readManifest(meta)).containsExactly(entry);
+
+        scan.dropStats();
+        assertThat(scan.readManifest(meta)).containsExactly(entry.copyWithoutStats());
+        scan.withFilter(new PredicateBuilder(DataTypes.ROW(DataTypes.INT())).equal(0, 7));
+        assertThat(scan.readManifest(meta)).containsExactly(entry);
+        scan.withFilter(null);
+        assertThat(scan.readManifest(meta)).containsExactly(entry.copyWithoutStats());
+        scan.keepStats();
+        assertThat(scan.readManifest(meta)).containsExactly(entry);
+        scan.dropStats();
+        assertThat(scan.readManifest(meta)).containsExactly(entry.copyWithoutStats());
+        scan.withFilter(new PredicateBuilder(DataTypes.ROW(DataTypes.INT())).equal(0, 7));
+        scan.keepStats();
+        scan.dropStats();
+        assertThat(scan.readManifest(meta)).containsExactly(entry);
+        scan.withFilter(null);
+        assertThat(scan.readManifest(meta)).containsExactly(entry.copyWithoutStats());
+        scan.keepStats();
+        assertThat(scan.readManifest(meta)).containsExactly(entry);
+        assertThat(manifests.read(meta.fileName(), meta.fileSize())).containsExactly(entry);
+    }
+
+    private static Stream<String> dataEvolutionMetadataCacheModes() {
+        return Stream.of("none", "cached", "oversized");
+    }
+
+    private static Stream<Arguments> dataEvolutionMetadataModes() {
+        return Stream.of((Boolean) null, Boolean.FALSE, Boolean.TRUE)
+                .flatMap(
+                        enabled ->
+                                dataEvolutionMetadataCacheModes()
+                                        .map(mode -> Arguments.of(enabled, mode)));
+    }
+
+    private static Options dataEvolutionMetadataOptions(Boolean enabled) {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
+        if (enabled != null) {
+            options.set(
+                    CoreOptions.DATA_EVOLUTION_METADATA_MEMORY_OPTIMIZATION_MODE,
+                    enabled
+                            ? DataEvolutionMetadataMemoryMode.LIGHTWEIGHT
+                            : DataEvolutionMetadataMemoryMode.OFF);
+        }
+        return options;
+    }
+
+    private ManifestFile.Factory dataEvolutionMetadataFactory(
+            Options options, String cacheMode, RecordingFileIO io) {
+        SegmentsCache<Path> cache =
+                "none".equals(cacheMode)
+                        ? null
+                        : new SegmentsCache<>(
+                                1024,
+                                MemorySize.ofMebiBytes(16),
+                                "cached".equals(cacheMode) ? Long.MAX_VALUE : 1L);
+        return createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, io, cache);
+    }
+
+    private static DataEvolutionFileStoreScan dataEvolutionMetadataScan(
+            ManifestFile.Factory factory, Options options) {
+        TableSchema schema =
+                TableSchema.create(
+                        0L,
+                        Schema.newBuilder()
+                                .column("v", DataTypes.INT())
+                                .options(options.toMap())
+                                .build());
+        return new DataEvolutionFileStoreScan(
+                mock(ManifestsReader.class), null, null, null, schema, factory, 2, false);
     }
 
     private ManifestFile createManifestFile(String pathStr) {

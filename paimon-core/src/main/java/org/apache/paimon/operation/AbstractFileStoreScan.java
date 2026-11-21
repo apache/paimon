@@ -23,14 +23,17 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
@@ -41,12 +44,14 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.ThrowingConsumer;
 import org.apache.paimon.utils.TriFilter;
 
 import org.slf4j.Logger;
@@ -313,24 +318,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         List<ManifestEntry> result = files;
 
-        long scanDuration = (System.nanoTime() - started) / 1_000_000;
-        LOG.info(
-                "File store scan plan completed in {} ms. Files size : {}",
-                scanDuration,
-                result.size());
-        if (scanMetrics != null) {
-            long allDataFiles =
-                    manifestsResult.allManifests.stream()
-                            .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
-                            .sum();
-            scanMetrics.reportScan(
-                    new ScanStats(
-                            scanDuration,
-                            snapshot == null ? 0 : snapshot.id(),
-                            manifests.size(),
-                            allDataFiles - result.size(),
-                            result.size()));
-        }
+        reportScan(manifestsResult, started, result.size());
 
         return new Plan() {
             @Nullable
@@ -352,6 +340,28 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
+    protected final void reportScan(
+            ManifestsReader.Result manifestsResult, long started, long resultedFiles) {
+        long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        LOG.info(
+                "File store scan plan completed in {} ms. Files size : {}",
+                scanDuration,
+                resultedFiles);
+        if (scanMetrics != null) {
+            long allDataFiles =
+                    manifestsResult.allManifests.stream()
+                            .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
+                            .sum();
+            scanMetrics.reportScan(
+                    new ScanStats(
+                            scanDuration,
+                            manifestsResult.snapshot == null ? 0 : manifestsResult.snapshot.id(),
+                            manifestsResult.filteredManifests.size(),
+                            allDataFiles - resultedFiles,
+                            resultedFiles));
+        }
+    }
+
     @Override
     public List<SimpleFileEntry> readSimpleEntries() {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
@@ -364,6 +374,47 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             result.add(iterator.next());
         }
         return result;
+    }
+
+    @Override
+    public void forEachSimpleEntry(ThrowingConsumer<SimpleFileEntry, Exception> consumer)
+            throws Exception {
+        // Resolve manifests once so DELETE collection and ADD production use the same snapshot.
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        if (scanMode != ScanMode.ALL) {
+            for (ManifestFileMeta manifest : manifests) {
+                forEachManifestEntry(
+                        manifest,
+                        null,
+                        null,
+                        entry -> consumer.accept(SimpleFileEntry.from(entry)));
+            }
+            return;
+        }
+
+        // Only DELETE identities survive this pass. They still grow with the number of deleted
+        // files, but neither a per-manifest result list nor the complete ADD metadata is retained.
+        CompactFileIdentifierSet deleted = new CompactFileIdentifierSet();
+        try {
+            for (ManifestFileMeta manifest : manifests) {
+                if (manifest.numDeletedFiles() > 0) {
+                    forEachManifestEntry(manifest, FileKind.DELETE, null, deleted::add);
+                }
+            }
+            for (ManifestFileMeta manifest : manifests) {
+                if (manifest.numAddedFiles() > 0) {
+                    forEachManifestEntry(
+                            manifest,
+                            FileKind.ADD,
+                            entry -> !deleted.contains((ProjectedManifestEntry) entry),
+                            // SimpleFileEntry carries no statistics or write-column names, so the
+                            // ordinary drop-stats/name-sharing conversions have nothing to retain.
+                            entry -> consumer.accept(SimpleFileEntry.from(entry)));
+                }
+            }
+        } finally {
+            deleted.release();
+        }
     }
 
     @Override
@@ -489,7 +540,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         }
     }
 
-    private ManifestsReader.Result readManifests() {
+    protected final ManifestsReader.Result readManifests() {
         return manifestsReader.read(specifiedSnapshot, scanMode);
     }
 
@@ -536,8 +587,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             return Collections.emptyList();
         }
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
-        Function<ManifestEntry, T> finalConverter =
-                dropStats ? e -> converter.apply(dropStats(e)) : converter;
+        Function<ManifestEntry, T> finalConverter = createManifestEntryConverter(converter);
 
         List<T> entries =
                 manifestFile
@@ -558,6 +608,62 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 selected);
         LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
         return entries;
+    }
+
+    protected <T> Function<ManifestEntry, T> createManifestEntryConverter(
+            Function<ManifestEntry, T> converter) {
+        return dropStats ? e -> converter.apply(dropStats(e)) : converter;
+    }
+
+    /** Applies the ordinary scan filters before consuming each independent binary entry. */
+    protected final void forEachManifestEntry(
+            ManifestFileMeta manifest,
+            @Nullable FileKind kind,
+            @Nullable Filter<ManifestEntry> beforeEntryFilter,
+            ThrowingConsumer<ProjectedManifestEntry, Exception> consumer)
+            throws Exception {
+        ManifestFile file =
+                manifestFileFactory
+                        .create()
+                        .withCacheMetrics(
+                                scanMetrics == null ? null : scanMetrics.getCacheMetrics());
+        BucketFilter buckets = createBucketFilter();
+        PartitionPredicate partitions = manifestsReader.partitionFilter();
+        ManifestSidecar.Selection selected =
+                file.selectBlocks(manifest, rowRangeIndex, partitions, buckets);
+        Filter<InternalRow> rowFilter = createEntryRowFilter();
+        ManifestEntrySerializer filterSerializer =
+                manifestEntryFilter == null ? null : new ManifestEntrySerializer();
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                file.scan(
+                        manifest,
+                        ProjectedManifestEntry.fullProjection(),
+                        partitions,
+                        buckets,
+                        selected)) {
+            while (entries.hasNext()) {
+                ProjectedManifestEntry entry = entries.next();
+                if (!rowFilter.test(entry.fullRow())
+                        || (kind != null && entry.kind() != kind)
+                        || (beforeEntryFilter != null && !beforeEntryFilter.test(entry))) {
+                    continue;
+                }
+                // Custom filters retain the ordinary entry API, including copy operations.
+                ManifestEntry filteredEntry =
+                        filterSerializer == null
+                                ? entry
+                                : filterSerializer.fromRow(entry.fullRow());
+                if ((manifestEntryFilter == null || manifestEntryFilter.test(filteredEntry))
+                        && filterByStats(filteredEntry)) {
+                    consumer.accept(
+                            filterSerializer == null
+                                    ? entry
+                                    : ProjectedManifestEntry.fullProjection()
+                                            .createEntry()
+                                            .replace(filterSerializer.toRow(filteredEntry)));
+                }
+            }
+        }
     }
 
     protected ManifestEntry dropStats(ManifestEntry entry) {

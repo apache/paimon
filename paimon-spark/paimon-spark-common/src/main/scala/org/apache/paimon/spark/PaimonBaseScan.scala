@@ -27,8 +27,8 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.{DataTable, FallbackReadFileStoreTable, FileStoreTable, InnerTable}
+import org.apache.paimon.table.source.{DataFileMetaStore, InnerTableScan, Split}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -37,6 +37,8 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Statistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.execution.SQLExecution
+
+import java.nio.file.Paths
 
 import scala.collection.JavaConverters._
 
@@ -50,8 +52,27 @@ abstract class PaimonBaseScan(table: InnerTable)
   @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
 
   protected def getInputSplits: Array[Split] = {
-    val scan = readBuilder
-      .newScan()
+    if (coreOptions.dataEvolutionMetadataStreamingEnabled() && supportsMetadataReplay) {
+      return getIncrementalInputSplits
+    }
+    planInputSplits(readBuilder.newScan().asInstanceOf[InnerTableScan])
+  }
+
+  private def supportsMetadataReplay: Boolean = {
+    // A replay store belongs to one ALL-snapshot reader, not composite or incremental scans.
+    if (!table.isInstanceOf[FileStoreTable] || table.isInstanceOf[FallbackReadFileStoreTable]) {
+      return false
+    }
+    coreOptions.startupMode() match {
+      case CoreOptions.StartupMode.INCREMENTAL | CoreOptions.StartupMode.LATEST_DELTA => false
+      case _ =>
+        coreOptions.toConfiguration.get(CoreOptions.BATCH_SCAN_MODE) ==
+          CoreOptions.BatchScanMode.NONE
+    }
+  }
+
+  private def planInputSplits(inputScan: InnerTableScan): Array[Split] = {
+    val scan = inputScan
       .withGlobalIndexResult(evalGlobalIndexSearch())
       .asInstanceOf[InnerTableScan]
       .withMetricRegistry(paimonMetricsRegistry)
@@ -59,6 +80,50 @@ abstract class PaimonBaseScan(table: InnerTable)
     val plan = scan.plan()
     registerReadProtectionTagCleanup(scan.readProtectionTagName)
     plan.splits().asScala.toArray
+  }
+
+  private def getIncrementalInputSplits: Array[Split] = {
+    val io = SparkUtils.createIOManager()
+    var store: DataFileMetaStore = null
+    try {
+      store = new DataFileMetaStore(
+        Paths.get(io.pickTempDir()),
+        coreOptions.dataEvolutionMetadataMaxDiskSize())
+      val scan =
+        readBuilder.newScan(actual => actual.newSnapshotReader().withIncrementalPlanning(store, io))
+      val splits = planInputSplits(scan.asInstanceOf[InnerTableScan])
+      if (splits.isEmpty) {
+        // Empty-table planning may finish before the snapshot reader seals its store.
+        store.close()
+        io.close()
+        return splits
+      }
+      // Sort spill is finished; replay files remain owned by the returned split slices.
+      io.close()
+      store.withAutomaticCleanup()
+      logInfo(
+        s"Incremental metadata planning produced ${splits.length} splits with " +
+          s"${store.serializedBytes()} encoded replay bytes.")
+      splits
+    } catch {
+      case failure: Throwable =>
+        if (store != null) {
+          closeAfterFailure(store, failure)
+        }
+        closeAfterFailure(io, failure)
+        throw failure
+    }
+  }
+
+  private def closeAfterFailure(resource: AutoCloseable, failure: Throwable): Unit = {
+    try {
+      resource.close()
+    } catch {
+      case cleanupFailure: Throwable =>
+        if (cleanupFailure ne failure) {
+          failure.addSuppressed(cleanupFailure)
+        }
+    }
   }
 
   final private[spark] def registerReadProtectionTagCleanup(tagName: String): Unit = {

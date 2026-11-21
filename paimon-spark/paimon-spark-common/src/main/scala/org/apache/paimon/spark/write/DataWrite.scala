@@ -70,6 +70,10 @@ trait DataWrite[T] extends AutoCloseable {
       // todo: support format table.
       case _ =>
     }
+    reportOutputMetrics(bytesWritten, recordsWritten)
+  }
+
+  protected def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
     val taskContext = TaskContext.get
     if (taskContext != null) {
       PaimonUtils.updateOutputMetrics(

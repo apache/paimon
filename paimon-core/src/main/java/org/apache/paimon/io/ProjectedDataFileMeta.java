@@ -313,6 +313,11 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public DataFileMeta withWriteCols(@Nullable List<String> writeCols) {
+        throw unsupportedOperation("withWriteCols(List)");
+    }
+
+    @Override
     public DataFileMeta withWriteColsSequences(long[] writeColsSequences) {
         throw unsupportedOperation("withWriteColsSequences(long[])");
     }

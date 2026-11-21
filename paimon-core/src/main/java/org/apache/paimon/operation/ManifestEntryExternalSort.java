@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.CollectedDeletes;
@@ -34,6 +35,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -41,6 +43,7 @@ import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -196,17 +199,13 @@ public class ManifestEntryExternalSort {
         }
     }
 
-    /** Spillable sorter that stores sort keys plus complete binary manifest rows. */
-    private static class EntrySorter implements AutoCloseable {
-        private final ManifestFileSorter.ManifestSortKey sortKey;
-        private final GenericRow externalSortRow;
+    /** Shared binary sorting kernel; callers retain their own row and output semantics. */
+    static final class BinaryRowSorter implements AutoCloseable {
         private final IOManager ioManager;
         private final boolean ownedIOManager;
         private final BinaryExternalSortBuffer sortBuffer;
 
-        private EntrySorter(ManifestFileSorter.ManifestSortKey sortKey, ExternalSortConfig config) {
-            this.sortKey = sortKey;
-            this.externalSortRow = new GenericRow(sortKey.externalSortRowType().getFieldCount());
+        BinaryRowSorter(RowType rowType, int[] keyFields, ExternalSortConfig config) {
             this.ioManager =
                     config.ioManager == null
                             ? IOManager.create(System.getProperty("java.io.tmpdir"))
@@ -215,13 +214,51 @@ public class ManifestEntryExternalSort {
             this.sortBuffer =
                     BinaryExternalSortBuffer.create(
                             ioManager,
-                            sortKey.externalSortRowType(),
-                            sortKey.externalSortKeyFields(),
+                            rowType,
+                            keyFields,
                             config.bufferSize,
                             config.pageSize,
                             config.maxNumFileHandles,
                             config.compression,
                             config.maxDiskSize);
+        }
+
+        void write(InternalRow row) throws IOException {
+            sortBuffer.write(row);
+        }
+
+        boolean isEmpty() {
+            return sortBuffer.isEmpty();
+        }
+
+        MutableObjectIterator<BinaryRow> sortedIterator() throws IOException {
+            return sortBuffer.sortedIterator();
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                sortBuffer.clear();
+            } finally {
+                if (ownedIOManager) {
+                    ioManager.close();
+                }
+            }
+        }
+    }
+
+    /** Spillable sorter that stores sort keys plus complete binary manifest rows. */
+    private static class EntrySorter implements AutoCloseable {
+        private final ManifestFileSorter.ManifestSortKey sortKey;
+        private final GenericRow externalSortRow;
+        private final BinaryRowSorter sortBuffer;
+
+        private EntrySorter(ManifestFileSorter.ManifestSortKey sortKey, ExternalSortConfig config) {
+            this.sortKey = sortKey;
+            this.externalSortRow = new GenericRow(sortKey.externalSortRowType().getFieldCount());
+            this.sortBuffer =
+                    new BinaryRowSorter(
+                            sortKey.externalSortRowType(), sortKey.externalSortKeyFields(), config);
         }
 
         private void write(ProjectedManifestEntry entry) throws Exception {
@@ -344,10 +381,7 @@ public class ManifestEntryExternalSort {
 
         @Override
         public void close() throws Exception {
-            sortBuffer.clear();
-            if (ownedIOManager) {
-                ioManager.close();
-            }
+            sortBuffer.close();
         }
     }
 }

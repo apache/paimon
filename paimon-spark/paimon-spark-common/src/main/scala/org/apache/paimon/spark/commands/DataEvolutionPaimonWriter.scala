@@ -20,7 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
-import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
+import org.apache.paimon.spark.write.{CommitMessageSeq, DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
@@ -29,6 +29,7 @@ import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
+import org.apache.spark.TaskContext
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 
@@ -127,24 +128,66 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       sparkSession.sparkContext.broadcast(firstRowIdToPartitionMap)
     val writeBuilder = table.newBatchWriteBuilder()
 
-    val written =
-      data.mapPartitions {
-        iter =>
-          {
-            val write = DataEvolutionTableDataWrite(
-              writeBuilder,
-              writeType,
-              firstRowIdToPartitionMapBroadcast.value,
-              uriReaderFactory,
-              rawBlobPlaceholderMarkerIndexes)
-            try {
-              iter.foreach(row => write.write(row))
-              Iterator.apply(write.commit)
-            } finally {
-              write.close()
+    if (table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled()) {
+      val streaming = table.coreOptions().dataEvolutionMetadataStreamingEnabled()
+      val written =
+        data.mapPartitions {
+          iter =>
+            {
+              val write = DataEvolutionTableDataWrite(
+                writeBuilder,
+                writeType,
+                firstRowIdToPartitionMapBroadcast.value,
+                uriReaderFactory,
+                rawBlobPlaceholderMarkerIndexes)
+              if (streaming) {
+                try {
+                  val context = TaskContext.get
+                  if (context != null) {
+                    context.addTaskCompletionListener[Unit](_ => write.close())
+                  }
+                  write.writeAndCommitRows(iter)
+                } catch {
+                  case failure: Throwable =>
+                    try write.close()
+                    catch {
+                      case cleanupFailure: Throwable =>
+                        if (cleanupFailure ne failure) failure.addSuppressed(cleanupFailure)
+                    }
+                    throw failure
+                }
+              } else {
+                try {
+                  iter.foreach(row => write.write(row))
+                  // Avoid one UnsafeRow buffer holding all messages returned by this task.
+                  write.commit.serializedMessageBytes.iterator
+                } finally {
+                  write.close()
+                }
+              }
             }
-          }
-      }
-    WriteTaskResult.merge(written.collect())
+        }
+      new CommitMessageSeq(CommitMessageList.fromBytes(written.collect().toSeq.asJava))
+    } else {
+      val written =
+        data.mapPartitions {
+          iter =>
+            {
+              val write = DataEvolutionTableDataWrite(
+                writeBuilder,
+                writeType,
+                firstRowIdToPartitionMapBroadcast.value,
+                uriReaderFactory,
+                rawBlobPlaceholderMarkerIndexes)
+              try {
+                iter.foreach(row => write.write(row))
+                Iterator.apply(write.commit)
+              } finally {
+                write.close()
+              }
+            }
+        }
+      WriteTaskResult.merge(written.collect())
+    }
   }
 }
