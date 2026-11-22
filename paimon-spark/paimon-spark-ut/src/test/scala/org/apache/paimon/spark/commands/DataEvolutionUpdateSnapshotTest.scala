@@ -21,11 +21,38 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.QueryPlanningTracker
 
 import scala.util.Try
 
 class DataEvolutionUpdateSnapshotTest extends PaimonSparkTestBase {
+
+  test("MERGE writes a column added after the latest data snapshot") {
+    for (reuse <- Seq(false, true)) {
+      withTable("t") {
+        sql("CREATE TABLE t (id BIGINT, value STRING) TBLPROPERTIES " +
+          "('bucket' = '-1', 'row-tracking.enabled' = 'true', " +
+          s"'data-evolution.enabled' = 'true', 'data-evolution.merge-into.join-reuse' = '$reuse')")
+        sql("INSERT INTO t VALUES (1, 'old'), (3, 'untouched')")
+        sql("ALTER TABLE t ADD COLUMNS (payload STRING)")
+        sql("""
+              |MERGE INTO t
+              |USING (SELECT * FROM VALUES (1L, 'updated', 'matched'), (2L, 'inserted', 'kept')
+              |       AS v(id, value, payload)) s
+              |ON t.id = s.id
+              |WHEN MATCHED THEN UPDATE SET t.value = s.value, t.payload = s.payload
+              |WHEN NOT MATCHED THEN INSERT (id, value, payload) VALUES (s.id, s.value, s.payload)
+              |""".stripMargin)
+        checkAnswer(
+          sql("SELECT id, value, payload FROM t"),
+          Seq(
+            Row(1L, "updated", "matched"),
+            Row(2L, "inserted", "kept"),
+            Row(3L, "untouched", null)))
+      }
+    }
+  }
 
   test("V1 update detects a concurrent update after its snapshot is pinned") {
     withSparkSQLConf(
