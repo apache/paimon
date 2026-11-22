@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.bitmap.CentroidBitmapIndex;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -68,10 +69,10 @@ final class CentroidBitmapFilter {
             return null;
         }
         GlobalIndexMeta meta = files.get(0).globalIndexMeta();
-        int[] extraFieldIds = meta.extraFieldIds();
-        if (!CentroidIndexMeta.hasScalarIndexes(meta.indexMeta()) || extraFieldIds == null) {
+        if (!CentroidIndexMeta.hasBitmapFields(meta)) {
             return null;
         }
+        int[] extraFieldIds = meta.extraFieldIds();
         RowType rowType = table.rowType();
         List<DataField> fields = new ArrayList<>();
         Predicate predicate = bind(filter, rowType, extraFieldIds, fields);
@@ -82,20 +83,22 @@ final class CentroidBitmapFilter {
         IndexPathFactory paths = table.store().pathFactory().globalIndexFileFactory();
         Map<Integer, CentroidIndexFile> bitmaps = new HashMap<>();
         Map<Integer, CentroidIndexFile> shards = new HashMap<>();
-        CentroidIndexFile router = null;
+        boolean hasRouter = false;
         long schemaId = -1;
         for (IndexFileMeta file : files) {
             CentroidIndexFile entry = (CentroidIndexFile) CentroidIndexMeta.file(file, paths);
             if (entry.routingModel()) {
-                checkState(router == null, "Multiple centroid routing models.");
-                router = entry;
+                checkState(!hasRouter, "Multiple centroid routing models.");
+                hasRouter = true;
             } else if (entry.scalarIndex()) {
                 checkState(
                         Arrays.equals(extraFieldIds, file.globalIndexMeta().extraFieldIds()),
                         "Mixed centroid bitmap fields.");
                 checkState(
                         bitmaps.put(entry.centroid(), entry) == null, "Duplicate centroid bitmap.");
-                long bitmapSchemaId = CentroidBitmapIndex.schemaId(entry.metadata());
+                long bitmapSchemaId =
+                        DataEvolutionIndexSourceMeta.fromIndexFile(file).sourceSchemaId();
+                checkState(bitmapSchemaId >= 0, "Missing centroid bitmap build schema.");
                 checkState(
                         schemaId == -1 || schemaId == bitmapSchemaId,
                         "Mixed centroid bitmap schemas.");
@@ -105,7 +108,7 @@ final class CentroidBitmapFilter {
                         shards.put(entry.centroid(), entry) == null, "Duplicate centroid shard.");
             }
         }
-        checkState(router != null, "Missing centroid routing model.");
+        checkState(hasRouter, "Missing centroid routing model.");
         checkState(
                 shards.keySet().equals(bitmaps.keySet()),
                 "Centroid bitmap files do not cover the shard group.");
@@ -115,10 +118,8 @@ final class CentroidBitmapFilter {
         for (CentroidIndexFile bitmap : bitmaps.values()) {
             CentroidIndexFile shard = shards.get(bitmap.centroid());
             checkState(
-                    bitmap.modelId().equals(router.modelId())
-                            && shard.modelId().equals(router.modelId())
-                            && bitmap.rowCount() == shard.rowCount(),
-                    "Centroid bitmap and vector shard belong to different builds.");
+                    bitmap.rowCount() == shard.rowCount(),
+                    "Centroid bitmap and vector shard row counts differ.");
         }
 
         RowType buildType =

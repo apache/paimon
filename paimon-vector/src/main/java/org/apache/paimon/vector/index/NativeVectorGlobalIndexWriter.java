@@ -356,8 +356,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             String fileName = fileWriter.newFileName(fileNamePrefix());
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
+            String metric =
+                    nativeOptions
+                            .getOrDefault("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC)
+                            .trim();
             byte[] header =
-                    centroidShard && ("ivf-flat".equals(identifier) || "ivf-pq".equals(identifier))
+                    centroidShard
+                                    && NativeCentroidRoutedIndexReader.storesLocalNlist(
+                                            identifier, metric)
                             ? new byte[64]
                             : null;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
@@ -400,18 +406,17 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta descriptor = new VectorIndexMeta();
+            byte[] descriptor = centroidShard ? null : new VectorIndexMeta().serialize();
             if (header != null) {
                 try (VectorIndexReader reader =
                         new VectorIndexReader(
                                 new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
                                         new ByteArraySeekableStream(header)))) {
                     VectorIndexMetadata local = reader.metadata();
-                    descriptor = new VectorIndexMeta(local.nlist(), local.metric());
+                    descriptor = ByteBuffer.allocate(Integer.BYTES).putInt(local.nlist()).array();
                 }
             }
-            return new ResultEntry(
-                    fileName, !centroidShard ? rowCount : count, descriptor.serialize());
+            return new ResultEntry(fileName, centroidShard ? count : rowCount, descriptor);
         }
     }
 

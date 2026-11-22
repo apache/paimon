@@ -25,15 +25,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Metadata for a vector index file.
- *
- * <p>Routed IVF shards can include their local geometry for automatic probing.
- */
+/** JSON metadata for a range-sharded vector index file. */
 public class VectorIndexMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -55,16 +50,6 @@ public class VectorIndexMeta implements Serializable {
         this.metric = metric;
     }
 
-    @Nullable
-    Integer localNlist() {
-        return localNlist;
-    }
-
-    @Nullable
-    String metric() {
-        return metric;
-    }
-
     public byte[] serialize() throws IOException {
         Map<String, String> values = new LinkedHashMap<>();
         if (localNlist != null) {
@@ -81,13 +66,5 @@ public class VectorIndexMeta implements Serializable {
         String nlist = values.get("localNlist");
         return new VectorIndexMeta(
                 nlist == null ? null : Integer.valueOf(nlist), values.get("metric"));
-    }
-
-    static VectorIndexMeta read(@Nullable byte[] data) {
-        try {
-            return data == null ? new VectorIndexMeta() : deserialize(data);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Invalid vector index metadata.", e);
-        }
     }
 }

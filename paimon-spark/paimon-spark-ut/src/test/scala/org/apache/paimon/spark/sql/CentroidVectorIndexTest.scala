@@ -416,6 +416,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L), (448L, 448L)))
       assert(routers.size == 5)
       assert(indexes.count(_.globalIndexMeta().rowRangeStart() == 448L) == 1)
+      assert(routers.exists(f => f.globalIndexMeta().rowRangeStart() == 448L && f.fileSize() == 0L))
       assert(nearest(200) == 200)
 
       def fileRanges = indexes.map(f => f.fileName() -> f.globalIndexMeta().rowRange()).toMap
@@ -552,12 +553,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           .map(_.indexFile())
           .find(f => CentroidIndexMeta.isRoutingModel(f))
           .get
-        val meta = CentroidIndexMeta
-          .file(model, table.store().pathFactory().globalIndexFileFactory())
-          .asInstanceOf[CentroidIndexFile]
         val path = table.store().pathFactory().globalIndexFileFactory().toPath(model)
         val in = table.fileIO().newInputStream(path)
-        try VectorTrainingModelIO.read(in, model.fileSize(), meta.modelId())
+        try VectorTrainingModelIO.read(in, model.fileSize())
         finally in.close()
       }
       val fourTasks = buildModel()

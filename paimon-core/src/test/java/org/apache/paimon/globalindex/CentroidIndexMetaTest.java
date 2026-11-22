@@ -21,6 +21,8 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 
+import org.apache.paimon.shade.guava30.com.google.common.io.BaseEncoding;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -43,20 +45,32 @@ class CentroidIndexMetaTest {
     }
 
     @Test
+    void writesTheSingleVersionWithFixedWidthFields() {
+        ResultEntry shard =
+                CentroidIndexMeta.shard(new ResultEntry("shard", 7, new byte[] {42}), 4);
+        assertThat(shard.meta())
+                .containsExactly(
+                        BaseEncoding.base16()
+                                .lowerCase()
+                                .decode(
+                                        "5041494d43454e54" // PAIMCENT
+                                                + "5301" // Shard role and version
+                                                + "00000004" // Centroid ID
+                                                + "2a")); // Payload
+    }
+
+    @Test
     void routedFilesRoundTripOpaqueMetadataAndRoles() {
-        for (byte[] payload : Arrays.asList(null, new byte[0], new byte[] {0, 2, -1})) {
+        for (byte[] payload : Arrays.asList(null, new byte[] {0, 2, -1})) {
             ResultEntry source = new ResultEntry("index", 7, payload);
-            ResultEntry shard = CentroidIndexMeta.shard(source, "g", 4);
-            ResultEntry router = CentroidIndexMeta.router(source, "g", 5);
-            assertThat(shard.meta())
-                    .startsWith("PAIMCENT".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            ResultEntry shard = CentroidIndexMeta.shard(source, 4);
+            ResultEntry router = CentroidIndexMeta.router(source, 5);
             assertThat(CentroidIndexMeta.isRoutingModel(shard.meta())).isFalse();
             assertThat(CentroidIndexMeta.isRoutingModel(router.meta())).isTrue();
             CentroidIndexFile decoded =
                     (CentroidIndexFile)
                             CentroidIndexMeta.file(path, 100, shard.rowCount(), shard.meta());
             assertThat(decoded.centroid()).isEqualTo(4);
-            assertThat(decoded.modelId()).isEqualTo("g");
             assertThat(decoded.rowCount()).isEqualTo(7);
             assertThat(decoded.metadata()).isEqualTo(payload);
             assertThat(
@@ -69,33 +83,38 @@ class CentroidIndexMetaTest {
 
     @Test
     void rejectsInvalidWrappedMetadata() {
-        byte[] meta =
-                CentroidIndexMeta.shard(new ResultEntry("f", 1, new byte[] {42}), "group", 3)
-                        .meta();
-        assertThatThrownBy(
-                        () ->
-                                CentroidIndexMeta.file(
-                                        path, 10, 1, Arrays.copyOf(meta, meta.length - 1)))
-                .hasMessageContaining("length");
-        meta[8] = 99;
+        byte[] meta = CentroidIndexMeta.shard(new ResultEntry("f", 1, new byte[] {42}), 3).meta();
+        assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, Arrays.copyOf(meta, 13)))
+                .hasMessageContaining("Truncated");
+        meta[9] = 2;
         assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, meta))
                 .hasMessageContaining("version");
+        meta[9] = 1;
+        meta[8] = 2;
+        assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, meta))
+                .hasMessageContaining("role");
     }
 
     @Test
-    void bitmapRolePairsWithTheVectorGeneration() {
+    void bitmapRoleAndExtraFieldsDescribeTheIndex() {
         ResultEntry bitmap =
-                CentroidIndexMeta.scalarIndex(new ResultEntry("bitmap", 3, new byte[] {9}), "g", 4);
+                CentroidIndexMeta.scalarIndex(new ResultEntry("bitmap", 3, new byte[] {9}), 4);
         CentroidIndexFile decoded =
                 (CentroidIndexFile)
                         CentroidIndexMeta.file(path, 100, bitmap.rowCount(), bitmap.meta());
-        assertThat(CentroidIndexMeta.hasScalarIndexes(bitmap.meta())).isTrue();
         assertThat(decoded.scalarIndex()).isTrue();
         assertThat(decoded.routingModel()).isFalse();
         assertThat(decoded.centroid()).isEqualTo(4);
-        assertThat(decoded.modelId()).isEqualTo("g");
         assertThat(decoded.metadata()).containsExactly(9);
-        GlobalIndexMeta meta = new GlobalIndexMeta(0, 9, 1, new int[] {2}, bitmap.meta());
+        assertThat(bitmap.meta()[9]).isEqualTo((byte) 1);
+
+        ResultEntry emptyRouter = CentroidIndexMeta.router(new ResultEntry("router", 0, null), 0);
+        GlobalIndexMeta meta = new GlobalIndexMeta(0, 9, 1, new int[] {2}, emptyRouter.meta());
+        assertThat(CentroidIndexMeta.hasBitmapFields(meta)).isTrue();
+        assertThat(
+                        CentroidIndexMeta.hasBitmapFields(
+                                new GlobalIndexMeta(0, 9, 1, null, emptyRouter.meta())))
+                .isFalse();
         assertThat(CentroidIndexMeta.matchesIndexFields(meta, Collections.singletonList(1)))
                 .isTrue();
         assertThat(CentroidIndexMeta.matchesIndexFields(meta, Collections.singletonList(2)))

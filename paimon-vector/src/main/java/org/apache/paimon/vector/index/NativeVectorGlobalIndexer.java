@@ -112,7 +112,7 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
             return this;
         }
         Map<String, String> bound = new LinkedHashMap<>(options);
-        bound.put("metric", NativeCentroidVectorGlobalIndexer.storedMetric(reader, files));
+        bound.put("metric", NativeCentroidVectorGlobalIndexer.storedMetric(files));
         return new NativeVectorGlobalIndexer(fieldType, bound, identifier, trainSampleRatio);
     }
 

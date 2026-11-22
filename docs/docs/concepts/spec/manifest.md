@@ -415,6 +415,10 @@ Data Evolution source metadata starts with the four-byte `DEIX` marker and a big
 build schema ID after the snapshot ID. Both IDs are big-endian. A build schema ID of `-1`
 indicates an unknown build schema.
 
+The [centroid index storage format](../../multimodal-table/global-index/centroid-vector#centroid-index-storage-format)
+defines the role-specific `_INDEX_META` bytes and the router model file layout for
+centroid-sharded vector indexes.
+
 See [Table Index](./tableindex) for dynamic bucket indexes and deletion vectors, and the
 [global index guide](../../primary-key-table/global-index) for query-index behavior.
 

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -27,7 +26,6 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
 import org.apache.paimon.globalindex.VectorTrainingModel;
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
@@ -36,11 +34,13 @@ import org.apache.paimon.types.DataType;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Outer centroid routing with an independently trained native index in each populated shard. */
 final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
@@ -61,35 +61,27 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
     }
 
     @Override
-    public ResultEntry writeRoutingModel(
-            GlobalIndexFileWriter io, String name, byte[] payload, String modelId)
+    public ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String name, byte[] payload)
             throws IOException {
         try (OutputStream out = io.newOutputStream(name)) {
-            VectorTrainingModelIO.write(out, payload, modelId);
+            out.write(payload);
         }
-        return new ResultEntry(name, 0, new VectorIndexMeta(null, metric().trim()).serialize());
+        return new ResultEntry(name, 0, metric().trim().getBytes(StandardCharsets.UTF_8));
     }
 
-    static String storedMetric(GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
+    static String storedMetric(List<GlobalIndexIOMeta> files) {
         for (GlobalIndexIOMeta file : files) {
-            CentroidIndexFile meta = (CentroidIndexFile) file;
-            if (meta.routingModel()) {
-                String metric = VectorIndexMeta.read(file.metadata()).metric();
-                if (metric != null) {
-                    return metric;
-                }
-                try (SeekableInputStream in = reader.getInputStream(file)) {
-                    return VectorTrainingModelIO.readLegacyMetric(
-                            in,
-                            file.fileSize(),
-                            meta.modelId(),
-                            CentroidRouter.maxSerializedBytes());
-                } catch (IOException e) {
-                    throw new UncheckedIOException("Cannot read centroid routing metric.", e);
-                }
+            if (file instanceof CentroidIndexFile && ((CentroidIndexFile) file).routingModel()) {
+                return routingMetric((CentroidIndexFile) file);
             }
         }
         throw new IllegalArgumentException("Missing centroid routing model.");
+    }
+
+    static String routingMetric(CentroidIndexFile router) {
+        byte[] metric = router.metadata();
+        checkArgument(metric != null && metric.length > 0, "Missing centroid routing metric.");
+        return new String(metric, StandardCharsets.UTF_8);
     }
 
     @Override
