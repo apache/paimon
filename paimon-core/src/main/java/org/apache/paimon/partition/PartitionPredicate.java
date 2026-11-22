@@ -218,6 +218,7 @@ public interface PartitionPredicate extends Serializable {
     class MultiplePartitionPredicate implements PartitionPredicate {
 
         private static final long serialVersionUID = 1L;
+        private static final int MIN_PARTITIONS_FOR_RANGE_SEARCH = 64;
 
         private final Set<BinaryRow> partitions;
         private final int fieldNum;
@@ -225,6 +226,10 @@ public interface PartitionPredicate extends Serializable {
         private final Predicate[] max;
         @Nullable private final Object[][] partitionValues;
         @Nullable private final RowDataToObjectArrayConverter converter;
+        private final int rangeField;
+        @Nullable private final Object rangeMin;
+        @Nullable private final Object rangeMax;
+        @Nullable private transient volatile Object[][] sortedPartitions;
 
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
@@ -254,6 +259,9 @@ public interface PartitionPredicate extends Serializable {
                 }
             }
             PredicateBuilder builder = new PredicateBuilder(partitionType);
+            int searchField = -1;
+            Object searchMin = null;
+            Object searchMax = null;
             for (int i = 0; i < collectors.length; i++) {
                 SimpleColStats stats = collectors[i].result();
                 Long nullCount = stats.nullCount();
@@ -262,14 +270,25 @@ public interface PartitionPredicate extends Serializable {
                     min[i] = builder.isNull(i);
                     max[i] = builder.isNull(i);
                 } else {
-                    min[i] = builder.greaterOrEqual(i, checkNotNull(stats.min()));
-                    max[i] = builder.lessOrEqual(i, checkNotNull(stats.max()));
+                    Object minValue = checkNotNull(stats.min());
+                    Object maxValue = checkNotNull(stats.max());
+                    min[i] = builder.greaterOrEqual(i, minValue);
+                    max[i] = builder.lessOrEqual(i, maxValue);
                     if (nullCount > 0) {
                         min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
                         max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
+                    } else if (partitions.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH
+                            && searchField == -1
+                            && compareLiteral(partitionType.getTypeAt(i), minValue, maxValue) < 0) {
+                        searchField = i;
+                        searchMin = minValue;
+                        searchMax = maxValue;
                     }
                 }
             }
+            this.rangeField = searchField;
+            this.rangeMin = searchMin;
+            this.rangeMax = searchMax;
         }
 
         @Override
@@ -308,14 +327,65 @@ public interface PartitionPredicate extends Serializable {
                                 ? -1
                                 : nullCounts.getLong(i);
             }
-            // At least one requested partition must match on every field for the manifest to
-            // matter.
-            for (Object[] partition : partitionValues) {
-                if (mayContainPartition(partition, lower, upper, nulls, rowCount)) {
+            Object[][] candidates = partitionValues;
+            int start = 0;
+            int end = candidates.length;
+            if (rangeMin != null && lower[rangeField] != null && upper[rangeField] != null) {
+                int field = rangeField;
+                DataType type = converter.rowType().getTypeAt(field);
+                boolean restrictStart = compareLiteral(type, rangeMin, lower[field]) < 0;
+                boolean restrictEnd = compareLiteral(type, rangeMax, upper[field]) > 0;
+                if (restrictStart || restrictEnd) {
+                    candidates = sortedPartitions(type);
+                    if (restrictStart) {
+                        start = findBound(candidates, type, lower[field], start, false);
+                    }
+                    if (restrictEnd) {
+                        end = findBound(candidates, type, upper[field], start, true);
+                    }
+                }
+            }
+            // A candidate must match on every field.
+            for (int i = start; i < end; i++) {
+                if (mayContainPartition(candidates[i], lower, upper, nulls, rowCount)) {
                     return true;
                 }
             }
             return false;
+        }
+
+        private Object[][] sortedPartitions(DataType type) {
+            Object[][] sorted = sortedPartitions;
+            if (sorted != null) {
+                return sorted;
+            }
+            synchronized (this) {
+                if (sortedPartitions == null) {
+                    // Build only when a manifest range can narrow the candidates.
+                    sorted = partitionValues.clone();
+                    int field = rangeField;
+                    Arrays.sort(
+                            sorted,
+                            (left, right) -> compareLiteral(type, left[field], right[field]));
+                    sortedPartitions = sorted;
+                }
+                return sortedPartitions;
+            }
+        }
+
+        private int findBound(
+                Object[][] candidates, DataType type, Object value, int start, boolean afterEqual) {
+            int end = candidates.length;
+            while (start < end) {
+                int middle = (start + end) >>> 1;
+                int comparison = compareLiteral(type, candidates[middle][rangeField], value);
+                if (comparison < 0 || (afterEqual && comparison == 0)) {
+                    start = middle + 1;
+                } else {
+                    end = middle;
+                }
+            }
+            return start;
         }
 
         private boolean mayContainPartition(

@@ -31,7 +31,10 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -126,25 +129,31 @@ public class PartitionPredicateTest {
                 .isFalse();
     }
 
-    @Test
-    public void testPartitionValuesAgainstRangeAndNullStatistics() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 64})
+    public void testPartitionValuesAgainstRangeAndNullStatistics(int additionalPartitions)
+            throws Exception {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         BinaryRow nullPartition = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(nullPartition);
         writer.setNullAt(0);
         writer.writeInt(1, 100);
         writer.complete();
+        List<BinaryRow> partitions =
+                new ArrayList<>(
+                        Arrays.asList(createPart(1, 100), createPart(19, 5), nullPartition));
+        for (int i = 0; i < additionalPartitions; i++) {
+            partitions.add(createPart(20 + i, 100));
+        }
         PartitionPredicate predicate =
-                InstantiationUtil.clone(
-                        PartitionPredicate.fromMultiple(
-                                type,
-                                Arrays.asList(
-                                        createPart(1, 100), createPart(19, 5), nullPartition)));
+                InstantiationUtil.clone(PartitionPredicate.fromMultiple(type, partitions));
         GenericRow lower = GenericRow.of(1, 5);
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
         assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
         assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
+        assertThat(predicate.test(10, lower, GenericRow.of(4, null), noNulls)).isTrue();
+        assertThat(predicate.test(10, GenericRow.of(1, null), upper, noNulls)).isTrue();
         // Day 1 no longer matches, but the null partition could match event 100.
         lower = GenericRow.of(3, 98);
         upper = GenericRow.of(4, 100);
@@ -179,6 +188,7 @@ public class PartitionPredicateTest {
         Set<BinaryRow> partitions = new HashSet<>();
         for (int day = 0; day < 40; day++) {
             partitions.add(createPart(day, day % 7));
+            partitions.add(createPart(day, (day + 2) % 7));
         }
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(
@@ -203,6 +213,10 @@ public class PartitionPredicateTest {
                                         createPart(day + 2, event + 1),
                                         noNulls))
                         .isEqualTo(expected);
+
+                BinaryRow point = createPart(day, event);
+                assertThat(predicate.test(5, point, point, noNulls))
+                        .isEqualTo(partitions.contains(point));
             }
         }
     }
