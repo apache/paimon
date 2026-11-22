@@ -20,7 +20,9 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.utils.TableScanUtils;
 
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
@@ -35,16 +37,20 @@ public class ConsumerProgressCalculator {
 
     private final Map<Integer, Long> assignedSnapshotPerReader;
 
+    private final Map<Integer, Long> lastAssignedSnapshotPerReader;
+
     private final Map<Integer, Long> consumingSnapshotPerReader;
 
     public ConsumerProgressCalculator(int parallelism) {
         this.minNextSnapshotPerCheckpoint = new TreeMap<>();
         this.assignedSnapshotPerReader = new HashMap<>(parallelism);
+        this.lastAssignedSnapshotPerReader = new HashMap<>(parallelism);
         this.consumingSnapshotPerReader = new HashMap<>(parallelism);
     }
 
     public void resetReaderProgress(int subtaskId) {
         assignedSnapshotPerReader.remove(subtaskId);
+        lastAssignedSnapshotPerReader.remove(subtaskId);
         consumingSnapshotPerReader.remove(subtaskId);
         // These minima were computed before the reader reset and cannot describe its restored
         // split state. Wait for fresh progress before advancing the consumer again.
@@ -52,23 +58,45 @@ public class ConsumerProgressCalculator {
     }
 
     public void updateConsumeProgress(int subtaskId, ReaderConsumeProgressEvent event) {
-        consumingSnapshotPerReader.put(subtaskId, event.lastConsumeSnapshotId());
+        Long lastAssigned = lastAssignedSnapshotPerReader.get(subtaskId);
+        // Restored splits are unordered, and the event for a finished split trails the request for
+        // the next one. Only progress within the current assignment proves older splits are done.
+        if (lastAssigned != null && event.lastConsumeSnapshotId() <= lastAssigned) {
+            consumingSnapshotPerReader.put(subtaskId, event.lastConsumeSnapshotId());
+        }
     }
 
-    public void updateAssignInformation(int subtaskId, FileStoreSourceSplit split) {
-        TableScanUtils.getSnapshotId(split)
+    public void updateAssignInformation(int subtaskId, List<FileStoreSourceSplit> splits) {
+        TableScanUtils.getSnapshotId(splits.get(0))
                 .ifPresent(snapshotId -> assignedSnapshotPerReader.put(subtaskId, snapshotId));
+        TableScanUtils.getSnapshotId(splits.get(splits.size() - 1))
+                .ifPresent(snapshotId -> lastAssignedSnapshotPerReader.put(subtaskId, snapshotId));
+        // returned splits can be older than what this reader has consumed
+        consumingSnapshotPerReader.remove(subtaskId);
     }
 
     public void notifySnapshotState(
             long checkpointId,
             Set<Integer> readersAwaitingSplit,
             Function<Integer, Long> unassignedCalculationFunction,
+            Collection<FileStoreSourceSplit> unassignedSplits,
             int parallelism) {
         computeMinNextSnapshotId(readersAwaitingSplit, unassignedCalculationFunction, parallelism)
                 .ifPresent(
                         minNextSnapshotId ->
-                                minNextSnapshotPerCheckpoint.put(checkpointId, minNextSnapshotId));
+                                minNextSnapshotPerCheckpoint.put(
+                                        checkpointId,
+                                        minWithUnassigned(minNextSnapshotId, unassignedSplits)));
+    }
+
+    /** Returned splits may be queued behind newer ones, so looking at the head is not enough. */
+    private static long minWithUnassigned(
+            long minSnapshotId, Collection<FileStoreSourceSplit> unassignedSplits) {
+        long min = minSnapshotId;
+        for (FileStoreSourceSplit split : unassignedSplits) {
+            min = Math.min(min, TableScanUtils.getSnapshotId(split).orElse(min));
+        }
+        return min;
     }
 
     public OptionalLong notifyCheckpointComplete(long checkpointId) {
