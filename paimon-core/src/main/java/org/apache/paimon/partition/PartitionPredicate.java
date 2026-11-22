@@ -40,10 +40,6 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.ObjectStreamField;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -221,24 +217,14 @@ public interface PartitionPredicate extends Serializable {
      */
     class MultiplePartitionPredicate implements PartitionPredicate {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
         private static final int MIN_PARTITIONS_FOR_RANGE_SEARCH = 64;
 
-        // Persist tuple data using the original fields. The indexes are rebuilt on demand.
-        private static final ObjectStreamField[] serialPersistentFields = {
-            new ObjectStreamField("partitions", Set.class),
-            new ObjectStreamField("fieldNum", int.class),
-            new ObjectStreamField("min", Predicate[].class),
-            new ObjectStreamField("max", Predicate[].class),
-            new ObjectStreamField("partitionValues", Object[][].class),
-            new ObjectStreamField("converter", RowDataToObjectArrayConverter.class)
-        };
-
-        private Set<BinaryRow> partitions;
-        private int fieldNum;
-        private Predicate[] min;
-        private Predicate[] max;
-        @Nullable private PartitionRangeIndex partitionRangeIndex;
+        private final Set<BinaryRow> partitions;
+        private final int fieldNum;
+        private final Predicate[] min;
+        private final Predicate[] max;
+        @Nullable private final PartitionRangeIndex partitionRangeIndex;
 
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
@@ -355,44 +341,6 @@ public interface PartitionPredicate extends Serializable {
             return Objects.hash(partitions, fieldNum, Arrays.hashCode(min), Arrays.hashCode(max));
         }
 
-        private void writeObject(ObjectOutputStream out) throws IOException {
-            ObjectOutputStream.PutField fields = out.putFields();
-            fields.put("partitions", partitions);
-            fields.put("fieldNum", fieldNum);
-            fields.put("min", min);
-            fields.put("max", max);
-            fields.put(
-                    "partitionValues",
-                    partitionRangeIndex == null ? null : partitionRangeIndex.partitionValues);
-            fields.put(
-                    "converter",
-                    partitionRangeIndex == null ? null : partitionRangeIndex.converter);
-            out.writeFields();
-        }
-
-        @SuppressWarnings("unchecked")
-        private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-            ObjectInputStream.GetField fields = in.readFields();
-            partitions = (Set<BinaryRow>) fields.get("partitions", null);
-            fieldNum = fields.get("fieldNum", 0);
-            min = (Predicate[]) fields.get("min", null);
-            max = (Predicate[]) fields.get("max", null);
-            Object[][] values = (Object[][]) fields.get("partitionValues", null);
-            RowDataToObjectArrayConverter converter =
-                    (RowDataToObjectArrayConverter) fields.get("converter", null);
-            if (values != null && converter != null) {
-                partitionRangeIndex = PartitionRangeIndex.restore(values, converter);
-            } else if (fields.getObjectStreamClass().getField("partitionRangeIndex") != null) {
-                PartitionRangeIndex previous =
-                        (PartitionRangeIndex) fields.get("partitionRangeIndex", null);
-                if (previous != null) {
-                    partitionRangeIndex =
-                            PartitionRangeIndex.restore(
-                                    previous.partitionValues, previous.converter);
-                }
-            }
-        }
-
         /** Checks partition tuples, with a lazy range index for each partition column. */
         static final class PartitionRangeIndex implements Serializable {
 
@@ -401,7 +349,7 @@ public interface PartitionPredicate extends Serializable {
 
             private final Object[][] partitionValues;
             private final RowDataToObjectArrayConverter converter;
-            @Nullable private final transient ColumnRangeIndex[] columns;
+            @Nullable private final ColumnRangeIndex[] columns;
 
             PartitionRangeIndex(
                     Object[][] partitionValues,
@@ -417,25 +365,6 @@ public interface PartitionPredicate extends Serializable {
                                         i, converter.rowType().getTypeAt(i), columnStats[i]);
                     }
                 }
-            }
-
-            private static PartitionRangeIndex restore(
-                    Object[][] values, RowDataToObjectArrayConverter converter) {
-                SimpleColStats[] stats = null;
-                if (values.length >= MIN_PARTITIONS_FOR_RANGE_SEARCH) {
-                    RowType type = converter.rowType();
-                    stats = new SimpleColStats[type.getFieldCount()];
-                    for (int i = 0; i < stats.length; i++) {
-                        Serializer<Object> serializer =
-                                InternalSerializers.create(type.getTypeAt(i));
-                        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
-                        for (Object[] partition : values) {
-                            collector.collect(partition[i], serializer);
-                        }
-                        stats[i] = collector.result();
-                    }
-                }
-                return new PartitionRangeIndex(values, converter, stats);
             }
 
             boolean test(
@@ -632,15 +561,17 @@ public interface PartitionPredicate extends Serializable {
                 return -1;
             }
 
-            private static final class ColumnRangeIndex {
+            private static final class ColumnRangeIndex implements Serializable {
+
+                private static final long serialVersionUID = 1L;
 
                 private final int field;
                 private final DataType type;
                 private final int nullCount;
                 @Nullable private final Object min;
                 @Nullable private final Object max;
-                private volatile long rejectedPartitions;
-                @Nullable private volatile Object[][] sortedPartitions;
+                private transient volatile long rejectedPartitions;
+                @Nullable private transient volatile Object[][] sortedPartitions;
 
                 private ColumnRangeIndex(int field, DataType type, SimpleColStats stats) {
                     this.field = field;

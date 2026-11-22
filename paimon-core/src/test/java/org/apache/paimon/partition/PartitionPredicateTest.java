@@ -24,13 +24,11 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate.PartitionRangeIndex;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -39,10 +37,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.ObjectStreamClass;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -195,33 +191,7 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testLegacySerializedPredicatePrunesPartitionTuples() throws Exception {
-        // Serialized on ad4f6e09ef using the partition tuples (0, 100) and (100, 0).
-        byte[] bytes =
-                Base64.getMimeDecoder()
-                        .decode(
-                                IOUtils.readFully(
-                                        getClass()
-                                                .getResourceAsStream(
-                                                        "/compatibility/multiple-partition-predicate-v1.base64"),
-                                        true));
-        PartitionPredicate restored =
-                InstantiationUtil.deserializeObject(bytes, getClass().getClassLoader());
-        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
-        BinaryRow gap = createPart(0, 0);
-        BinaryRow partition = createPart(0, 100);
-        assertThat(restored.test(10, gap, gap, noNulls)).isFalse();
-        assertThat(restored.test(10, partition, partition, noNulls)).isTrue();
-        assertThat(restored.test(partition)).isTrue();
-
-        ObjectStreamClass stream = ObjectStreamClass.lookup(MultiplePartitionPredicate.class);
-        assertThat(stream.getField("partitionValues").getType()).isEqualTo(Object[][].class);
-        assertThat(stream.getField("converter").getType())
-                .isEqualTo(RowDataToObjectArrayConverter.class);
-    }
-
-    @Test
-    public void testRangeIndexRequiresEnoughRejectedPartitions() {
+    public void testRangeIndexRequiresEnoughRejectedPartitions() throws Exception {
         Object[] first = {Integer.MIN_VALUE, 0};
         Object[] second = {-1, 2};
         Object[] third = {-1, 1};
@@ -252,6 +222,15 @@ public class PartitionPredicateTest {
         assertThat(index.test(10, lower, upper, noNulls)).isFalse();
         assertThat(index.sortedPartitions(0)).isSameAs(sorted);
         assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
+
+        PartitionRangeIndex restored = InstantiationUtil.clone(index);
+        assertThat(restored.sortedPartitions(0)).isNull();
+        for (int i = 0; i < 17; i++) {
+            assertThat(restored.test(10, lower, upper, noNulls)).isFalse();
+            assertThat(restored.sortedPartitions(0)).isNull();
+        }
+        assertThat(restored.test(10, duplicate, duplicate, noNulls)).isTrue();
+        assertThat(restored.sortedPartitions(0)).isNotNull();
     }
 
     @Test
