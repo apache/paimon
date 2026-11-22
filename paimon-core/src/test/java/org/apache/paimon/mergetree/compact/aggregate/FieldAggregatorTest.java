@@ -973,6 +973,85 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
     }
 
+    @Test
+    public void testFieldSumDecimalOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 0));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        assertThatThrownBy(
+                        () ->
+                                fieldSumAgg.agg(
+                                        negMax, Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0)))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 0));
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal negOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.retract(max, negOne))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowNonCompact() {
+        // precision 38 exceeds the compact fast path, so the BigDecimal path is exercised
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(38, 2));
+        Decimal max =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("999999999999999999999999999999999999.99"), 38, 2);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 38, 2);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("-999999999999999999999999999999999999.99"), 38, 2);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowWithScale() {
+        // compact fast path with a non-zero scale: the bound stays 10^precision
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 2));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("999.99"), 5, 2);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("0.01"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-999.99"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowDisabled() {
+        // by default (fail-on-overflow = false) the aggregated value becomes NULL
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(5, 0));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        Decimal negOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0);
+        assertThat(fieldSumAgg.agg(max, one)).isNull();
+        assertThat(fieldSumAgg.agg(negMax, negOne)).isNull();
+        assertThat(fieldSumAgg.retract(max, negOne)).isNull();
+        assertThat(fieldSumAgg.retract(negOne, max)).isNull();
+
+        // non-compact path behaves the same
+        FieldSumAgg nonCompact = new FieldSumAggFactory().create(new DecimalType(38, 2));
+        Decimal bigMax =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("999999999999999999999999999999999999.99"), 38, 2);
+        Decimal bigNegOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 38, 2);
+        assertThat(nonCompact.agg(bigMax, Decimal.fromBigDecimal(new BigDecimal("1"), 38, 2)))
+                .isNull();
+        assertThat(nonCompact.retract(bigMax, bigNegOne)).isNull();
+    }
+
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);
