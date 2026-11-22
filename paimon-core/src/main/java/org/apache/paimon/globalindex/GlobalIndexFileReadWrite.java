@@ -33,21 +33,14 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
 
     private final FileIO fileIO;
     private final IndexPathFactory indexPathFactory;
-    private final long buildSchemaId;
 
     public GlobalIndexFileReadWrite(FileIO fileIO, IndexPathFactory indexPathFactory) {
-        this(fileIO, indexPathFactory, -1);
-    }
-
-    GlobalIndexFileReadWrite(FileIO fileIO, IndexPathFactory indexPathFactory, long buildSchemaId) {
         this.fileIO = fileIO;
         this.indexPathFactory = indexPathFactory;
-        this.buildSchemaId = buildSchemaId;
     }
 
     public String newFileName(String prefix) {
-        String schema = buildSchemaId < 0 ? "" : "schema-" + buildSchemaId + "-";
-        return prefix + "-global-index-" + schema + UUID.randomUUID() + ".index";
+        return prefix + "-" + "global-index-" + UUID.randomUUID() + ".index";
     }
 
     public long fileSize(String fileName) throws IOException {

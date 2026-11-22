@@ -45,6 +45,18 @@ class SortedIndexFileMetaTest {
     @TempDir private java.nio.file.Path tempPath;
 
     @Test
+    void testOptionalBuildSchemaIdPreservesKeyBounds() {
+        SortedIndexFileMeta bounds = new SortedIndexFileMeta(null, new byte[] {7}, true);
+
+        assertThat(roundTrip(bounds).buildSchemaId()).isNull();
+        SortedIndexFileMeta withSchema = roundTrip(bounds.withBuildSchemaId(42));
+        assertThat(withSchema.buildSchemaId()).isEqualTo(42L);
+        assertThat(withSchema.firstKey()).isNull();
+        assertThat(withSchema.lastKey()).containsExactly((byte) 7);
+        assertThat(withSchema.hasNulls()).isTrue();
+    }
+
+    @Test
     void testEmptyFirstKey() {
         byte[] lastKey = new byte[] {1, 2, 3};
 

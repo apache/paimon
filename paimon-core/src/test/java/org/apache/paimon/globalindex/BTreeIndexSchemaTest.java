@@ -28,6 +28,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -39,27 +41,18 @@ class BTreeIndexSchemaTest {
     void testLegacyIndexRequiresAnUnchangedKeyType() throws Exception {
         RowType old = RowType.of(DataTypes.INT());
         RowType widened = RowType.of(DataTypes.BIGINT());
-        IndexFileMeta legacy =
-                index("btree-global-index-00000000-0000-0000-0000-000000000001.index");
+        IndexFileMeta legacy = index(null);
         assertThat(new BTreeIndexSchema(table(old, old)).isCompatible(legacy)).isTrue();
         assertThat(new BTreeIndexSchema(table(old, widened)).isCompatible(legacy)).isFalse();
     }
 
     @Test
-    void testTaggedIndexOnlyComparesTheBuildSchema() throws Exception {
+    void testIndexUsesTheRecordedBuildSchema() throws Exception {
         RowType old = RowType.of(DataTypes.INT());
         RowType widened = RowType.of(DataTypes.BIGINT());
         BTreeIndexSchema schema = new BTreeIndexSchema(table(old, widened));
-        assertThat(
-                        schema.isCompatible(
-                                index(
-                                        "btree-global-index-schema-0-00000000-0000-0000-0000-000000000001.index")))
-                .isFalse();
-        assertThat(
-                        schema.isCompatible(
-                                index(
-                                        "btree-global-index-schema-1-00000000-0000-0000-0000-000000000001.index")))
-                .isTrue();
+        assertThat(schema.isCompatible(index(0L))).isFalse();
+        assertThat(schema.isCompatible(index(1L))).isTrue();
     }
 
     private static FileStoreTable table(RowType before, RowType current) throws Exception {
@@ -69,7 +62,6 @@ class BTreeIndexSchemaTest {
         TableSchema currentSchema = mock(TableSchema.class);
         when(beforeSchema.logicalRowType()).thenReturn(before);
         when(currentSchema.id()).thenReturn(1L);
-        when(currentSchema.logicalRowType()).thenReturn(current);
         when(manager.tryGetSchema(0)).thenReturn(beforeSchema);
         when(table.schemaManager()).thenReturn(manager);
         when(table.schema()).thenReturn(currentSchema);
@@ -77,8 +69,12 @@ class BTreeIndexSchemaTest {
         return table;
     }
 
-    private static IndexFileMeta index(String name) {
+    private static IndexFileMeta index(@Nullable Long buildSchemaId) {
+        SortedIndexFileMeta bounds = new SortedIndexFileMeta(null, null, true);
+        byte[] indexMeta =
+                (buildSchemaId == null ? bounds : bounds.withBuildSchemaId(buildSchemaId))
+                        .serialize();
         return new IndexFileMeta(
-                "btree", name, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
+                "btree", "index", 1, 1, new GlobalIndexMeta(0, 0, 0, null, indexMeta), null);
     }
 }

@@ -28,6 +28,8 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -46,6 +48,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
@@ -160,6 +163,20 @@ public class SortedGlobalIndexWriter implements Serializable {
             long scanSnapshotId)
             throws IOException {
         byte[] sourceMeta = new DataEvolutionIndexSourceMeta(scanSnapshotId).serialize();
+        if (BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexType)) {
+            long buildSchemaId = table.schema().id();
+            resultEntries =
+                    resultEntries.stream()
+                            .map(
+                                    entry ->
+                                            new ResultEntry(
+                                                    entry.fileName(),
+                                                    entry.rowCount(),
+                                                    SortedIndexFileMeta.deserialize(entry.meta())
+                                                            .withBuildSchemaId(buildSchemaId)
+                                                            .serialize()))
+                            .collect(Collectors.toList());
+        }
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),

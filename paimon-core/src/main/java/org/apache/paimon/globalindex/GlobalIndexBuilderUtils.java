@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -646,11 +645,12 @@ public class GlobalIndexBuilderUtils {
             FileStoreTable table, String indexType, List<DataField> indexFields, Options options)
             throws IOException {
         GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
+        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+    }
+
+    private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        long buildSchemaId =
-                BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexType) ? table.schema().id() : -1;
-        return globalIndexer.createWriter(
-                new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory, buildSchemaId));
+        return new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory);
     }
 
     @Nullable

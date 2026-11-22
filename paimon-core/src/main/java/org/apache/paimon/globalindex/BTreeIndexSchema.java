@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -27,19 +28,11 @@ import java.io.FileNotFoundException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory.IDENTIFIER;
 
 /** Checks that a Data Evolution BTree can be decoded using the read schema. */
 final class BTreeIndexSchema {
-
-    private static final String SCHEMA_TAG = "btree-global-index-schema-";
-    private static final Pattern BUILD_SCHEMA =
-            Pattern.compile(
-                    SCHEMA_TAG
-                            + "([0-9]+)-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\.index");
 
     private final FileStoreTable table;
     private final RowType readSchema;
@@ -55,25 +48,19 @@ final class BTreeIndexSchema {
         if (!IDENTIFIER.equals(file.indexType())) {
             return true;
         }
-        String name = file.fileName();
-        if (!name.startsWith(SCHEMA_TAG)) {
+        GlobalIndexMeta meta = file.globalIndexMeta();
+        Long schemaId =
+                meta.indexMeta() == null
+                        ? null
+                        : SortedIndexFileMeta.deserialize(meta.indexMeta()).buildSchemaId();
+        if (schemaId == null) {
             // Legacy keys are safe if the field's type has stayed the same since it was added.
-            return file.globalIndexMeta().getIndexedFieldIds().stream()
+            return meta.getIndexedFieldIds().stream()
                     .allMatch(field -> legacyFields.computeIfAbsent(field, this::legacyCompatible));
-        }
-        Matcher matcher = BUILD_SCHEMA.matcher(name);
-        if (!matcher.matches()) {
-            return false;
-        }
-        long schemaId;
-        try {
-            schemaId = Long.parseLong(matcher.group(1));
-        } catch (NumberFormatException e) {
-            return false;
         }
         Optional<RowType> written = schema(schemaId);
         return written.isPresent()
-                && file.globalIndexMeta().getIndexedFieldIds().stream()
+                && meta.getIndexedFieldIds().stream()
                         .allMatch(field -> sameType(written.get(), field));
     }
 

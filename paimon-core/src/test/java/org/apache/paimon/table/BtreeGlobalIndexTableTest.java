@@ -28,9 +28,11 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -849,6 +851,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
             assertThat(values).containsExactly(7L);
         }
 
+        Snapshot source = table.latestSnapshot().get();
+        assertThat(source.id()).isEqualTo(indexedSnapshot);
+        assertThat(source.schemaId()).isNotEqualTo(table.schema().id());
+
         TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.BIGINT()), DESCENDING, NULLS_LAST, 1);
         assertThat(
                         DataEvolutionGlobalIndexScanner.createForTopN(
@@ -867,6 +873,21 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         createIndexIncremental("f0");
         FileStoreTable rebuilt = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(rebuilt.store().newIndexFileHandler().scanEntries())
+                .isNotEmpty()
+                .allSatisfy(
+                        entry -> {
+                            IndexFileMeta file = entry.indexFile();
+                            assertThat(
+                                            DataEvolutionIndexSourceMeta.fromIndexFile(file)
+                                                    .scanSnapshotId())
+                                    .isEqualTo(source.id());
+                            assertThat(
+                                            SortedIndexFileMeta.deserialize(
+                                                            file.globalIndexMeta().indexMeta())
+                                                    .buildSchemaId())
+                                    .isEqualTo(rebuilt.schema().id());
+                        });
         assertThat(globalIndexScan(rebuilt, new PredicateBuilder(rebuilt.rowType()).equal(0, 7L)))
                 .containsExactly(7L);
         try (DataEvolutionGlobalIndexScanner scanner =
