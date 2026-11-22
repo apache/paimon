@@ -193,11 +193,12 @@ loaded model's centroid count matches the manifest.
 
 ### Bitmap Files
 
-Each populated centroid gets one Bitmap file with one consecutive section per
-`_EXTRA_FIELD_IDS` entry, in that order. Each section uses the standalone
-[Bitmap file format](./bitmap#file-format), with block offsets relative to the start of
-the section. The first section starts at byte zero and the last ends at the manifest's
-`_FILE_SIZE`. For `N` fields, the `B` descriptor stores `N - 1` increasing offsets.
+When `extra_fields` is configured, each populated centroid gets one Bitmap file
+with one consecutive section per `_EXTRA_FIELD_IDS` entry, in that order. Each
+section uses the standalone [Bitmap file format](./bitmap#file-format), with block
+offsets relative to the start of the section. The first section starts at byte zero
+and the last ends at the manifest's `_FILE_SIZE`. For `N` fields, the `B` descriptor
+stores `N - 1` increasing offsets.
 The build schema ID in `_SOURCE_META` identifies the types of the Bitmap keys.
 
 ## Scalar Bitmap Filters in Centroid Shards
@@ -229,11 +230,11 @@ before using an older Java reader that lacks support for centroid Bitmap files.
 
 ## Rebuild and Compatibility
 
-If a concurrent write or compaction replaces indexed vectors within a source range,
-the commit fails and the build must be retried. Updates to other columns and appends
-outside the source ranges can proceed. When a row-ID reassignment moves a whole
-range by a constant offset, the router and shards can be reused with the updated
-manifest range.
+If a concurrent write or compaction replaces data in the vector column or any
+configured Bitmap column within a source range, the index commit fails and the
+build must be retried. Updates to unindexed columns and appends outside the source
+ranges can proceed. When a row-ID reassignment moves a whole range by a constant
+offset, the router and shards can be reused with the updated manifest range.
 
 Centroid searches use a Java reader with the vector plugin and a matching native
 library with centroid model APIs. Install the vector plugin in Spark builds too.
