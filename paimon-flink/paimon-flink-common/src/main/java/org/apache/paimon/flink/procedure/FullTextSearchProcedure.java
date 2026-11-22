@@ -29,6 +29,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.FullTextRead;
+import org.apache.paimon.table.source.FullTextScan;
+import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
@@ -97,17 +100,18 @@ public class FullTextSearchProcedure extends ProcedureBase {
         }
 
         Projection parsedProjection = Projection.parse(projection, table.rowType());
-        GlobalIndexResult result =
-                table.newFullTextSearchBuilder()
-                        .withQuery(column, query)
-                        .withLimit(topK)
-                        .executeLocal();
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder().withQuery(column, query).withLimit(topK);
+        FullTextRead searchRead = searchBuilder.newFullTextRead();
+        FullTextScan.Plan searchPlan = searchBuilder.newFullTextScan().scan();
+        GlobalIndexResult result = searchRead.read(searchPlan);
 
         ReadBuilder readBuilder = table.newReadBuilder();
         if (parsedProjection.dataProjection != null) {
             readBuilder.withProjection(parsedProjection.dataProjection);
         }
-        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        TableScan.Plan plan =
+                ProcedureUtil.planSearchResult(readBuilder, result, searchPlan.snapshot());
         return readRows(readBuilder, plan, parsedProjection);
     }
 
