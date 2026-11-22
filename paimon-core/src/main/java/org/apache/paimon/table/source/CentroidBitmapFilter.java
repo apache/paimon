@@ -24,12 +24,16 @@ import org.apache.paimon.globalindex.bitmap.CentroidBitmapIndex;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundFunction;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -69,29 +73,10 @@ final class CentroidBitmapFilter {
             return null;
         }
         RowType rowType = table.rowType();
-        List<LeafPredicate> predicates = new ArrayList<>();
         List<DataField> fields = new ArrayList<>();
-        for (Predicate predicate : PredicateBuilder.splitAnd(filter)) {
-            LeafPredicate leaf = pointLookup(predicate);
-            if (leaf == null) {
-                return null;
-            }
-            Optional<FieldRef> fieldRef = leaf.fieldRefOptional();
-            if (!fieldRef.isPresent()
-                    || (!Equal.INSTANCE.equals(leaf.function())
-                            && !In.INSTANCE.equals(leaf.function())
-                            && !IsNotNull.INSTANCE.equals(leaf.function())
-                            && !IsNull.INSTANCE.equals(leaf.function()))
-                    || !rowType.containsField(fieldRef.get().name())) {
-                return null;
-            }
-            DataField field = rowType.getField(fieldRef.get().name());
-            if (!field.type().equalsIgnoreNullable(fieldRef.get().type())
-                    || Arrays.stream(extraFieldIds).noneMatch(id -> id == field.id())) {
-                return null;
-            }
-            predicates.add(leaf);
-            fields.add(field);
+        Predicate predicate = bind(filter, rowType, extraFieldIds, fields);
+        if (predicate == null) {
+            return null;
         }
 
         IndexPathFactory paths = table.store().pathFactory().globalIndexFileFactory();
@@ -154,18 +139,68 @@ final class CentroidBitmapFilter {
                         extraFieldIds,
                         rowType,
                         buildType,
-                        predicates);
+                        predicate);
     }
 
     @Nullable
-    private static LeafPredicate pointLookup(Predicate predicate) {
-        if (predicate instanceof LeafPredicate) {
-            return (LeafPredicate) predicate;
+    private static Predicate bind(
+            Predicate predicate, RowType rowType, int[] extraFieldIds, List<DataField> fields) {
+        if (predicate instanceof CompoundPredicate) {
+            CompoundFunction function = ((CompoundPredicate) predicate).function();
+            List<Predicate> children;
+            if (Or.INSTANCE.equals(function)) {
+                children = PredicateBuilder.splitOr(predicate);
+                LeafPredicate in = sameColumnIn(children);
+                if (in != null) {
+                    return bind(in, rowType, extraFieldIds, fields);
+                }
+            } else if (And.INSTANCE.equals(function)) {
+                children = PredicateBuilder.splitAnd(predicate);
+            } else {
+                return null;
+            }
+            if (children.isEmpty()) {
+                return null;
+            }
+
+            List<Predicate> boundChildren = new ArrayList<>(children.size());
+            for (Predicate child : children) {
+                Predicate bound = bind(child, rowType, extraFieldIds, fields);
+                if (bound == null) {
+                    return null;
+                }
+                boundChildren.add(bound);
+            }
+            return new CompoundPredicate(function, boundChildren);
         }
+        if (!(predicate instanceof LeafPredicate)) {
+            return null;
+        }
+        LeafPredicate leaf = (LeafPredicate) predicate;
+        Optional<FieldRef> fieldRef = leaf.fieldRefOptional();
+        if (!fieldRef.isPresent()
+                || (!Equal.INSTANCE.equals(leaf.function())
+                        && !In.INSTANCE.equals(leaf.function())
+                        && !IsNotNull.INSTANCE.equals(leaf.function())
+                        && !IsNull.INSTANCE.equals(leaf.function()))
+                || !rowType.containsField(fieldRef.get().name())) {
+            return null;
+        }
+        DataField field = rowType.getField(fieldRef.get().name());
+        if (!field.type().equalsIgnoreNullable(fieldRef.get().type())
+                || Arrays.stream(extraFieldIds).noneMatch(id -> id == field.id())) {
+            return null;
+        }
+        fields.add(field);
+        return leaf;
+    }
+
+    @Nullable
+    private static LeafPredicate sameColumnIn(List<Predicate> children) {
         // PredicateBuilder represents short IN lists as an OR of equalities.
         LeafPredicate first = null;
         List<Object> values = new ArrayList<>();
-        for (Predicate child : PredicateBuilder.splitOr(predicate)) {
+        for (Predicate child : children) {
             if (!(child instanceof LeafPredicate)) {
                 return null;
             }
