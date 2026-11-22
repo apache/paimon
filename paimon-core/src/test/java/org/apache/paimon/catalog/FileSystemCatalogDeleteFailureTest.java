@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -35,12 +37,15 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
@@ -83,6 +88,43 @@ class FileSystemCatalogDeleteFailureTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasStackTraceContaining(external.toString());
         assertThat(fileIO.exists(external)).isTrue();
+    }
+
+    @Test
+    void testFailedExternalDeletionStillCompletesDrop() throws Exception {
+        FileIO fileIO = spy(LocalFileIO.create());
+        Path first = new Path(tempDir.resolve("first").toUri());
+        Path second = new Path(tempDir.resolve("second").toUri());
+        fileIO.mkdirs(first);
+        fileIO.mkdirs(second);
+        FileSystemCatalog catalog = createCatalog(fileIO, first);
+        catalog.alterTable(
+                IDENTIFIER,
+                SchemaChange.setOption(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), second.toString()),
+                false);
+        Catalog cachingCatalog = new CachingCatalog(catalog, new Options());
+        cachingCatalog.getTable(IDENTIFIER);
+        // The iteration order is unspecified, so fail whichever external path is deleted first.
+        AtomicBoolean failed = new AtomicBoolean();
+        doAnswer(
+                        invocation -> {
+                            Path path = invocation.getArgument(0);
+                            if ((path.equals(first) || path.equals(second))
+                                    && failed.compareAndSet(false, true)) {
+                                return false;
+                            }
+                            return invocation.callRealMethod();
+                        })
+                .when(fileIO)
+                .delete(any(Path.class), eq(true));
+
+        assertThatThrownBy(() -> cachingCatalog.dropTable(IDENTIFIER, false))
+                .hasStackTraceContaining("Failed to delete directory");
+        assertThat(new boolean[] {fileIO.exists(first), fileIO.exists(second)})
+                .containsExactlyInAnyOrder(true, false);
+        assertThatThrownBy(() -> cachingCatalog.getTable(IDENTIFIER))
+                .isInstanceOf(Catalog.TableNotExistException.class);
     }
 
     @Test
