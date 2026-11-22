@@ -31,7 +31,6 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
-from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.filesystem.local_file_io import FuseLocalFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot import export as export_module
@@ -63,17 +62,6 @@ class MemoryOss:
             entries = [key for key in self.objects
                        if key.startswith(uri.rstrip("/") + "/")]
         return entries
-
-    def try_to_write_exclusive(self, uri, content):
-        with self.lock:
-            if uri in self.objects:
-                return False
-            self.objects[uri] = content.encode()
-            self.writes.append(uri)
-            return True
-
-    def check_exclusive_write_supported(self, uri):
-        pass
 
     def new_output_stream(self, uri):
         store = self
@@ -108,7 +96,7 @@ def _export_to_disk(conn, table_name, path, **kwargs):
     target = MemoryOss()
     with _target_object_table(conn, target):
         prefix = conn.export_to_lerobot(
-            table_name, output_table="exports", sub_folder=path.name, **kwargs)
+            table_name, output_table="exports", **kwargs)
     for uri, payload in target.objects.items():
         destination = path / uri[len(prefix) + 1:]
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -370,11 +358,11 @@ def test_export_to_object_table(tmp_path, version):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    prefix = "oss://test-bucket/lerobot/export"
+    dataset_id = conn.get_table("robot_datasets").scan().to_arrow()["id"][0].as_py()
+    prefix = "oss://test-bucket/lerobot/" + dataset_id
     with _target_object_table(conn, target):
         assert conn.export_to_lerobot(
-            "robot", output_table="exports", sub_folder="export",
-            version=version) == prefix
+            "robot", output_table="exports", version=version) == prefix
         assert target.writes[-1] == prefix + "/meta/info.json"
         assert len([key for key in target.objects if key.endswith(".mp4")]) == (
             1 if version == "v3.0" else 2)
@@ -384,8 +372,7 @@ def test_export_to_object_table(tmp_path, version):
         before = len(target.writes)
         with pytest.raises(FileExistsError):
             conn.export_to_lerobot(
-                "robot", output_table="exports", sub_folder="export",
-                version=version)
+                "robot", output_table="exports", version=version)
         assert len(target.writes) == before
 
 
@@ -401,20 +388,40 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
     target = MemoryOss()
     wrapped = SimpleNamespace(
         exists=target.exists, list_status=target.list_status,
-        check_exclusive_write_supported=target.check_exclusive_write_supported,
-        try_to_write_exclusive=target.try_to_write_exclusive,
         new_output_stream=target.new_output_stream)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
-            "robot", output_table="exports", sub_folder="train_001")
+            "robot", output_table="exports")
     assert output + "/meta/info.json" in target.objects
 
 
-def test_export_rejects_unsafe_name(tmp_path):
+def test_export_to_fuse_object_table(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    with pytest.raises(ValueError, match="safe directory name"):
-        conn.export_to_lerobot(
-            "robot", output_table="exports", sub_folder="../escape")
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+    fuse_root = tmp_path / "fuse"
+    fuse_root.mkdir()
+    fuse = FuseLocalFileIO("oss://test-bucket/lerobot", str(fuse_root))
+    with _target_object_table(conn, fuse):
+        output = conn.export_to_lerobot("robot", output_table="exports")
+    dataset_id = conn.get_table("robot_datasets").scan().to_arrow()["id"][0].as_py()
+    assert output == "oss://test-bucket/lerobot/" + dataset_id
+    assert (fuse_root / dataset_id / "meta/info.json").exists()
+
+
+def test_export_rejects_unsafe_dataset_id(tmp_path):
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", source(tmp_path / "input"))
+    original_read = export_module._read_arrow
+
+    def unsafe_id(table, columns):
+        rows = original_read(table, columns)
+        return rows.set_column(
+            rows.schema.get_field_index("id"), "id", pa.array(["../escape"]))
+
+    with _target_object_table(conn, MemoryOss()), \
+            mock.patch.object(export_module, "_read_arrow", side_effect=unsafe_id):
+        with pytest.raises(ValueError, match="safe directory name"):
+            conn.export_to_lerobot("robot", output_table="exports")
 
 
 def test_export_rejects_non_object_table(tmp_path):
@@ -422,19 +429,7 @@ def test_export_rejects_non_object_table(tmp_path):
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     with pytest.raises(ValueError, match="must name an Object Table"):
         conn.export_to_lerobot(
-            "robot", output_table="robot_frames", sub_folder="train_001")
-
-
-def test_fuse_object_table_is_rejected_before_reading_source(tmp_path):
-    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
-    fuse = FuseLocalFileIO(
-        "oss://test-bucket/lerobot", str(tmp_path / "fuse"))
-    rest = RESTTokenFileIO.__new__(RESTTokenFileIO)
-    rest.file_io = lambda: fuse
-    with _target_object_table(conn, rest):
-        with pytest.raises(NotImplementedError, match="Exclusive creation"):
-            conn.export_to_lerobot(
-                "missing_source", output_table="exports", sub_folder="train_001")
+            "robot", output_table="robot_frames")
 
 
 def test_export_v3_episode_chunks_share_schema(tmp_path):
@@ -482,33 +477,33 @@ def test_export_to_object_table_rejects_existing_name(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", original)
     target = MemoryOss()
-    target.objects["oss://test-bucket/lerobot/export/unrelated"] = b"old"
+    dataset_id = conn.get_table("robot_datasets").scan().to_arrow()["id"][0].as_py()
+    target.objects[
+        "oss://test-bucket/lerobot/" + dataset_id + "/unrelated"] = b"old"
     with _target_object_table(conn, target):
         with pytest.raises(FileExistsError):
-            conn.export_to_lerobot(
-                "robot", output_table="exports", sub_folder="export")
+            conn.export_to_lerobot("robot", output_table="exports")
     assert len(target.objects) == 1
 
 
-def test_concurrent_export_to_same_object_table_name_has_one_winner(tmp_path):
+def test_concurrent_datasets_export_to_separate_directories(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("first", source(tmp_path / "first", value=10))
     conn.load_from_lerobot("second", source(tmp_path / "second", value=20))
     target = MemoryOss()
-    prefix = "oss://test-bucket/lerobot/export"
+    ids = [conn.get_table(name + "_datasets").scan().to_arrow()["id"][0].as_py()
+           for name in ("first", "second")]
     with _target_object_table(conn, target):
         with ThreadPoolExecutor(2) as pool:
             futures = [pool.submit(
-                conn.export_to_lerobot, name, output_table="exports",
-                sub_folder="export")
+                conn.export_to_lerobot, name, output_table="exports")
                 for name in ("first", "second")]
-            results = [future.exception() or future.result() for future in futures]
-    assert sum(result == prefix for result in results) == 1
-    assert sum(isinstance(result, FileExistsError) for result in results) == 1
-    assert target.writes[-1] == prefix + "/meta/info.json"
+            results = [future.result() for future in futures]
+    assert results == ["oss://test-bucket/lerobot/" + value for value in ids]
     assert len(target.writes) == len(set(target.writes))
-    data = next(value for key, value in target.objects.items()
-                if key.endswith(".parquet") and "/data/" in key)
-    winner = results.index(prefix)
-    assert pq.read_table(io.BytesIO(data))["observation.state"][0].as_py()[0] \
-        == (10 if winner == 0 else 20)
+    for prefix, expected in zip(results, (10, 20)):
+        assert prefix + "/meta/info.json" in target.objects
+        data = next(value for key, value in target.objects.items()
+                    if key.startswith(prefix + "/data/") and key.endswith(".parquet"))
+        assert pq.read_table(io.BytesIO(data))["observation.state"][0].as_py()[0] \
+            == expected

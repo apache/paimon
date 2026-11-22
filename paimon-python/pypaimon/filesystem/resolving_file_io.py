@@ -102,12 +102,6 @@ class ResolvingFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._get_fileio(path).try_to_write_atomic(path, content)
 
-    def try_to_write_exclusive(self, path: str, content: str) -> bool:
-        return self._get_fileio(path).try_to_write_exclusive(path, content)
-
-    def check_exclusive_write_supported(self, path: str):
-        return self._get_fileio(path).check_exclusive_write_supported(path)
-
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         return self._get_fileio(descriptor.uri).create_blob_presigned_url(
             table_root, descriptor, validity)

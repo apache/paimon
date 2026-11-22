@@ -64,19 +64,10 @@ def oss_server():
             return True
 
         def do_GET(self):
+            server.gets += 1
             if not self.authenticate():
                 return
-            query = urlsplit(self.path).query
-            if query not in ('versioning', 'versioning='):
-                key = unquote(urlsplit(self.path).path)
-                with server.lock:
-                    payload = server.objects.get(key)
-                if payload is None:
-                    self.error(404, 'NoSuchKey')
-                else:
-                    self.respond(200, payload)
-                return
-            server.gets += 1
+            assert urlsplit(self.path).query in ('versioning', 'versioning=')
             if server.fail_method == 'GET':
                 self.error(*server.failure)
                 return
@@ -283,17 +274,6 @@ def test_lost_response_is_not_replayed_or_reported_as_conflict(oss_server):
     assert isinstance(caught.value.__cause__, oss2.exceptions.RequestError)
     assert oss_server.puts == 1
     assert list(oss_server.objects.values()) == [b'data']
-
-
-def test_exclusive_write_confirms_own_claim_after_lost_response(oss_server):
-    oss_server.lose_response = True
-    path = 'oss://test-bucket/export/meta/.pypaimon-export-claim'
-    attempt = 'unique-attempt-id'
-
-    assert file_io(oss_server).try_to_write_exclusive(path, attempt)
-    assert oss_server.puts == 1
-    assert oss_server.objects == {
-        '/test-bucket/export/meta/.pypaimon-export-claim': attempt.encode()}
 
 
 @pytest.mark.parametrize('settings,expected', [

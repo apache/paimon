@@ -22,7 +22,6 @@ import json
 import re
 import shutil
 import tempfile
-import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -49,7 +48,7 @@ _V3_DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 _V3_VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
 
-def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
+def export_to_lerobot(connection, table_name, *, output_table,
                       version="v3.0", dataset_id=None, tag_name=None,
                       batch_size=1024):
     """Export one original Dataset; the destination must not already exist.
@@ -70,9 +69,6 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
         _validate_tag_name(tag_name)
     if not isinstance(output_table, str) or not output_table:
         raise ValueError("output_table must name an Object Table.")
-    if (not isinstance(sub_folder, str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", sub_folder) is None):
-        raise ValueError("sub_folder must be one safe directory name.")
     table = connection.catalog.get_table(connection._identifier(output_table))
     if not isinstance(table, ObjectTable):
         raise ValueError("output_table must name an Object Table.")
@@ -80,10 +76,6 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
     parsed = urlparse(object_location)
     if parsed.scheme != "oss" or not parsed.netloc:
         raise ValueError("Object Table output must use OSS storage.")
-    target_uri = object_location.rstrip("/") + "/" + sub_folder
-    table.file_io.check_exclusive_write_supported(
-        target_uri + "/meta/.pypaimon-export-claim")
-
     try:
         frames = connection.get_table(table_name)
     except TableNotExistException:
@@ -111,6 +103,13 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
         if len(selected) != 1:
             raise ValueError("LeRobot dataset_id %r was not found." % dataset_id)
         source = selected[0]
+    source_id = source["id"]
+    if (not isinstance(source_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", source_id) is None):
+        raise ValueError("LeRobot Dataset id is not a safe directory name.")
+    target_uri = object_location.rstrip("/") + "/" + source_id
+    if _prefix_has_files(table.file_io, target_uri):
+        raise FileExistsError(target_uri)
     info = json.loads(source["info"])
     info["fps"] = _dataset_fps(info.get("fps"))
     source_episodes = _read_source_episodes(episodes, source["id"])
@@ -130,8 +129,6 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
     stage = None
     reader = None
     try:
-        if _prefix_has_files(table.file_io, target_uri):
-            raise FileExistsError(target_uri)
         stage = Path(tempfile.mkdtemp(prefix=".lerobot-export-"))
         reader = _PaimonTableFrameReader(
             read_frames, columns=_target_schema(read_frames).names)
@@ -149,7 +146,8 @@ def export_to_lerobot(connection, table_name, *, output_table, sub_folder,
 
 
 def _upload_to_object_table(stage, prefix, file_io):
-    _reserve_object_prefix(prefix, file_io)
+    if _prefix_has_files(file_io, prefix):
+        raise FileExistsError(prefix)
     info = stage / "meta/info.json"
     for path in sorted(stage.rglob("*")):
         if not path.is_file() or path == info:
@@ -161,14 +159,6 @@ def _upload_to_object_table(stage, prefix, file_io):
 
 def _prefix_has_files(file_io, prefix):
     return file_io.exists(prefix) or bool(file_io.list_status(prefix))
-
-
-def _reserve_object_prefix(prefix, file_io):
-    if _prefix_has_files(file_io, prefix):
-        raise FileExistsError(prefix)
-    if not file_io.try_to_write_exclusive(
-            prefix + "/meta/.pypaimon-export-claim", uuid.uuid4().hex):
-        raise FileExistsError(prefix)
 
 
 def _upload_file(path, uri, file_io):

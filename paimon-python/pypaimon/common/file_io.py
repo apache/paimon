@@ -525,22 +525,6 @@ class FileIO(ABC):
                 self.delete_quietly(temp_path)
         return success
 
-    def try_to_write_exclusive(self, path: str, content: str) -> bool:
-        """Atomically create only when absent, or reject unsupported backends.
-
-        Unlike ``try_to_write_atomic``, this must never fall back to a rename
-        that can replace another writer's file. Return False if the path exists.
-        """
-        raise NotImplementedError(
-            "Exclusive creation is not supported by {}.".format(
-                type(self).__name__))
-
-    def check_exclusive_write_supported(self, path: str):
-        """Check exclusive-create support without creating an object."""
-        raise NotImplementedError(
-            "Exclusive creation is not supported by {}.".format(
-                type(self).__name__))
-
     def write_file(self, path: str, content: str, overwrite: bool = False):
         if not overwrite and self.exists(path):
             raise FileExistsError(f"File {path} already exists and overwrite=False")
