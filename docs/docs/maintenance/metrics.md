@@ -343,6 +343,11 @@ Lookup metrics are available for local partial lookup. They are reported at look
 
 ### Blob Fetch Metrics
 
+The existing fetch outcome counters are always registered when the Blob writer has a metric
+registry. Setting `blob-transfer-metrics.enabled=true` adds the five counters listed at the end
+of this table to the same `paimon.table.<table_name>.blobFetch` group. The option defaults to
+`false` and does not change the existing fetch outcomes or successful-byte accounting.
+
 <table class="table table-bordered">
     <thead>
     <tr>
@@ -417,8 +422,48 @@ Lookup metrics are available for local partial lookup. They are reported at look
             <td>Counter</td>
             <td>Total number of blob fetch failures that are not classified as HTTP status or invalid URI failures.</td>
         </tr>
+        <tr>
+            <td>blobFetchTransferTimedCount</td>
+            <td>Counter</td>
+            <td>Number of timed payload copy attempts, including empty payloads and failed copies.</td>
+        </tr>
+        <tr>
+            <td>blobFetchTransferDurationNanos</td>
+            <td>Counter</td>
+            <td>Cumulative payload copy duration in nanoseconds.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailedReadBytes</td>
+            <td>Counter</td>
+            <td>Payload bytes returned by successful read calls before a copy failed.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailedWrittenBytes</td>
+            <td>Counter</td>
+            <td>Payload bytes passed to normally returning write calls before a copy failed.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttp503</td>
+            <td>Counter</td>
+            <td>Terminal blob fetch failures classified as HTTP 503, including failures written as NULL. A subset of blobFetchHttpServerError.</td>
+        </tr>
     </tbody>
 </table>
+
+Copy timing covers payload reads and writes, excluding source open, seek, and cleanup. NULL
+values and failures before copying are not timed; an empty payload that reaches copying is
+timed. Divide the duration-counter delta by the timed-count delta for the mean copy duration.
+
+Failed-copy bytes exclude framing, checksums, and protocol overhead. A throwing write may have
+unknown side effects: only preceding, normally returning writes contribute to
+`blobFetchFailedWrittenBytes`. These bytes are not storage acknowledgments or committed data.
+Successful payload bytes remain solely in `blobFetchSuccessBytes`. The failed-byte counters
+cover failures inside the copy loop only. Later source-close, footer, or consumer-callback
+failures do not reclassify a completed copy. Therefore, successful bytes and failed-copy bytes
+are not an exhaustive traffic partition and must not be added together as total traffic.
+
+`blobFetchHttp503` classifies the logical fetch's terminal error. It does not count every HTTP
+response, hidden client retry, or redirect, and HTTP 503 alone does not prove rate limiting.
 
 ### Compaction Metrics
 

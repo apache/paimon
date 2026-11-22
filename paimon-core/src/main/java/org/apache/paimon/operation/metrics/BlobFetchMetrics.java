@@ -25,6 +25,8 @@ import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.rest.HttpClientUtils;
 
+import javax.annotation.Nullable;
+
 /** Metrics to measure blob fetches during write. */
 public class BlobFetchMetrics implements BlobFetchMetricReporter {
 
@@ -44,6 +46,12 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     public static final String BLOB_FETCH_HTTP_OTHER_ERROR = "blobFetchHttpOtherError";
     public static final String BLOB_FETCH_INVALID_URI = "blobFetchInvalidUri";
     public static final String BLOB_FETCH_OTHER_ERROR = "blobFetchOtherError";
+    public static final String BLOB_FETCH_TRANSFER_TIMED_COUNT = "blobFetchTransferTimedCount";
+    public static final String BLOB_FETCH_TRANSFER_DURATION_NANOS =
+            "blobFetchTransferDurationNanos";
+    public static final String BLOB_FETCH_FAILED_READ_BYTES = "blobFetchFailedReadBytes";
+    public static final String BLOB_FETCH_FAILED_WRITTEN_BYTES = "blobFetchFailedWrittenBytes";
+    public static final String BLOB_FETCH_HTTP_503 = "blobFetchHttp503";
 
     private final MetricGroup metricGroup;
     private final Counter totalCounter;
@@ -59,8 +67,20 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     private final Counter httpOtherErrorCounter;
     private final Counter invalidUriCounter;
     private final Counter otherErrorCounter;
+    private final boolean transferMetricsEnabled;
+    @Nullable private final Counter transferTimedCounter;
+    @Nullable private final Counter transferDurationNanosCounter;
+    @Nullable private final Counter failedReadBytesCounter;
+    @Nullable private final Counter failedWrittenBytesCounter;
+    @Nullable private final Counter http503Counter;
 
     public BlobFetchMetrics(MetricRegistry registry, String tableName) {
+        this(registry, tableName, false);
+    }
+
+    public BlobFetchMetrics(
+            MetricRegistry registry, String tableName, boolean transferMetricsEnabled) {
+        this.transferMetricsEnabled = transferMetricsEnabled;
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.totalCounter = metricGroup.counter(BLOB_FETCH_TOTAL);
         this.successCounter = metricGroup.counter(BLOB_FETCH_SUCCESS);
@@ -76,6 +96,20 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
         this.httpOtherErrorCounter = metricGroup.counter(BLOB_FETCH_HTTP_OTHER_ERROR);
         this.invalidUriCounter = metricGroup.counter(BLOB_FETCH_INVALID_URI);
         this.otherErrorCounter = metricGroup.counter(BLOB_FETCH_OTHER_ERROR);
+        if (transferMetricsEnabled) {
+            this.transferTimedCounter = metricGroup.counter(BLOB_FETCH_TRANSFER_TIMED_COUNT);
+            this.transferDurationNanosCounter =
+                    metricGroup.counter(BLOB_FETCH_TRANSFER_DURATION_NANOS);
+            this.failedReadBytesCounter = metricGroup.counter(BLOB_FETCH_FAILED_READ_BYTES);
+            this.failedWrittenBytesCounter = metricGroup.counter(BLOB_FETCH_FAILED_WRITTEN_BYTES);
+            this.http503Counter = metricGroup.counter(BLOB_FETCH_HTTP_503);
+        } else {
+            this.transferTimedCounter = null;
+            this.transferDurationNanosCounter = null;
+            this.failedReadBytesCounter = null;
+            this.failedWrittenBytesCounter = null;
+            this.http503Counter = null;
+        }
     }
 
     @VisibleForTesting
@@ -117,6 +151,29 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
         recordFailureReason(throwable);
     }
 
+    @Override
+    public boolean isTransferMetricsEnabled() {
+        return transferMetricsEnabled;
+    }
+
+    @Override
+    public void recordTransfer(
+            long readBytes, long writtenBytes, long durationNanos, boolean completed) {
+        if (!transferMetricsEnabled) {
+            return;
+        }
+        transferTimedCounter.inc();
+        transferDurationNanosCounter.inc(Math.max(0, durationNanos));
+        if (!completed) {
+            if (readBytes > 0) {
+                failedReadBytesCounter.inc(readBytes);
+            }
+            if (writtenBytes > 0) {
+                failedWrittenBytesCounter.inc(writtenBytes);
+            }
+        }
+    }
+
     public void close() {
         metricGroup.close();
     }
@@ -130,6 +187,13 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
                 httpClientErrorCounter.inc();
             } else if (statusCode >= 500 && statusCode < 600) {
                 httpServerErrorCounter.inc();
+                if (statusCode == 503 && http503Counter != null) {
+                    try {
+                        http503Counter.inc();
+                    } catch (RuntimeException ignored) {
+                        // Optional telemetry must not replace the original fetch failure.
+                    }
+                }
             } else {
                 httpOtherErrorCounter.inc();
             }
