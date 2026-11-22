@@ -161,7 +161,6 @@ final class ManifestFileBlockMerger {
             List<ManifestFileMeta> result = new ArrayList<>();
             List<ManifestFileMeta> toCompact = new LinkedList<>(inputs);
             if (predicate != null) {
-                int remainingManifests = inputs.size() - deltaManifests.size();
                 Iterator<ManifestFileMeta> iterator = toCompact.iterator();
                 while (iterator.hasNext()) {
                     ManifestFileMeta file = iterator.next();
@@ -172,8 +171,7 @@ final class ManifestFileBlockMerger {
                             file.numAddedFiles() + file.numDeletedFiles(),
                             file.partitionStats().minValues(),
                             file.partitionStats().maxValues(),
-                            file.partitionStats().nullCounts(),
-                            --remainingManifests)) {
+                            file.partitionStats().nullCounts())) {
                         iterator.remove();
                         result.add(file);
                     }

@@ -87,9 +87,6 @@ import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -738,21 +735,11 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Snapshot snapshot = mock(Snapshot.class);
         ManifestList.Factory lists = mock(ManifestList.Factory.class, RETURNS_DEEP_STUBS);
         when(lists.create().readDataManifests(snapshot)).thenReturn(Arrays.asList(a, gap, b));
-        PartitionPredicate authFilter = mock(PartitionPredicate.class);
-        List<Integer> remaining = new ArrayList<>();
-        when(authFilter.test(anyLong(), any(), any(), any(), anyInt()))
-                .thenAnswer(
-                        invocation -> {
-                            remaining.add(invocation.getArgument(4));
-                            return true;
-                        });
         ManifestsReader.Result result =
                 new ManifestsReader(type, "default", null, lists)
                         .withPartitionFilter(Arrays.asList(first.partition(), last.partition()))
-                        .withAuthPartitionFilter(authFilter)
                         .read(snapshot, ScanMode.ALL);
         assertThat(result.filteredManifests).containsExactly(a, b);
-        assertThat(remaining).containsExactly(2, 0);
     }
 
     @ParameterizedTest

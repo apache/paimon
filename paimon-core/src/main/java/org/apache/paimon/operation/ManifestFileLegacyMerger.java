@@ -157,11 +157,9 @@ final class ManifestFileLegacyMerger {
         long totalManifestSize = 0;
         long deltaDeleteFileNum = 0;
         long totalDeltaFileSize = 0;
-        int remainingManifests = inputs.size();
         for (ManifestFileMeta file : inputs) {
             totalManifestSize += file.fileSize();
             if (mustChange.test(file)) {
-                remainingManifests--;
                 totalDeltaFileSize += file.fileSize();
                 deltaDeleteFileNum += file.numDeletedFiles();
             }
@@ -204,8 +202,7 @@ final class ManifestFileLegacyMerger {
                         file.numAddedFiles() + file.numDeletedFiles(),
                         file.partitionStats().minValues(),
                         file.partitionStats().maxValues(),
-                        file.partitionStats().nullCounts(),
-                        --remainingManifests)) {
+                        file.partitionStats().nullCounts())) {
                     iterator.remove();
                     result.add(file);
                 }

@@ -157,7 +157,7 @@ public class PartitionPredicateTest {
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
         for (int i = 0; i < 17; i++) {
-            assertThat(predicate.test(10, lower, upper, noNulls, 64 - i)).isFalse();
+            assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
         }
         assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
         assertThat(predicate.test(10, GenericRow.of(3, 5), GenericRow.of(4, 100), noNulls))
@@ -220,7 +220,7 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testRangeIndexRequiresEnoughRemainingManifests() throws Exception {
+    public void testRangeIndexRequiresEnoughScannedPartitions() throws Exception {
         Object[] first = {Integer.MIN_VALUE, 0};
         Object[] second = {-1, 2};
         Object[] third = {-1, 1};
@@ -236,22 +236,23 @@ public class PartitionPredicateTest {
                         Integer.MAX_VALUE);
 
         for (int i = 0; i < 16; i++) {
-            assertThat(index.sortedPartitions(6)).isNull();
+            index.recordScannedPartitions(partitions.length);
+            assertThat(index.sortedPartitions()).isNull();
         }
-        assertThat(index.sortedPartitions(5)).isNull();
-        assertThat(index.sortedPartitions(0)).isNull();
-        Object[][] sorted = index.sortedPartitions(6);
+        index.recordScannedPartitions(partitions.length - 1);
+        assertThat(index.sortedPartitions()).isNull();
+        index.recordScannedPartitions(1);
+        Object[][] sorted = index.sortedPartitions();
         assertThat(Arrays.asList(sorted)).containsExactly(first, second, third, fourth);
-        assertThat(index.sortedPartitions(0)).isSameAs(sorted);
+        assertThat(index.sortedPartitions()).isSameAs(sorted);
         assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
 
         PartitionRangeIndex restored = InstantiationUtil.clone(index);
-        for (int i = 0; i < 16; i++) {
-            assertThat(restored.sortedPartitions(24)).isNull();
+        assertThat(restored.sortedPartitions()).isNull();
+        for (int i = 0; i < 17; i++) {
+            restored.recordScannedPartitions(1);
         }
-        assertThat(restored.sortedPartitions(0)).isNull();
-        assertThat(Arrays.stream(restored.sortedPartitions(24)).map(fields -> fields[0]))
-                .containsExactly(Integer.MIN_VALUE, -1, -1, Integer.MAX_VALUE);
+        assertThat(restored.sortedPartitions()).isNull();
     }
 
     @Test
@@ -265,7 +266,6 @@ public class PartitionPredicateTest {
                 PartitionPredicate.fromMultiple(
                         DataTypes.ROW(DataTypes.INT(), DataTypes.INT()), partitions);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
-        int remainingManifests = 2 * 40 * 7;
         for (int day = 0; day < 40; day++) {
             for (int event = 0; event < 7; event++) {
                 int firstDay = day;
@@ -283,12 +283,11 @@ public class PartitionPredicateTest {
                                         5,
                                         createPart(day, event),
                                         createPart(day + 2, event + 1),
-                                        noNulls,
-                                        --remainingManifests))
+                                        noNulls))
                         .isEqualTo(expected);
 
                 BinaryRow point = createPart(day, event);
-                assertThat(predicate.test(5, point, point, noNulls, --remainingManifests))
+                assertThat(predicate.test(5, point, point, noNulls))
                         .isEqualTo(partitions.contains(point));
             }
         }

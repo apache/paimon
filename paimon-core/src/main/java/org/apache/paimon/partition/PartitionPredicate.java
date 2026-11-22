@@ -88,19 +88,6 @@ public interface PartitionPredicate extends Serializable {
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
     /**
-     * Tests manifest statistics with the number of later manifests in the current scan. The count
-     * is a hint for index construction and does not affect the result.
-     */
-    default boolean test(
-            long rowCount,
-            InternalRow minValues,
-            InternalRow maxValues,
-            InternalArray nullCounts,
-            int remainingManifests) {
-        return test(rowCount, minValues, maxValues, nullCounts);
-    }
-
-    /**
      * Compared to the multiple method, this approach can accept filtering of partially partitioned
      * fields.
      */
@@ -327,16 +314,6 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow minValues,
                 InternalRow maxValues,
                 InternalArray nullCounts) {
-            return test(rowCount, minValues, maxValues, nullCounts, 0);
-        }
-
-        @Override
-        public boolean test(
-                long rowCount,
-                InternalRow minValues,
-                InternalRow maxValues,
-                InternalArray nullCounts,
-                int remainingManifests) {
             if (fieldNum == 0
                     || minValues.getFieldCount() < fieldNum
                     || maxValues.getFieldCount() < fieldNum
@@ -352,8 +329,7 @@ public interface PartitionPredicate extends Serializable {
             }
             return partitionRangeIndex == null
                     || rowCount <= 0
-                    || partitionRangeIndex.test(
-                            rowCount, minValues, maxValues, nullCounts, remainingManifests);
+                    || partitionRangeIndex.test(rowCount, minValues, maxValues, nullCounts);
         }
 
         public Optional<BinaryRow> extractSinglePartition() {
@@ -422,16 +398,14 @@ public interface PartitionPredicate extends Serializable {
         static final class PartitionRangeIndex implements Serializable {
 
             private static final long serialVersionUID = 1L;
-            private static final int LINEAR_LOOKUPS_BEFORE_SORT = 16;
-            private static final int MANIFESTS_PER_SORT_LEVEL = 3;
+            private static final int LINEAR_SCANS_BEFORE_SORT = 17;
 
             private final Object[][] partitionValues;
             private final RowDataToObjectArrayConverter converter;
             private final int field;
             @Nullable private final Object min;
             @Nullable private final Object max;
-            private final int minimumRemainingManifests;
-            private transient int selectiveLookups;
+            private transient volatile long scannedPartitions;
             @Nullable private transient volatile Object[][] sortedPartitions;
 
             PartitionRangeIndex(
@@ -445,18 +419,13 @@ public interface PartitionPredicate extends Serializable {
                 this.field = field;
                 this.min = min;
                 this.max = max;
-                // Estimate how many O(n) scans it takes to amortize O(n log n) sorting.
-                int sortLevels =
-                        Integer.SIZE - Integer.numberOfLeadingZeros(partitionValues.length - 1);
-                this.minimumRemainingManifests = MANIFESTS_PER_SORT_LEVEL * sortLevels;
             }
 
             private boolean test(
                     long rowCount,
                     InternalRow minValues,
                     InternalRow maxValues,
-                    InternalArray nullCounts,
-                    int remainingManifests) {
+                    InternalArray nullCounts) {
                 Object[] lower = converter.convert(minValues);
                 Object[] upper = converter.convert(maxValues);
                 long[] nulls = new long[lower.length];
@@ -471,7 +440,7 @@ public interface PartitionPredicate extends Serializable {
                     boolean restrictStart = compareLiteral(type, min, lower[field]) < 0;
                     boolean restrictEnd = compareLiteral(type, max, upper[field]) > 0;
                     if (restrictStart || restrictEnd) {
-                        Object[][] sorted = sortedPartitions(remainingManifests);
+                        Object[][] sorted = sortedPartitions();
                         if (sorted == null) {
                             return matchesUnsortedRange(type, lower, upper, nulls, rowCount);
                         }
@@ -499,25 +468,27 @@ public interface PartitionPredicate extends Serializable {
                         partitionValues, 0, partitionValues.length, lower, upper, nulls, rowCount);
             }
 
-            /** Returns the cached index or builds one after enough eligible lookups. */
+            /** Returns the cached index or builds one after enough work on linear scans. */
             @Nullable
-            Object[][] sortedPartitions(int remainingManifests) {
+            Object[][] sortedPartitions() {
                 Object[][] sorted = sortedPartitions;
                 if (sorted != null) {
                     return sorted;
                 }
-                if (remainingManifests < minimumRemainingManifests) {
+                if (scannedPartitions < (long) partitionValues.length * LINEAR_SCANS_BEFORE_SORT) {
                     return null;
                 }
                 synchronized (this) {
                     if (sortedPartitions == null) {
-                        if (selectiveLookups < LINEAR_LOOKUPS_BEFORE_SORT) {
-                            selectiveLookups++;
-                            return null;
-                        }
                         sortedPartitions = sortPartitions();
                     }
                     return sortedPartitions;
+                }
+            }
+
+            synchronized void recordScannedPartitions(int count) {
+                if (sortedPartitions == null) {
+                    scannedPartitions += count;
                 }
             }
 
@@ -572,14 +543,17 @@ public interface PartitionPredicate extends Serializable {
                 Object upperBound = upper[field];
                 lower[field] = null;
                 // Check the indexed field first so only candidates in range need a tuple check.
-                for (Object[] partition : partitionValues) {
+                for (int i = 0; i < partitionValues.length; i++) {
+                    Object[] partition = partitionValues[i];
                     Object value = partition[field];
                     if (compareLiteral(type, value, lowerBound) >= 0
                             && compareLiteral(type, value, upperBound) <= 0
                             && mayContainPartition(partition, lower, upper, nulls, rowCount)) {
+                        recordScannedPartitions(i + 1);
                         return true;
                     }
                 }
+                recordScannedPartitions(partitionValues.length);
                 return false;
             }
 
@@ -658,19 +632,8 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow minValues,
                 InternalRow maxValues,
                 InternalArray nullCounts) {
-            return test(rowCount, minValues, maxValues, nullCounts, 0);
-        }
-
-        @Override
-        public boolean test(
-                long rowCount,
-                InternalRow minValues,
-                InternalRow maxValues,
-                InternalArray nullCounts,
-                int remainingManifests) {
             for (PartitionPredicate predicate : predicates) {
-                if (!predicate.test(
-                        rowCount, minValues, maxValues, nullCounts, remainingManifests)) {
+                if (!predicate.test(rowCount, minValues, maxValues, nullCounts)) {
                     return false;
                 }
             }

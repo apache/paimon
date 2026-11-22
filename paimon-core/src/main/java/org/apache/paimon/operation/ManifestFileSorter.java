@@ -609,11 +609,9 @@ public class ManifestFileSorter {
         }
 
         // Classify each file based on size and delete-partition overlap
-        int remainingManifests = lsmFiles.size();
         Iterator<ManifestFileMeta> iterator = lsmFiles.iterator();
         while (iterator.hasNext()) {
             ManifestFileMeta file = iterator.next();
-            remainingManifests--;
             boolean small = file.fileSize() < suggestedMetaSize;
             boolean inDeleteRange =
                     predicate != null
@@ -621,8 +619,7 @@ public class ManifestFileSorter {
                                     file.numAddedFiles() + file.numDeletedFiles(),
                                     file.partitionStats().minValues(),
                                     file.partitionStats().maxValues(),
-                                    file.partitionStats().nullCounts(),
-                                    remainingManifests);
+                                    file.partitionStats().nullCounts());
             if (small || inDeleteRange) {
                 iterator.remove();
                 defaultCompactFiles.put(file, inDeleteRange);

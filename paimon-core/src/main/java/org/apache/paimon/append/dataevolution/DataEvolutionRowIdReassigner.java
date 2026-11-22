@@ -182,12 +182,10 @@ public class DataEvolutionRowIdReassigner {
         List<ManifestFileMeta> manifestMetas = manifestList.readDataManifests(snapshot);
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         List<List<ManifestFileMeta>> includedGroups = new ArrayList<>();
-        int remainingManifests = manifestGroups.stream().mapToInt(List::size).sum();
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
-            if (!skipManifestGroupByPartitionFilter(manifestGroup, remainingManifests)) {
+            if (!skipManifestGroupByPartitionFilter(manifestGroup)) {
                 includedGroups.add(manifestGroup);
             }
-            remainingManifests -= manifestGroup.size();
         }
 
         DataEvolutionRowIdAssignmentPlanner planner =
@@ -313,8 +311,7 @@ public class DataEvolutionRowIdReassigner {
         return groups;
     }
 
-    private boolean skipManifestGroupByPartitionFilter(
-            List<ManifestFileMeta> manifestGroup, int remainingManifests) {
+    private boolean skipManifestGroupByPartitionFilter(List<ManifestFileMeta> manifestGroup) {
         if (!partitionFilterEnabled()) {
             return false;
         }
@@ -330,8 +327,7 @@ public class DataEvolutionRowIdReassigner {
                     manifestMeta.numAddedFiles() + manifestMeta.numDeletedFiles(),
                     partitionStats.minValues(),
                     partitionStats.maxValues(),
-                    partitionStats.nullCounts(),
-                    --remainingManifests)) {
+                    partitionStats.nullCounts())) {
                 return false;
             }
         }

@@ -37,11 +37,11 @@ import org.apache.paimon.utils.TriFilter;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 
@@ -166,17 +166,13 @@ public class ManifestsReader {
         BucketFilter effectiveBucketFilter =
                 BucketFilter.create(
                         onlyReadRealBuckets, specifiedBucket, bucketFilter, totalAwareBucketFilter);
-        List<ManifestFileMeta> filtered = new ArrayList<>();
-        int remainingManifests = manifests.size();
-        for (ManifestFileMeta manifest : manifests) {
-            if (filterManifestFileMeta(
-                    manifest,
-                    effectivePartitionFilter,
-                    effectiveBucketFilter,
-                    --remainingManifests)) {
-                filtered.add(manifest);
-            }
-        }
+        List<ManifestFileMeta> filtered =
+                manifests.stream()
+                        .filter(
+                                m ->
+                                        filterManifestFileMeta(
+                                                m, effectivePartitionFilter, effectiveBucketFilter))
+                        .collect(Collectors.toList());
         return new Result(snapshot, manifests, filtered);
     }
 
@@ -211,8 +207,7 @@ public class ManifestsReader {
     private boolean filterManifestFileMeta(
             ManifestFileMeta manifest,
             @Nullable PartitionPredicate effectivePartitionFilter,
-            @Nullable BucketFilter effectiveBucketFilter,
-            int remainingManifests) {
+            @Nullable BucketFilter effectiveBucketFilter) {
         if (effectiveBucketFilter != null && !effectiveBucketFilter.mayContain(manifest)) {
             return false;
         }
@@ -235,8 +230,7 @@ public class ManifestsReader {
                     manifest.numAddedFiles() + manifest.numDeletedFiles(),
                     stats.minValues(),
                     stats.maxValues(),
-                    stats.nullCounts(),
-                    remainingManifests)) {
+                    stats.nullCounts())) {
                 return false;
             }
         }
