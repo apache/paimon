@@ -224,15 +224,14 @@ public interface PartitionPredicate extends Serializable {
         private static final long serialVersionUID = 1L;
         private static final int MIN_PARTITIONS_FOR_RANGE_SEARCH = 64;
 
-        // Keep the legacy tuple fields in the stream for compatibility in both directions.
+        // Persist tuple data using the original fields. The indexes are rebuilt on demand.
         private static final ObjectStreamField[] serialPersistentFields = {
             new ObjectStreamField("partitions", Set.class),
             new ObjectStreamField("fieldNum", int.class),
             new ObjectStreamField("min", Predicate[].class),
             new ObjectStreamField("max", Predicate[].class),
             new ObjectStreamField("partitionValues", Object[][].class),
-            new ObjectStreamField("converter", RowDataToObjectArrayConverter.class),
-            new ObjectStreamField("partitionRangeIndex", PartitionRangeIndex.class)
+            new ObjectStreamField("converter", RowDataToObjectArrayConverter.class)
         };
 
         private Set<BinaryRow> partitions;
@@ -269,11 +268,15 @@ public interface PartitionPredicate extends Serializable {
                 }
             }
             PredicateBuilder builder = new PredicateBuilder(partitionType);
-            int rangeField = -1;
-            Object rangeMin = null;
-            Object rangeMax = null;
+            SimpleColStats[] columnStats =
+                    partitions.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH
+                            ? new SimpleColStats[fieldNum]
+                            : null;
             for (int i = 0; i < collectors.length; i++) {
                 SimpleColStats stats = collectors[i].result();
+                if (columnStats != null) {
+                    columnStats[i] = stats;
+                }
                 Long nullCount = stats.nullCount();
                 checkArgument(nullCount != null, "nullCount cannot be null!");
                 if (nullCount == partitions.size()) {
@@ -287,20 +290,13 @@ public interface PartitionPredicate extends Serializable {
                     if (nullCount > 0) {
                         min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
                         max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
-                    } else if (rangeField == -1
-                            && partitions.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH
-                            && compareLiteral(partitionType.getTypeAt(i), minValue, maxValue) < 0) {
-                        rangeField = i;
-                        rangeMin = minValue;
-                        rangeMax = maxValue;
                     }
                 }
             }
             this.partitionRangeIndex =
                     partitionValues == null
                             ? null
-                            : new PartitionRangeIndex(
-                                    partitionValues, converter, rangeField, rangeMin, rangeMax);
+                            : new PartitionRangeIndex(partitionValues, converter, columnStats);
         }
 
         @Override
@@ -371,7 +367,6 @@ public interface PartitionPredicate extends Serializable {
             fields.put(
                     "converter",
                     partitionRangeIndex == null ? null : partitionRangeIndex.converter);
-            fields.put("partitionRangeIndex", partitionRangeIndex);
             out.writeFields();
         }
 
@@ -382,19 +377,23 @@ public interface PartitionPredicate extends Serializable {
             fieldNum = fields.get("fieldNum", 0);
             min = (Predicate[]) fields.get("min", null);
             max = (Predicate[]) fields.get("max", null);
-            partitionRangeIndex = (PartitionRangeIndex) fields.get("partitionRangeIndex", null);
-            if (partitionRangeIndex == null) {
-                Object[][] values = (Object[][]) fields.get("partitionValues", null);
-                RowDataToObjectArrayConverter converter =
-                        (RowDataToObjectArrayConverter) fields.get("converter", null);
-                if (values != null && converter != null) {
+            Object[][] values = (Object[][]) fields.get("partitionValues", null);
+            RowDataToObjectArrayConverter converter =
+                    (RowDataToObjectArrayConverter) fields.get("converter", null);
+            if (values != null && converter != null) {
+                partitionRangeIndex = PartitionRangeIndex.restore(values, converter);
+            } else if (fields.getObjectStreamClass().getField("partitionRangeIndex") != null) {
+                PartitionRangeIndex previous =
+                        (PartitionRangeIndex) fields.get("partitionRangeIndex", null);
+                if (previous != null) {
                     partitionRangeIndex =
-                            new PartitionRangeIndex(values, converter, -1, null, null);
+                            PartitionRangeIndex.restore(
+                                    previous.partitionValues, previous.converter);
                 }
             }
         }
 
-        /** Checks partition tuples, with a lazy index for repeated selective manifest lookups. */
+        /** Checks partition tuples, with a lazy range index for each partition column. */
         static final class PartitionRangeIndex implements Serializable {
 
             private static final long serialVersionUID = 1L;
@@ -402,26 +401,44 @@ public interface PartitionPredicate extends Serializable {
 
             private final Object[][] partitionValues;
             private final RowDataToObjectArrayConverter converter;
-            private final int field;
-            @Nullable private final Object min;
-            @Nullable private final Object max;
-            private transient volatile long scannedPartitions;
-            @Nullable private transient volatile Object[][] sortedPartitions;
+            @Nullable private final transient ColumnRangeIndex[] columns;
 
             PartitionRangeIndex(
                     Object[][] partitionValues,
                     RowDataToObjectArrayConverter converter,
-                    int field,
-                    @Nullable Object min,
-                    @Nullable Object max) {
+                    @Nullable SimpleColStats[] columnStats) {
                 this.partitionValues = partitionValues;
                 this.converter = converter;
-                this.field = field;
-                this.min = min;
-                this.max = max;
+                columns = columnStats == null ? null : new ColumnRangeIndex[columnStats.length];
+                if (columns != null) {
+                    for (int i = 0; i < columns.length; i++) {
+                        columns[i] =
+                                new ColumnRangeIndex(
+                                        i, converter.rowType().getTypeAt(i), columnStats[i]);
+                    }
+                }
             }
 
-            private boolean test(
+            private static PartitionRangeIndex restore(
+                    Object[][] values, RowDataToObjectArrayConverter converter) {
+                SimpleColStats[] stats = null;
+                if (values.length >= MIN_PARTITIONS_FOR_RANGE_SEARCH) {
+                    RowType type = converter.rowType();
+                    stats = new SimpleColStats[type.getFieldCount()];
+                    for (int i = 0; i < stats.length; i++) {
+                        Serializer<Object> serializer =
+                                InternalSerializers.create(type.getTypeAt(i));
+                        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
+                        for (Object[] partition : values) {
+                            collector.collect(partition[i], serializer);
+                        }
+                        stats[i] = collector.result();
+                    }
+                }
+                return new PartitionRangeIndex(values, converter, stats);
+            }
+
+            boolean test(
                     long rowCount,
                     InternalRow minValues,
                     InternalRow maxValues,
@@ -435,126 +452,137 @@ public interface PartitionPredicate extends Serializable {
                                     ? -1
                                     : nullCounts.getLong(i);
                 }
-                if (field >= 0 && lower[field] != null && upper[field] != null) {
-                    DataType type = converter.rowType().getTypeAt(field);
-                    boolean restrictStart = compareLiteral(type, min, lower[field]) < 0;
-                    boolean restrictEnd = compareLiteral(type, max, upper[field]) > 0;
-                    if (restrictStart || restrictEnd) {
-                        Object[][] sorted = sortedPartitions();
-                        if (sorted == null) {
-                            return matchesUnsortedRange(type, lower, upper, nulls, rowCount);
+                if (columns == null) {
+                    return matchesAny(
+                            partitionValues,
+                            0,
+                            partitionValues.length,
+                            lower,
+                            upper,
+                            nulls,
+                            rowCount,
+                            null);
+                }
+
+                CandidateRange best = null;
+                ColumnRangeIndex ready = null;
+                Object readyLower = null;
+                Object readyUpper = null;
+                boolean trackRejections = false;
+                long requiredRejections = (long) partitionValues.length * LINEAR_SCANS_BEFORE_SORT;
+                for (int field = 0; field < columns.length; field++) {
+                    ColumnRangeIndex column = columns[field];
+                    boolean checkBounds =
+                            column.min != null
+                                    && lower[field] != null
+                                    && upper[field] != null
+                                    && nulls[field] != rowCount;
+                    Object lowerBound =
+                            checkBounds && compareLiteral(column.type, column.min, lower[field]) < 0
+                                    ? lower[field]
+                                    : null;
+                    Object upperBound =
+                            checkBounds && compareLiteral(column.type, column.max, upper[field]) > 0
+                                    ? upper[field]
+                                    : null;
+                    if (lowerBound == null && upperBound == null) {
+                        // No non-null value is excluded by the bounds of this column.
+                        lower[field] = null;
+                        if ((nulls[field] != 0 || column.nullCount == 0)
+                                && (nulls[field] != rowCount || column.min == null)) {
+                            continue;
                         }
-                        int start =
-                                restrictStart ? findBound(sorted, type, lower[field], 0, false) : 0;
-                        if (start == sorted.length
-                                || (restrictEnd
-                                        && compareLiteral(type, sorted[start][field], upper[field])
-                                                > 0)) {
+                    }
+                    Object[][] sorted = sortedPartitions(field);
+                    if (sorted != null) {
+                        CandidateRange range =
+                                column.search(
+                                        sorted, lowerBound, upperBound, nulls[field], rowCount);
+                        if (range == null) {
                             return false;
                         }
-                        int end =
-                                restrictEnd
-                                        ? findBound(sorted, type, upper[field], start + 1, true)
-                                        : sorted.length;
-                        // The index has already checked the bounds for these candidates.
-                        lower[field] = null;
-                        return matchesAny(sorted, start, end, lower, upper, nulls, rowCount);
+                        if (best == null || range.size() < best.size()) {
+                            best = range;
+                        }
                     } else {
-                        // The manifest covers the entire range of the indexed field.
-                        lower[field] = null;
+                        trackRejections = true;
+                        if (column.rejectedPartitions >= requiredRejections
+                                && (ready == null
+                                        || column.rejectedPartitions > ready.rejectedPartitions)) {
+                            ready = column;
+                            readyLower = lowerBound;
+                            readyUpper = upperBound;
+                        }
                     }
                 }
-                return matchesAny(
-                        partitionValues, 0, partitionValues.length, lower, upper, nulls, rowCount);
+
+                // Reuse a small candidate set instead of building another index for this lookup.
+                if (ready != null
+                        && (best == null || best.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH)) {
+                    CandidateRange range =
+                            ready.search(
+                                    ready.build(partitionValues),
+                                    readyLower,
+                                    readyUpper,
+                                    nulls[ready.field],
+                                    rowCount);
+                    if (range == null) {
+                        return false;
+                    }
+                    if (best == null || range.size() < best.size()) {
+                        best = range;
+                    }
+                }
+
+                int[] rejections = trackRejections ? new int[columns.length] : null;
+                boolean matches;
+                if (best == null) {
+                    matches =
+                            matchesAny(
+                                    partitionValues,
+                                    0,
+                                    partitionValues.length,
+                                    lower,
+                                    upper,
+                                    nulls,
+                                    rowCount,
+                                    rejections);
+                } else {
+                    // The candidate intervals have already checked the bounds on this column.
+                    lower[best.field] = null;
+                    matches =
+                            matchesAny(
+                                            best.partitions,
+                                            0,
+                                            best.nullEnd,
+                                            lower,
+                                            upper,
+                                            nulls,
+                                            rowCount,
+                                            rejections)
+                                    || matchesAny(
+                                            best.partitions,
+                                            best.start,
+                                            best.end,
+                                            lower,
+                                            upper,
+                                            nulls,
+                                            rowCount,
+                                            rejections);
+                }
+                if (rejections != null) {
+                    for (int i = 0; i < rejections.length; i++) {
+                        if (rejections[i] > 0 && sortedPartitions(i) == null) {
+                            columns[i].recordRejections(rejections[i]);
+                        }
+                    }
+                }
+                return matches;
             }
 
-            /** Returns the cached index or builds one after enough work on linear scans. */
             @Nullable
-            Object[][] sortedPartitions() {
-                Object[][] sorted = sortedPartitions;
-                if (sorted != null) {
-                    return sorted;
-                }
-                if (scannedPartitions < (long) partitionValues.length * LINEAR_SCANS_BEFORE_SORT) {
-                    return null;
-                }
-                synchronized (this) {
-                    if (sortedPartitions == null) {
-                        sortedPartitions = sortPartitions();
-                    }
-                    return sortedPartitions;
-                }
-            }
-
-            synchronized void recordScannedPartitions(int count) {
-                if (sortedPartitions == null) {
-                    scannedPartitions += count;
-                }
-            }
-
-            private Object[][] sortPartitions() {
-                if (partitionValues[0][field] instanceof Integer) {
-                    // Put the signed key in the high bits and the tuple ordinal in the low bits.
-                    long[] order = new long[partitionValues.length];
-                    for (int i = 0; i < order.length; i++) {
-                        int key = (Integer) partitionValues[i][field];
-                        order[i] = ((long) key << Integer.SIZE) | i;
-                    }
-                    Arrays.sort(order);
-                    Object[][] sorted = new Object[order.length][];
-                    for (int i = 0; i < order.length; i++) {
-                        sorted[i] = partitionValues[(int) order[i]];
-                    }
-                    return sorted;
-                }
-
-                Object[][] sorted = partitionValues.clone();
-                DataType type = converter.rowType().getTypeAt(field);
-                Arrays.sort(
-                        sorted, (left, right) -> compareLiteral(type, left[field], right[field]));
-                return sorted;
-            }
-
-            private int findBound(
-                    Object[][] candidates,
-                    DataType type,
-                    Object value,
-                    int start,
-                    boolean afterEqual) {
-                int end = candidates.length;
-                while (start < end) {
-                    int middle = (start + end) >>> 1;
-                    int comparison = compareLiteral(type, candidates[middle][field], value);
-                    if (comparison < 0 || (afterEqual && comparison == 0)) {
-                        start = middle + 1;
-                    } else {
-                        end = middle;
-                    }
-                }
-                return start;
-            }
-
-            private boolean matchesUnsortedRange(
-                    DataType type, Object[] lower, Object[] upper, long[] nulls, long rowCount) {
-                if (nulls[field] == rowCount) {
-                    return false;
-                }
-                Object lowerBound = lower[field];
-                Object upperBound = upper[field];
-                lower[field] = null;
-                // Check the indexed field first so only candidates in range need a tuple check.
-                for (int i = 0; i < partitionValues.length; i++) {
-                    Object[] partition = partitionValues[i];
-                    Object value = partition[field];
-                    if (compareLiteral(type, value, lowerBound) >= 0
-                            && compareLiteral(type, value, upperBound) <= 0
-                            && mayContainPartition(partition, lower, upper, nulls, rowCount)) {
-                        recordScannedPartitions(i + 1);
-                        return true;
-                    }
-                }
-                recordScannedPartitions(partitionValues.length);
-                return false;
+            Object[][] sortedPartitions(int field) {
+                return columns == null ? null : columns[field].sortedPartitions;
             }
 
             private boolean matchesAny(
@@ -564,16 +592,22 @@ public interface PartitionPredicate extends Serializable {
                     Object[] lower,
                     Object[] upper,
                     long[] nulls,
-                    long rowCount) {
+                    long rowCount,
+                    @Nullable int[] rejections) {
                 for (int i = start; i < end; i++) {
-                    if (mayContainPartition(candidates[i], lower, upper, nulls, rowCount)) {
+                    int rejectedField = firstMismatch(candidates[i], lower, upper, nulls, rowCount);
+                    if (rejectedField < 0) {
                         return true;
+                    }
+                    if (rejections != null) {
+                        // Only count work that reached this column in schema order.
+                        rejections[rejectedField]++;
                     }
                 }
                 return false;
             }
 
-            private boolean mayContainPartition(
+            private int firstMismatch(
                     Object[] partition,
                     Object[] lower,
                     Object[] upper,
@@ -583,19 +617,162 @@ public interface PartitionPredicate extends Serializable {
                     Object value = partition[i];
                     if (value == null) {
                         if (nulls[i] == 0) {
-                            return false;
+                            return i;
                         }
                     } else if (nulls[i] == rowCount) {
-                        return false;
+                        return i;
                     } else if (lower[i] != null && upper[i] != null) {
                         DataType type = converter.rowType().getTypeAt(i);
                         if (compareLiteral(type, value, lower[i]) < 0
                                 || compareLiteral(type, value, upper[i]) > 0) {
-                            return false;
+                            return i;
                         }
                     }
                 }
-                return true;
+                return -1;
+            }
+
+            private static final class ColumnRangeIndex {
+
+                private final int field;
+                private final DataType type;
+                private final int nullCount;
+                @Nullable private final Object min;
+                @Nullable private final Object max;
+                private volatile long rejectedPartitions;
+                @Nullable private volatile Object[][] sortedPartitions;
+
+                private ColumnRangeIndex(int field, DataType type, SimpleColStats stats) {
+                    this.field = field;
+                    this.type = type;
+                    this.nullCount = checkNotNull(stats.nullCount()).intValue();
+                    this.min = stats.min();
+                    this.max = stats.max();
+                }
+
+                private synchronized void recordRejections(int count) {
+                    if (sortedPartitions == null) {
+                        rejectedPartitions += count;
+                    }
+                }
+
+                private synchronized Object[][] build(Object[][] partitions) {
+                    if (sortedPartitions == null) {
+                        sortedPartitions =
+                                min instanceof Integer
+                                        ? sortIntegerPartitions(partitions)
+                                        : sortPartitions(partitions);
+                    }
+                    return sortedPartitions;
+                }
+
+                private Object[][] sortIntegerPartitions(Object[][] partitions) {
+                    Object[][] sorted = new Object[partitions.length][];
+                    long[] order = new long[partitions.length - nullCount];
+                    int nextNull = 0;
+                    int nextKey = 0;
+                    for (int i = 0; i < partitions.length; i++) {
+                        Integer key = (Integer) partitions[i][field];
+                        if (key == null) {
+                            sorted[nextNull++] = partitions[i];
+                        } else {
+                            // Keep signed ordering and every tuple that shares a key.
+                            order[nextKey++] = ((long) key << Integer.SIZE) | i;
+                        }
+                    }
+                    Arrays.sort(order);
+                    for (int i = 0; i < order.length; i++) {
+                        sorted[nullCount + i] = partitions[(int) order[i]];
+                    }
+                    return sorted;
+                }
+
+                private Object[][] sortPartitions(Object[][] partitions) {
+                    Object[][] sorted = partitions.clone();
+                    if (nullCount != 0) {
+                        int nextNull = 0;
+                        int nextKey = nullCount;
+                        for (Object[] partition : partitions) {
+                            if (partition[field] == null) {
+                                sorted[nextNull++] = partition;
+                            } else {
+                                sorted[nextKey++] = partition;
+                            }
+                        }
+                    }
+                    Arrays.sort(
+                            sorted,
+                            nullCount,
+                            sorted.length,
+                            (left, right) -> compareLiteral(type, left[field], right[field]));
+                    return sorted;
+                }
+
+                @Nullable
+                private CandidateRange search(
+                        Object[][] sorted,
+                        @Nullable Object lower,
+                        @Nullable Object upper,
+                        long manifestNulls,
+                        long rowCount) {
+                    int nullEnd = manifestNulls == 0 ? 0 : nullCount;
+                    if (manifestNulls == rowCount) {
+                        return nullEnd == 0
+                                ? null
+                                : new CandidateRange(field, sorted, nullEnd, nullCount, nullCount);
+                    }
+                    int start =
+                            lower == null ? nullCount : findBound(sorted, lower, nullCount, false);
+                    if (start == sorted.length
+                            || (upper != null
+                                    && compareLiteral(type, sorted[start][field], upper) > 0)) {
+                        return nullEnd == 0
+                                ? null
+                                : new CandidateRange(field, sorted, nullEnd, start, start);
+                    }
+                    int end =
+                            upper == null
+                                    ? sorted.length
+                                    : findBound(sorted, upper, start + 1, true);
+                    return new CandidateRange(field, sorted, nullEnd, start, end);
+                }
+
+                private int findBound(
+                        Object[][] sorted, Object value, int start, boolean afterEqual) {
+                    int end = sorted.length;
+                    while (start < end) {
+                        int middle = (start + end) >>> 1;
+                        int comparison = compareLiteral(type, sorted[middle][field], value);
+                        if (comparison < 0 || (afterEqual && comparison == 0)) {
+                            start = middle + 1;
+                        } else {
+                            end = middle;
+                        }
+                    }
+                    return start;
+                }
+            }
+
+            private static final class CandidateRange {
+
+                private final int field;
+                private final Object[][] partitions;
+                private final int nullEnd;
+                private final int start;
+                private final int end;
+
+                private CandidateRange(
+                        int field, Object[][] partitions, int nullEnd, int start, int end) {
+                    this.field = field;
+                    this.partitions = partitions;
+                    this.nullEnd = nullEnd;
+                    this.start = start;
+                    this.end = end;
+                }
+
+                private int size() {
+                    return nullEnd + (end - start);
+                }
             }
         }
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.partition;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
@@ -220,7 +221,7 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testRangeIndexRequiresEnoughScannedPartitions() throws Exception {
+    public void testRangeIndexRequiresEnoughRejectedPartitions() {
         Object[] first = {Integer.MIN_VALUE, 0};
         Object[] second = {-1, 2};
         Object[] third = {-1, 1};
@@ -231,28 +232,68 @@ public class PartitionPredicateTest {
                         partitions,
                         new RowDataToObjectArrayConverter(
                                 RowType.of(DataTypes.INT(), DataTypes.INT())),
-                        0,
-                        Integer.MIN_VALUE,
-                        Integer.MAX_VALUE);
-
-        for (int i = 0; i < 16; i++) {
-            index.recordScannedPartitions(partitions.length);
-            assertThat(index.sortedPartitions()).isNull();
-        }
-        index.recordScannedPartitions(partitions.length - 1);
-        assertThat(index.sortedPartitions()).isNull();
-        index.recordScannedPartitions(1);
-        Object[][] sorted = index.sortedPartitions();
-        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third, fourth);
-        assertThat(index.sortedPartitions()).isSameAs(sorted);
-        assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
-
-        PartitionRangeIndex restored = InstantiationUtil.clone(index);
-        assertThat(restored.sortedPartitions()).isNull();
+                        new SimpleColStats[] {
+                            new SimpleColStats(Integer.MIN_VALUE, Integer.MAX_VALUE, 0L),
+                            new SimpleColStats(0, 2, 0L)
+                        });
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        GenericRow firstMatch = GenericRow.of(Integer.MAX_VALUE, 0);
+        GenericRow lower = GenericRow.of(0, 0);
+        GenericRow upper = GenericRow.of(0, 2);
         for (int i = 0; i < 17; i++) {
-            restored.recordScannedPartitions(1);
+            assertThat(index.test(10, firstMatch, firstMatch, noNulls)).isTrue();
+            assertThat(index.test(10, lower, upper, noNulls)).isFalse();
+            assertThat(index.sortedPartitions(0)).isNull();
         }
-        assertThat(restored.sortedPartitions()).isNull();
+        GenericRow duplicate = GenericRow.of(-1, 1);
+        assertThat(index.test(10, duplicate, duplicate, noNulls)).isTrue();
+        Object[][] sorted = index.sortedPartitions(0);
+        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third, fourth);
+        assertThat(index.test(10, lower, upper, noNulls)).isFalse();
+        assertThat(index.sortedPartitions(0)).isSameAs(sorted);
+        assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
+    }
+
+    @Test
+    public void testRangeIndexesBuildIndependentlyForNullableColumns() {
+        BinaryString a = BinaryString.fromString("a");
+        BinaryString b = BinaryString.fromString("b");
+        BinaryString c = BinaryString.fromString("c");
+        Object[][] partitions = {{null, c}, {0, a}, {2, c}, {4, null}};
+        PartitionRangeIndex index =
+                new PartitionRangeIndex(
+                        partitions,
+                        new RowDataToObjectArrayConverter(
+                                RowType.of(DataTypes.DATE(), DataTypes.STRING())),
+                        new SimpleColStats[] {
+                            new SimpleColStats(0, 4, 1L), new SimpleColStats(a, c, 1L)
+                        });
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        GenericRow firstLower = GenericRow.of(1, b);
+        GenericRow firstUpper = GenericRow.of(1, c);
+        for (int i = 0; i < 18; i++) {
+            assertThat(index.test(10, firstLower, firstUpper, noNulls)).isFalse();
+        }
+        assertThat(index.sortedPartitions(0)[0]).isSameAs(partitions[0]);
+        assertThat(index.sortedPartitions(1)).isNull();
+
+        GenericRow secondGap = GenericRow.of(null, b);
+        BinaryArray unknownDateNulls = BinaryArray.fromLongArray(new Long[] {null, 0L});
+        for (int i = 0; i < 17; i++) {
+            assertThat(index.test(10, secondGap, secondGap, unknownDateNulls)).isFalse();
+        }
+        assertThat(index.sortedPartitions(1)).isNull();
+        assertThat(index.test(10, secondGap, secondGap, unknownDateNulls)).isFalse();
+        assertThat(index.sortedPartitions(1)[0]).isSameAs(partitions[3]);
+
+        GenericRow correlatedMiss = GenericRow.of(0, c);
+        assertThat(index.test(10, correlatedMiss, correlatedMiss, noNulls)).isFalse();
+        GenericRow nullableDate = GenericRow.of(1, c);
+        assertThat(index.test(10, nullableDate, nullableDate, unknownDateNulls)).isTrue();
+        assertThat(index.test(10, nullableDate, nullableDate, noNulls)).isFalse();
+        BinaryArray allNullStrings = BinaryArray.fromLongArray(new Long[] {0L, 10L});
+        GenericRow nullableString = GenericRow.of(4, null);
+        assertThat(index.test(10, nullableString, nullableString, allNullStrings)).isTrue();
     }
 
     @Test
