@@ -252,7 +252,9 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
             encoder.writeMapStart();
             encoder.setItemCount(numElements);
-            if (map instanceof AvroBytesStringMap && encoder instanceof BinaryEncoder) {
+            if (map instanceof AvroBytesStringMap
+                    && encoder instanceof BinaryEncoder
+                    && ((AvroBytesStringMap) map).valueNullable() == valueType.isNullable()) {
                 AvroBytesStringMap casted = (AvroBytesStringMap) map;
                 encoder.writeFixed(casted.bytes(), 0, casted.lengthInBytes());
             } else {
