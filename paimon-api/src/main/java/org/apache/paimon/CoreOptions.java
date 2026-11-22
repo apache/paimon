@@ -5162,6 +5162,12 @@ public class CoreOptions implements Serializable {
         return options.contains(VECTOR_FILE_FORMAT);
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(List)}.
+     */
+    @Deprecated
     public Set<String> vectorField() {
         String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
@@ -5170,12 +5176,61 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(Map, List)}.
+     */
+    @Deprecated
     public static Set<String> vectorField(Map<String, String> options) {
         String vectorFields = options.getOrDefault(CoreOptions.VECTOR_FIELD.key(), null);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
             return Collections.emptySet();
         }
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public Set<String> vectorField(List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD), fieldNames));
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public static Set<String> vectorField(Map<String, String> options, List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD.key()), fieldNames));
+    }
+
+    /**
+     * Rewrites a {@link #VECTOR_FIELD} value as the field names it resolves to, so that adding a
+     * field later cannot change which fields the stored value refers to. A value that names unknown
+     * fields, or that would refer to other fields once rewritten, is returned unchanged.
+     */
+    public static String normalizeVectorField(String vectorFields, List<String> fieldNames) {
+        List<String> names = resolveVectorFields(vectorFields, fieldNames);
+        String normalized = String.join(",", names);
+        return fieldNames.containsAll(names)
+                        && resolveVectorFields(normalized, fieldNames).equals(names)
+                ? normalized
+                : vectorFields;
+    }
+
+    /**
+     * Uses a name exactly as written when a field has that name, which keeps existing tables with
+     * spaces in field names working, and its trimmed form otherwise.
+     */
+    private static List<String> resolveVectorFields(
+            @Nullable String vectorFields, List<String> fieldNames) {
+        List<String> fields = new ArrayList<>();
+        if (vectorFields == null) {
+            return fields;
+        }
+        for (String field : vectorFields.trim().split(",")) {
+            String name = fieldNames.contains(field) ? field : field.trim();
+            if (!name.isEmpty()) {
+                fields.add(name);
+            }
+        }
+        return fields;
     }
 
     public long vectorTargetFileSize() {
