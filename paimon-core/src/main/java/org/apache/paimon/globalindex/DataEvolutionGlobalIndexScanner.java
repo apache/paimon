@@ -89,7 +89,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable PartitionPredicate partitionFilter,
             GlobalIndexSearchMode searchMode,
             Collection<IndexFileMeta> coverageIndexFiles,
-            Collection<IndexFileMeta> indexFiles) {
+            Collection<IndexFileMeta> indexFiles,
+            DataEvolutionIndexSchema schema) {
         this.table = table;
         this.indexFiles = new ArrayList<>(indexFiles);
         this.fileIO = table.fileIO();
@@ -100,7 +101,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         this.indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         this.coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table, snapshot, partitionFilter, coverageIndexFiles, searchMode);
+                        table, snapshot, partitionFilter, coverageIndexFiles, searchMode, schema);
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, List<IndexMetaFileGroup>> groupsByField = groupIndexFiles(indexFiles);
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
@@ -203,6 +204,22 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
+        return createForScalarFilters(
+                table,
+                pinnedSnapshot,
+                partitionFilter,
+                indexFiles,
+                searchMode,
+                new DataEvolutionIndexSchema(table));
+    }
+
+    public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode,
+            DataEvolutionIndexSchema schema) {
         return create(
                 table,
                 pinnedSnapshot,
@@ -210,7 +227,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 indexFiles.stream()
                         .filter(file -> !isMultiFieldIndex(file))
                         .collect(Collectors.toList()),
-                searchMode);
+                searchMode,
+                schema);
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -223,7 +241,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 pinnedSnapshot,
                 partitionFilter,
                 indexFiles,
-                table.coreOptions().scalarIndexSearchMode());
+                table.coreOptions().scalarIndexSearchMode(),
+                new DataEvolutionIndexSchema(table));
     }
 
     private static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -231,8 +250,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
-            GlobalIndexSearchMode searchMode) {
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
+            GlobalIndexSearchMode searchMode,
+            DataEvolutionIndexSchema schema) {
         List<IndexFileMeta> globalIndexFiles =
                 indexFiles.stream().filter(schema::isCompatible).collect(Collectors.toList());
         if (globalIndexFiles.isEmpty()) {
@@ -245,7 +264,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         partitionFilter,
                         searchMode,
                         globalIndexFiles,
-                        globalIndexFiles));
+                        globalIndexFiles,
+                        schema));
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -263,9 +283,11 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         if (snapshot == null) {
             return Optional.empty();
         }
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
-                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
+                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter, schema))
+                        .stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         if (indexFiles.isEmpty()) {
@@ -278,7 +300,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         partitionFilter,
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
-                        indexFiles));
+                        indexFiles,
+                        schema));
     }
 
     /**
@@ -325,7 +348,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         partitionFilter,
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
-                        selectedIndexFiles));
+                        selectedIndexFiles,
+                        schema));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -355,11 +379,18 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
+        return indexFileFilter(table, partitionFilter, filter, new DataEvolutionIndexSchema(table));
+    }
+
+    private static Filter<IndexManifestEntry> indexFileFilter(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            DataEvolutionIndexSchema schema) {
         if (filter == null) {
             return entry -> false;
         }
         Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
                     if (partitionFilter != null && !partitionFilter.test(entry.partition())) {

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
@@ -212,13 +213,15 @@ public class DataEvolutionFullTextRead implements FullTextRead {
 
         RoaringNavigableMap64 unindexed = new RoaringNavigableMap64();
         GlobalIndexSearchMode prefilterMode = table.coreOptions().scalarPrefilterSearchMode();
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         for (Range range :
                 new DataEvolutionGlobalIndexCoverage(
                                 table,
                                 planSnapshot,
                                 partitionFilter,
                                 scalarIndexFiles,
-                                prefilterMode)
+                                prefilterMode,
+                                schema)
                         .unindexedRanges(table.rowType(), filter)) {
             unindexed.addRange(range);
         }
@@ -230,7 +233,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         RoaringNavigableMap64 matched = new RoaringNavigableMap64();
         if (!decidedByIndex.isEmpty()) {
             Optional<GlobalIndexEvaluator.Evaluation> evaluation =
-                    evaluateWithIndexes(scalarIndexFiles, planSnapshot);
+                    evaluateWithIndexes(scalarIndexFiles, planSnapshot, prefilterMode, schema);
             if (evaluation.isPresent()) {
                 RoaringNavigableMap64 fromIndex =
                         RoaringNavigableMap64.and(
@@ -268,10 +271,18 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     }
 
     private Optional<GlobalIndexEvaluator.Evaluation> evaluateWithIndexes(
-            Set<IndexFileMeta> scalarIndexFiles, @Nullable Snapshot planSnapshot) {
+            Set<IndexFileMeta> scalarIndexFiles,
+            @Nullable Snapshot planSnapshot,
+            GlobalIndexSearchMode prefilterMode,
+            DataEvolutionIndexSchema schema) {
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
+                        table,
+                        planSnapshot,
+                        partitionFilter,
+                        scalarIndexFiles,
+                        prefilterMode,
+                        schema);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }

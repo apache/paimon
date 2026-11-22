@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
@@ -68,6 +70,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -76,6 +79,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -898,6 +902,37 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         .isEqualTo(original.schema().id());
                             }
                         });
+    }
+
+    @Test
+    public void testIndexScanReadsHistoricalSchemaOnce() throws Exception {
+        write(1);
+        createIndex("f0");
+        FileStoreTable original = (FileStoreTable) catalog.getTable(identifier());
+        String historicalSchemaName = "schema-" + original.schema().id();
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnComment("f0", "New comment"), false);
+
+        AtomicInteger historicalSchemaReads = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public String readFileUtf8(Path path) throws IOException {
+                        if (historicalSchemaName.equals(path.getName())) {
+                            historicalSchemaReads.incrementAndGet();
+                        }
+                        return super.readFileUtf8(path);
+                    }
+                };
+        FileStoreTable evolved = FileStoreTableFactory.create(fileIO, original.location());
+        Predicate predicate = new PredicateBuilder(evolved.rowType()).equal(0, 0);
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(evolved, null, predicate).get()) {
+            assertThat(scanner.scan(predicate))
+                    .hasValueSatisfying(
+                            result -> assertThat(result.results().contains(0L)).isTrue());
+        }
+        assertThat(historicalSchemaReads.get()).isEqualTo(1);
     }
 
     @Test

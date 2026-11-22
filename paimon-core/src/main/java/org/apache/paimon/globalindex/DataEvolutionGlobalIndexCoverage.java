@@ -60,12 +60,27 @@ public class DataEvolutionGlobalIndexCoverage {
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
+        this(
+                table,
+                snapshot,
+                partitionFilter,
+                indexFiles,
+                searchMode,
+                new DataEvolutionIndexSchema(table));
+    }
+
+    public DataEvolutionGlobalIndexCoverage(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode,
+            DataEvolutionIndexSchema schema) {
         this.table = table;
         this.snapshot = snapshot;
         this.partitionFilter = partitionFilter;
         this.searchMode = checkNotNull(searchMode);
         this.coverageByField = new HashMap<>();
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             // Single-field coverage belongs to single-field index definitions. Multi-field
