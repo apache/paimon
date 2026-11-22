@@ -538,6 +538,32 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @ValueSource(floats = {1.0e20f, 1.0e-23f})
+    public void testRawCosineTopKIsInvariantToVectorScale(float scale) throws Exception {
+        Identifier id = identifier("scaled_raw_cosine");
+        catalog.createTable(
+                id,
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
+                        .option("test.vector.metric", "cosine")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(id);
+        writeVectors(table, new float[][] {{-scale, 0f}, {scale, 0f}, {0f, scale}});
+
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult)
+                        table.newVectorSearchBuilder()
+                                .withVectorColumn(VECTOR_FIELD_NAME)
+                                .withVector(new float[] {scale, 0f})
+                                .withLimit(1)
+                                .executeLocal();
+
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(result.scoreGetter().score(1L)).isEqualTo(1f);
+    }
+
+    @ParameterizedTest
     @CsvSource({
         "global-index.test-vector-ann.index-columns,true",
         "global-index.test-vector-ann.index-columns,false",
