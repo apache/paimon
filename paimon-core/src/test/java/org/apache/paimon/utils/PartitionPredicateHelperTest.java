@@ -95,4 +95,16 @@ public class PartitionPredicateHelperTest {
         assertThat(result).isNotNull();
         assertThat(result.get("pt")).isEqualTo("");
     }
+
+    @Test
+    public void testParseTrailingEmptyComponent() {
+        // Without a split limit, trailing empty strings are discarded and "{a, }"
+        // parses as a single field, failing the key-count check.
+        List<String> keys = Arrays.asList("pt1", "pt2");
+        LinkedHashMap<String, String> result =
+                PartitionPredicateHelper.parsePartitionSpec("{a, }", keys);
+        assertThat(result).isNotNull();
+        assertThat(result.get("pt1")).isEqualTo("a");
+        assertThat(result.get("pt2")).isEqualTo("");
+    }
 }

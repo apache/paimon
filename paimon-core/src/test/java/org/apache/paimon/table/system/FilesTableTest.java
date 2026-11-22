@@ -237,8 +237,7 @@ public class FilesTableTest extends TableTestBase {
         FilesTable commaFilesTable =
                 (FilesTable)
                         catalog.getTable(
-                                identifier(
-                                        tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
 
         assertThat(readPartBucketLevel(commaFilesTable, null))
@@ -250,6 +249,62 @@ public class FilesTableTest extends TableTestBase {
                                 commaFilesTable,
                                 builder.equal(0, BinaryString.fromString("{hello, world}"))))
                 .containsExactlyInAnyOrder("{hello, world}-0-0");
+    }
+
+    @Test
+    public void testReadWithMultiKeyPartitionAndInFilterContainingSeparator() throws Exception {
+        String tableName = "MultiKeyCommaPartitionFilesTable";
+        Identifier tableIdentifier = identifier(tableName);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt1", DataTypes.STRING())
+                        .column("pt2", DataTypes.STRING())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt1", "pt2")
+                        .primaryKey("pk", "pt1", "pt2")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .build();
+        catalog.createTable(tableIdentifier, schema, true);
+
+        FileStoreTable commaTable = getTable(tableIdentifier);
+        write(
+                commaTable,
+                GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b, c"), 1));
+        write(
+                commaTable,
+                GenericRow.of(
+                        2, BinaryString.fromString("other"), BinaryString.fromString("x"), 2));
+
+        FilesTable commaFilesTable =
+                (FilesTable)
+                        catalog.getTable(
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+
+        assertThat(readPartBucketLevel(commaFilesTable, null))
+                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{other, x}-0-0");
+
+        // the last partition value contains the ", " separator of the rendered form
+        assertThat(
+                        readPartBucketLevel(
+                                commaFilesTable,
+                                builder.equal(0, BinaryString.fromString("{a, b, c}"))))
+                .containsExactlyInAnyOrder("{a, b, c}-0-0");
+
+        // the IN branch keeps the literal whose rendered partition contains the separator
+        DataField partitionField = FilesTable.TABLE_TYPE.getFields().get(0);
+        Predicate inPredicate =
+                new LeafPredicate(
+                        In.INSTANCE,
+                        partitionField.type(),
+                        0,
+                        partitionField.name(),
+                        Arrays.asList(
+                                BinaryString.fromString("{a, b, c}"),
+                                BinaryString.fromString("{other, x}")));
+        assertThat(readPartBucketLevel(commaFilesTable, inPredicate))
+                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{other, x}-0-0");
     }
 
     @Test
