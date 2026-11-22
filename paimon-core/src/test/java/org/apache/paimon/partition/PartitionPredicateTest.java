@@ -23,11 +23,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate.PartitionRangeIndex;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -36,8 +38,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ObjectStreamClass;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -190,18 +194,46 @@ public class PartitionPredicateTest {
     }
 
     @Test
+    public void testLegacySerializedPredicatePrunesPartitionTuples() throws Exception {
+        // Serialized on ad4f6e09ef using the partition tuples (0, 100) and (100, 0).
+        byte[] bytes =
+                Base64.getMimeDecoder()
+                        .decode(
+                                IOUtils.readFully(
+                                        getClass()
+                                                .getResourceAsStream(
+                                                        "/compatibility/multiple-partition-predicate-v1.base64"),
+                                        true));
+        PartitionPredicate restored =
+                InstantiationUtil.deserializeObject(bytes, getClass().getClassLoader());
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        BinaryRow gap = createPart(0, 0);
+        BinaryRow partition = createPart(0, 100);
+        assertThat(restored.test(10, gap, gap, noNulls)).isFalse();
+        assertThat(restored.test(10, partition, partition, noNulls)).isTrue();
+        assertThat(restored.test(partition)).isTrue();
+
+        ObjectStreamClass stream = ObjectStreamClass.lookup(MultiplePartitionPredicate.class);
+        assertThat(stream.getField("partitionValues").getType()).isEqualTo(Object[][].class);
+        assertThat(stream.getField("converter").getType())
+                .isEqualTo(RowDataToObjectArrayConverter.class);
+    }
+
+    @Test
     public void testRangeIndexRequiresEnoughRemainingManifests() throws Exception {
-        Object[] first = {1};
-        Object[] second = {2};
-        Object[] third = {3};
-        Object[][] partitions = {third, first, second};
+        Object[] first = {Integer.MIN_VALUE, 0};
+        Object[] second = {-1, 2};
+        Object[] third = {-1, 1};
+        Object[] fourth = {Integer.MAX_VALUE, 0};
+        Object[][] partitions = {fourth, second, first, third};
         PartitionRangeIndex index =
                 new PartitionRangeIndex(
                         partitions,
-                        new RowDataToObjectArrayConverter(RowType.of(DataTypes.INT())),
+                        new RowDataToObjectArrayConverter(
+                                RowType.of(DataTypes.INT(), DataTypes.INT())),
                         0,
-                        1,
-                        3);
+                        Integer.MIN_VALUE,
+                        Integer.MAX_VALUE);
 
         for (int i = 0; i < 16; i++) {
             assertThat(index.sortedPartitions(6)).isNull();
@@ -209,18 +241,17 @@ public class PartitionPredicateTest {
         assertThat(index.sortedPartitions(5)).isNull();
         assertThat(index.sortedPartitions(0)).isNull();
         Object[][] sorted = index.sortedPartitions(6);
-        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third);
+        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third, fourth);
         assertThat(index.sortedPartitions(0)).isSameAs(sorted);
-        assertThat(Arrays.asList(partitions)).containsExactly(third, first, second);
+        assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
 
         PartitionRangeIndex restored = InstantiationUtil.clone(index);
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             assertThat(restored.sortedPartitions(24)).isNull();
         }
-        assertThat(restored.sortedPartitions(23)).isNull();
         assertThat(restored.sortedPartitions(0)).isNull();
         assertThat(Arrays.stream(restored.sortedPartitions(24)).map(fields -> fields[0]))
-                .containsExactly(1, 2, 3);
+                .containsExactly(Integer.MIN_VALUE, -1, -1, Integer.MAX_VALUE);
     }
 
     @Test

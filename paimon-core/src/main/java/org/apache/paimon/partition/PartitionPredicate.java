@@ -40,6 +40,10 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.ObjectStreamField;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -233,11 +237,22 @@ public interface PartitionPredicate extends Serializable {
         private static final long serialVersionUID = 1L;
         private static final int MIN_PARTITIONS_FOR_RANGE_SEARCH = 64;
 
-        private final Set<BinaryRow> partitions;
-        private final int fieldNum;
-        private final Predicate[] min;
-        private final Predicate[] max;
-        @Nullable private final PartitionRangeIndex partitionRangeIndex;
+        // Keep the legacy tuple fields in the stream for compatibility in both directions.
+        private static final ObjectStreamField[] serialPersistentFields = {
+            new ObjectStreamField("partitions", Set.class),
+            new ObjectStreamField("fieldNum", int.class),
+            new ObjectStreamField("min", Predicate[].class),
+            new ObjectStreamField("max", Predicate[].class),
+            new ObjectStreamField("partitionValues", Object[][].class),
+            new ObjectStreamField("converter", RowDataToObjectArrayConverter.class),
+            new ObjectStreamField("partitionRangeIndex", PartitionRangeIndex.class)
+        };
+
+        private Set<BinaryRow> partitions;
+        private int fieldNum;
+        private Predicate[] min;
+        private Predicate[] max;
+        @Nullable private PartitionRangeIndex partitionRangeIndex;
 
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
@@ -368,12 +383,46 @@ public interface PartitionPredicate extends Serializable {
             return Objects.hash(partitions, fieldNum, Arrays.hashCode(min), Arrays.hashCode(max));
         }
 
+        private void writeObject(ObjectOutputStream out) throws IOException {
+            ObjectOutputStream.PutField fields = out.putFields();
+            fields.put("partitions", partitions);
+            fields.put("fieldNum", fieldNum);
+            fields.put("min", min);
+            fields.put("max", max);
+            fields.put(
+                    "partitionValues",
+                    partitionRangeIndex == null ? null : partitionRangeIndex.partitionValues);
+            fields.put(
+                    "converter",
+                    partitionRangeIndex == null ? null : partitionRangeIndex.converter);
+            fields.put("partitionRangeIndex", partitionRangeIndex);
+            out.writeFields();
+        }
+
+        @SuppressWarnings("unchecked")
+        private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+            ObjectInputStream.GetField fields = in.readFields();
+            partitions = (Set<BinaryRow>) fields.get("partitions", null);
+            fieldNum = fields.get("fieldNum", 0);
+            min = (Predicate[]) fields.get("min", null);
+            max = (Predicate[]) fields.get("max", null);
+            partitionRangeIndex = (PartitionRangeIndex) fields.get("partitionRangeIndex", null);
+            if (partitionRangeIndex == null) {
+                Object[][] values = (Object[][]) fields.get("partitionValues", null);
+                RowDataToObjectArrayConverter converter =
+                        (RowDataToObjectArrayConverter) fields.get("converter", null);
+                if (values != null && converter != null) {
+                    partitionRangeIndex =
+                            new PartitionRangeIndex(values, converter, -1, null, null);
+                }
+            }
+        }
+
         /** Checks partition tuples, with a lazy index for repeated selective manifest lookups. */
         static final class PartitionRangeIndex implements Serializable {
 
             private static final long serialVersionUID = 1L;
             private static final int LINEAR_LOOKUPS_BEFORE_SORT = 16;
-            private static final int EARLY_SORT_REMAINING_MULTIPLIER = 4;
             private static final int MANIFESTS_PER_SORT_LEVEL = 3;
 
             private final Object[][] partitionValues;
@@ -462,24 +511,37 @@ public interface PartitionPredicate extends Serializable {
                 }
                 synchronized (this) {
                     if (sortedPartitions == null) {
-                        int linearLookups = LINEAR_LOOKUPS_BEFORE_SORT;
-                        if (remainingManifests
-                                >= EARLY_SORT_REMAINING_MULTIPLIER * minimumRemainingManifests) {
-                            linearLookups /= 2;
-                        }
-                        if (selectiveLookups < linearLookups) {
+                        if (selectiveLookups < LINEAR_LOOKUPS_BEFORE_SORT) {
                             selectiveLookups++;
                             return null;
                         }
-                        sorted = partitionValues.clone();
-                        DataType type = converter.rowType().getTypeAt(field);
-                        Arrays.sort(
-                                sorted,
-                                (left, right) -> compareLiteral(type, left[field], right[field]));
-                        sortedPartitions = sorted;
+                        sortedPartitions = sortPartitions();
                     }
                     return sortedPartitions;
                 }
+            }
+
+            private Object[][] sortPartitions() {
+                if (partitionValues[0][field] instanceof Integer) {
+                    // Put the signed key in the high bits and the tuple ordinal in the low bits.
+                    long[] order = new long[partitionValues.length];
+                    for (int i = 0; i < order.length; i++) {
+                        int key = (Integer) partitionValues[i][field];
+                        order[i] = ((long) key << Integer.SIZE) | i;
+                    }
+                    Arrays.sort(order);
+                    Object[][] sorted = new Object[order.length][];
+                    for (int i = 0; i < order.length; i++) {
+                        sorted[i] = partitionValues[(int) order[i]];
+                    }
+                    return sorted;
+                }
+
+                Object[][] sorted = partitionValues.clone();
+                DataType type = converter.rowType().getTypeAt(field);
+                Arrays.sort(
+                        sorted, (left, right) -> compareLiteral(type, left[field], right[field]));
+                return sorted;
             }
 
             private int findBound(
