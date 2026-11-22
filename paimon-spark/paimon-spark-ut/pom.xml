@@ -97,6 +97,13 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-vector</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
             <version>${mockito.version}</version>
@@ -121,36 +128,4 @@ under the License.
             </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <profile>
-            <id>spark4</id>
-            <activation>
-                <property>
-                    <name>spark4</name>
-                </property>
-            </activation>
-            <properties>
-                <!-- Match the version declared by Hive 2.3.10. -->
-                <bonecp.version>0.8.0.RELEASE</bonecp.version>
-            </properties>
-            <dependencies>
-                <!-- Spark 4 excludes BoneCP, but the embedded Hive 2.3 metastore used by
-                     these tests still references its classes from TxnHandler. -->
-                <dependency>
-                    <groupId>com.jolbox</groupId>
-                    <artifactId>bonecp</artifactId>
-                    <version>${bonecp.version}</version>
-                    <scope>test</scope>
-                    <exclusions>
-                        <!-- Reuse Spark's Guava rather than BoneCP's Guava 15. -->
-                        <exclusion>
-                            <groupId>com.google.guava</groupId>
-                            <artifactId>guava</artifactId>
-                        </exclusion>
-                    </exclusions>
-                </dependency>
-            </dependencies>
-        </profile>
-    </profiles>
 </project>

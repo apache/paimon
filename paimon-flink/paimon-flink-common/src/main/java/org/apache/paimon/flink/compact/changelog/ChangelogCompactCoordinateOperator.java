@@ -141,7 +141,8 @@ public class ChangelogCompactCoordinateOperator
                                 message.compactIncrement().compactAfter(),
                                 skippedCompactChangelogs,
                                 message.compactIncrement().newIndexFiles(),
-                                message.compactIncrement().deletedIndexFiles()));
+                                message.compactIncrement().deletedIndexFiles()),
+                        message.checkFromSnapshot());
         Committable newCommittable = new Committable(committable.checkpointId(), newMessage);
         output.collect(new StreamRecord<>(Either.Left(newCommittable)));
     }

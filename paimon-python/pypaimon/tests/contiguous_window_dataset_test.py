@@ -802,7 +802,7 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertEqual(0, dataset[0]["frame_index"])
         self.assertEqual([10, 11], dataset[0]["value"])
 
-    def test_rejects_scan_and_batch_vector_search_queries(self):
+    def test_constructor_requires_scan_instead_of_search_queries(self):
         table = self.conn.create_table(
             "vectors",
             schema=pa.schema([
@@ -826,8 +826,6 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         for query in (table.search([1.0, 0.0]),
                       table.search_vectors([[1.0, 0.0]])):
             with self.subTest(query=type(query).__name__):
-                with self.assertRaisesRegex(TypeError, "only supported on scan"):
-                    query.to_contiguous_window_dataset(**kwargs)
                 with self.assertRaisesRegex(TypeError, "only supported on scan"):
                     ContiguousWindowDataset.from_query(query, **kwargs)
 
@@ -1140,7 +1138,8 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
                 group_key="is_pad", order_key="step")
 
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
-            table.search("anything", column="episode").to_contiguous_window_dataset(
+            ContiguousWindowDataset.from_query(
+                table.search("anything", column="episode"),
                 window_size=2, columns=["value"],
                 group_key="episode", order_key="step")
 

@@ -320,10 +320,14 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testLackStartupTimestamp() {
         assertThatThrownBy(
-                        () ->
-                                streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='from-timestamp') */"))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                        () -> {
+                            try (CloseableIterator<Row> invalidIterator =
+                                    streamSqlIter(
+                                            "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='from-timestamp') */")) {
+                                invalidIterator.hasNext();
+                            }
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
     }
@@ -344,11 +348,15 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         // Configure 'scan.timestamp-millis' with 'scan.mode=latest'.
         assertThatThrownBy(
-                        () ->
-                                streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.timestamp-millis'='%s') */",
-                                        0))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                        () -> {
+                            try (CloseableIterator<Row> invalidIterator =
+                                    streamSqlIter(
+                                            "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.timestamp-millis'='%s') */",
+                                            0)) {
+                                invalidIterator.hasNext();
+                            }
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "scan.timestamp-millis must be null when you use latest for scan.mode");
     }
@@ -393,11 +401,15 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         // Configure 'scan.snapshot-id' with 'scan.mode=latest'.
         assertThatThrownBy(
-                        () ->
-                                streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.snapshot-id'='%s') */",
-                                        0))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                        () -> {
+                            try (CloseableIterator<Row> invalidIterator =
+                                    streamSqlIter(
+                                            "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.snapshot-id'='%s') */",
+                                            0)) {
+                                invalidIterator.hasNext();
+                            }
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "scan.snapshot-id must be null when you use latest for scan.mode");
     }

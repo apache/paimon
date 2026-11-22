@@ -420,8 +420,8 @@ def test_pk_plan_retains_snapshot_and_sources_after_primary_key_update(source, p
         schema = pa.schema([pa.field('id', pa.int32(), False),
                             pa.field('embedding', pa.list_(pa.float32(), 4))])
         rows = [{'id': 1, 'embedding': [0., 0., 0., 1.]}, {'id': 100, 'embedding': [0., 0., 0., 1.]}]
-    write = table.copy({'write.native.enabled': 'true', 'pk-vector.index.columns': '',
-                        'pk-full-text.index.columns': ''}).new_batch_write_builder()
+    write = table.copy({'write.native.enabled': 'true', 'pk-vector.index.columns': None,
+                        'pk-full-text.index.columns': None}).new_batch_write_builder()
     writer, commit = write.new_write(), write.new_commit()
     try:
         writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))

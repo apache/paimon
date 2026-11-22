@@ -1,7 +1,7 @@
 ---
 title: "CLI: Query and Inspect"
 sidebar_label: "Query and Inspect"
-description: "Inspect schemas, snapshots, partitions, scan plans, and table rows from the terminal."
+description: "Inspect schemas, snapshots, manifests, partitions, scan plans, and table rows from the terminal."
 ---
 
 <!--
@@ -25,7 +25,7 @@ under the License.
 
 # CLI: Query and Inspect
 
-Inspect schemas, snapshots, partitions, scan plans, and table rows from the terminal. Configure a catalog with the [CLI quick start](./cli#basic-usage) first. The examples use existing tables and illustrative output; replace table and column names with your own.
+Inspect schemas, snapshots, manifests, partitions, scan plans, and table rows from the terminal. Configure a catalog with the [CLI quick start](./cli#basic-usage) first. The examples use existing tables and illustrative output; replace table and column names with your own.
 
 ## Table Read
 
@@ -38,6 +38,7 @@ paimon table read mydb.users
 **Options:**
 
 - `--select, -s`: Select specific columns to read (comma-separated)
+- `--snapshot-id` reads all rows visible at the specified positive snapshot ID on the table's branch. Use the column names from that snapshot in `--select` and `--where`.
 - `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
 - `--format, -f`: Output format: `table` (default) or `json`
@@ -50,6 +51,9 @@ paimon table read mydb.users -l 50
 
 # Read specific columns
 paimon table read mydb.users -s id,name,age
+
+# Read the rows visible at snapshot 5 using the column names at that time
+paimon table read mydb.users --snapshot-id 5 -s id,name -w "age >= 20"
 
 # Filter with WHERE clause
 paimon table read mydb.users --where "age > 18"
@@ -122,6 +126,7 @@ paimon table explain mydb.events
 **Options:**
 
 - `--select, -s`: Project specific columns (comma-separated)
+- `--snapshot-id` plans the scan for the specified positive snapshot ID using the same branch, schema, and selection rules as `table read`.
 - `--where, -w`: Filter condition in SQL-like syntax (same operators as `table read`)
 - `--limit, -l`: Row limit to push down
 - `--verbose, -v`: List every split with its files
@@ -132,6 +137,9 @@ paimon table explain mydb.events
 ```shell
 # Whole-table scan plan
 paimon table explain mydb.events
+
+# Inspect the plan for the snapshot 5 query from the Table Read example
+paimon table explain mydb.users --snapshot-id 5 -s id,name -w "age >= 20" --verbose
 
 # Push filter and projection through the planner
 paimon table explain mydb.events --where "dt = '2026-05-16' AND id = 7" -s dt,id,val
@@ -205,13 +213,90 @@ Output:
 
 **Note:** The output JSON can be saved to a file and used directly with the `table create` command to recreate the table structure.
 
+Use an explicit schema ID or resolve the schema referenced by a historical snapshot:
+
+```shell
+paimon table get mydb.users --schema-id 0
+paimon table get mydb.users --schema-id 3 --format json
+paimon table get mydb.users --snapshot-id 42 --format json
+paimon table get mydb.users --schema-id 3 --format table
+```
+
+**Options:**
+
+- `--schema-id`: Schema ID to inspect, including `0`. Defaults to the current table schema.
+- `--snapshot-id`: Read the schema ID recorded in this snapshot, then load that schema.
+  Mutually exclusive with `--schema-id`.
+- `--format, -f`: Output format, `json` (default) or `table`.
+
+## Table List Schemas
+
+List available schema versions in ascending numeric schema-ID order. JSON is the default output
+format. Each array element contains the complete serialized `TableSchema`, including its ID,
+metadata version, field definitions and IDs, highest field ID, keys, options, comment, and update
+time. Field definitions preserve nested types, nullability, and column comments.
+
+```shell
+# List all available schema versions as JSON
+paimon table list-schemas mydb.users
+
+# Return the oldest 20 available versions
+paimon table list-schemas mydb.users --limit 20
+
+# Display schema definitions and update times in a readable table
+paimon table list-schemas mydb.users --format table
+```
+
+**Options:**
+
+- `--limit, -l`: Maximum number of schemas to return, starting with the oldest. Must be positive;
+  omitted by default, which returns all available schemas.
+- `--format, -f`: Output format, `json` (default) or `table`.
+
+Example JSON for a table with one schema version:
+
+```json
+[
+  {
+    "version": 3,
+    "id": 0,
+    "fields": [
+      {"id": 0, "name": "user_id", "type": "BIGINT NOT NULL"}
+    ],
+    "highestFieldId": 0,
+    "partitionKeys": [],
+    "primaryKeys": [],
+    "options": {"bucket": "-1"},
+    "comment": null,
+    "timeMillis": 1700000000123
+  }
+]
+```
+
 ## Table Snapshot
 
-Get and display the latest snapshot information of a Paimon table in JSON format. The snapshot contains metadata about the current state of the table.
+Get the latest snapshot or inspect a specific retained snapshot. JSON remains the default output
+format for compatibility with existing scripts. The snapshot includes its schema ID, manifest-list
+references, commit information, record counts, and other available metadata.
 
 ```shell
 paimon table snapshot mydb.users
+
+# Inspect a historical snapshot without falling back to the latest snapshot
+paimon table snapshot mydb.users --snapshot-id 42 --format json
+
+# Display all available fields as a readable table
+paimon table snapshot mydb.users --snapshot-id 42 --format table
 ```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID to inspect. Omit it to resolve the latest snapshot once.
+- `--format, -f`: Output format: `json` (default) or `table`. Table output includes the UTC commit
+  time alongside the original epoch-millisecond value.
+
+The command fails with a non-zero exit status if the table has no snapshots, the requested snapshot
+is unavailable, or its metadata cannot be read. Errors are written to stderr.
 
 Output:
 ```json
@@ -232,6 +317,182 @@ Output:
   "watermark": null,
   "statistics": null,
   "nextRowId": null
+}
+```
+
+## Table List Snapshots
+
+List retained snapshots in ascending numeric snapshot-ID order. The default table output shows
+the snapshot ID, schema ID, commit time in UTC, commit kind, commit user, and total, delta, and
+changelog record counts. Missing optional counts are displayed as `-`.
+
+```shell
+# List all available snapshots, oldest first
+paimon table list-snapshots mydb.users
+
+# Show the first 20 snapshots in that order
+paimon table list-snapshots mydb.users --limit 20
+
+# Export complete snapshot metadata as a JSON array
+paimon table list-snapshots mydb.users --format json
+```
+
+**Options:**
+
+- `--limit, -l`: Maximum number of snapshots to display; must be a positive integer.
+  Omit it to list all available snapshots.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+JSON output contains the same snapshot objects as `table snapshot`, preserving metadata field
+names such as `schemaId`, `timeMillis`, and `baseManifestList`. Timestamps remain epoch milliseconds
+and record counts remain integers. Optional fields with no value are omitted.
+
+An empty table returns an empty JSON array or a `No snapshots found` message, with a successful
+exit status. Expired snapshots are not reconstructed. If a snapshot disappears during listing,
+it is skipped; other metadata read errors fail the command. These commands read snapshot metadata
+without opening manifest or data files or modifying the table.
+
+## Table List Manifests
+
+List the manifests referenced by the latest or a specific retained snapshot. By default, the
+command includes base, delta, and changelog manifest lists, in that order.
+
+```shell
+paimon table list-manifests mydb.orders
+
+# Inspect one manifest-list type in a historical snapshot
+paimon table list-manifests mydb.orders --snapshot-id 42 --type delta
+
+# Limit the total number of manifests and export structured JSON
+paimon table list-manifests mydb.orders --limit 20 --format json
+```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID. Omit it to use the latest snapshot.
+- `--type`: `all` (default), `base`, `delta`, or `changelog`.
+- `--limit, -l`: Positive maximum number of manifests across all selected lists. Omit it to show all.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+Table output groups manifests by type and manifest-list file, showing file names, sizes in bytes,
+added/deleted file counts, schema IDs, partition statistics, and row-ID bounds. Missing values are
+displayed as `-`. JSON output contains `table`, `snapshot_id`, and a `manifests` array.
+
+Output:
+```text
+Table: mydb.orders
+Snapshot: 6
+
+base (manifest-list-example):
+       file_name file_size num_added_files num_deleted_files schema_id min_partition_stats max_partition_stats min_row_id max_row_id
+manifest-example      2317               1                 0         0                  {}                  {}          -          -
+```
+
+## Table Manifest
+
+Read a manifest file and display its original `ADD` and `DELETE` entries, including file metadata
+and statistics. JSON is the default output format. Use the `file_name` returned by `list-manifests`:
+
+```shell
+paimon table manifest mydb.orders --file manifest-example
+
+# Display complete metadata as a readable table
+paimon table manifest mydb.orders --file manifest-example --format table
+```
+
+**Options:**
+
+- `--file`: Manifest file name within the table's `manifest/` directory, not a path. **Required**.
+- `--format, -f`: Output format: `json` (default) or `table`.
+
+Output contains `table`, `manifest_file`, `manifest_path`, and `entries`. Table output displays
+the complete `entries` array as JSON in a single field. Historical manifests can be inspected
+while their files remain available.
+
+Output:
+```json
+{
+  "table": "mydb.orders",
+  "manifest_file": "manifest-example",
+  "manifest_path": "/warehouse/mydb.db/orders/manifest/manifest-example",
+  "entries": [
+    {
+      "kind": "ADD",
+      "partition": {},
+      "bucket": 0,
+      "total_buckets": -1,
+      "file": {
+        "file_name": "data-example.parquet",
+        "file_size": 803,
+        "row_count": 2,
+        "schema_id": 0,
+        "value_stats": {"min_values": {}, "max_values": {}, "null_counts": {}},
+        "first_row_id": null
+      }
+    }
+  ]
+}
+```
+
+## Table List Files
+
+List the live data files referenced by the latest or a specific retained snapshot.
+
+```shell
+paimon table list-files mydb.orders
+paimon table list-files mydb.orders --snapshot-id 1 --format json
+paimon table list-files mydb.orders --bucket 0 --limit 20
+```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID. Omit it to use the latest snapshot.
+- `--bucket`: Only display files in the specified bucket.
+- `--limit, -l`: Positive maximum number of live files after filtering. Omit it to show all.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+Table output follows the `$files` system table, with `snapshot_id` as the first column and
+`delete_row_count` for the delete-row count. It includes partition, bucket, full file path, format,
+file schema ID, level, record count, size, key bounds, column statistics, sequence-number bounds,
+creation time, file source, first row ID, and written columns. JSON output contains
+`table`, `snapshot_id`, and a `files` array.
+
+Output (selected columns):
+```text
+snapshot_id bucket                                               file_path file_format record_count file_size_in_bytes              creation_time
+          1      0 /warehouse/mydb.db/orders/bucket-0/data-example.parquet     parquet            2                803 2026-11-14T18:23:49.778000
+```
+
+## Table File
+
+Inspect a Parquet file's schema and footer metadata without reading data records. Use the
+`file_path` returned by `list-files`:
+
+```shell
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet --format table
+```
+
+**Options:**
+
+- `--file`: Actual Parquet file path or filesystem URI. **Required**.
+- `--format, -f`: Output format: `json` (default) or `table`.
+
+If a `file:` input matches both a literal path and a different URL-decoded file, the command
+reports an ambiguity. Use a plain filesystem path to select the intended file.
+
+Output includes the file path, format, size, schema, and Parquet metadata such as row groups and
+column statistics. Table output displays `schema` and `metadata` as indented, multiline JSON.
+
+Output (selected fields):
+```json
+{
+  "table": "mydb.orders",
+  "file_path": "/warehouse/mydb.db/orders/bucket-0/data-example.parquet",
+  "file_format": "parquet",
+  "file_size_in_bytes": 803,
+  "schema": {"arrow": "id: int64\nname: string"},
+  "metadata": {"num_columns": 2, "num_rows": 2, "num_row_groups": 1}
 }
 ```
 

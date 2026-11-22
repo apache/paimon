@@ -53,7 +53,8 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
   }
 
   override def filterAttributes(): Array[NamedReference] = {
-    val requiredFields = readBuilder.readType().getFieldNames.asScala
+    // Fields read only to construct metadata are not ordinary attributes in the scan output.
+    val requiredFields = readTableRowType.getFieldNames.asScala
     table
       .partitionKeys()
       .asScala

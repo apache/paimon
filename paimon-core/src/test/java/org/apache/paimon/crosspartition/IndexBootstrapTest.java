@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
@@ -49,6 +50,8 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
 import org.mockito.Mockito;
 
@@ -112,9 +115,14 @@ public class IndexBootstrapTest extends TableTestBase {
     }
 
     private Table createTable(String tableName) throws Exception {
+        return createTable(tableName, false);
+    }
+
+    private Table createTable(String tableName, boolean queryAuthEnabled) throws Exception {
         Identifier identifier = identifier(tableName);
         Options options = new Options();
         options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.QUERY_AUTH_ENABLED, queryAuthEnabled);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -157,7 +165,7 @@ public class IndexBootstrapTest extends TableTestBase {
 
     @Test
     public void testBootstrapIgnoresQueryAuth() throws Exception {
-        FileStoreTable table = (FileStoreTable) createTable();
+        FileStoreTable table = (FileStoreTable) createTable("T", true);
         write(
                 table,
                 row(1, 1, 1, 2),
@@ -191,8 +199,8 @@ public class IndexBootstrapTest extends TableTestBase {
 
     @Test
     public void testBootstrapIgnoresQueryAuthWithFallback() throws Exception {
-        FileStoreTable mainTable = (FileStoreTable) createTable("MAIN");
-        FileStoreTable fallbackTable = (FileStoreTable) createTable("FALLBACK");
+        FileStoreTable mainTable = (FileStoreTable) createTable("MAIN", true);
+        FileStoreTable fallbackTable = (FileStoreTable) createTable("FALLBACK", true);
         write(mainTable, row(1, 10, 10, 2));
         write(fallbackTable, row(2, 20, 20, 3));
 
@@ -202,6 +210,31 @@ public class IndexBootstrapTest extends TableTestBase {
                         new QueryAuthFileStoreTable(mainTable, authResult),
                         new QueryAuthFileStoreTable(fallbackTable, authResult),
                         true);
+
+        List<GenericRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = new IndexBootstrap(table).bootstrap(1, 0)) {
+            reader.forEachRemaining(
+                    row -> result.add(GenericRow.of(row.getInt(0), row.getInt(1), row.getInt(2))));
+        }
+
+        assertThat(result)
+                .containsExactlyInAnyOrder(GenericRow.of(10, 1, 2), GenericRow.of(20, 2, 3));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testBootstrapWithFallbackBranch(boolean queryAuthEnabled) throws Exception {
+        FileStoreTable mainTable = (FileStoreTable) createTable("T", queryAuthEnabled);
+        mainTable.createBranch("fallback");
+        write(mainTable, row(1, 10, 10, 2));
+        write(mainTable.switchToBranch("fallback"), row(2, 20, 20, 3));
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(
+                        SchemaChange.setOption(CoreOptions.SCAN_FALLBACK_BRANCH.key(), "fallback")),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier("T"));
+        assertThat(table).isInstanceOf(FallbackReadFileStoreTable.class);
 
         List<GenericRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader = new IndexBootstrap(table).bootstrap(1, 0)) {
@@ -276,7 +309,14 @@ public class IndexBootstrapTest extends TableTestBase {
         @Override
         public FileStoreTable copy(TableSchema newTableSchema) {
             return new QueryAuthFileStoreTable(
-                    wrapped.copy(newTableSchema), authResult, queryAuthEnabled);
+                    wrapped.copy(newTableSchema),
+                    authResult,
+                    queryAuthEnabled(newTableSchema.options()));
+        }
+
+        @Override
+        public FileStoreTable copyWithoutQueryAuth() {
+            return new QueryAuthFileStoreTable(wrapped.copyWithoutQueryAuth(), authResult, false);
         }
 
         @Override

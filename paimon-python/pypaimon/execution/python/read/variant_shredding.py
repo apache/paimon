@@ -17,7 +17,9 @@
 
 """Python execution for physical shredded columns."""
 
-from typing import Dict, List, Optional, Tuple
+import struct
+from functools import lru_cache
+from typing import Dict, List, Optional, Set, Tuple
 import pyarrow as pa
 from pypaimon.data.generic_variant import GenericVariant, _Type, _variant_get_type
 from pypaimon.data._variant_binary import _OBJECT, _U32_SIZE, _read_unsigned, _primitive_header
@@ -37,6 +39,19 @@ _NULL_TYPE_ID = 0
 _TRUE_TYPE_ID = 1
 _FALSE_TYPE_ID = 2
 _NULL_VALUE_BYTES: bytes = bytes([_primitive_header(_NULL_TYPE_ID)])
+
+
+def _metadata_id_to_name(metadata: bytes) -> Dict[int, str]:
+    return {key_id: name for name, key_id in parse_metadata_dict(metadata).items()}
+
+
+def _read_object_ints(data: bytes, start: int, count: int, width: int):
+    if width == 1:
+        return data[start:start + count]
+    if width in (2, 4) and start + count * width <= len(data):
+        kind = 'H' if width == 2 else 'I'
+        return struct.unpack_from('<{}{}'.format(count, kind), data, start)
+    return tuple(_read_unsigned(data, start + i * width, width) for i in range(count))
 
 
 def _extract_overflow_fields(overflow_bytes: bytes) -> List[Tuple[int, bytes]]:
@@ -78,31 +93,54 @@ def _extract_overflow_fields(overflow_bytes: bytes) -> List[Tuple[int, bytes]]:
     #   So pairs = [(id_a=0, off=2), (id_b=1, off=0)]
     #   Sorted by offset: [(id_b=1, off=0), (id_a=0, off=2)]
     #   Boundaries:        [0, 2, sentinel] → enc(2)=data[0:2], enc(1)=data[2:sentinel]
-    pairs: List[Tuple[int, int]] = []
-    for i in range(size):
-        key_id = _read_unsigned(overflow_bytes, id_start + i * id_size, id_size)
-        off = _read_unsigned(overflow_bytes, offset_start + i * offset_size, offset_size)
-        pairs.append((key_id, off))
-
-    sentinel = _read_unsigned(overflow_bytes, offset_start + size * offset_size, offset_size)
+    key_ids = _read_object_ints(overflow_bytes, id_start, size, id_size)
+    offsets = _read_object_ints(overflow_bytes, offset_start, size + 1, offset_size)
 
     # Sort by offset so that adjacent entries define contiguous data boundaries.
     # Track by original index (always unique) to avoid dict key collisions when
     # two fields share the same offset (malformed data).
-    indexed_pairs = sorted(enumerate(pairs), key=lambda x: x[1][1])
-    boundaries = [ip[1][1] for ip in indexed_pairs] + [sentinel]
+    sorted_indices = sorted(range(size), key=offsets.__getitem__)
 
-    # end_by_orig[i] = end offset for pairs[i]
+    # end_by_orig[i] = end offset for key_ids[i]
     end_by_orig = [0] * size
-    for rank, (orig_idx, _) in enumerate(indexed_pairs):
-        end_by_orig[orig_idx] = boundaries[rank + 1]
+    end = offsets[size]
+    for orig_idx in reversed(sorted_indices):
+        end_by_orig[orig_idx] = end
+        end = offsets[orig_idx]
 
     fields: List[Tuple[int, bytes]] = []
-    for orig_idx, (key_id, off) in enumerate(pairs):
+    for orig_idx, key_id in enumerate(key_ids):
+        off = offsets[orig_idx]
         end = end_by_orig[orig_idx]
         field_bytes = bytes(overflow_bytes[data_start + off:data_start + end])
         fields.append((key_id, field_bytes))
     return fields
+
+
+def _split_object_fields(
+    fields: List[Tuple[int, bytes]],
+    id_to_name: Dict[int, str],
+    shredded_names: Set[str],
+):
+    overflow_pairs = []
+    shredded_by_name = {}
+    previous_name = None
+    ordered = True
+    for kid, field_bytes in fields:
+        name = id_to_name.get(kid)
+        if name is None:
+            raise ValueError('MALFORMED_VARIANT: key id out of range')
+        if previous_name is not None and name < previous_name:
+            ordered = False
+        previous_name = name
+        if name in shredded_names:
+            shredded_by_name[name] = field_bytes
+        else:
+            overflow_pairs.append((kid, field_bytes))
+
+    if not ordered:
+        overflow_pairs.sort(key=lambda item: id_to_name[item[0]].encode('utf-8'))
+    return overflow_pairs, shredded_by_name
 
 
 def rebuild_value(
@@ -321,6 +359,7 @@ def _decompose_field_bytes(
     field_bytes: bytes,
     schema: VariantSchema,
     metadata: bytes,
+    id_to_name: Optional[Dict[int, str]] = None,
 ) -> dict:
     """Decompose a variant field's value bytes into a ``{value, typed_value}`` sub-struct dict.
 
@@ -348,30 +387,26 @@ def _decompose_field_bytes(
             return {'value': field_bytes, 'typed_value': None}
 
         all_sub = _extract_overflow_fields(field_bytes)
-        key_dict = parse_metadata_dict(metadata)
-        id_to_name = {v: k for k, v in key_dict.items()}
-        shredded_names = {of.field_name for of in schema.object_fields}
+        if id_to_name is None:
+            id_to_name = _metadata_id_to_name(metadata)
+        shredded_names = schema.object_schema_map
+        if shredded_names is None:
+            shredded_names = {of.field_name for of in schema.object_fields}
 
-        overflow_pairs = [
-            (kid, fb) for kid, fb in all_sub
-            if id_to_name.get(kid) not in shredded_names
-        ]
-        shredded_by_name = {
-            id_to_name[kid]: fb for kid, fb in all_sub
-            if kid in id_to_name and id_to_name[kid] in shredded_names
-        }
+        overflow_pairs, shredded_by_name = _split_object_fields(
+            all_sub, id_to_name, shredded_names)
 
         typed_value: Dict[str, dict] = {}
         for of in schema.object_fields:
             fname = of.field_name
             if fname in shredded_by_name:
                 typed_value[fname] = _decompose_field_bytes(
-                    shredded_by_name[fname], of.schema, metadata
+                    shredded_by_name[fname], of.schema, metadata, id_to_name
                 )
             else:
                 typed_value[fname] = {'value': None, 'typed_value': None}
 
-        overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+        overflow_bytes = (_build_object_value(overflow_pairs, already_sorted=True)
                           if overflow_pairs else None)
         return {'value': overflow_bytes, 'typed_value': typed_value}
 
@@ -382,6 +417,8 @@ def _decompose_field_bytes(
 def decompose_variant(
     gv: 'GenericVariant',
     obj_fields: List[ObjectField],
+    shredded_names: Optional[Set[str]] = None,
+    id_to_name: Optional[Dict[int, str]] = None,
 ) -> dict:
     """Decompose a ``GenericVariant`` into a shredded row dict for writing.
 
@@ -407,30 +444,25 @@ def decompose_variant(
         return {'metadata': metadata, 'value': value_bytes, 'typed_value': None}
 
     all_fields = _extract_overflow_fields(value_bytes)
-    key_dict = parse_metadata_dict(metadata)
-    id_to_name = {v: k for k, v in key_dict.items()}
-    shredded_names = {of.field_name for of in obj_fields}
+    if id_to_name is None:
+        id_to_name = _metadata_id_to_name(metadata)
+    if shredded_names is None:
+        shredded_names = {of.field_name for of in obj_fields}
 
-    overflow_pairs = [
-        (kid, fb) for kid, fb in all_fields
-        if id_to_name.get(kid) not in shredded_names
-    ]
-    shredded_by_name = {
-        id_to_name[kid]: fb for kid, fb in all_fields
-        if kid in id_to_name and id_to_name[kid] in shredded_names
-    }
+    overflow_pairs, shredded_by_name = _split_object_fields(
+        all_fields, id_to_name, shredded_names)
 
     typed_value = {}
     for of in obj_fields:
         fname = of.field_name
         if fname in shredded_by_name:
             typed_value[fname] = _decompose_field_bytes(
-                shredded_by_name[fname], of.schema, metadata
+                shredded_by_name[fname], of.schema, metadata, id_to_name
             )
         else:
             typed_value[fname] = {'value': None, 'typed_value': None}
 
-    overflow_bytes = (_build_object_value(overflow_pairs, key_dict)
+    overflow_bytes = (_build_object_value(overflow_pairs, already_sorted=True)
                       if overflow_pairs else None)
     return {'metadata': metadata, 'value': overflow_bytes, 'typed_value': typed_value}
 
@@ -455,11 +487,21 @@ def shred_variant_column(
     from pypaimon.data.generic_variant import GenericVariant
 
     rows = column.to_pylist()
+    shredded_names = {of.field_name for of in obj_fields}
+
+    @lru_cache(maxsize=16)
+    def metadata_names(metadata: bytes) -> Dict[int, str]:
+        return _metadata_id_to_name(metadata)
+
     result = []
     for row in rows:
         if row is None:
             result.append(None)
         else:
             gv = GenericVariant.from_arrow_struct(row)
-            result.append(decompose_variant(gv, obj_fields))
+            value = gv.value()
+            id_to_name = (metadata_names(gv.metadata())
+                          if value and (value[0] & 0x3) == _OBJECT else None)
+            result.append(decompose_variant(
+                gv, obj_fields, shredded_names, id_to_name))
     return pa.array(result, type=target_type)

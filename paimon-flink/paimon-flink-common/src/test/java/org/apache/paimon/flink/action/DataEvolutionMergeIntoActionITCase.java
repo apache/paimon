@@ -1263,7 +1263,8 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.emptyMap()));
-        insertInto("BLOB_SPLIT_UPDATE_S", "(1, X'02')");
+        // Two updated payloads force rolling regardless of the initial row-ID order.
+        insertInto("BLOB_SPLIT_UPDATE_S", "(1, X'02')", "(3, X'04')");
 
         builder(warehouse, database, "BLOB_SPLIT_UPDATE_T")
                 .withMergeCondition("BLOB_SPLIT_UPDATE_T.id=BLOB_SPLIT_UPDATE_S.id")
@@ -1278,7 +1279,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 Arrays.asList(
                         changelogRow("+I", 1, new byte[] {2}),
                         changelogRow("+I", 2, large),
-                        changelogRow("+I", 3, new byte[] {3})));
+                        changelogRow("+I", 3, new byte[] {4})));
 
         List<Row> newBlobFiles = new ArrayList<>();
         boolean sawOriginalLargeFile = false;

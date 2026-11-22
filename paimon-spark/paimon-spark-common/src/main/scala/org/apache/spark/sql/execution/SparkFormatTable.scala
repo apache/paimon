@@ -144,6 +144,15 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
   }
 
   protected def wrapWriteBuilderWithOverwrite(original: WriteBuilder): WriteBuilder = {
+    if (partitionSchema().nonEmpty) {
+      // Spark's V2 file write does not write partition directories, so the rows would land in the
+      // table root, where the partitioned file index never reads them. SQL INSERT, except
+      // INSERT ... REPLACE WHERE, is rewritten to Spark's V1 write by FallBackFileSourceV2 and
+      // never gets here.
+      throw new UnsupportedOperationException(
+        "Only SQL INSERT INTO and INSERT OVERWRITE can write a partitioned engine format table. " +
+          "Set 'format-table.implementation' to 'paimon' to write it in other ways.")
+    }
     new WriteBuilder with SupportsOverwriteV2 {
       override def build(): Write = original.build()
       override def canOverwrite(predicates: Array[Predicate]): Boolean = true

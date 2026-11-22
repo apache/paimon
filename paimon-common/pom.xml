@@ -33,6 +33,12 @@ under the License.
 
     <dependencies>
         <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+            <version>1.20.0</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-api</artifactId>
             <version>${project.version}</version>
@@ -305,6 +311,7 @@ under the License.
                                     <include>it.unimi.dsi:fastutil</include>
                                     <include>org.roaringbitmap:RoaringBitmap</include>
                                     <include>net.openhft:zero-allocation-hashing</include>
+                                    <include>org.locationtech.jts:jts-core</include>
                                     <include>com.github.davidmoten:hilbert-curve</include>
                                     <include>com.github.davidmoten:guava-mini</include>
                                     <include>org.apache.datasketches:*</include>
@@ -322,6 +329,10 @@ under the License.
                                 </filter>
                             </filters>
                             <relocations>
+                                <relocation>
+                                    <pattern>org.locationtech.jts</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.locationtech.jts</shadedPattern>
+                                </relocation>
                                 <relocation>
                                     <pattern>org.antlr.v4.runtime</pattern>
                                     <shadedPattern>org.apache.paimon.shade.org.antlr.v4.runtime</shadedPattern>

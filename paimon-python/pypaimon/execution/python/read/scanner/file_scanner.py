@@ -110,7 +110,8 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
         if p.method == 'between':
             if not p.literals or len(p.literals) < 2:
                 return []
-            return [Range(int(p.literals[0]), int(p.literals[1]))]
+            lower, upper = int(p.literals[0]), int(p.literals[1])
+            return [Range(lower, upper)] if lower <= upper else []
         return None
 
     return visit(predicate)
@@ -570,7 +571,7 @@ class FileScanner:
                 evaluation = scanner.scan_with_coverage(predicate)
                 if evaluation is None:
                     return None
-                scalar_mode = self.table.options.scalar_index_search_mode()
+                scalar_mode = self.table.options.scalar_scan_search_mode()
                 coverage_args = {}
                 if evaluation.indexed_ranges is not None:
                     coverage_args["indexed_ranges"] = evaluation.indexed_ranges

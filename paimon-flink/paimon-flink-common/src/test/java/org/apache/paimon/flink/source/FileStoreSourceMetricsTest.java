@@ -36,6 +36,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
+import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
@@ -49,6 +50,8 @@ import org.apache.flink.runtime.metrics.util.TestingMetricRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -185,6 +188,53 @@ public class FileStoreSourceMetricsTest {
                                                 .SOURCE_PARALLELISM_UPPER_BOUND)
                                 .getValue())
                 .isEqualTo(ContinuousFileStoreSource.MAX_PARALLELISM_OF_SOURCE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testUnassignedSplitsMetric(boolean unordered) throws Exception {
+        ContinuousFileStoreSource source =
+                new ContinuousFileStoreSource(
+                        table.newReadBuilder(), table.options(), null, unordered, null);
+        try (ContinuousFileSplitEnumerator enumerator =
+                (ContinuousFileSplitEnumerator) source.restoreEnumerator(context, null)) {
+            enumerator.start();
+            Gauge<Long> unassignedSplits =
+                    TestingMetricUtils.getGauge(enumeratorMetricGroup, "unassignedSplits");
+            assertThat(unassignedSplits).isNotNull();
+            assertThat(unassignedSplits.getValue()).isZero();
+
+            writeOnce(table);
+            enumerator.processDiscoveredSplits(enumerator.scanNextSnapshot(), null);
+            assertThat(unassignedSplits.getValue()).isEqualTo(1L);
+
+            context.registerReader(0, "localhost");
+            enumerator.handleSplitRequest(0, "localhost");
+            assertThat(context.getSplitAssignments().get(0).getAssignedSplits()).hasSize(1);
+            assertThat(unassignedSplits.getValue()).isZero();
+
+            enumerator.addSplitsBack(context.getSplitAssignments().get(0).getAssignedSplits(), 0);
+            assertThat(unassignedSplits.getValue()).isEqualTo(1L);
+
+            PendingSplitsCheckpoint checkpoint = enumerator.snapshotState(1L);
+            TestingSplitEnumeratorContextWithRegisteringGroup restoredContext =
+                    new TestingSplitEnumeratorContextWithRegisteringGroup(1);
+            try (ContinuousFileSplitEnumerator restored =
+                    (ContinuousFileSplitEnumerator)
+                            source.restoreEnumerator(restoredContext, checkpoint)) {
+                restored.start();
+                Gauge<Long> restoredUnassignedSplits =
+                        TestingMetricUtils.getGauge(
+                                restoredContext.metricGroup(), "unassignedSplits");
+                assertThat(restoredUnassignedSplits.getValue()).isEqualTo(1L);
+
+                restoredContext.registerReader(0, "localhost");
+                restored.handleSplitRequest(0, "localhost");
+                assertThat(restoredContext.getSplitAssignments().get(0).getAssignedSplits())
+                        .hasSize(1);
+                assertThat(restoredUnassignedSplits.getValue()).isZero();
+            }
+        }
     }
 
     private void writeOnce(FileStoreTable table) throws Exception {

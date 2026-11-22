@@ -170,7 +170,7 @@ class LocalDiskCacheManager:
         return self._block_size
 
     def _cache_path(self, file_path: str, block_index: int) -> str:
-        key = f"{file_path}:{block_index}"
+        key = f"{self._block_size}:{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
@@ -274,6 +274,7 @@ class CachingInputStream(io.RawIOBase):
         self._cache = cache
         self._pos = 0
         self._io_lock = threading.Lock()
+        self._open_lock = threading.Lock()
         self._remote_supports_pread = None
 
     def readable(self):
@@ -398,8 +399,14 @@ class CachingInputStream(io.RawIOBase):
         return bytes(buf)
 
     def _get_remote_stream(self):
+        # read_at is documented as thread-safe, so concurrent misses must not
+        # each open their own stream: only the first one is retained and the
+        # rest would leak. Kept separate from _io_lock, which serializes seek
+        # and read on an already open stream.
         if self._stream is None:
-            self._stream = self._file_io.new_input_stream(self._file_path)
+            with self._open_lock:
+                if self._stream is None:
+                    self._stream = self._file_io.new_input_stream(self._file_path)
         return self._stream
 
     def close(self):

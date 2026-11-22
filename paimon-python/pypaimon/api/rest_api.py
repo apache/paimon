@@ -52,6 +52,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
+from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.rest_util import RESTUtil
@@ -81,6 +82,7 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
+    MODEL_NAME_PATTERN = "modelNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
@@ -167,7 +169,7 @@ class RESTApi:
 
             page_token = response.next_page_token
 
-            if not page_token or not response.data:
+            if not page_token:
                 break
 
         return results
@@ -562,9 +564,13 @@ class RESTApi:
         if resource_name is not None:
             components.append((resource_name, 'Resource name'))
         for value, label in components:
-            if not value or not value.strip() or value in ('.', '..'):
-                raise ValueError('{} must be a non-empty resource path component'.format(label))
+            RESTApi._validate_resource_path_component(value, label)
         return database_name, table_name
+
+    @staticmethod
+    def _validate_resource_path_component(value, label):
+        if not value or not value.strip() or value in ('.', '..'):
+            raise ValueError('{} must be a non-empty resource path component'.format(label))
 
     def create_branch(
             self,
@@ -737,6 +743,45 @@ class RESTApi:
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
+            self.rest_auth_function,
+        )
+
+    def list_models(self, database_name: str) -> List[GetModelResponse]:
+        self._validate_resource_path_component(database_name, "Database name")
+        return self.__list_data_from_page_api(
+            lambda query_params: self.client.get_with_params(
+                self.resource_paths.models(database_name),
+                query_params,
+                ListModelsResponse,
+                self.rest_auth_function,
+            )
+        )
+
+    def get_model(self, identifier: Identifier) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        return self.client.get(
+            self.resource_paths.model(database_name, model_name),
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def create_model(
+            self, identifier: Identifier, request: CreateModelRequest
+    ) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        if request.name != model_name:
+            raise ValueError("Model request name must match the identifier")
+        return self.client.post_with_response_type(
+            self.resource_paths.models(database_name),
+            request,
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_model(self, identifier: Identifier) -> None:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.client.delete(
+            self.resource_paths.model(database_name, model_name),
             self.rest_auth_function,
         )
 

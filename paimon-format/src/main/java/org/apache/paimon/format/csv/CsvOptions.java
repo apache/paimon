@@ -72,6 +72,22 @@ public class CsvOptions {
                     .withFallbackKeys("nullvalue")
                     .withDescription("The literal for null values in CSV format");
 
+    public static final ConfigOption<Boolean> SKIP_EMPTY_LINES =
+            ConfigOptions.key("csv.skip-empty-lines")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip empty lines when reading, the same way as Spark's CSV "
+                                    + "source. Only supported for format tables. A line is empty if "
+                                    + "nothing is left after String#trim, which removes all "
+                                    + "characters up to U+0020, including spaces, tabs and other "
+                                    + "control characters. By default such a line is read as a row "
+                                    + "of NULLs. Note that Paimon itself writes a row whose values "
+                                    + "are all NULL as an empty line in a single-column table, or as "
+                                    + "a line of delimiters only, which can also be empty after "
+                                    + "trimming (e.g. a tab). Such rows are skipped when this option "
+                                    + "is enabled.");
+
     public static final ConfigOption<Mode> MODE =
             ConfigOptions.key("csv.mode")
                     .enumType(Mode.class)
@@ -87,6 +103,7 @@ public class CsvOptions {
     private final String quoteCharacter;
     private final String escapeCharacter;
     private final Mode mode;
+    private final boolean skipEmptyLines;
 
     public CsvOptions(Options options) {
         this.fieldDelimiter = singleCharacter(options, FIELD_DELIMITER);
@@ -98,6 +115,11 @@ public class CsvOptions {
         this.quoteCharacter = singleCharacter(options, QUOTE_CHARACTER);
         this.escapeCharacter = singleCharacter(options, ESCAPE_CHARACTER);
         this.mode = options.get(MODE);
+        this.skipEmptyLines = options.get(SKIP_EMPTY_LINES);
+    }
+
+    public boolean skipEmptyLines() {
+        return skipEmptyLines;
     }
 
     /**

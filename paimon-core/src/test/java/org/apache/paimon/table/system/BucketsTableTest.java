@@ -25,8 +25,10 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,6 +39,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Projection;
 
@@ -45,6 +48,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -118,6 +122,44 @@ public class BucketsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testBucketsTableWithPartitionTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+        DataField partitionField = BucketsTable.TABLE_TYPE.getFields().get(0);
+        UpperTransform upperPartition =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, partitionField.name(), partitionField.type())));
+
+        Predicate filter = builder.equal(upperPartition, BinaryString.fromString("{2}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {1, 2, 4}))
+                .containsExactlyInAnyOrder(GenericRow.of(0, 2L, 2L));
+    }
+
+    @Test
+    public void testBucketsTableWithPartitionRangeFilter() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", "1")
+                        .build();
+        catalog.createTable(identifier("RangeTable"), schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier("RangeTable"));
+        write(table, GenericRow.of(1, 9), GenericRow.of(1, 10));
+        Table rangeBucketsTable =
+                catalog.getTable(identifier("RangeTable" + SYSTEM_TABLE_SPLITTER + BUCKETS));
+
+        // The scan compares partition values as integers, so 10 > 9 although '{10}' < '{9}'.
+        Predicate filter =
+                new PredicateBuilder(BucketsTable.TABLE_TYPE)
+                        .greaterThan(0, BinaryString.fromString("{9}"));
+        assertThat(readWithFilter(rangeBucketsTable, filter, new int[] {0}))
+                .containsExactly(GenericRow.of(BinaryString.fromString("{10}")));
+    }
+
+    @Test
     public void testBucketsTableWithBucketFilter() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
 
@@ -155,7 +197,7 @@ public class BucketsTableTest extends TableTestBase {
             readBuilder.withProjection(projection);
         }
         RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+                readBuilder.newRead().executeFilter().createReader(readBuilder.newScan().plan());
         InternalRowSerializer serializer =
                 new InternalRowSerializer(
                         projection == null

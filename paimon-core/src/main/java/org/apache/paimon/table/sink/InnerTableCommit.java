@@ -58,6 +58,8 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit materializeDvRowIdCheck();
 
+    InnerTableCommit dataEvolutionRangeSortCheck();
+
     @Override
     InnerTableCommit withMetricRegistry(MetricRegistry registry);
 }

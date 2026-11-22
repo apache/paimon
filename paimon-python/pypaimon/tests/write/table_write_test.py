@@ -28,6 +28,7 @@ from unittest.mock import Mock, patch
 from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.schema.schema_change import SchemaChange
 import pyarrow as pa
 import pytest
 from parameterized import parameterized
@@ -635,6 +636,85 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
 
+    @parameterized.expand([
+        ('table', [], False, 2, 4), ('partition', ['dt'], False, 2, 4),
+        ('overwrite', ['dt'], True, 2, 4), ('fewer_buckets', ['dt'], False, 4, 2),
+    ])
+    @pytest.mark.python_write
+    def test_write_bucket_count(self, name, partition_keys, overwrite, previous, new):
+        identifier = 'default.bucket_count_' + name
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            self.postpone_pa_schema, partition_keys=partition_keys,
+            primary_keys=['id'] + partition_keys, options={'bucket': str(previous)}), False)
+        table = self.catalog.get_table(identifier)
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('bucket', str(new))], False)
+        table = self.catalog.get_table(identifier)
+        rows_to_write = [data]
+        if not overwrite and new > previous:
+            buckets = create_row_key_extractor(table).extract_partition_bucket_batch(data.to_batches()[0])[1]
+            # Rows of buckets that have no files yet.
+            new_bucket_rows = data.filter(pa.array([bucket >= previous for bucket in buckets]))
+            self.assertGreater(new_bucket_rows.num_rows, 0)
+            rows_to_write.append(new_bucket_rows)
+        for rows in rows_to_write:
+            builder = table.new_batch_write_builder()
+            if overwrite:
+                builder.overwrite({'dt': 'p'})
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                if overwrite:
+                    writer.write_arrow(rows)
+                    commit.commit(writer.prepare_commit())
+                else:
+                    with self.assertRaises(RuntimeError) as error:
+                        writer.write_arrow(rows)
+                    self.assertEqual(
+                        'Try to write {} with a new bucket num {}, but the previous bucket num is {}. '
+                        'Please switch to batch mode, and perform INSERT OVERWRITE to rescale '
+                        'current data layout first.'.format(
+                            'partition {dt=p}' if partition_keys else 'table', new, previous),
+                        str(error.exception))
+            finally:
+                writer.close()
+                commit.close()
+        if overwrite:
+            self._commit_arrow(table, data)
+        expected = data
+        if partition_keys and not overwrite:
+            # A new partition uses the new bucket count.
+            new_partition = pa.Table.from_pydict({
+                'id': list(range(8)), 'dt': ['q'] * 8, 'value': ['new'] * 8,
+            }, schema=self.postpone_pa_schema)
+            self._commit_arrow(table, new_partition)
+            expected = pa.concat_tables([data, new_partition])
+        sort_keys = [('dt', 'ascending'), ('id', 'ascending')]
+        self.assertEqual(expected.to_pylist(), self._read_sorted(table, sort_keys).to_pylist())
+
+    @pytest.mark.python_write
+    def test_write_bucket_count_with_blob_writer(self):
+        from pypaimon.execution.python.write.file_store_write import FileStoreWrite
+
+        identifier = 'default.bucket_count_blob_writer'
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            self.postpone_pa_schema, partition_keys=['dt'], options={'bucket': '2', 'bucket-key': 'id'}), False)
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(self.catalog.get_table(identifier), data)
+        self.catalog.alter_table(identifier, [SchemaChange.set_option('bucket', '4')], False)
+        writer = self.catalog.get_table(identifier).new_batch_write_builder().new_write()
+        try:
+            # Writers that do not restore sequence numbers, such as Blob writers, are checked too.
+            with patch.object(FileStoreWrite, '_has_blob_columns', return_value=True):
+                with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+                    writer.write_arrow(data)
+        finally:
+            writer.close()
+
     @pytest.mark.python_write
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -890,6 +970,56 @@ class TableWriteTest(unittest.TestCase):
                 write._check_runtime_bucket((1,), 0, 3)
         finally:
             write.abort()
+
+    @pytest.mark.python_write
+    def test_write_fixed_bucket_after_postpone(self):
+        table = self._create_postpone_table(
+            'default.fixed_bucket_after_postpone', self.postpone_pa_schema,
+            partition_keys=['dt'], primary_keys=['id', 'dt'])
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data)
+        self.catalog.alter_table(
+            'default.fixed_bucket_after_postpone', [SchemaChange.set_option('bucket', '2')], False)
+        # Postpone files do not count, as in Java.
+        self._commit_arrow(self.catalog.get_table('default.fixed_bucket_after_postpone'), data)
+        self.catalog.alter_table(
+            'default.fixed_bucket_after_postpone', [SchemaChange.set_option('bucket', '4')], False)
+        # Nor do they exempt the fixed bucket files of the same partition.
+        with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+            self._commit_arrow(self.catalog.get_table('default.fixed_bucket_after_postpone'), data)
+
+    @pytest.mark.python_write
+    def test_postpone_checks_restored_bucket_count(self):
+        from pypaimon.execution.python.write.file_store_write import PostponeFixedBucketFileStoreWrite
+
+        table = self._create_postpone_table(
+            'default.postpone_restored_bucket_count', self.postpone_pa_schema,
+            partition_keys=['dt'], primary_keys=['id', 'dt'], options={
+                'postpone.target-size-per-bucket': '1 b',
+                'postpone.batch-write-fixed-bucket.max-parallelism': '2',
+            })
+        data = pa.Table.from_pydict({
+            'id': list(range(8)), 'dt': ['p'] * 8, 'value': ['old'] * 8,
+        }, schema=self.postpone_pa_schema)
+        self._commit_arrow(table, data, fixed_bucket=True)
+        writer = PostponeFixedBucketFileStoreWrite(table, 'test-user')
+        try:
+            with patch.object(writer, '_load_seq_number_stats', wraps=writer._load_seq_number_stats) as restore:
+                for bucket in (3, 0):
+                    with self.assertRaisesRegex(RuntimeError, 'new bucket num 4, but the previous bucket num is 2'):
+                        writer.write(('p',), bucket, data.to_batches()[0], 4)
+                restore.assert_called_once_with(('p',))
+        finally:
+            writer.abort()
+        # Overwrite ignores the existing layout.
+        writer = PostponeFixedBucketFileStoreWrite(table, 'test-user')
+        writer.restore_snapshot_id = 0
+        try:
+            writer.write(('p',), 0, data.to_batches()[0], 4)
+        finally:
+            writer.abort()
 
     def test_postpone_batch_write_builder_keeps_postpone_mode(self):
         table = self._create_postpone_table(

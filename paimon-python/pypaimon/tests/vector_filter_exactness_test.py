@@ -42,7 +42,7 @@ def table(tmp_path):
     schema = pa.schema([("id", pa.int64()), ("name", pa.string()), ("embedding", pa.list_(pa.float32(), 2))])
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=schema, options={"file.format": "parquet", "vector.file.format": "parquet",
-                                           "read.batch-size": "1"})
+                                           "read.batch-size": "1", "deletion-vectors.enabled": "true"})
     table.add(pa.table({"id": [0, 1, 2], "name": ["alpha", "beta zeta", "gamma"],
                         "embedding": [[0., 1.], [1., 1.], [2., 1.]]}, schema=schema))
     table.raw_table.create_global_index(

@@ -22,8 +22,10 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.geo.BoundingBox;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -168,6 +170,15 @@ public class PredicateBuilder {
 
     public Predicate contains(int idx, Object patternLiteral) {
         return leaf(Contains.INSTANCE, idx, patternLiteral);
+    }
+
+    /** Tests XY envelope intersection; exact spatial predicates require further refinement. */
+    public Predicate bboxIntersects(int idx, double minX, double minY, double maxX, double maxY) {
+        Preconditions.checkArgument(
+                rowType.getTypeAt(idx).is(DataTypeRoot.GEOMETRY),
+                "Bounding-box intersection requires a GEOMETRY column.");
+        BoundingBox.of(minX, minY, maxX, maxY);
+        return leaf(BBoxIntersects.INSTANCE, idx, Arrays.asList(minX, minY, maxX, maxY));
     }
 
     public Predicate contains(Transform transform, Object patternLiteral) {
@@ -648,6 +659,14 @@ public class PredicateBuilder {
         }
         return predicates.stream()
                 .filter(f -> !containsFields(f, fields))
+                .collect(Collectors.toList());
+    }
+
+    /** Excludes the predicates that reference any of the fields. */
+    public static List<Predicate> excludePredicateReferencingFields(
+            List<Predicate> predicates, Set<String> fields) {
+        return predicates.stream()
+                .filter(f -> Collections.disjoint(PredicateVisitor.collectFieldNames(f), fields))
                 .collect(Collectors.toList());
     }
 

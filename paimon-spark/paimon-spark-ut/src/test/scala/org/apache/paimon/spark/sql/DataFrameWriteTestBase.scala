@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
@@ -1010,14 +1011,18 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
           assert(msg4.contains("Only support Overwrite with one filter for each partition column"))
 
           // Overwrite a partition which is not the specified
-          val msg5 = intercept[Exception] {
+          val error = intercept[Exception] {
             spark
               .range(2)
               .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
               .writeTo("t")
               .overwrite($"p1" === "b")
-          }.getMessage
-          assert(msg5.contains("does not belong to this partition"))
+          }
+          assert(
+            ExceptionUtils
+              .findThrowableWithMessage(error, "does not belong to this partition")
+              .isPresent,
+            ExceptionUtils.stringifyException(error))
         }
       }
   }

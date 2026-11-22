@@ -35,10 +35,10 @@ def check_row_id_conflicts(table, messages, latest_snapshot_id, check_from_snaps
     baseline = manager.get_snapshot_by_id(check_from_snapshot)
     if latest is None or baseline is None:
         raise ValueError('Row-ID conflict check snapshots must exist in the current table')
-    current_schema = table.schema_manager.latest()
-    if (baseline.schema_id != latest.schema_id
-            or current_schema is not None and current_schema.id != table.table_schema.id):
-        raise ValueError('Row-ID conflict checks require an unchanged, current table schema')
+    # Logical conflicts compare field IDs resolved in each file's historical
+    # schema, just like ordinary commits. Different schema versions alone do
+    # not imply a conflict; the caller validates staged field identities against
+    # the current schema before rewriting or committing data.
     entries = []
     for message in messages:
         partition = GenericRow(list(message.partition), table.partition_keys_fields)

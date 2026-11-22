@@ -391,6 +391,23 @@ def _get(fields, field, default=None):
     return fields[field][1] if field in fields else default
 
 
+def parquet_metadata_with_arrow_schema(metadata, schema):
+    """Replace only ARROW:schema, retaining physical types and row-group metadata."""
+    output = pa.BufferOutputStream()
+    metadata.write_metadata_file(output)
+    serialized = output.getvalue().to_pybytes()
+    length = struct.unpack("<I", serialized[-8:-4])[0]
+    footer = _Compact(serialized[-8 - length:-8], length).value(12)
+    encoded_schema = base64.b64encode(schema.serialize().to_pybytes())
+    entries = _get(footer, 5, (12, []))[1]
+    entries = [entry for entry in entries if _get(entry, 1) != b"ARROW:schema"]
+    entries.append({1: (8, b"ARROW:schema"), 2: (8, encoded_schema)})
+    footer[5] = (9, (12, entries))
+    encoded = _encode(12, footer)
+    data = b"PAR1" + encoded + struct.pack("<I", len(encoded)) + b"PAR1"
+    return pq.read_metadata(pa.BufferReader(data))
+
+
 def _read_exact(source, offset, length):
     if offset < 4 or length <= 0:
         raise ValueError("Invalid Parquet page-index byte range")

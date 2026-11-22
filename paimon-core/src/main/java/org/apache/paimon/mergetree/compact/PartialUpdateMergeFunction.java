@@ -136,6 +136,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
+    private final boolean[] isSequenceField;
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
@@ -168,6 +169,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
         this.nullables = nullables;
+        this.isSequenceField = new boolean[getters.length];
+        fieldSeqComparators.forEach(
+                (field, comparator) -> {
+                    for (int seqField : comparator.compareFields()) {
+                        if (seqField == field) {
+                            isSequenceField[field] = true;
+                        }
+                    }
+                });
     }
 
     @Override
@@ -287,11 +297,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
                 Object field = getters[i].getFieldOrNull(kv.value());
                 if (seqComparator.compare(kv.value(), row) >= 0) {
-                    int index = i;
-
                     // Multiple sequence fields should be updated at once.
-                    if (Arrays.stream(seqComparator.compareFields())
-                            .anyMatch(seqIndex -> seqIndex == index)) {
+                    if (isSequenceField[i]) {
                         for (int fieldIndex : seqComparator.compareFields()) {
                             if (sequenceGroupPartialDelete.contains(fieldIndex)) {
                                 currentDeleteRow = false;
@@ -370,11 +377,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 }
 
                 if (seqComparator.compare(kv.value(), row) >= 0) {
-                    int index = i;
-
                     // Multiple sequence fields should be updated at once.
-                    if (Arrays.stream(seqComparator.compareFields())
-                            .anyMatch(field -> field == index)) {
+                    if (isSequenceField[i]) {
                         for (int field : seqComparator.compareFields()) {
                             if (!updatedSequenceFields.contains(field)) {
                                 if (kv.valueKind() == RowKind.DELETE

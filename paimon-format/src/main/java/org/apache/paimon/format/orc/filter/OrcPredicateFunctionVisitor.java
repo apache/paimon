@@ -93,6 +93,12 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitNotContains(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }

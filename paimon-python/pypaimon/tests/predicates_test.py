@@ -29,8 +29,9 @@ import pyarrow.dataset as ds
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import DataField
-from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.table.row.projected_row import ProjectedRow
 
@@ -45,6 +46,58 @@ def _check_filtered_result(read_builder, expected_df):
 
 def _random_format():
     return random.choice(['parquet', 'avro', 'orc'])
+
+
+@pytest.mark.parametrize('data_type', ['FLOAT', 'DOUBLE'])
+@pytest.mark.parametrize('method,arity,finite_result', [
+    ('equal', 1, True), ('notEqual', 1, False),
+    ('lessThan', 1, False), ('lessOrEqual', 1, True),
+    ('greaterThan', 1, False), ('greaterOrEqual', 1, True),
+    ('in', 2, True), ('notIn', 2, False),
+    ('between', 2, True), ('notBetween', 2, False),
+])
+def test_by_simple_stats_with_nan(data_type, method, arity, finite_result):
+    fields = [DataField(0, 'd', AtomicType(data_type))]
+    cases = [([-0.0, -0.0] + [0.0] * arity, finite_result),
+             ([float('nan')] * (arity + 2), True)]
+    for index in range(arity + 2):
+        values = [0.0, 1.0] + [0.0] * arity
+        values[index] = float('nan')
+        cases.append((values, True))
+    for values, expected in cases:
+        min_row, max_row = (
+            BinaryRow(GenericRowSerializer.to_bytes(GenericRow([v], fields)), fields) for v in values[:2])
+        stats = SimpleStats(min_row, max_row, [0])
+        predicate = Predicate(method, 0, 'd', values[2:])
+        assert predicate.test_by_simple_stats(stats, 1) == expected, values
+
+
+@pytest.mark.python_plan
+def test_append_read_with_nan_stats(tmp_path):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', False)
+    pa_schema = pa.schema([('d', pa.float64())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        pa_schema, options={'file.format': 'avro', 'metadata.stats-mode': 'full'}), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    write, commit = builder.new_write(), builder.new_commit()
+    try:
+        write.write_arrow(pa.Table.from_pydict({'d': [1.0, float('nan'), 3.0]}, schema=pa_schema))
+        messages = write.prepare_commit()
+        # Java's full stats collector includes NaN as the maximum.
+        messages[0].new_files[0].value_stats = SimpleStats(
+            GenericRow([1.0], table.fields), GenericRow([float('nan')], table.fields), [0])
+        commit.commit(messages)
+    finally:
+        write.close()
+        commit.close()
+
+    read = table.new_read_builder()
+    read.with_filter(read.new_predicate_builder().greater_than('d', 2.0))
+    splits = read.new_scan().plan().splits()
+    assert len(splits) == 1
+    assert read.new_read().to_arrow(splits).column('d').to_pylist() == [3.0]
 
 
 class PredicateTest(unittest.TestCase):

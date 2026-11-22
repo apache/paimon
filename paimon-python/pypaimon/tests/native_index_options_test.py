@@ -117,8 +117,11 @@ def test_distinct_scalar_field_options_reach_native_scan(tmp_path, streaming):
             assert native_stream_scan(table, predicate=predicate) is bridge.return_value.new_stream_scan.return_value
         else:
             assert native_plan(table, predicate=predicate) is convert.return_value
-        bridge.assert_called_once_with(table)
-    options = json.loads(_resolved_schema_json(table))['options']
+        bridge.assert_called_once()
+    planned, = bridge.call_args[0]
+    options = json.loads(_resolved_schema_json(planned))['options']
+    assert options.get('scalar-index.search-mode') == (None if streaming else 'full')
+    assert 'scalar-index.search-mode' not in table.table_schema.options
     assert options['fields.amount.index-options'] != options['fields.other.index-options']
 
 

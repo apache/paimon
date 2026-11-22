@@ -29,7 +29,9 @@ import warnings
 import weakref
 from unittest import mock
 
+import pyarrow as pa
 import pyarrow.fs as pafs
+import pyarrow.parquet as pq
 
 from pyarrow import PythonFile
 from pyarrow.fs import PyFileSystem
@@ -232,6 +234,124 @@ class JindoInputFileTest(unittest.TestCase):
         self.assertEqual(b"x" * 10, python_file.read_at(10, 500))
         self.assertEqual([(10, 500)], stream.preads)
         self.assertEqual([], stream.reads)
+
+
+class JindoFileIOPositionalReadTest(unittest.TestCase):
+    @staticmethod
+    def _file_io(data, positional=True):
+        class Stream(io.BytesIO):
+            def __init__(self):
+                super().__init__(data)
+                self.preads = []
+                self.reads = []
+                self.closes = 0
+
+            def pread(self, size, offset):
+                self.preads.append((size, offset))
+                return self.getvalue()[offset:offset + size]
+
+            def read(self, size=-1):
+                self.reads.append((size, self.tell()))
+                return super().read(size)
+
+            def close(self):
+                if not self.closed:
+                    self.closes += 1
+                super().close()
+
+        if not positional:
+            del Stream.pread
+
+        class FileSystem:
+            def __init__(self):
+                self.opened = []
+
+            def open(self, path, mode):
+                stream = Stream()
+                self.opened.append((path, stream))
+                return stream
+
+        filesystem = FileSystem()
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(
+                    connect=lambda *args, **kwargs: filesystem)), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
+            file_io = pyarrow_file_io_module.PyArrowFileIO(
+                "oss://bucket/", Options({"fs.oss.impl": "jindo"}))
+        return file_io, filesystem
+
+    def test_file_io_read_at_uses_pread_without_changing_position(self):
+        file_io, filesystem = self._file_io(b"abcdefghij")
+        stream = file_io.new_input_stream("oss://bucket/data.blob")
+        self.addCleanup(stream.close)
+        native = filesystem.opened[0][1]
+
+        self.assertIsInstance(stream, pa.NativeFile)
+        stream.seek(2)
+        self.assertEqual(b"fgh", stream.read_at(3, 5))
+        self.assertEqual(2, stream.tell())
+        self.assertEqual(b"cd", stream.read(2))
+        self.assertEqual([(3, 5)], native.preads)
+        self.assertEqual([(2, 2)], native.reads)
+        self.assertEqual(1, len(filesystem.opened))
+        self.assertEqual("oss://bucket/data.blob", filesystem.opened[0][0])
+
+    def test_stream_without_pread_keeps_original_arrow_read_at(self):
+        file_io, filesystem = self._file_io(b"abcdefghij", positional=False)
+        with file_io.new_input_stream("oss://bucket/data.blob") as stream:
+            self.assertEqual(b"ef", stream.read_at(2, 4))
+        native = filesystem.opened[0][1]
+        self.assertEqual([(2, 4)], native.reads)
+        self.assertEqual(1, len(filesystem.opened))
+        self.assertEqual(1, native.closes)
+
+    def test_arrow_consumer_keeps_reading_through_native_file(self):
+        expected = pa.table({"id": [1, 2, 3]})
+        output = pa.BufferOutputStream()
+        pq.write_table(expected, output)
+        file_io, filesystem = self._file_io(output.getvalue().to_pybytes())
+        with file_io.new_input_stream("oss://bucket/data.parquet") as stream:
+            self.assertTrue(pq.ParquetFile(stream).read().equals(expected))
+        self.assertEqual(1, filesystem.opened[0][1].closes)
+        # Arrow's filesystem entry remains a C NativeFile using seek + read.
+        with file_io.filesystem.open_input_file("data.parquet") as stream:
+            self.assertTrue(pq.ParquetFile(stream).read().equals(expected))
+        self.assertEqual(1, filesystem.opened[1][1].closes)
+
+    def test_file_io_stream_pins_owner_until_close(self):
+        file_io, filesystem = self._file_io(b"abcdefghij")
+        owner_ref = weakref.ref(filesystem)
+        handler_ref = weakref.ref(file_io.filesystem.handler)
+        stream = file_io.new_input_stream("oss://bucket/data.blob")
+        native = filesystem.opened[0][1]
+        del file_io, filesystem
+        gc.collect()
+        self.assertIsNone(handler_ref())
+        self.assertIsNotNone(owner_ref())
+        self.assertEqual(b"ef", stream.read_at(2, 4))
+        stream.close()
+        stream.close()
+        gc.collect()
+        self.assertIsNone(owner_ref())
+        self.assertEqual(1, native.closes)
+        with self.assertRaises(ValueError):
+            stream.read_at(1, 0)
+        del stream
+        gc.collect()
+        self.assertEqual(1, native.closes)
+
+    def test_non_jindo_file_io_keeps_filesystem_entry(self):
+        file_io = pyarrow_file_io_module.PyArrowFileIO.__new__(
+            pyarrow_file_io_module.PyArrowFileIO)
+        file_io._use_jindo = False
+        file_io.filesystem = mock.Mock()
+        file_io.to_filesystem_path = mock.Mock(return_value="bucket/object")
+        stream = file_io.new_input_stream("s3://bucket/object")
+        self.assertIs(stream, file_io.filesystem.open_input_file.return_value)
+        file_io.filesystem.open_input_file.assert_called_once_with("bucket/object")
+        file_io.filesystem.handler.open_input_file.assert_not_called()
 
 
 class JindoStreamStatsTest(unittest.TestCase):

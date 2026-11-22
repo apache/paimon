@@ -33,6 +33,7 @@ def docs(tmp_path):
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "docs", schema=schema, partitioned=["pt"], options={
             "file.format": "parquet", "vector.file.format": "parquet", "read.batch-size": "1",
+            "deletion-vectors.enabled": "true",
             "full-text-index.search-mode": "full", "vector-index.search-mode": "full"})
     table.add(pa.table({"id": [0, 1, 2], "text": ["paimon", "paimon paimon", "paimon long document"],
                         "label": ["other", "other", "target"], "pt": ["a"] * 3,

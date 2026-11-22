@@ -179,6 +179,23 @@ public class IncrementalClusterStrategyTest {
         assertThat(result.get().files()).hasSize(3);
     }
 
+    @Test
+    public void testPickFullCompactionWithMixedSchemasInSingleRun() {
+        int maxLevel = 2;
+        DataFileMeta matchingFile = createFile(1, 0L, maxLevel);
+        DataFileMeta nonMatchingFile = createFile(2, 1L, maxLevel);
+        LevelSortedRun run =
+                new LevelSortedRun(
+                        maxLevel,
+                        SortedRun.fromSorted(Arrays.asList(matchingFile, nonMatchingFile)));
+
+        Optional<CompactUnit> result =
+                incrementalClusterStrategy.pickFullCompaction(3, Collections.singletonList(run));
+        assertThat(result.isPresent()).isTrue();
+        assertThat(result.get().outputLevel()).isEqualTo(maxLevel);
+        assertThat(result.get().files()).hasSize(2);
+    }
+
     private static void prepareSchema() throws Exception {
         // schema-0
         Map<String, String> options = new HashMap<>();

@@ -75,6 +75,16 @@ public class VectorSearchTest {
     }
 
     @Test
+    public void testMatrixSearchKeepsQueryCoordinates() {
+        float[][] input = {{1f, 0f}, {0f, 1f}};
+        VectorSearch search = VectorSearch.multiVector(input, 1, "chunks", null);
+        input[0][0] = 3f;
+        input[1] = new float[] {1f, 0f};
+        search.multiVector()[0][1] = 4f;
+        assertThat(search.multiVector()).isDeepEqualTo(new float[][] {{1f, 0f}, {0f, 1f}});
+    }
+
+    @Test
     public void testBatchVectorSearchOrder() {
         float[][] vectors = new float[][] {new float[] {1.0f, 0.0f}, new float[] {0.0f, 1.0f}};
 

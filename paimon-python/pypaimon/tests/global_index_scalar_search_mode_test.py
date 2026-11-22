@@ -61,8 +61,13 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
     def test_default_values(self):
         options = CoreOptions(Options.from_none())
         self.assertIsNone(options.global_index_search_mode())
+        self.assertEqual(GlobalIndexSearchMode.FULL, CoreOptions.SCALAR_INDEX_SEARCH_MODE.default_value())
+        self.assertEqual(
+            GlobalIndexSearchMode.FULL, options.scalar_scan_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
+        self.assertEqual(
+            GlobalIndexSearchMode.FAST, options.scalar_prefilter_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.vector_index_search_mode())
         self.assertEqual(
@@ -71,7 +76,9 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
     def test_legacy_global_mode_is_family_fallback(self):
         options = CoreOptions(Options({"global-index.search-mode": "detail"}))
         for getter in (
+                options.scalar_scan_search_mode,
                 options.scalar_index_search_mode,
+                options.scalar_prefilter_search_mode,
                 options.vector_index_search_mode,
                 options.full_text_index_search_mode):
             self.assertEqual(GlobalIndexSearchMode.DETAIL, getter())
@@ -84,11 +91,24 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             "full-text-index.search-mode": "fast",
         }))
         self.assertEqual(
+            GlobalIndexSearchMode.FAST, options.scalar_scan_search_mode())
+        self.assertEqual(
             GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
+        self.assertEqual(
+            GlobalIndexSearchMode.FAST, options.scalar_prefilter_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FULL, options.vector_index_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.full_text_index_search_mode())
+
+    def test_prefilter_mode_overrides_legacy_modes_for_search_only(self):
+        options = CoreOptions(Options({
+            "global-index.search-mode": "fast",
+            "scalar-index.search-mode": "full",
+            "scalar-index.prefilter.search-mode": "detail",
+        }))
+        self.assertEqual(GlobalIndexSearchMode.DETAIL, options.scalar_prefilter_search_mode())
+        self.assertEqual(GlobalIndexSearchMode.FULL, options.scalar_scan_search_mode())
 
     def test_coverage_honours_search_mode_override(self):
         coverage = _coverage(CoreOptions(Options.from_none()))

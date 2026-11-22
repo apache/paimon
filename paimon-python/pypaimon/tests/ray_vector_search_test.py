@@ -57,6 +57,7 @@ def table(tmp_path):
     return pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "vectors", schema=SCHEMA,
         options={"file.format": "parquet", "vector.file.format": "parquet",
+                 "deletion-vectors.enabled": "true",
                  "vector-index.search-mode": "full", "read.batch-size": "2",
                  "source.split.target-size": "1 b", "source.split.open-file-cost": "1 b"})
 
@@ -418,6 +419,31 @@ def test_nan_scores_fail_before_worker_top_k(table, ray_cluster):
     # otherwise a different split layout can silently change the answer.
     with pytest.raises(ValueError, match="cannot rank NaN"):
         table.search([1., 1.]).limit(1).to_arrow(execution="ray")
+
+
+@pytest.mark.parametrize("first_value", [float("nan"), 1.0], ids=["nan", "tie"])
+def test_single_vector_top_k_in_either_split_order(table, ray_cluster, first_value):
+    add_rows(table, [[first_value, 1.]])
+    add_rows(table, [[1., 1.]], start=1)
+    query = table.search([1., 1.]).select(["id"]).limit(1)
+    original = RaySearchTaskExecutor.map
+
+    def run(reverse):
+        def dispatch(executor, tasks, ordered=False):
+            assert len(tasks) == 2
+            # One real worker task at a time fixes the completion order.
+            tasks = sorted(tasks, key=lambda task: task.item.files[0].first_row_id, reverse=reverse)
+            yield from original(executor, tasks, ordered=ordered)
+
+        with patch.object(RaySearchTaskExecutor, "map", dispatch):
+            return query.to_arrow(execution="ray", concurrency=1)
+
+    for reverse in (False, True):
+        if np.isnan(first_value):
+            with pytest.raises(ValueError, match="cannot rank NaN"):
+                run(reverse)
+        else:
+            assert ids(run(reverse)) == [0]
 
 
 @pytest.mark.parametrize("ordered", [False, True])

@@ -118,7 +118,7 @@ batches = ctx.sql("SELECT * FROM paimon.default.my_temp")
 
 ## Supported SQL Syntax
 
-The SQL engine is powered by Apache DataFusion, which supports a rich set of SQL syntax. For the full SQL reference, see the [paimon-rust SQL documentation](https://paimon-rust.apache.org/sql.html) which covers:
+The SQL engine is powered by Apache DataFusion, which supports a rich set of SQL syntax. For the full SQL reference, see the [paimon-rust SQL documentation](https://paimon.apache.org/docs/rust/sql/) which covers:
 
 - **DDL**: `CREATE SCHEMA`, `CREATE TABLE` (with `PARTITIONED BY`, `PRIMARY KEY`, `WITH` options), `DROP TABLE`, `ALTER TABLE`, `CREATE TEMPORARY TABLE/VIEW`
 - **DML**: `INSERT INTO`, `INSERT OVERWRITE` (dynamic/static partitions), `UPDATE`, `DELETE`, `MERGE INTO`, `TRUNCATE TABLE`
@@ -175,6 +175,10 @@ paimon sql "SELECT city, COUNT(*) AS cnt FROM users GROUP BY city ORDER BY cnt D
 # Output as JSON
 paimon sql "SELECT * FROM users LIMIT 5" --format json
 ```
+
+JSON output represents timestamps as ISO 8601 strings, preserving fractional
+seconds (up to nanosecond precision) and timezone offsets when present.
+SQL `NULL` values are represented as JSON `null`.
 
 ### Interactive REPL
 

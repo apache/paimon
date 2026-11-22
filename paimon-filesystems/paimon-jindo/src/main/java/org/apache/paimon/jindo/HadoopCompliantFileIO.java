@@ -31,19 +31,24 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import com.aliyun.jindodata.types.JindoHadoopFileStatus;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
@@ -133,9 +138,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         JindoHadoopSystem fs = pair.getKey();
         String sysType = pair.getValue();
         FSDataInputStream fsInput = fs.open(hadoopPath);
+        JindoIOStats.StreamCounter stats =
+                JindoIOStats.track(JindoIOStats.INPUT, ioStatsInterval());
         return "jobj".equalsIgnoreCase(sysType)
-                ? new VectoredReadableInputStream(fsInput)
-                : new HadoopSeekableInputStream(fsInput);
+                ? new VectoredReadableInputStream(fsInput, stats)
+                : new HadoopSeekableInputStream(fsInput, stats);
     }
 
     @Override
@@ -143,8 +150,16 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         boolean shouldCache = writeCacheEnabled && shouldCache(path);
         LOG.debug("OutputStream should cache {} for path {}", shouldCache, path);
+        FSDataOutputStream fsOutput =
+                getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite);
         return new HadoopPositionOutputStream(
-                getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite));
+                fsOutput, JindoIOStats.track(JindoIOStats.OUTPUT, ioStatsInterval()));
+    }
+
+    /** Interval of logging {@link JindoIOStats}; null or zero leaves the streams uncounted. */
+    @Nullable
+    protected Duration ioStatsInterval() {
+        return null;
     }
 
     @Override
@@ -159,16 +174,45 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        FileStatus[] statuses = new FileStatus[0];
-        org.apache.hadoop.fs.FileStatus[] hadoopStatuses =
-                getFileSystem(hadoopPath, false).listStatus(hadoopPath);
-        if (hadoopStatuses != null) {
-            statuses = new FileStatus[hadoopStatuses.length];
-            for (int i = 0; i < hadoopStatuses.length; i++) {
-                statuses[i] = new HadoopFileStatus(hadoopStatuses[i]);
-            }
+        JindoHadoopSystem fs = getFileSystem(hadoopPath, false);
+        org.apache.hadoop.fs.FileStatus[] entries = fs.listStatus(hadoopPath);
+        if (entries == null) {
+            return new FileStatus[0];
+        }
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
+        FileStatus[] statuses = new FileStatus[entries.length];
+        for (int i = 0; i < entries.length; i++) {
+            statuses[i] = new HadoopFileStatus(entries[i], directory);
         }
         return statuses;
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        JindoHadoopSystem fs = getFileSystem(hadoopPath, false);
+        org.apache.hadoop.fs.Path directory = listingDirectory(fs, hadoopPath);
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.FileStatus> entries =
+                fs.listStatusIterator(hadoopPath);
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return entries.hasNext();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                return new HadoopFileStatus(entries.next(), directory);
+            }
+        };
+    }
+
+    private static org.apache.hadoop.fs.Path listingDirectory(
+            JindoHadoopSystem fs, org.apache.hadoop.fs.Path path) {
+        // Jindo rebuilds even fully qualified paths with the Hadoop Path component constructor.
+        URI fsUri = fs.getUri();
+        String directory = fs.makeQualified(path).toUri().getPath();
+        return new org.apache.hadoop.fs.Path(fsUri.getScheme(), fsUri.getAuthority(), directory);
     }
 
     @Override
@@ -290,8 +334,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         protected final FSDataInputStream in;
 
-        private HadoopSeekableInputStream(FSDataInputStream in) {
+        @Nullable protected final JindoIOStats.StreamCounter stats;
+
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private HadoopSeekableInputStream(
+                FSDataInputStream in, @Nullable JindoIOStats.StreamCounter stats) {
             this.in = in;
+            this.stats = stats;
         }
 
         @Override
@@ -316,17 +366,29 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public int read() throws IOException {
-            return in.read();
+            int b = in.read();
+            if (b >= 0 && stats != null) {
+                stats.bytes(1);
+            }
+            return b;
         }
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            return in.read(b, off, len);
+            int n = in.read(b, off, len);
+            if (stats != null) {
+                stats.bytes(n);
+            }
+            return n;
         }
 
         @Override
         public void close() throws IOException {
             in.close();
+            // a close that throws is not counted, so that a retried close still reaches Jindo
+            if (stats != null && closed.compareAndSet(false, true)) {
+                stats.closed();
+            }
         }
 
         /**
@@ -358,13 +420,18 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     private static class VectoredReadableInputStream extends HadoopSeekableInputStream
             implements VectoredReadable {
 
-        private VectoredReadableInputStream(FSDataInputStream in) {
-            super(in);
+        private VectoredReadableInputStream(
+                FSDataInputStream in, @Nullable JindoIOStats.StreamCounter stats) {
+            super(in, stats);
         }
 
         @Override
         public int pread(long position, byte[] bytes, int off, int len) throws IOException {
-            return in.read(position, bytes, off, len);
+            int n = in.read(position, bytes, off, len);
+            if (stats != null) {
+                stats.bytes(n);
+            }
+            return n;
         }
     }
 
@@ -372,8 +439,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         private final FSDataOutputStream out;
 
-        private HadoopPositionOutputStream(FSDataOutputStream out) {
+        @Nullable private final JindoIOStats.StreamCounter stats;
+
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private HadoopPositionOutputStream(
+                FSDataOutputStream out, @Nullable JindoIOStats.StreamCounter stats) {
             this.out = out;
+            this.stats = stats;
         }
 
         @Override
@@ -384,16 +457,25 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public void write(int b) throws IOException {
             out.write(b);
+            if (stats != null) {
+                stats.bytes(1);
+            }
         }
 
         @Override
         public void write(byte[] b) throws IOException {
             out.write(b);
+            if (stats != null) {
+                stats.bytes(b.length);
+            }
         }
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
             out.write(b, off, len);
+            if (stats != null) {
+                stats.bytes(len);
+            }
         }
 
         @Override
@@ -404,15 +486,41 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public void close() throws IOException {
             out.close();
+            // a close that throws is not counted, so that a retried close still reaches Jindo
+            if (stats != null && closed.compareAndSet(false, true)) {
+                stats.closed();
+            }
         }
     }
 
     private static class HadoopFileStatus implements FileStatus {
 
         private final org.apache.hadoop.fs.FileStatus status;
+        @Nullable private final org.apache.hadoop.fs.Path listedDirectory;
 
         private HadoopFileStatus(org.apache.hadoop.fs.FileStatus status) {
+            this(status, null);
+        }
+
+        private HadoopFileStatus(
+                org.apache.hadoop.fs.FileStatus status,
+                @Nullable org.apache.hadoop.fs.Path listedDirectory) {
             this.status = status;
+            this.listedDirectory = listedDirectory;
+        }
+
+        @Nullable
+        @Override
+        public String getStorageClass() {
+            // Listing a single file can return a basic status with a default storage class.
+            if (listedDirectory != null
+                    && status instanceof JindoHadoopFileStatus
+                    && status.isFile()
+                    && listedDirectory.equals(status.getPath().getParent())) {
+                String storageClass = ((JindoHadoopFileStatus) status).getStorageClassName();
+                return "Unknown".equals(storageClass) ? null : storageClass;
+            }
+            return null;
         }
 
         @Override

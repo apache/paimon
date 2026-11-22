@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
@@ -31,6 +32,8 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.RestoreFiles;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -41,14 +44,20 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SegmentsCache;
 
+import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
+import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
+import org.apache.flink.util.SerializedValue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
@@ -58,8 +67,76 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINA
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class TableWriteCoordinatorTest extends TableTestBase {
+
+    @ParameterizedTest
+    @CsvSource({"false, false", "true, false", "true, true"})
+    public void testCoordinatedRestoreHashIndex(boolean scanDataFileMetas, boolean legacyEntryPoint)
+            throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .primaryKey("f0")
+                        .option("bucket", "-1")
+                        .option("sink.writer-coordinator.page-size", "128 b")
+                        .build();
+        catalog.createDatabase("db", false);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = spy(getTable(identifier));
+        writeWithBucketAssigner(table, row -> 0, GenericRow.of(1), GenericRow.of(2));
+        Snapshot snapshot = table.latestSnapshot().get();
+        IndexFileMeta hash =
+                table.store().newIndexFileHandler().scanHashIndex(snapshot, EMPTY_ROW, 0).get();
+
+        FileStore<?> store = spy(table.store());
+        FileStoreScan scan = spy(store.newScan());
+        doReturn(scan).when(store).newScan();
+        doReturn(store).when(table).store();
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        OperatorID operatorID = new OperatorID();
+        TaskOperatorEventGateway gateway = mock(TaskOperatorEventGateway.class);
+        when(gateway.sendRequestToCoordinator(eq(operatorID), any()))
+                .thenAnswer(
+                        invocation -> {
+                            SerializedValue<CoordinationRequest> serialized =
+                                    invocation.getArgument(1);
+                            PagedCoordinationRequest request =
+                                    (PagedCoordinationRequest)
+                                            serialized.deserializeValue(
+                                                    getClass().getClassLoader());
+                            return CompletableFuture.completedFuture(
+                                    CoordinationResponseUtils.wrap(coordinator.scan(request)));
+                        });
+        CoordinatedWriteRestore restore = new CoordinatedWriteRestore(gateway, operatorID);
+
+        RestoreFiles restored =
+                legacyEntryPoint
+                        ? restore.restoreFiles(EMPTY_ROW, 0, true, false, false)
+                        : restore.restoreFiles(EMPTY_ROW, 0, true, false, false, scanDataFileMetas);
+        assertThat(restored.snapshot().id()).isEqualTo(snapshot.id());
+        assertThat(restored.dynamicBucketIndex()).isEqualTo(hash);
+        assertThat(restored.dynamicBucketIndex().rowCount()).isEqualTo(2);
+        if (scanDataFileMetas) {
+            assertThat(restored.dataFiles()).hasSize(1);
+            assertThat(restored.totalBuckets()).isEqualTo(-1);
+        } else {
+            assertThat(restored.dataFiles()).isEmpty();
+            assertThat(restored.totalBuckets()).isNull();
+        }
+        verify(scan, times(scanDataFileMetas ? 1 : 0)).plan();
+        verify(gateway, atLeast(2)).sendRequestToCoordinator(eq(operatorID), any());
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})

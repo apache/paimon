@@ -129,10 +129,6 @@ class DedicatedFormatWriter(CompositeDataWriter):
             column for column in self.blob_file_column_names
             if column in configured_video_fields
         ]
-        normal_name_set = set(self.normal_column_names)
-        self.normal_columns = [
-            field for field in self.table.table_schema.fields if field.name in normal_name_set
-        ]
         all_normal_column_names = [
             col for col in all_column_names if col not in dedicated_set
         ]
@@ -349,67 +345,6 @@ class DedicatedFormatWriter(CompositeDataWriter):
     @staticmethod
     def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
         return project_arrow_batch(data, column_names)
-
-    def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
-        if not self.blob_inline_fields:
-            return
-
-        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
-
-        for field_name in self.blob_descriptor_fields:
-            if field_name not in data.schema.names:
-                continue
-            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
-            for value in values:
-                if value is None:
-                    continue
-                if hasattr(value, 'as_py'):
-                    value = value.as_py()
-                if isinstance(value, str):
-                    value = value.encode('utf-8')
-                if not isinstance(value, (bytes, bytearray)):
-                    raise ValueError(
-                        "blob-descriptor-field requires blob field value to be a serialized "
-                        "BlobDescriptor."
-                    )
-                descriptor_bytes = bytes(value)
-                # Like Java, schema-declared descriptors use the prefix parser.
-                # Exact wire length is only needed when detecting descriptors
-                # among arbitrary payload bytes.
-                try:
-                    BlobDescriptor.deserialize(descriptor_bytes)
-                except Exception as e:
-                    raise ValueError(
-                        "blob-descriptor-field requires blob field value to be a serialized "
-                        "BlobDescriptor."
-                    ) from e
-
-        for field_name in self.blob_view_fields:
-            if field_name not in data.schema.names:
-                continue
-            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
-            for value in values:
-                if value is None:
-                    continue
-                if hasattr(value, 'as_py'):
-                    value = value.as_py()
-                if isinstance(value, str):
-                    value = value.encode('utf-8')
-                if not isinstance(value, (bytes, bytearray)):
-                    raise ValueError(
-                        "blob-view-field requires blob field value to be a serialized "
-                        "BlobViewStruct."
-                    )
-                try:
-                    view_bytes = bytes(value)
-                    view_struct = BlobViewStruct.deserialize(view_bytes)
-                    if view_struct.serialize() != view_bytes:
-                        raise ValueError("BlobViewStruct payload contains trailing bytes.")
-                except Exception as e:
-                    raise ValueError(
-                        "blob-view-field requires blob field value to be a serialized "
-                        "BlobViewStruct."
-                    ) from e
 
     @staticmethod
     def _process_normal_data(data: pa.RecordBatch) -> Optional[pa.Table]:

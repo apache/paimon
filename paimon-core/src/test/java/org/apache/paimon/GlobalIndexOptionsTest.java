@@ -48,6 +48,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GlobalIndexOptionsTest {
 
     @ParameterizedTest
+    @CsvSource({"0,ivf-pq", "-1,ivf-pq", "0,btree", "-1,btree"})
+    void testRejectsNonPositivePrimaryKeyIndexBuildParallelism(int parallelism, String type) {
+        Map<String, String> values = new HashMap<>();
+        values.put("bucket", "1");
+        values.put("deletion-vectors.enabled", "true");
+        values.put(
+                "global-index." + type + ".index-columns",
+                "btree".equals(type) ? "amount" : "embedding");
+        values.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
+
+        assertThatThrownBy(() -> SchemaValidation.validateTableSchema(schema(values, true)))
+                .hasMessageContaining("pk-index.build.parallelism must be greater than zero");
+    }
+
+    @ParameterizedTest
     @ValueSource(
             strings = {
                 "index_type",
@@ -108,10 +123,7 @@ class GlobalIndexOptionsTest {
         if ("ivf-pq".equals(type)) {
             assertThat(VectorIndexOptions.columns(options.toConfiguration()))
                     .containsExactly("first", "second");
-            assertThat(
-                            VectorIndexOptions.resolve(
-                                            options.toConfiguration(), null, "first", false)
-                                    .type())
+            assertThat(VectorIndexOptions.resolve(options.toConfiguration(), null, "first").type())
                     .isEqualTo("ivf-pq");
         }
     }
@@ -212,14 +224,39 @@ class GlobalIndexOptionsTest {
     }
 
     @Test
+    void testPluginReceivesSingleVectorDefaultAndExplicitListMetric() {
+        DataField vector = new DataField(0, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataField list = new DataField(0, "embedding", DataTypes.ARRAY(vector.type()));
+        Options options = new Options();
+
+        assertThat(
+                        GlobalIndexer.resolveOptions(
+                                        "ivf-flat", Collections.singletonList(vector), options)
+                                .get("ivf-flat.metric"))
+                .isEqualTo("inner_product");
+        assertThat(
+                        GlobalIndexer.resolveOptions(
+                                        "ivf-flat", Collections.singletonList(list), options)
+                                .get("ivf-flat.metric"))
+                .isNull();
+
+        options.setString("fields.embedding.index-options", "{\"metric\":\"INNER-PRODUCT\"}");
+        assertThat(
+                        GlobalIndexer.resolveOptions(
+                                        "ivf-flat", Collections.singletonList(list), options)
+                                .get("ivf-flat.metric"))
+                .isEqualTo("inner_product");
+    }
+
+    @Test
     void testUnrelatedFieldOptionsDoNotRequestDefaultMetric() {
         CoreOptions options =
                 new CoreOptions(
                         Collections.singletonMap(
                                 "fields.embedding.index-options", "{\"nlist\":64}"));
         assertThat(
-                        VectorIndexOptions.resolve(
-                                        options.toConfiguration(), "ivf-pq", "embedding", false)
+                        VectorIndexOptions.resolveConfigured(
+                                        options.toConfiguration(), "ivf-pq", "embedding")
                                 .options()
                                 .get("ivf-pq.metric"))
                 .isNull();

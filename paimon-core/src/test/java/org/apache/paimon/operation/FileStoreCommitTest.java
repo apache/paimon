@@ -41,6 +41,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -75,8 +76,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SlowFileIO;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -95,6 +98,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -107,7 +112,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -120,6 +129,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -998,15 +1008,18 @@ public class FileStoreCommitTest {
     public void testMaterializedCompactionOnlyRefreshesGlobalIndexInSameBucket() throws Exception {
         TestFileStore store = createStore(false, 2);
         BinaryRow partition = gen.getPartition(gen.next());
-        IndexManifestEntry materializedBucketDelete =
-                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
-        IndexManifestEntry otherBucketDelete =
-                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+        IndexManifestEntry materializedBucketIndex =
+                globalIndexEntry(partition, 0, "materialized-bucket-index");
+        IndexManifestEntry otherBucketIndex = globalIndexEntry(partition, 1, "other-bucket-index");
+        IndexManifestFile manifestFile = store.indexManifestFileFactory().create();
+        String manifest =
+                manifestFile.writeWithoutRolling(
+                        Arrays.asList(materializedBucketIndex, otherBucketIndex));
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.indexManifest()).thenReturn(manifest);
         CommitChanges changes =
                 new CommitChanges(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =
@@ -1014,18 +1027,23 @@ public class FileStoreCommitTest {
                                     changes,
                                     Snapshot.CommitKind.COMPACT,
                                     Collections.singleton(Pair.of(partition, 0)))
-                            .provide(null);
+                            .provide(snapshot);
 
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+            assertThat(refreshed.indexFiles)
+                    .containsExactly(materializedBucketIndex.toDeleteEntry());
+            String refreshedManifest =
+                    manifestFile.writeIndexFiles(
+                            manifest, refreshed.indexFiles, store.bucketMode());
+            assertThat(manifestFile.read(refreshedManifest)).containsExactly(otherBucketIndex);
         }
     }
 
-    private static IndexManifestEntry globalIndexDeleteEntry(
+    private static IndexManifestEntry globalIndexEntry(
             BinaryRow partition, int bucket, String fileName) {
         IndexFileMeta file =
                 new IndexFileMeta(
                         "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
-        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
+        return new IndexManifestEntry(FileKind.ADD, partition, bucket, file);
     }
 
     @Test
@@ -1179,7 +1197,9 @@ public class FileStoreCommitTest {
                                 Collections.singletonList(compactDeleted)));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         assertThat(store.fileIO().exists(dataNewPath)).isFalse();
@@ -1215,7 +1235,9 @@ public class FileStoreCommitTest {
                                 Collections.emptyList()));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         for (Path path : dataNew.collectFiles(pathFactory)) {
@@ -1261,8 +1283,12 @@ public class FileStoreCommitTest {
                                 Collections.emptyList()));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.abort(Collections.singletonList(commitMessage));
-            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
         }
 
         for (Path path : reused.collectFiles(pathFactory)) {
@@ -1315,8 +1341,8 @@ public class FileStoreCommitTest {
             }
             assertThat(store.snapshotManager().latestSnapshotId()).isNull();
 
-            commit.abort(messages);
-            commit.abort(messages);
+            commit.abort(messages, store.options().fileOperationThreadNum());
+            commit.abort(messages, store.options().fileOperationThreadNum());
 
             for (Path path : pendingPaths) {
                 assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
@@ -1324,6 +1350,411 @@ public class FileStoreCommitTest {
             assertThat(store.snapshotManager().latestSnapshotId()).isNull();
         } finally {
             write.close();
+        }
+    }
+
+    @Test
+    public void testAbortDeletesFilesConcurrently() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "4");
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempDir, options, SlowFileIO.SCHEME);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        DataFileMeta reused = createDataFileWithExtraFile(store, pathFactory.newPath(), false);
+        DataFileMeta compactNew = createDataFileWithExtraFile(store, pathFactory.newPath(), false);
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                newFiles, Collections.emptyList(), Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.singletonList(reused),
+                                Arrays.asList(reused.upgrade(1), compactNew),
+                                Collections.emptyList()));
+
+        // start every pool thread now, so no delete runs on a thread created by the caller below
+        // that inherited its context class loader; size the shared pool for 4 first, as a pool
+        // with fewer threads is replaced by a new one on the abort below
+        FileOperationThreadPool.getExecutorService(4);
+        List<ClassLoader> poolLoaders = poolThreadContextClassLoaders();
+        Thread caller = Thread.currentThread();
+        ClassLoader original = caller.getContextClassLoader();
+        try (URLClassLoader callerLoader = new URLClassLoader(new URL[0], original)) {
+            SlowFileIO.reset();
+            SlowFileIO.setDelayMillis(50);
+            caller.setContextClassLoader(callerLoader);
+            try (FileStoreCommitImpl commit = store.newCommit()) {
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
+            } finally {
+                caller.setContextClassLoader(original);
+            }
+            // issue 11111: abort deleted one file at a time, so at most one delete was in flight;
+            // the deletes now overlap and stay within file-operation.thread-num
+            assertThat(SlowFileIO.maxActiveOperations()).isBetween(2, 4);
+            // the sequential abort deleted with the caller's context class loader, the pool
+            // threads use it only while deleting
+            assertThat(SlowFileIO.deleteContextClassLoaders())
+                    .isNotEmpty()
+                    .allMatch(loader -> loader == callerLoader);
+            assertThat(poolThreadContextClassLoaders())
+                    .containsExactlyInAnyOrderElementsOf(poolLoaders);
+        } finally {
+            SlowFileIO.reset();
+        }
+
+        newFiles.add(compactNew);
+        for (DataFileMeta file : newFiles) {
+            for (Path path : file.collectFiles(pathFactory)) {
+                assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
+            }
+        }
+        // PR 10582: a file reused by compaction is not owned by the aborted write
+        for (Path path : reused.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).as("reused file %s", path).isTrue();
+        }
+    }
+
+    @Test
+    public void testAbortContinuesWhenOneDeleteFails() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "4");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        // A non-empty directory cannot be deleted non-recursively, so this delete fails for real.
+        DataFileMeta first = newFiles.get(0);
+        Path undeletable = new Path(pathFactory.newPath().getParent(), "undeletable-extra");
+        store.fileIO().newOutputStream(new Path(undeletable, "child"), false).close();
+        List<String> extraFiles = new ArrayList<>(first.extraFiles());
+        extraFiles.add(undeletable.getName());
+        newFiles.set(0, first.copy(extraFiles));
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                newFiles, Collections.emptyList(), Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+
+        // issue 11111: a failed delete is logged and neither throws nor skips the other files
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(
+                    Collections.singletonList(commitMessage),
+                    store.options().fileOperationThreadNum());
+        }
+
+        assertThat(store.fileIO().exists(undeletable)).isTrue();
+        for (DataFileMeta file : newFiles) {
+            for (Path path : file.collectFiles(pathFactory)) {
+                if (!path.equals(undeletable)) {
+                    assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testAbortDeletesAllFilesWhenCallerIsInterrupted() throws Exception {
+        // thread-num 1 is below the shared pool size, so deletes go through the bounded executor
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "1");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        CommitMessage commitMessage = newFilesCommitMessage(store, partition, newFiles);
+
+        boolean interruptedAfterAbort;
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            Thread.currentThread().interrupt();
+            try {
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
+            } finally {
+                interruptedAfterAbort = Thread.interrupted();
+            }
+        }
+
+        // issue 11111: the sequential abort deleted every file under an interrupt, and the
+        // caller's interrupt flag must survive the cleanup
+        assertThat(interruptedAfterAbort).isTrue();
+        assertAllDeleted(store, pathFactory, newFiles);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAbortWaitsForAllDeletesWhenInterruptedWhileWaiting(boolean failDeletes)
+            throws Exception {
+        // 2 data files with one extra file each, all 4 deletes can run at once
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "4");
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempDir, options, SlowFileIO.SCHEME);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        CommitMessage commitMessage =
+                newFilesCommitMessage(store, partition, new ArrayList<>(newFiles));
+        List<DataFileMeta> failing = new ArrayList<>();
+        if (failDeletes) {
+            failing.add(newFiles.remove(0));
+            failing.add(newFiles.remove(0));
+        }
+
+        Thread caller = Thread.currentThread();
+        Throwable abortFailure = null;
+        boolean interruptedAfterAbort;
+        AtomicBoolean allDeletesStarted = new AtomicBoolean();
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            SlowFileIO.reset();
+            SlowFileIO.setDelayMillis(50);
+            SlowFileIO.failDeletesUnchecked(
+                    failing.stream().map(DataFileMeta::fileName).toArray(String[]::new));
+            // every delete has started, so all were submitted and abort is waiting for them
+            Thread interrupter =
+                    new Thread(
+                            () -> {
+                                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                                while (SlowFileIO.delayedOperations() < 4) {
+                                    if (System.nanoTime() > deadline) {
+                                        return;
+                                    }
+                                    Thread.yield();
+                                }
+                                allDeletesStarted.set(true);
+                                caller.interrupt();
+                            });
+            interrupter.start();
+            try {
+                commit.abort(
+                        Collections.singletonList(commitMessage),
+                        store.options().fileOperationThreadNum());
+            } catch (Throwable t) {
+                abortFailure = t;
+            } finally {
+                interruptedAfterAbort = Thread.interrupted();
+                interrupter.join(TimeUnit.SECONDS.toMillis(20));
+                // drops an interrupt that arrives only after a broken abort returned early
+                Thread.interrupted();
+            }
+            assertThat(interrupter.isAlive()).as("interrupter finished").isFalse();
+        } finally {
+            SlowFileIO.reset();
+        }
+        assertThat(allDeletesStarted).as("all deletes started within 10 seconds").isTrue();
+
+        // issue 11111: the sequential abort was not cut short by an interrupt, so every delete is
+        // still attempted and awaited, and the caller's interrupt flag survives the cleanup
+        assertThat(interruptedAfterAbort).isTrue();
+        assertAllDeleted(store, pathFactory, newFiles);
+        if (failDeletes) {
+            // only IOException is swallowed by deleteQuietly; unchecked failures keep their type,
+            // the first in input order is thrown and the later one is suppressed into it
+            assertThat(abortFailure)
+                    .isExactlyInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining(failing.get(0).fileName());
+            assertThat(abortFailure.getSuppressed())
+                    .singleElement()
+                    .isInstanceOf(IllegalStateException.class)
+                    .extracting(Throwable::getMessage)
+                    .asString()
+                    .contains(failing.get(1).fileName());
+            for (DataFileMeta file : failing) {
+                assertThat(store.fileIO().exists(pathFactory.toPath(file))).isTrue();
+                for (String extraFile : file.extraFiles()) {
+                    assertThat(store.fileIO().exists(pathFactory.toAlignedPath(extraFile, file)))
+                            .as("extra file %s", extraFile)
+                            .isFalse();
+                }
+            }
+        } else {
+            assertThat(abortFailure).isNull();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAbortKeepsDeleteBoundWhenInterruptedWhileSubmitting(boolean interrupt)
+            throws Exception {
+        // file-operation.thread-num is "the maximum number of concurrent file operations"; 1 is
+        // below the shared pool size, so the 4 deletes (2 data files with one extra file each)
+        // must run one at a time
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_OPERATION_THREAD_NUM.key(), "1");
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempDir, options, SlowFileIO.SCHEME);
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            newFiles.add(createDataFileWithExtraFile(store, pathFactory.newPath(), false));
+        }
+        CommitMessage commitMessage = newFilesCommitMessage(store, partition, newFiles);
+
+        // Start every thread of the shared pool and keep all but two busy: one runs the first
+        // delete, and the other is the only idle thread, so it runs queued tasks in order.
+        FileOperationThreadPool.getExecutorService(4);
+        ThreadPoolExecutor pool =
+                (ThreadPoolExecutor) FileOperationThreadPool.getExecutorService(0);
+        int poolSize = pool.getMaximumPoolSize();
+        CountDownLatch allRunning = new CountDownLatch(poolSize);
+        CountDownLatch freeTwo = new CountDownLatch(1);
+        CountDownLatch freeRest = new CountDownLatch(1);
+        List<Future<?>> blockers = new ArrayList<>();
+        SlowFileIO.reset();
+        CountDownLatch firstDelete = SlowFileIO.holdNextDelete();
+        Thread caller = null;
+        try {
+            for (int i = 0; i < poolSize; i++) {
+                CountDownLatch free = i < 2 ? freeTwo : freeRest;
+                blockers.add(
+                        pool.submit(
+                                () -> {
+                                    allRunning.countDown();
+                                    return free.await(30, TimeUnit.SECONDS);
+                                }));
+            }
+            assertThat(allRunning.await(10, TimeUnit.SECONDS)).isTrue();
+            freeTwo.countDown();
+            blockers.get(0).get(10, TimeUnit.SECONDS);
+            blockers.get(1).get(10, TimeUnit.SECONDS);
+
+            AtomicReference<Throwable> abortFailure = new AtomicReference<>();
+            AtomicBoolean interruptedAfterAbort = new AtomicBoolean();
+            FileStoreCommitImpl commit = store.newCommit();
+            caller =
+                    new Thread(
+                            () -> {
+                                try {
+                                    commit.abort(
+                                            Collections.singletonList(commitMessage),
+                                            store.options().fileOperationThreadNum());
+                                } catch (Throwable t) {
+                                    abortFailure.set(t);
+                                } finally {
+                                    interruptedAfterAbort.set(Thread.interrupted());
+                                    commit.close();
+                                }
+                            });
+            caller.start();
+            Thread abortCaller = caller;
+            // the first delete holds the only permit, so the caller waits to submit the next one
+            waitUtil(
+                    () ->
+                            SlowFileIO.activeDeletes() == 1
+                                    && abortCaller.getState() == Thread.State.WAITING,
+                    Duration.ofSeconds(10),
+                    Duration.ofMillis(1));
+            // Interrupt twice. If abort stopped waiting for its own permit on the first interrupt,
+            // it would go on to wait in the bounded executor, which keeps the bound on that
+            // interrupt and only runs a task without a permit on the next one.
+            if (interrupt) {
+                for (int i = 0; i < 2; i++) {
+                    abortCaller.interrupt();
+                    // the caller clears the flag when it handles the interrupt, then waits again
+                    waitUtil(
+                            () ->
+                                    !abortCaller.isInterrupted()
+                                            && abortCaller.getState() == Thread.State.WAITING,
+                            Duration.ofSeconds(10),
+                            Duration.ofMillis(1));
+                }
+            }
+            // the idle thread runs queued tasks in order, so after this probe any delete
+            // submitted while the first one is held has run
+            pool.submit(() -> {}).get(10, TimeUnit.SECONDS);
+            firstDelete.countDown();
+            caller.join(TimeUnit.SECONDS.toMillis(20));
+            assertThat(caller.isAlive()).as("abort finished").isFalse();
+
+            // issue 11111: an interrupt must not let a delete run without a permit, the bound
+            // holds, every file is deleted and the caller's interrupt flag survives the cleanup
+            assertThat(SlowFileIO.maxActiveDeletes()).isEqualTo(1);
+            assertThat(abortFailure.get()).isNull();
+            assertThat(interruptedAfterAbort.get()).isEqualTo(interrupt);
+            assertAllDeleted(store, pathFactory, newFiles);
+        } finally {
+            firstDelete.countDown();
+            freeTwo.countDown();
+            freeRest.countDown();
+            if (caller != null) {
+                caller.interrupt();
+                caller.join(TimeUnit.SECONDS.toMillis(20));
+            }
+            SlowFileIO.reset();
+        }
+    }
+
+    private static CommitMessage newFilesCommitMessage(
+            TestAppendFileStore store, BinaryRow partition, List<DataFileMeta> newFiles) {
+        return new CommitMessageImpl(
+                partition,
+                0,
+                store.options().bucket(),
+                new DataIncrement(newFiles, Collections.emptyList(), Collections.emptyList()),
+                new CompactIncrement(
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
+    }
+
+    /** Occupies every thread of the shared file operation pool and returns their loaders. */
+    private static List<ClassLoader> poolThreadContextClassLoaders() throws Exception {
+        ThreadPoolExecutor pool =
+                (ThreadPoolExecutor) FileOperationThreadPool.getExecutorService(0);
+        int poolSize = pool.getMaximumPoolSize();
+        CountDownLatch allRunning = new CountDownLatch(poolSize);
+        List<Future<ClassLoader>> loaders = new ArrayList<>();
+        for (int i = 0; i < poolSize; i++) {
+            loaders.add(
+                    pool.submit(
+                            () -> {
+                                allRunning.countDown();
+                                assertThat(allRunning.await(10, TimeUnit.SECONDS)).isTrue();
+                                return Thread.currentThread().getContextClassLoader();
+                            }));
+        }
+        List<ClassLoader> result = new ArrayList<>();
+        for (Future<ClassLoader> loader : loaders) {
+            result.add(loader.get(20, TimeUnit.SECONDS));
+        }
+        return result;
+    }
+
+    private static void assertAllDeleted(
+            TestAppendFileStore store, DataFilePathFactory pathFactory, List<DataFileMeta> files)
+            throws IOException {
+        for (DataFileMeta file : files) {
+            for (Path path : file.collectFiles(pathFactory)) {
+                assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
+            }
         }
     }
 

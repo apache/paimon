@@ -84,6 +84,24 @@ public class FlinkConnectorOptions {
                                     + "This eliminates data transfer overhead when the source already "
                                     + "provides suitable data distribution (e.g., Kafka partitions).");
 
+    public static final ConfigOption<Boolean> SINK_STRIPED_BUCKET_WRITE_ENABLED =
+            ConfigOptions.key("sink.striped-bucket-write.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a fixed-bucket table stripes each bucket's writes across multiple "
+                                    + "writer subtasks so that write parallelism can exceed the bucket count "
+                                    + "without rescaling the table.");
+
+    public static final ConfigOption<Integer> SINK_STRIPED_BUCKET_WRITE_WRITERS_PER_BUCKET =
+            ConfigOptions.key("sink.striped-bucket-write.writers-per-bucket")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Sets how many writer subtasks write each bucket. Set to -1 to let every "
+                                    + "writer subtask write every bucket. Only takes effect when "
+                                    + "'sink.striped-bucket-write.enabled' is true.");
+
     public static final ConfigOption<CompactionBucketDistributionStrategy>
             COMPACTION_BUCKET_DISTRIBUTION_STRATEGY =
                     ConfigOptions.key("compaction.bucket-distribution-strategy")
@@ -198,7 +216,11 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, flink sink will use managed memory for merge tree; otherwise, "
-                                    + "it will create an independent memory allocator.");
+                                    + "it will create an independent memory allocator. "
+                                    + "This option selects the allocator and declares the managed memory weight. "
+                                    + "For append-only table, rows are buffered in managed memory only when "
+                                    + "'write-buffer-for-append' is also set to true; otherwise rows are written "
+                                    + "directly to the file format writers and the managed memory stays unused.");
 
     public static final ConfigOption<Boolean> SCAN_REMOVE_NORMALIZE =
             key("scan.remove-normalize")
@@ -375,6 +397,14 @@ public class FlinkConnectorOptions {
                                     + "weight sink.managed.writer-buffer-memory. The actual writer buffer "
                                     + "size depends on the slot's allocated resources and managed memory consumers.");
 
+    public static final ConfigOption<MemorySize> SINK_WRITER_OFFHEAP_MEMORY =
+            ConfigOptions.key("sink.writer-offheap-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Task off-heap memory resource budget for the writer slot sharing group. "
+                                    + "Must be positive and requires sink.writer-memory.");
+
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
                     .doubleType()
@@ -388,6 +418,22 @@ public class FlinkConnectorOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Sink committer memory to control heap memory of global committer.");
+
+    public static final ConfigOption<MemorySize> SINK_COMMITTER_MANAGED_MEMORY =
+            ConfigOptions.key("sink.committer-managed-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Managed memory resource budget for the committer slot sharing group. "
+                                    + "Must be positive and requires sink.committer-memory.");
+
+    public static final ConfigOption<MemorySize> SINK_COMMITTER_OFFHEAP_MEMORY =
+            ConfigOptions.key("sink.committer-offheap-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Task off-heap memory resource budget for the committer slot sharing group. "
+                                    + "Must be positive and requires sink.committer-memory.");
 
     public static final ConfigOption<Boolean> SINK_COMMITTER_OPERATOR_CHAINING =
             ConfigOptions.key("sink.committer-operator-chaining")

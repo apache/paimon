@@ -261,11 +261,13 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
 def _build_object_value(
     fields: List[Tuple[int, bytes]],
     key_dict: Optional[Dict[str, int]] = None,
+    already_sorted: bool = False,
 ) -> bytes:
     """Build object variant value bytes from ``(key_id, value_bytes)`` pairs.
 
     Variant object fields are ordered by key name, not metadata key ID. The
     metadata dictionary may assign IDs in a different order.
+    Set ``already_sorted`` only for fields retained from a sorted object table.
     """
     if not fields:
         # Empty object: header + size=0 + one zero-offset sentinel
@@ -275,14 +277,15 @@ def _build_object_value(
         buf.append(0)       # offset[0] = 0 (sentinel)
         return bytes(buf)
 
-    if key_dict is None:
-        fields = sorted(fields, key=lambda f: f[0])
-    else:
-        id_to_name = {key_id: name for name, key_id in key_dict.items()}
-        fields = sorted(
-            fields,
-            key=lambda f: id_to_name[f[0]].encode('utf-8'),
-        )
+    if not already_sorted:
+        if key_dict is None:
+            fields = sorted(fields, key=lambda f: f[0])
+        else:
+            id_to_name = {key_id: name for name, key_id in key_dict.items()}
+            fields = sorted(
+                fields,
+                key=lambda f: id_to_name[f[0]].encode('utf-8'),
+            )
     size = len(fields)
     data = b''.join(vb for _, vb in fields)
     data_size = len(data)

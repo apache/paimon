@@ -38,12 +38,12 @@ public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 
     @Override
     public VectorRead newVectorRead() {
-        rejectUnderQueryAuth();
+        validateSearch();
         if (isPrimaryKeyVectorSearch()) {
             return new SparkPrimaryKeyVectorRead(
                     table, vectorColumn, vector, limit, options, filter);
         }
         return new SparkDataEvolutionVectorRead(
-                table, partitionFilter, filter, limit, vectorColumn, vector, options);
+                table, partitionFilter, filter, limit, vectorColumn, vector, options, multiVector);
     }
 }

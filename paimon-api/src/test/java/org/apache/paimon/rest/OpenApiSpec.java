@@ -83,6 +83,11 @@ public final class OpenApiSpec {
         return schemas;
     }
 
+    /** The REST catalog OpenAPI spec. */
+    public static JsonNode catalogSpec() throws IOException {
+        return new YAMLMapper().readTree(new File(specDirectory(), FILES.get(0)));
+    }
+
     /** Returns the operation a request matches, preferring literal segments, or null. */
     @Nullable
     public static String match(Set<String> operations, String method, String path) {

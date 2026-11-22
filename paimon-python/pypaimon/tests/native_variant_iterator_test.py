@@ -54,8 +54,14 @@ def variant_table(tmp_path, request):
         options.update({'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true'})
     data = pa.Table.from_arrays([
         pa.array(range(1, 7), type=pa.int64()), payload,
-        pa.StructArray.from_arrays([payload], names=['payload'], mask=pa.array([False] * 5 + [True])),
-    ], names=['id', 'payload', 'profile'])
+        pa.StructArray.from_arrays([
+            payload, pa.array(['Hangzhou', 'Beijing', None, 'Shenzhen', 'Suzhou', 'hidden']),
+        ], names=['payload', 'city'], mask=pa.array([False] * 5 + [True])),
+        pa.array([
+            [('source', 'web'), ('source', 'mobile')], [('source', None), ('source', 'later')],
+            [], None, [('other', 'value')], [('source', 'app')],
+        ], type=pa.map_(pa.string(), pa.string())),
+    ], names=['id', 'payload', 'profile', 'attributes'])
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('db', True)
     catalog.create_table('db.t', Schema.from_pyarrow_schema(

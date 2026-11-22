@@ -19,15 +19,15 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.Snapshot
-import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog}
 import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.CatalogV2Util
+import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan}
 import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
-import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
+import org.apache.spark.sql.execution.datasources.v2.{CreateTableAsSelectExec, DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.collection.JavaConverters._
@@ -53,19 +53,25 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession) extends Strate
         parts.nonEmpty,
         newProps.asJava)
 
-      CreateTableAsSelectExec(
-        catalog,
-        ident,
-        parts,
-        query,
-        planLater(query),
-        newProps,
-        new CaseInsensitiveStringMap(
-          (writeOptions +
-            (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT
-              .name())).asJava),
-        ifNotExists
-      ) :: Nil
+      PaimonTableAsSelectWriteExec.prepare(
+        CreateTableAsSelectExec(
+          catalog,
+          ident,
+          parts,
+          query,
+          planLater(query),
+          newProps,
+          new CaseInsensitiveStringMap(
+            (writeOptions +
+              (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT
+                .name())).asJava),
+          ifNotExists
+        )) :: Nil
+    case create @ CreateTableAsSelect(catalog: SparkGenericCatalog, _, _, _, props, _, _)
+        if supportsCatalog(catalog, props.get(TableCatalog.PROP_PROVIDER).orNull) =>
+      new DataSourceV2Strategy(spark)
+        .apply(create)
+        .map(exec => PaimonTableAsSelectWriteExec.prepare(exec))
     case _ => Nil
   }
 }

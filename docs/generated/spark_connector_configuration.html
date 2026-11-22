@@ -154,9 +154,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>write.use-v2-write</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.</td>
+            <td>If true, use DataSource V2 for batch writes. Path-based writes without a catalog and unsupported table configurations fall back to V1. Supports table, session and DataSource write options with the standard option precedence. Set to false to use V1 batch writes. Streaming writes use V1.</td>
         </tr>
     </tbody>
 </table>

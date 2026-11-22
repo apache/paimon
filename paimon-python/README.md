@@ -10,6 +10,13 @@ This PyPi package contains the Python APIs for using Paimon.
 
 Pypaimon requires Python 3.6+.
 
+On Python 3.10+, `pip install pypaimon` also installs `pypaimon-rust>=0.5.0`.
+Native split planning, reads, writes, updates and commits are enabled by default
+for supported operations. Older Python versions and unsupported operations use
+Python execution. To select Python execution explicitly, set
+`scan.native-plan.enabled`, `read.native.enabled`, `write.native.enabled` and
+`commit.native.enabled` to `false` in the table options.
+
 # Build
 
 Run from `paimon-python/` with pip supporting dependency groups.
@@ -125,6 +132,97 @@ finally:
 For stream updates, use `table.new_stream_write_builder()` and pass the stream
 commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
+# Multimodal column enrichment
+
+Multimodal Data Evolution tables provide column-enrichment methods:
+
+```python
+# labels is a typed Arrow table containing sample_id and the columns to fill.
+# New columns are added automatically; existing media columns retain their files.
+result = table.merge_columns(labels, on="sample_id")
+
+# Compute new nullable columns from selected inputs, in input row order.
+result = table.add_columns(
+    schema=feature_schema, inputs=["image"], fn=compute_features, batch_size=128)
+
+# Without fn, only the schema is changed; existing rows read as NULL.
+result = table.add_columns(schema=nullable_columns)
+
+# Fill existing columns, or recompute them after changing the model.
+result = table.compute_columns(
+    ["embedding"], inputs=["image"], fn=compute_embeddings, batch_size=128)
+
+# Import external annotations carrying _ROW_ID and existing output columns.
+result = table.update_columns_by_row_id(annotations, columns=["label"])
+```
+
+`table` is a `pypaimon.multimodal.MultimodalTable`. `merge_columns` uses ordinary
+update-only MERGE semantics: unmatched source rows are ignored, NULL keys do not
+match, and one source row can update multiple target rows. Multiple source rows
+matching the same target row are rejected by the MERGE executor. Key type
+conversion follows `merge`.
+Outputs must have the declared/existing types. A fixed-size Arrow list declares
+a VECTOR column, for example `pa.list_(pa.float32(), 768)` for an embedding.
+
+These methods require a current full-table view and a single writer during the
+operation. `add_columns` with `fn` and `compute_columns` support `execution="ray"`
+with `pypaimon[ray]` installed. `concurrency` caps the number of shards and
+`ray_remote_args` configures task resources. The driver commits the backfill
+after all workers succeed. For `add_columns`, task definition and static
+resource checks run before schema publication. Ray can still reject placement
+group constraints during submission, and workers can fail during execution.
+There are no automatic retries.
+`compute_columns` requires existing, non-partition output columns and never
+changes the schema. It uses the table's output types and nullability. Every call
+computes all visible rows, including rows with existing values. Use `replace_video`
+for video-frame outputs. Inputs may also be outputs; reads use the source snapshot.
+`add_columns` and `compute_columns` read only their inputs, materializing ordinary
+BLOB inputs as bytes; video-frame columns keep their descriptor semantics.
+Function calls have at most
+`batch_size` rows; outputs are buffered per original file group before writing.
+`merge_columns` materializes the source as an Arrow table and delegates target
+matching and updates to the standard MERGE backend. Supported routes use native
+MERGE when `write.native.enabled=true` and a compatible `pypaimon_rust` is available.
+Local `add_columns` and `compute_columns` can use the native shard reader and
+writer; their `fn` runs in Python.
+
+`update_columns_by_row_id(data, *, columns)` accepts one Arrow Table and requires
+an explicit output column name or sequence of names. The input must contain
+`_ROW_ID` and each selected column exactly once. Extra input columns are ignored
+and cannot overwrite the corresponding current table values. `_ROW_ID` must contain
+unique, non-NULL, non-negative integers representable as int64. Every ID must
+identify a visible row in the captured snapshot; missing or deleted IDs reject
+the entire call before writing. Input order does not affect matching. Outputs
+must be existing, non-partition columns with the table's types and nullability;
+use `replace_video` for video-frame outputs. Omitted rows keep their values and
+untouched columns retain their files. The method uses the standard Python/native
+row-ID update backend and commits all updates together. Empty input creates no
+snapshot. A schema mismatch with the current target branch is rejected before
+writing; reopen the table after schema changes or copying to a branch with a
+different schema. It does not insert rows, add columns, remap
+historical IDs, or check whether external results are stale.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writeback;
+a matching numeric snapshot ID alone does not prove that they remain valid.
+
+`ColumnUpdateResult` reports `updated_rows`, `added_columns`, `source_snapshot_id`,
+`snapshot_id`, and `schema_id`. `updated_rows` is the backfilled row count for
+`add_columns` (zero for schema-only additions) and `compute_columns`, and `None`
+for `merge_columns`. `update_columns_by_row_id` returns the input row count in
+`updated_rows`. Both it and `compute_columns` always return `added_columns=()`.
+Schema publication and data
+commit are separate. A schema-only call does not create a data snapshot.
+Failures during publication or data preparation raise `ColumnUpdateError` with `phase`,
+`schema_changed`, `schema_id`, `source_snapshot_id`, and `commit_outcome`;
+the original exception remains in `__cause__`. New columns can remain visible as
+NULL after failed computation. If schema publication or data commit has an
+unknown outcome, inspect the table before retrying. Prepared files are preserved
+on failure and may require ordinary orphan-file maintenance.
+
+See [Multimodal Column Enrichment](../docs/docs/pypaimon/multimodal-tables.mdx#column-enrichment) for a
+complete example and the column update contract.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a
@@ -148,8 +246,8 @@ Native planning, reading, writing and committing remain available for table data
 
 # Native write and commit
 
-PyPaimon can write Arrow batches through the optional `pypaimon-rust` runtime.
-Enable it on a table independently of native commit:
+PyPaimon writes Arrow batches through `pypaimon-rust` by default on Python 3.10+.
+Native writes and commits can be configured independently:
 
 ```python
 native_table = table.copy({"write.native.enabled": "true",
@@ -307,12 +405,13 @@ uncommitted and will never be submitted. Never call it after a commit with an
 unknown outcome: publication may have succeeded before its response failed.
 Internal failure paths preserve prepared files instead of calling commit abort.
 
-Both native options are disabled by default.
+Both native options are enabled by default.
 
 # Native commit
 
-PyPaimon can submit append and batch overwrite commits through the optional
-`pypaimon-rust` runtime. Enable it independently of native planning and reading:
+PyPaimon can submit append and batch overwrite commits through
+`pypaimon-rust`, installed by default on Python 3.10+. Native commit is enabled
+by default and configured independently of native planning and reading:
 
 ```python
 native_table = table.copy({"commit.native.enabled": "true"})
@@ -356,22 +455,24 @@ not installed, commits use Python. The current native route supports main-branch
 tables using filesystem/JDBC catalogs or `FileStoreTable.from_path()` with
 standard FileIO. Truncate, REST/catalog-managed publication, custom
 FileIO/environments, commit callbacks, and snapshot properties use Python.
-Data-evolution updates that need Python's row-id conflict rewriting also retain
-the Python path. Compact increments remain unsupported by both committers.
+With Native 0.5.0, Data Evolution commits containing retained row-ID files use
+Python publication to validate written field IDs against the schema of each
+snapshot attempt. Native write and update preparation remain available.
+Compact increments remain unsupported by both committers.
 
 Fallback is limited to runtime availability, table construction and message
 conversion before a native mutation starts. A native commit error propagates;
 the adapter neither retries it through Python nor aborts files, since the
-snapshot may already have been published. The option is disabled by default.
+snapshot may already have been published. The option is enabled by default.
 
 # Native scan planning
 
-PyPaimon can plan splits with the optional `pypaimon-rust` package. Planning and
-reading are independently selectable, so native plans can still use the Python
-reader:
+PyPaimon plans splits with `pypaimon-rust` by default on Python 3.10+.
+Planning and reading are independently selectable, so native plans can still
+use the Python reader:
 
 ```python
-native_table = table.copy({"scan.native-plan.enabled": "true"})
+native_table = table.copy({"read.native.enabled": "false"})
 builder = native_table.new_read_builder()
 plan = builder.new_scan().plan()
 rows = builder.new_read().to_arrow(plan.splits())
@@ -565,7 +666,8 @@ Continuous streaming delegates planning and resume state to Rust core.
 retaining scan filters and limits and requiring unrestricted query authorization.
 Writer restore, overwrite and index construction use this entrypoint and delegate
 planning to Rust core when Native planning is enabled.
-Native planning remains optional and is disabled by default.
+Native planning is enabled by default; set `scan.native-plan.enabled=false`
+and `read.native.enabled=false` to select Python planning and reading.
 
 Binary partition keys use UTF-8 text and normal partition escaping in both
 `partition.legacy-name` modes, matching Java. This makes repeated writes to the
@@ -610,16 +712,27 @@ connection.load_from_lerobot(
 ```
 
 The source dataset must be non-empty. Its schema comes from `meta/info.json`.
-Each frame becomes one row; media uses BLOB columns. The import creates frame,
-Episode, task, info, and optional stats/subtask tables. Info and stats use
-`key STRING, value STRING` rows, with each value JSON-encoded to preserve
-nested metadata. Decode values with `json.loads`.
+Each frame becomes one row; media uses BLOB columns. The supplied name is the
+table-group prefix: `robot_data` creates three tables, `robot_data_frames`,
+`robot_data_episodes`, and `robot_data_datasets`. They store frames, Episode
+metadata, and source dataset metadata, respectively.
+
+`robot_data_datasets` stores one row per source, including `info`, `stats`,
+`tasks`, and `subtasks`. The task/subtask fields map source-local IDs to text.
+`info` and `stats` are JSON strings; decode them with `json.loads`. `stats` is
+null when the source has no statistics.
+
+Pass an ordered source list to merge multiple datasets into the same three
+tables. Frames and Episodes retain source-local indices and use `dataset_index`
+to reference `_datasets.index`.
+See the [LeRobot data model](../docs/docs/pypaimon/lerobot.md#data-model) for the
+field definitions, native file mapping, and single-source schema differences.
 
 Before training, pause writes and create a shared tag:
 
 ```python
 connection.create_lerobot_tag("robot_data", "train-2026-09-07")
-frames = connection.get_table("robot_data").scan(
+frames = connection.get_table("robot_data_frames").scan(
     tag_name="train-2026-09-07").to_arrow()
 ```
 

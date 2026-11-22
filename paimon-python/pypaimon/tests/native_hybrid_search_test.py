@@ -130,6 +130,21 @@ def test_partial_coverage_and_scalar_modes_apply_to_each_route(rest_catalog, mod
     assert indexes._ids(table) == list(range(12))
 
 
+def test_prefilter_mode_includes_uncovered_rows_in_hybrid_search(rest_catalog):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'vector-index.search-mode': 'fast', 'full-text-index.search-mode': 'fast',
+                             'scalar-index.search-mode': 'fast', 'scalar-index.prefilter.search-mode': 'full'},
+                   indexed=False)
+    table.create_global_index('label', index_type='btree')
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    table.create_global_index('content', index_type='full-text')
+    table.create_global_index('embedding', index_type='ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+
+    predicate = table.new_read_builder().new_predicate_builder().equal('label', 'keep')
+    assert set(_compare(table, predicate=predicate)) == {1, 5, 7, 9, 11}
+
+
 @pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
 @pytest.mark.parametrize('refine', [False, True])
 def test_candidate_refinement_uses_java_semantics_in_both_routes(rest_catalog, index_type, refine):
@@ -475,10 +490,10 @@ def test_unsupported_literal_qualifies_before_core_execution(rest_catalog):
 @pytest.mark.parametrize('native', [False, True])
 def test_query_auth_rejects_hybrid_before_native_table_access(rest_catalog, native):
     catalog, _ = rest_catalog
-    table = _table(catalog)
-    table = table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
+    raw_table = _table(catalog)
+    table = raw_table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
     with patch('pypaimon.execution.native.read.native_hybrid_search._native_table',
                side_effect=AssertionError('Native table access before authorization')):
         with pytest.raises(Exception, match='query-auth'):
             _builder(table).execute_local()
-    assert indexes._ids(table.copy({'query-auth.enabled': 'false'})) == list(range(8))
+    assert indexes._ids(raw_table) == list(range(8))

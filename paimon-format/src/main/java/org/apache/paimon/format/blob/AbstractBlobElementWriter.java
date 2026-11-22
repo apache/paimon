@@ -23,7 +23,6 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobTransferSource;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.ReusingBlobRefStreamProvider;
 import org.apache.paimon.fs.Path;
@@ -62,10 +61,6 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private final ReusingBlobRefStreamProvider reuseSource;
 
     private String pathString;
-    private long transferStartNanos;
-    private long transferReadBytes;
-    private long transferWrittenBytes;
-    private BlobTransferSource transferSource = BlobTransferSource.UNKNOWN;
 
     AbstractBlobElementWriter(
             PositionOutputStream out,
@@ -73,7 +68,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             @Nullable BlobConsumer writeConsumer,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
-            @Nullable BlobFetchMetricReporter blobFetchMetricReporter,
+            BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
         checkArgument(
                 copyBufferSize > 0,
@@ -84,11 +79,8 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.writeConsumer = writeConsumer;
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
-        this.blobFetchMetricReporter =
-                blobFetchMetricReporter == null
-                        ? BlobFetchMetricReporter.NOOP
-                        : blobFetchMetricReporter;
-        this.transferMetricsEnabled = this.blobFetchMetricReporter.isTransferMetricsEnabled();
+        this.blobFetchMetricReporter = blobFetchMetricReporter;
+        this.transferMetricsEnabled = transferMetricsEnabled(blobFetchMetricReporter);
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
         this.reuseSource = new ReusingBlobRefStreamProvider();
@@ -125,23 +117,15 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     }
 
     protected final BlobFetchResult getBlob(BlobGetter getter) {
-        if (transferMetricsEnabled) {
-            transferStartNanos = System.nanoTime();
-            transferReadBytes = 0;
-            transferWrittenBytes = 0;
-            transferSource = BlobTransferSource.UNKNOWN;
-        }
         try {
             return new BlobFetchResult(getter.get(), false);
         } catch (RuntimeException e) {
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, null);
                 blobFetchMetricReporter.recordFetchFailureNullWritten(e);
-                recordTransfer(false);
                 return new BlobFetchResult(null, true);
             }
             blobFetchMetricReporter.recordFetchFailure(e);
-            recordTransfer(false);
             throw e;
         }
     }
@@ -152,9 +136,6 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
      * (bounded to the descriptor); other blobs open their own stream and read until EOF.
      */
     protected final @Nullable BlobCopySource prepareBlobSource(Blob blob) throws IOException {
-        if (transferMetricsEnabled) {
-            transferSource = BlobTransferSource.classify(blob);
-        }
         // Exact class only: subclasses may override newInputStream() and must not be bypassed.
         if (blob != null && blob.getClass() == BlobRef.class) {
             BlobRef ref = (BlobRef) blob;
@@ -162,13 +143,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             if (length >= 0) {
                 // Position/release the previous source first; its cleanup error is not this blob's
                 // fetch failure and must not be turned into a NULL write.
-                if (transferMetricsEnabled) {
-                    // Only the previous source's close is excluded. Seeking the current reference
-                    // remains part of its transfer latency.
-                    transferStartNanos += reuseSource.prepareForWithCleanupTiming(ref);
-                } else {
-                    reuseSource.prepareFor(ref);
-                }
+                reuseSource.prepareFor(ref);
                 SeekableInputStream source = openStream(ref, () -> reuseSource.openBounded(ref));
                 if (source == null) {
                     return null;
@@ -189,7 +164,6 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         try {
             return opener.open();
         } catch (IOException | RuntimeException e) {
-            recordTransfer(false);
             if (handleFetchFailure(e, blob)) {
                 return null;
             }
@@ -222,12 +196,11 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         if (source.reused()) {
             try {
                 if (transferMetricsEnabled) {
-                    copyExactlyWithMetrics(source.stream(), source.length());
+                    copyWithMetrics(source.stream(), source.length());
                 } else {
                     copyExactly(source.stream(), source.length());
                 }
             } catch (IOException | RuntimeException e) {
-                recordTransfer(false);
                 blobFetchMetricReporter.recordFetchFailure(e);
                 // Source is at an unknown position now; drop it so the next blob reopens.
                 reuseSource.discardQuietly();
@@ -236,17 +209,19 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         } else {
             try (SeekableInputStream stream = source.stream()) {
                 if (transferMetricsEnabled) {
-                    copyUntilEndWithMetrics(stream);
+                    copyWithMetrics(stream, -1L);
                 } else {
-                    copyUntilEnd(stream);
+                    int bytesRead = stream.read(copyBuffer);
+                    while (bytesRead >= 0) {
+                        write(copyBuffer, bytesRead);
+                        bytesRead = stream.read(copyBuffer);
+                    }
                 }
             } catch (IOException | RuntimeException e) {
-                recordTransfer(false);
                 blobFetchMetricReporter.recordFetchFailure(e);
                 throw e;
             }
         }
-        recordTransfer(true);
         return new BlobDescriptor(pathString, blobPosition, out.getPos() - blobPosition);
     }
 
@@ -273,24 +248,41 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         }
     }
 
-    // Keep accounting out of the disabled copy loops. Locals are published even when I/O fails.
-    private void copyExactlyWithMetrics(SeekableInputStream stream, long length)
-            throws IOException {
+    private static boolean transferMetricsEnabled(BlobFetchMetricReporter reporter) {
+        try {
+            return reporter.isTransferMetricsEnabled();
+        } catch (RuntimeException ignored) {
+            // Optional telemetry must not prevent a Blob from being written.
+            return false;
+        }
+    }
+
+    /** Opt-in accounting around the payload-copy loop only. */
+    private void copyWithMetrics(SeekableInputStream stream, long length) throws IOException {
+        long started = System.nanoTime();
         long readBytes = 0;
         long writtenBytes = 0;
+        long remaining = length;
+        boolean completed = false;
         try {
-            long remaining = length;
-            while (remaining > 0) {
-                int toRead = (int) Math.min(copyBuffer.length, remaining);
-                int bytesRead = stream.read(copyBuffer, 0, toRead);
+            while (length < 0 || remaining > 0) {
+                int toRead =
+                        length < 0
+                                ? copyBuffer.length
+                                : (int) Math.min(copyBuffer.length, remaining);
+                int bytesRead =
+                        length < 0 ? stream.read(copyBuffer) : stream.read(copyBuffer, 0, toRead);
                 if (bytesRead < 0) {
-                    throw new EOFException(
-                            String.format(
-                                    "Unexpected EOF while copying BLOB payload for field %s: expected %d "
-                                            + "bytes but source ended %d bytes early.",
-                                    blobFieldName, length, remaining));
+                    if (length >= 0) {
+                        throw new EOFException(
+                                String.format(
+                                        "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                                + "bytes but source ended %d bytes early.",
+                                        blobFieldName, length, remaining));
+                    }
+                    break;
                 }
-                if (bytesRead == 0) {
+                if (bytesRead == 0 && length >= 0) {
                     throw new IOException(
                             "Source returned 0 bytes while copying BLOB payload for field "
                                     + blobFieldName);
@@ -300,34 +292,15 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                 writtenBytes += bytesRead;
                 remaining -= bytesRead;
             }
+            completed = true;
         } finally {
-            transferReadBytes = readBytes;
-            transferWrittenBytes = writtenBytes;
-        }
-    }
-
-    private void copyUntilEnd(SeekableInputStream stream) throws IOException {
-        int bytesRead = stream.read(copyBuffer);
-        while (bytesRead >= 0) {
-            write(copyBuffer, bytesRead);
-            bytesRead = stream.read(copyBuffer);
-        }
-    }
-
-    private void copyUntilEndWithMetrics(SeekableInputStream stream) throws IOException {
-        long readBytes = 0;
-        long writtenBytes = 0;
-        try {
-            int bytesRead = stream.read(copyBuffer);
-            while (bytesRead >= 0) {
-                readBytes += bytesRead;
-                write(copyBuffer, bytesRead);
-                writtenBytes += bytesRead;
-                bytesRead = stream.read(copyBuffer);
+            long durationNanos = Math.max(0L, System.nanoTime() - started);
+            try {
+                blobFetchMetricReporter.recordTransfer(
+                        readBytes, writtenBytes, durationNanos, completed);
+            } catch (RuntimeException ignored) {
+                // Do not replace a business exception or fail a successful copy for telemetry.
             }
-        } finally {
-            transferReadBytes = readBytes;
-            transferWrittenBytes = writtenBytes;
         }
     }
 
@@ -341,24 +314,6 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
 
     protected final void recordSuccess(long length) {
         blobFetchMetricReporter.recordSuccess(length);
-    }
-
-    private void recordTransfer(boolean completed) {
-        if (!transferMetricsEnabled) {
-            return;
-        }
-        try {
-            blobFetchMetricReporter.recordTransfer(
-                    transferSource,
-                    transferReadBytes,
-                    transferWrittenBytes,
-                    Math.max(0, System.nanoTime() - transferStartNanos),
-                    completed);
-        } catch (RuntimeException e) {
-            // Optional transfer telemetry must not replace the original write outcome or exception.
-            // Do not log the exception message, which a custom reporter could populate with a URI.
-            LOG.debug("Unable to report BLOB transfer metrics: {}", e.getClass().getName());
-        }
     }
 
     protected final void recordPreCheckedMissingFileNull(InternalRow row) {

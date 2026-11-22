@@ -101,6 +101,29 @@ class LocalMergeOperatorTest {
     }
 
     @Test
+    public void testEmptyFlushStillEmitsWatermark() throws Exception {
+        prepareHashOperator();
+        List<Long> watermarks = new ArrayList<>();
+        List<String> rows = new ArrayList<>();
+        operator.setOutput(
+                new TestOutput(row -> rows.add(row.toString())) {
+                    @Override
+                    public void emitWatermark(Watermark mark) {
+                        watermarks.add(mark.getTimestamp());
+                    }
+                });
+
+        // a watermark arrives but no records do
+        operator.processWatermark(new Watermark(42L));
+        assertThat(operator.merger().isEmpty()).isTrue();
+
+        operator.prepareSnapshotPreBarrier(0);
+
+        assertThat(rows).isEmpty();
+        assertThat(watermarks).containsExactly(42L);
+    }
+
+    @Test
     public void testUserDefineSequence() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(SEQUENCE_FIELD.key(), "f1");

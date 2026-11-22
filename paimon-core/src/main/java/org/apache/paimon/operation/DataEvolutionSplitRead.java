@@ -130,6 +130,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     private static final String ROW_SIDECAR_FORMAT = "row";
 
+    /** Minimum share of a file's rows that a contiguous deletion span must cover to prune it. */
+    private static final double DATA_FILE_DV_MIN_DELETED_RATIO = 0.5d;
+
     private final FileIO fileIO;
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
@@ -148,6 +151,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private ReadBatchSizer readBatchSizer;
+    private boolean keepBlobPlaceholders;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -174,6 +178,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> forceKeepDelete() {
+        return this;
+    }
+
+    /** Keeps unresolved placeholders when compacting only a prefix of blob versions. */
+    public DataEvolutionSplitRead withKeepBlobPlaceholders() {
+        this.keepBlobPlaceholders = true;
         return this;
     }
 
@@ -744,7 +754,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     blobBunch.logicalRange(),
                     rowRanges,
                     readRowType,
-                    blobIndex);
+                    blobIndex,
+                    keepBlobPlaceholders);
         } else {
             throw new UnsupportedOperationException("Unsupported bunch type: " + bunch);
         }
@@ -949,8 +960,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         ? (BitmapIndexResult) fileIndexResult
                         : null;
         if (selection != null && selection.isEmpty()) {
-            // Data-file targets never include DV-only filtering in their selection, so a file
-            // fully deleted by its DV still reaches applyDeletionVector below.
+            // With data-evolution.data-file-dv-pushdown.enabled, a fully deleted file whose
+            // deletions form one contiguous span yields an empty selection here. Otherwise
+            // data-file targets never include DV-only filtering, so a fully deleted file still
+            // reaches applyDeletionVector below.
             return new EmptyFileRecordReader<>();
         }
 
@@ -1567,11 +1580,26 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 }
             }
         }
+        RoaringBitmap32 dataFileSelection = selection;
+        if (selection == null
+                && deletionVector != null
+                && coreOptions.dataEvolutionDataFileDvPushdownEnabled()
+                && isParquetDataFile(file)) {
+            RoaringBitmap32 liveSelection =
+                    contiguousDeletionLiveSelection(
+                            file,
+                            deletionVector.deletionVector,
+                            deletionVector.range,
+                            DATA_FILE_DV_MIN_DELETED_RATIO);
+            if (liveSelection != null) {
+                dataFileSelection = liveSelection;
+            }
+        }
         return new FileReadTarget(
                 DataFilePathFactory.formatIdentifier(file.fileName()),
                 dataFilePathFactory.toPath(file),
                 file.fileSize(),
-                selection);
+                dataFileSelection);
     }
 
     @VisibleForTesting
@@ -1713,6 +1741,103 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     }
                 });
         return deleted;
+    }
+
+    /**
+     * Returns the live-row selection when the deletion vector's in-file positions form exactly one
+     * contiguous span covering at least {@code minDeletedRatio} of the file's rows, so the reader
+     * can skip that span. The deletion vector is still applied on top of the returned selection.
+     * Returns null when the deletions do not qualify (scattered, sparse, or misaligned), leaving
+     * the regular read-then-filter path in place. Returns null when no pushdown applies, but an
+     * empty bitmap (never null) when the whole file is deleted: null means "fall back", empty means
+     * "skip the file".
+     */
+    @Nullable
+    @VisibleForTesting
+    static RoaringBitmap32 contiguousDeletionLiveSelection(
+            DataFileMeta file,
+            @Nullable DeletionVector deletionVector,
+            @Nullable Range deletionVectorRange,
+            double minDeletedRatio) {
+        if (deletionVector == null || deletionVector.isEmpty()) {
+            return null;
+        }
+        long rowCount = file.rowCount();
+        if (rowCount <= 0 || rowCount > RoaringBitmap32.MAX_VALUE) {
+            return null;
+        }
+        long minDeletedRows = (long) Math.ceil(minDeletedRatio * (double) rowCount);
+        if (deletionVector.getCardinality() < minDeletedRows) {
+            // O(1) pre-check: too few deletions to ever qualify, skip the scan entirely.
+            return null;
+        }
+        long rangeStart =
+                deletionVectorRange == null ? file.nonNullFirstRowId() : deletionVectorRange.from;
+        if (file.nonNullFirstRowId() - rangeStart != 0) {
+            // Deletion positions are not file-local (a non-anchor file of a merged group).
+            return null;
+        }
+        if (deletionVector instanceof BitmapDeletionVector) {
+            // Fast path: when the whole bitmap lies inside this file, its first/last positions
+            // and cardinality decide contiguity without visiting every deleted position.
+            // Bitmap64DeletionVector exposes no range summary, so it keeps the scan below.
+            RoaringBitmap32 deleted = ((BitmapDeletionVector) deletionVector).get();
+            if (deleted.last() < rowCount) {
+                return contiguousSpanSelection(
+                        deleted.getCardinality(),
+                        deleted.first(),
+                        deleted.last(),
+                        rowCount,
+                        minDeletedRows);
+            }
+        }
+        long[] stats = {0L, Long.MAX_VALUE, Long.MIN_VALUE}; // count, min position, max position
+        deletionVector.forEachDeletedPosition(
+                position -> {
+                    if (position >= 0 && position < rowCount) {
+                        stats[0]++;
+                        if (position < stats[1]) {
+                            stats[1] = position;
+                        }
+                        if (position > stats[2]) {
+                            stats[2] = position;
+                        }
+                    }
+                });
+        return contiguousSpanSelection(stats[0], stats[1], stats[2], rowCount, minDeletedRows);
+    }
+
+    private static RoaringBitmap32 contiguousSpanSelection(
+            long deletedCount, long min, long max, long rowCount, long minDeletedRows) {
+        if (deletedCount == 0 || deletedCount < minDeletedRows) {
+            return null;
+        }
+        if (deletedCount != max - min + 1) {
+            // Holes inside the span would drop live rows if the span were skipped. This proves
+            // absence of holes only because deletion positions are distinct — both DeletionVector
+            // implementations are backed by bitmaps; a non-distinct implementation would need a
+            // different check.
+            return null;
+        }
+        if (min == 0 && max == rowCount - 1) {
+            return new RoaringBitmap32();
+        }
+        if (min == 0) {
+            return RoaringBitmap32.bitmapOfRange(max + 1L, rowCount);
+        }
+        if (max == rowCount - 1) {
+            return RoaringBitmap32.bitmapOfRange(0L, min);
+        }
+        return RoaringBitmap32.or(
+                RoaringBitmap32.bitmapOfRange(0L, min),
+                RoaringBitmap32.bitmapOfRange(max + 1L, rowCount));
+    }
+
+    private static boolean isParquetDataFile(DataFileMeta file) {
+        String fileName = file.fileName();
+        return !isBlobFile(fileName)
+                && !isVectorStoreFile(fileName)
+                && "parquet".equals(DataFilePathFactory.formatIdentifier(fileName));
     }
 
     private static boolean isRowSidecarFile(String fileName) {

@@ -215,3 +215,31 @@ def test_other_structured_readers_use_block_cache(tmp_path, file_format):
         assert cold_opens > 0
         assert read() == [1, 2, 3]
         assert opens.call_count == cold_opens
+
+
+@pytest.mark.parametrize('first,second', [('64 b', '256 b'), ('256 b', '64 b')])
+def test_block_size_change_reuses_disk_cache_dir_safely(tmp_path, first, second):
+    # A disk cache directory survives the process, so a catalog that reopens it
+    # with a retuned local-cache.block-size must still read the table correctly.
+    path = tmp_path / 'data.parquet'
+    expected = list(range(1, 501))
+    pq.write_table(pa.table({'v': pa.array(expected, type=pa.int32())}),
+                   path, row_group_size=100)
+    cache_dir = str(tmp_path / 'cache')
+
+    def read_with(block_size):
+        opts = Options({'local-cache.enabled': 'true',
+                        'local-cache.dir': cache_dir,
+                        'local-cache.block-size': block_size,
+                        'local-cache.whitelist': 'structured-data'})
+        delegate = LocalFileIO(catalog_options=opts)
+        file_io = CachingFileIO.wrap_with_caching_if_needed(
+            delegate, opts, CachingFileIO.create_cache_manager(opts))
+        _reset_file_format_dataset_cache()
+        return _read(file_io, path.as_uri(), 'parquet', None)
+
+    try:
+        assert read_with(first) == expected
+        assert read_with(second) == expected
+    finally:
+        _reset_file_format_dataset_cache()

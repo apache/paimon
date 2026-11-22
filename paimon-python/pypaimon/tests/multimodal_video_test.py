@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
+from parameterized import parameterized
+
 from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
@@ -207,6 +209,221 @@ class VideoFrameCollatorTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_parallel_direct_calls_preserve_order_and_bound_cache(self):
+        import threading
+
+        barrier = threading.Barrier(2)
+        calls = {}
+        decoders = []
+
+        def factory(stream):
+            decoder = _Decoder(stream, [])
+            decoders.append(decoder)
+            return decoder
+
+        def decode_batch(decoder, indices, rows):
+            barrier.wait(timeout=5)
+            self.assertFalse(decoder.closed)
+            calls[rows[0]["video_id"]] = list(indices)
+            return [decoder.decode(index) for index in indices]
+
+        rows = [{"video_id": name, "video": self._descriptor(name, name.encode(), index)}
+                for name, index in (("a", 2), ("b", 1), ("a", 0), ("c", 3), ("d", 0))]
+        rows.insert(1, {"video_id": "null", "video": None})
+        collator = VideoFrameCollator(
+            self.table, video_column="video", decoder_factory=factory,
+            decode_batch_fn=decode_batch, collate_fn=list,
+            max_open_videos=2, decode_parallelism=4)
+        try:
+            result = collator(rows)
+            self.assertEqual([row["video_id"] for row in rows],
+                             [row["video_id"] for row in result])
+            self.assertEqual([(b"a", 2), None, (b"b", 1), (b"a", 0), (b"c", 3), (b"d", 0)],
+                             [row["frame"] for row in result])
+            self.assertEqual({"a": [0, 2], "b": [1], "c": [3], "d": [0]}, calls)
+            self.assertEqual(2, sum(not decoder.closed for decoder in decoders))
+            executor = collator._decode_pool._executor
+        finally:
+            collator.close()
+        self.assertTrue(executor._shutdown)
+        self.assertTrue(all(decoder.closed for decoder in decoders))
+
+    def test_parallel_direct_callbacks_preserve_context(self):
+        try:
+            from contextvars import ContextVar
+        except ImportError:
+            self.skipTest("contextvars requires Python 3.7+")
+        import threading
+
+        marker = ContextVar("decode_marker", default="default")
+        token = marker.set("caller")
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        try:
+            for batch in (False, True):
+                barrier = threading.Barrier(2)
+
+                def decode(decoder, index, row):
+                    barrier.wait(timeout=5)
+                    return marker.get()
+
+                def decode_batch(decoder, indices, group):
+                    barrier.wait(timeout=5)
+                    return [marker.get()] * len(indices)
+
+                callback = ({"decode_batch_fn": decode_batch} if batch
+                            else {"decode_fn": decode})
+                collator = VideoFrameCollator(
+                    self.table, video_column="video", collate_fn=list,
+                    decoder_factory=lambda stream: _Decoder(stream, []),
+                    decode_parallelism=2, **callback)
+                try:
+                    self.assertEqual(["caller", "caller"],
+                                     [row["frame"] for row in collator(rows)])
+                finally:
+                    collator.close()
+        finally:
+            marker.reset(token)
+
+    def test_parallel_direct_callbacks_preserve_torch_mode(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: (
+                torch.is_grad_enabled(), torch.is_inference_mode_enabled()),
+            decode_parallelism=2)
+        try:
+            for mode, expected in ((torch.no_grad(), (False, False)),
+                                   (torch.inference_mode(), (False, True))):
+                with mode:
+                    self.assertEqual([expected, expected],
+                                     [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
+    def test_parallel_direct_callbacks_accept_legacy_torch_device(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from unittest.mock import patch
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: index,
+            decode_parallelism=2)
+        try:
+            # Torch 1.13 has torch.device(...) but no __enter__/__exit__.
+            with patch.object(torch, "device", side_effect=lambda device: object()):
+                self.assertEqual([0], [row["frame"] for row in collator(rows[:1])])
+                self.assertEqual([0, 1], [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
+    def test_parallel_direct_callbacks_preserve_torch_device_and_autocast(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(2)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: torch.empty(1).device.type,
+            decode_parallelism=2)
+        try:
+            with torch.device("meta"):
+                inline = collator(rows[:1])[0]["frame"]
+                parallel = [row["frame"] for row in collator(rows)]
+            self.assertEqual([inline, inline], parallel)
+            self.assertEqual("meta", inline)
+
+            collator.decode_fn = lambda decoder, index, row: torch.mm(
+                torch.ones((2, 2)), torch.ones((2, 2))).dtype
+            with torch.device("cpu"), torch.autocast("cpu", dtype=torch.bfloat16):
+                inline = collator(rows[:1])[0]["frame"]
+                parallel = [row["frame"] for row in collator(rows)]
+            self.assertEqual([inline, inline], parallel)
+            self.assertEqual(torch.bfloat16, inline)
+        finally:
+            collator.close()
+
+    def test_direct_pool_survives_variable_video_counts(self):
+        rows = [{"video": self._descriptor(str(i), b"video", i)} for i in range(4)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            max_open_videos=4, decode_parallelism=4)
+        try:
+            collator(rows)
+            executor = collator._decode_pool._executor
+            self.assertIsNotNone(executor)
+            collator(rows[:1])
+            self.assertIs(executor, collator._decode_pool._executor)
+            self.assertFalse(executor._shutdown)
+            collator(rows)
+            self.assertIs(executor, collator._decode_pool._executor)
+        finally:
+            collator.close()
+
+    def test_parallel_direct_callback_failure_drains_before_reuse(self):
+        import threading
+
+        barrier = threading.Barrier(2)
+        finished = threading.Event()
+
+        def decode(decoder, index, row):
+            barrier.wait(timeout=5)
+            if index == 0:
+                raise ValueError("decode failed")
+            self.assertFalse(decoder.closed)
+            finished.set()
+            return decoder.decode(index)
+
+        rows = [{"video": self._descriptor(str(index), b"video", index)}
+                for index in (0, 1)]
+        collator = VideoFrameCollator(
+            self.table, video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=decode, collate_fn=list, decode_parallelism=2)
+        try:
+            with self.assertRaisesRegex(ValueError, "decode failed"):
+                collator(rows)
+            self.assertTrue(finished.is_set())
+            collator.decode_fn = lambda decoder, index, row: decoder.decode(index)
+            self.assertEqual([(b"video", 0), (b"video", 1)],
+                             [row["frame"] for row in collator(rows)])
+        finally:
+            collator.close()
+
+    def test_direct_parallelism_validation_and_serial_default(self):
+        import threading
+
+        options = dict(table=self.table, video_column="video",
+                       decoder_factory=lambda stream: _Decoder(stream, []),
+                       decode_fn=lambda decoder, index, row: threading.get_ident(),
+                       collate_fn=list)
+        for value in (0, -1, True, 1.5, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "decode_parallelism"):
+                VideoFrameCollator(**options, decode_parallelism=value)
+        collator = VideoFrameCollator(**options)
+        try:
+            self.assertEqual([], collator([]))
+            row = {"video": self._descriptor("serial", b"video", 0)}
+            self.assertEqual(threading.get_ident(), collator(row)["frame"])
+            self.assertIsNone(collator._decode_pool._executor)
+        finally:
+            collator.close()
+
     def test_accepts_batch_callback_without_single_frame_callback(self):
         descriptors = [
             self._descriptor("episode.mp4", b"video", index)
@@ -389,7 +606,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         def row(request, offset, length, index):
             return {"request": request, "video": VideoFrameDescriptor(
-                path, offset, length, index, -1, 0).serialize()}
+                path, offset, length, index).serialize()}
 
         collator = VideoFrameCollator(
             self.table,
@@ -548,7 +765,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
         file_io = ResolvedFileIO()
         table = SimpleNamespace(raw_table=SimpleNamespace(file_io=file_io))
         descriptor = VideoFrameDescriptor(
-            "oss://bucket/internal.video", 0, 14, 2, -1, 0
+            "oss://bucket/internal.video", 0, 14, 2
         ).serialize()
         collator = VideoFrameCollator(
             table,
@@ -565,12 +782,259 @@ class VideoFrameCollatorTest(unittest.TestCase):
         self.assertEqual("oss://bucket/internal.video", file_io.path)
         self.assertEqual((b"resolved-video", 2), result[0]["frame"])
 
+    @parameterized.expand([0, 5])
+    def test_unused_index_is_not_read_on_decode_eviction_or_close(self, prefetch_max_bytes):
+        streams = []
+
+        class PayloadOnlyIO:
+            def new_input_stream(self, path):
+                stream = io.BytesIO(b"video")
+                streams.append(stream)
+                return stream
+
+            def read_file_range(self, *args):
+                raise AssertionError("unused index must not be read")
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=PayloadOnlyIO()), video_column="video",
+            decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            max_open_videos=1, collate_fn=lambda rows: rows,
+            prefetch_max_bytes=prefetch_max_bytes)
+        try:
+            for name in ("first", "second"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 2)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 2), result[0]["frame"])
+            self.assertTrue(streams[0].closed)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_prefetch_bounds_retained_payloads_and_reuses_reads(self):
+        reads = []
+        opened = []
+
+        class Source(io.BytesIO):
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(size)
+
+        class CountingIO:
+            def new_input_stream(self, path):
+                stream = Source(b"video")
+                opened.append(stream)
+                return stream
+
+        decoders = []
+
+        def factory(stream):
+            decoder = _Decoder(stream, [])
+            decoders.append(decoder)
+            return decoder
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=CountingIO()), video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5)
+        first = VideoFrameDescriptor("first", 0, 5, 0, 0, 0).serialize()
+        second = VideoFrameDescriptor("second", 0, 5, 0, 0, 0).serialize()
+        try:
+            for _ in range(2):
+                result = collator([{"video": first}])
+                self.assertEqual((b"video", 0), result[0]["frame"])
+            self.assertEqual([5], reads)
+            self.assertFalse(opened[0].closed)
+            self.assertEqual([b"id", b"o"],
+                             decoders[0]._stream.video_read_ranges([(1, 2), (4, 1)]))
+            self.assertEqual([5], reads)
+            collator([{"video": second}])
+            self.assertEqual(0, getattr(decoders[1]._stream, "video_prefetch_bytes", 0))
+            self.assertFalse(opened[1].closed)
+            self.assertEqual(5, sum(getattr(stream, "video_prefetch_bytes", 0)
+                                    for _, stream in collator._decoders.values()))
+            collator.close()
+            collator([{"video": second}])
+            self.assertEqual(5, decoders[-1]._stream.video_prefetch_bytes)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for stream in opened))
+
+    def test_disabled_or_oversized_prefetch_keeps_range_reads(self):
+        for budget in (0, 4):
+            with self.subTest(budget=budget):
+                source = io.BytesIO(b"video")
+                captured = []
+
+                def factory(stream):
+                    self.assertEqual(0, source.tell())
+                    captured.append(stream)
+                    return _Decoder(stream, [])
+
+                collator = VideoFrameCollator(
+                    SimpleNamespace(file_io=SimpleNamespace(
+                        new_input_stream=lambda path: source)),
+                    video_column="video", decoder_factory=factory,
+                    decode_fn=lambda decoder, index, row: decoder.decode(index),
+                    collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
+                try:
+                    descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
+                    result = collator([{"video": descriptor.serialize()}])
+                    self.assertEqual((b"video", 0), result[0]["frame"])
+                    self.assertEqual(0, getattr(captured[0], "video_prefetch_bytes", 0))
+                finally:
+                    collator.close()
+
+    def test_prefetch_rejects_truncated_payload_and_closes_source(self):
+        source = io.BytesIO(b"short")
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
+            video_column="video", decoder_factory=lambda stream: self.fail("truncated"),
+            decode_fn=lambda *args: None, prefetch_max_bytes=10)
+        descriptor = VideoFrameDescriptor("video", 0, 10, 0, 0, 0)
+        with self.assertRaisesRegex(IOError, "Incomplete video"):
+            collator([{"video": descriptor.serialize()}])
+        self.assertTrue(source.closed)
+        self.assertFalse(collator._decoders)
+        collator.close()
+
+    def test_prefetch_accepts_short_reads(self):
+        reads = []
+
+        class Source(io.BytesIO):
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(min(size, 2))
+
+        source = Source(b"video")
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=lambda path: source)),
+            video_column="video", decoder_factory=lambda stream: _Decoder(stream, []),
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5)
+        try:
+            descriptor = VideoFrameDescriptor("video", 0, 5, 0, 0, 0)
+            result = collator([{"video": descriptor.serialize()}])
+            self.assertEqual((b"video", 0), result[0]["frame"])
+            self.assertEqual([5, 3, 1], reads)
+        finally:
+            collator.close()
+        self.assertTrue(source.closed)
+
+    def test_prefetch_reuses_evicted_decoder_budget(self):
+        opened = []
+        buffered = []
+
+        def open_source(path):
+            source = io.BytesIO(b"video")
+            opened.append(source)
+            return source
+
+        def factory(stream):
+            buffered.append(getattr(stream, "video_prefetch_bytes", 0))
+            self.assertTrue(all(source.closed for source in opened[:-1]))
+            return _Decoder(stream, [])
+
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=SimpleNamespace(new_input_stream=open_source)),
+            video_column="video", decoder_factory=factory,
+            decode_fn=lambda decoder, index, row: decoder.decode(index),
+            collate_fn=lambda rows: rows, prefetch_max_bytes=5, max_open_videos=1)
+        try:
+            for name in ("first", "second", "third"):
+                descriptor = VideoFrameDescriptor(name, 0, 5, 0, 0, 0)
+                result = collator([{"video": descriptor.serialize()}])
+                self.assertEqual((b"video", 0), result[0]["frame"])
+                self.assertEqual(1, len(collator._decoders))
+            self.assertEqual([5, 5, 5], buffered)
+        finally:
+            collator.close()
+        self.assertTrue(all(source.closed for source in opened))
+
+    def test_invalid_prefetch_budget(self):
+        for budget in (-1, True, 1.5, "10"):
+            with self.subTest(budget=budget):
+                with self.assertRaisesRegex(ValueError, "prefetch_max_bytes"):
+                    VideoFrameCollator(
+                        self.table, video_column="video", decoder_factory=lambda stream: None,
+                        decode_fn=lambda *args: None, prefetch_max_bytes=budget)
+
+    def test_prefetch_preserves_real_indexed_video_frames(self):
+        try:
+            import av
+            import numpy as np
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+
+        target = io.BytesIO()
+        with av.open(target, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width = stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.codec_context.gop_size = 4
+            for value in range(12):
+                pixels = np.full((16, 16, 3), value * 15, dtype=np.uint8)
+                for packet in stream.encode(av.VideoFrame.from_ndarray(pixels, format="rgb24")):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = target.getvalue()
+        from pypaimon.common.mp4_moov import MoovLocator
+        locator = MoovLocator()
+        locator.feed(payload)
+        moov_offset, moov_length = locator.finish()
+        full_file = payload
+        outputs = []
+        for budget in (0, len(payload)):
+            reads = []
+
+            class Source(io.BytesIO):
+                def read(self, size=-1):
+                    reads.append((self.tell(), size))
+                    return super().read(size)
+
+            class CountingIO:
+                def new_input_stream(self, path):
+                    return Source(full_file)
+
+                def read_file_range(self, path, offset, size):
+                    reads.append((offset, size))
+                    return full_file[offset:offset + size]
+
+                def read_ranges_coalesced(self, ranges, parallelism):
+                    return [self.read_file_range(*entry) for entry in ranges]
+
+            collator = VideoFrameCollator(
+                SimpleNamespace(file_io=CountingIO()), video_column="video",
+                decoder_factory=lambda source: _open_video_decoder(source, backend="pyav"),
+                decode_batch_fn=lambda decoder, indices, rows: list(
+                    decoder.get_frames_at(indices=indices).data),
+                collate_fn=lambda rows: rows, prefetch_max_bytes=budget)
+            try:
+                rows = [{"video": VideoFrameDescriptor(
+                    "video", 0, len(payload), frame, moov_offset, moov_length
+                ).serialize()} for frame in (9, 1, 9, 7)]
+                outputs.append(torch.stack([row["frame"] for row in collator(rows)]))
+                if budget:
+                    media_reads = [entry for entry in reads if entry[0] < len(payload)]
+                    self.assertEqual([(0, len(payload))], media_reads)
+                    count = len(reads)
+                    repeated = torch.stack([row["frame"] for row in collator(rows)])
+                    self.assertTrue(torch.equal(outputs[-1], repeated))
+                    self.assertEqual(count, len(reads))
+            finally:
+                collator.close()
+        self.assertTrue(torch.equal(outputs[0], outputs[1]))
+
     def _descriptor(self, name, data, frame_index):
         path = os.path.join(self.temp_dir.name, name)
         with open(path, "wb") as output:
             output.write(data)
         return VideoFrameDescriptor(
-            path, 0, len(data), frame_index, -1, 0
+            path, 0, len(data), frame_index
         ).serialize()
 
 

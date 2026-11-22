@@ -94,7 +94,7 @@ class GlobalIndexVisibilityChecker {
                 indexedRangesByPartition
                         .computeIfAbsent(entry.partition().copy(), k -> new HashMap<>())
                         .computeIfAbsent(identifier, k -> new ArrayList<>())
-                        .add(globalIndex.rowRange());
+                        .add(entry.indexFile().globalIndexMeta().rowRange());
             }
         }
 

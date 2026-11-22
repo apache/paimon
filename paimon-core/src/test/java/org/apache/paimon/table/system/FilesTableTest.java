@@ -31,10 +31,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -245,6 +247,21 @@ public class FilesTableTest extends TableTestBase {
                         builder.equal(0, BinaryString.fromString("{1, 10}")),
                         builder.equal(4, 999L));
         assertThat(readPartBucketLevel(combinedMiss)).isEmpty();
+    }
+
+    @Test
+    public void testReadWithPartitionTransformFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+        DataField partitionField = FilesTable.TABLE_TYPE.getFields().get(0);
+        UpperTransform upperPartition =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new FieldRef(0, partitionField.name(), partitionField.type())));
+
+        assertThat(
+                        readPartBucketLevel(
+                                builder.equal(upperPartition, BinaryString.fromString("{2, 20}"))))
+                .containsExactlyInAnyOrder("{2, 20}-0-0", "{2, 20}-0-0");
     }
 
     @Test

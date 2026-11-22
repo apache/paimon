@@ -81,3 +81,11 @@ class GlobalIndexIOMeta:
 
     def __hash__(self) -> int:
         return hash((self.file_name, self.file_size, self.external_path))
+
+
+def range_vector_index_file(io_metas: List[GlobalIndexIOMeta]) -> GlobalIndexIOMeta:
+    # Paimon Core prefixes routed manifest metadata with this layout marker.
+    if any(meta.metadata and meta.metadata.startswith(b"PAIMCENT") for meta in io_metas):
+        raise NotImplementedError("Centroid-sharded vector indexes require the Java reader.")
+    assert len(io_metas) == 1, "Expected exactly one index file per shard"
+    return io_metas[0]

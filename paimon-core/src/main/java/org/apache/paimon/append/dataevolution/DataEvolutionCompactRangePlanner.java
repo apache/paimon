@@ -143,7 +143,7 @@ final class DataEvolutionCompactRangePlanner {
         return new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
     }
 
-    Iterator<RangeBatch> plan(List<ManifestFileMeta> manifestFileMetas) {
+    RangeBatchIterator plan(List<ManifestFileMeta> manifestFileMetas) {
         return new RangeBatchIterator(groupManifestFiles(manifestFileMetas));
     }
 
@@ -433,7 +433,7 @@ final class DataEvolutionCompactRangePlanner {
         }
     }
 
-    private final class RangeBatchIterator implements Iterator<RangeBatch> {
+    final class RangeBatchIterator implements Iterator<RangeBatch> {
 
         private final Queue<List<ManifestFileMeta>> manifestGroups;
         private Queue<RangeBatch> currentGroupBatches = new ArrayDeque<>();
@@ -441,6 +441,11 @@ final class DataEvolutionCompactRangePlanner {
 
         private RangeBatchIterator(Queue<List<ManifestFileMeta>> manifestGroups) {
             this.manifestGroups = manifestGroups;
+        }
+
+        /** Returns the known completion state without scanning unvisited manifest groups. */
+        boolean isScanFinished() {
+            return pending == null && currentGroupBatches.isEmpty() && manifestGroups.isEmpty();
         }
 
         @Override

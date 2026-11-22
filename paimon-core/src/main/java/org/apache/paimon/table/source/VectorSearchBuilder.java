@@ -43,6 +43,12 @@ public interface VectorSearchBuilder extends Serializable {
     /** The vector to search. */
     VectorSearchBuilder withVector(float[] vector);
 
+    /** Rank each multivector row once using the sum of its best cosine matches. */
+    default VectorSearchBuilder withMultiVector(float[][] vectors) {
+        throw new UnsupportedOperationException(
+                "Multivector queries are not supported by this builder.");
+    }
+
     /** Option for vector indexes. */
     default VectorSearchBuilder withOption(String key, String value) {
         throw new UnsupportedOperationException(

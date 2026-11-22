@@ -26,10 +26,14 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference,
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.trees.TreeNodeTag
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
 object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with ExpressionHelper {
+
+  private val ALIGNED = TreeNodeTag[Boolean]("paimon.update.aligned")
 
   override val operation: RowLevelOp = Update
 
@@ -38,7 +42,8 @@ object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with Expr
     // short-circuit. Use `transformDown` under `allowInvokingTransformsInAnalyzer` instead.
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
-        case u @ UpdateTable(PaimonRelation(table), assignments, condition) if u.resolved =>
+        case u @ UpdateTable(PaimonRelation(table), assignments, condition)
+            if u.resolved && !u.getTagValue(ALIGNED).contains(true) =>
           checkPaimonTable(table.getTable)
 
           table.getTable match {
@@ -91,7 +96,14 @@ object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with Expr
                   throw new RuntimeException(
                     "Update operation is not supported when data evolution is enabled yet.")
                 }
-                alignedUpdateTable
+                // Metadata columns can already be in the table output when the condition uses
+                // them. Honor Spark's update policy instead of preserving their old values.
+                val v2UpdateTable = alignedUpdateTable.copy(
+                  assignments = SparkShimLoader.shim.resolveUpdateMetadata(alignedAssignments))
+                // Spark re-applies post-hoc rules to check idempotence before the V2 rewrite.
+                // Avoid rebuilding struct values and metadata assignments on that second pass.
+                v2UpdateTable.setTagValue(ALIGNED, true)
+                v2UpdateTable
               } else {
                 if (dataEvolutionEnabled) {
                   UpdatePaimonDataEvolutionTableCommand(

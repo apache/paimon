@@ -15,68 +15,56 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import logging
+from bisect import bisect_right
 
 from pypaimon.common.json_util import JSON
 
-logger = logging.getLogger(__name__)
-
 
 class RollbackHelper:
-    """Helper class for table rollback including utils to clean snapshots.
-    """
+    """Clean filesystem metadata during table rollback."""
 
-    def __init__(self, snapshot_manager, tag_manager, file_io):
-        """Initialize RollbackHelper.
-
-        Args:
-            snapshot_manager: The SnapshotManager instance.
-            tag_manager: The TagManager instance.
-            file_io: The FileIO instance for file operations.
-        """
+    def __init__(self, snapshot_manager, changelog_manager, tag_manager, file_io):
         self._snapshot_manager = snapshot_manager
+        self._changelog_manager = changelog_manager
         self._tag_manager = tag_manager
         self._file_io = file_io
 
     def clean_larger_than(self, retained_snapshot):
-        """Clean snapshots and tags whose id is larger than the retained snapshot.
-
-        Updates the LATEST hint and removes snapshot files and tag files
-        for snapshots newer than the retained one.
-
-        Args:
-            retained_snapshot: The snapshot to retain; everything newer is removed.
-        """
-        latest = self._snapshot_manager.get_latest_snapshot()
-        if latest is None:
-            return
-
-        latest_id = latest.id
+        """Remove snapshot, long-lived changelog, and tag files above the target ID."""
         retained_id = retained_snapshot.id
+        self._clean_snapshots(retained_id)
+        self._clean_long_lived_changelogs(retained_id)
+        self._clean_tags(retained_id)
 
-        # Update LATEST hint
-        try:
-            # Try atomic write first
-            success = self._file_io.try_to_write_atomic(self._snapshot_manager.latest_file, str(retained_id))
-            if not success:
-                # Fallback to regular write
-                self._file_io.write_file(self._snapshot_manager.latest_file, str(retained_id), overwrite=True)
-        except Exception as e:
-            logger.warning("Failed to update LATEST hint: %s", e)
+    def _clean_snapshots(self, retained_id):
+        manager = self._snapshot_manager
+        # A previous attempt can leave LATEST at the target while newer files
+        # still exist. List actual IDs so a gap cannot hide those files.
+        snapshot_ids = manager.list_snapshot_ids()
+        self._file_io.overwrite_file_utf8(manager.latest_file, str(retained_id))
+        for snapshot_id in reversed(snapshot_ids):
+            if snapshot_id <= retained_id:
+                break
+            path = manager.get_snapshot_path(snapshot_id)
+            if not self._file_io.delete(path) and self._file_io.exists(path):
+                raise OSError(f"Failed to delete snapshot file {path}")
 
-        # Delete snapshot files larger than retained
-        for snapshot_id in range(retained_id + 1, latest_id + 1):
-            snapshot_path = self._snapshot_manager.get_snapshot_path(snapshot_id)
-            if self._file_io.exists(snapshot_path):
-                self._file_io.delete(snapshot_path)
+    def _clean_long_lived_changelogs(self, retained_id):
+        manager = self._changelog_manager
+        changelog_ids = manager.list_changelog_ids()
+        first_removed = bisect_right(changelog_ids, retained_id)
+        if first_removed == len(changelog_ids):
+            return
+        latest = changelog_ids[first_removed - 1] if first_removed else -1
+        manager.commit_long_lived_changelog_latest_hint(latest)
+        for changelog_id in reversed(changelog_ids[first_removed:]):
+            self._file_io.delete_quietly(manager.long_lived_changelog_path(changelog_id))
 
-        # Clean tags whose snapshot id is larger than retained
+    def _clean_tags(self, retained_id):
         for tag_name in self._tag_manager.list_tags():
             tag = self._tag_manager.get(tag_name)
-            if tag is not None:
-                tag_snapshot = tag.trim_to_snapshot()
-                if tag_snapshot.id > retained_id:
-                    self._tag_manager.delete_tag(tag_name)
+            if tag is not None and tag.id > retained_id:
+                self._file_io.delete_quietly(self._tag_manager.tag_path(tag_name))
 
     def create_snapshot_file_if_needed(self, tagged_snapshot):
         """Create a snapshot file from a tag if the snapshot file doesn't exist.
@@ -89,5 +77,9 @@ class RollbackHelper:
         """
         snapshot_path = self._snapshot_manager.get_snapshot_path(tagged_snapshot.id)
         if not self._file_io.exists(snapshot_path):
+            # Update EARLIEST before creating the file so a failed hint write
+            # leaves the missing snapshot available to restore on retry.
+            earliest_file = f"{self._snapshot_manager.snapshot_dir}/EARLIEST"
+            self._file_io.overwrite_file_utf8(earliest_file, str(tagged_snapshot.id))
             self._file_io.write_file(
                 snapshot_path, JSON.to_json(tagged_snapshot), overwrite=False)

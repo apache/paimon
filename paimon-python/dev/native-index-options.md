@@ -30,6 +30,12 @@ strings, and collections to JSON. A None table option represents an unset value.
 Python preserves effective authorization and write-policy values at the generic
 table boundary.
 
+Global-index builds retain schema defaults separately from explicit build options,
+so an alias in the build request can override a different alias in the schema.
+A None build value removes that schema default. Typed build parallelism retains
+Python's integer conversion before crossing the string-only ABI; other index
+parameters are interpreted in Rust.
+
 ## Resolution contract
 
 * The shared resolver returns the selected implementation together with its

@@ -22,6 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.errors.ErrorMessages;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -33,6 +35,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -63,6 +66,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Conflict detection for Data Evolution tables. */
@@ -275,6 +279,59 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         return Collections.emptyList();
     }
 
+    @Override
+    public void checkRetainedGlobalIndexes(
+            Snapshot snapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (commitKind == CommitKind.COMPACT || snapshot.indexManifest() == null) {
+            return;
+        }
+        Map<BinaryRow, List<DataFileMeta>> updates = new HashMap<>();
+        for (ManifestEntry change : deltaFiles) {
+            if (change.kind() == FileKind.ADD && change.file().firstRowId() != null) {
+                updates.computeIfAbsent(change.partition(), ignored -> new ArrayList<>())
+                        .add(change.file());
+            }
+        }
+        if (updates.isEmpty()) {
+            return;
+        }
+        Set<String> deletedIndexes =
+                indexFiles.stream()
+                        .filter(entry -> entry.kind() == FileKind.DELETE)
+                        .map(entry -> entry.indexFile().fileName())
+                        .collect(Collectors.toSet());
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        for (IndexManifestEntry index : indexFileHandler.readManifest(snapshot.indexManifest())) {
+            IndexFileMeta file = index.indexFile();
+            GlobalIndexMeta meta = file.globalIndexMeta();
+            List<DataFileMeta> partitionUpdates = updates.get(index.partition());
+            if (partitionUpdates == null
+                    || meta == null
+                    || !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                    || !CentroidIndexMeta.isRoutingModel(meta.indexMeta())
+                    || deletedIndexes.contains(file.fileName())) {
+                continue;
+            }
+            for (DataFileMeta update : partitionUpdates) {
+                Range changed = update.nonNullRowIdRange();
+                if (changed.to < meta.rowRangeStart() || changed.from > meta.rowRangeEnd()) {
+                    continue;
+                }
+                TableSchema schema =
+                        schemas.computeIfAbsent(update.schemaId(), commitScanner()::schema);
+                if (!Collections.disjoint(
+                        meta.getIndexedFieldIds(), fileFieldIds(schema, update))) {
+                    throw new IllegalStateException(
+                            "Update affects an active centroid index with Bitmap fields. "
+                                    + "Drop the index or use DROP_PARTITION_INDEX before updating.");
+                }
+            }
+        }
+    }
+
     private List<SimpleFileEntry> scanChangedRowRanges(
             Snapshot latestSnapshot,
             List<BinaryRow> changedPartitions,
@@ -366,6 +423,11 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return exception;
         }
 
+        exception = checkCentroidSourceChanges(latestSnapshot, deltaIndexEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
         return checkForRowIdFromSnapshot(
                 latestSnapshot, deltaEntries, deltaIndexEntries, rowIdConflictChecker);
     }
@@ -412,7 +474,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                                         + "have encountered conflicts, data files: "
                                         + dataFileGroup.stream()
                                                 .map(this::fileEntryToString)
-                                                .collect(Collectors.toList())));
+                                                .collect(Collectors.toList()),
+                                dataFileGroup.stream()
+                                        .map(FileEntry::identifier)
+                                        .collect(Collectors.toList())));
             }
         }
         return Optional.empty();
@@ -613,9 +678,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         for (IndexManifestEntry indexEntry : indexesToCheck) {
             GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
             checkState(globalIndex != null, "Global index meta must not be null.");
-            Range indexRange = globalIndex.rowRange();
             RowRangeIndex rowRangeIndex =
                     rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
+            Range indexRange = globalIndex.rowRange();
             if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
                 return Optional.of(
                         new RuntimeException(
@@ -626,6 +691,87 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                                                 + "files. The referenced row IDs may have been "
                                                 + "reassigned or removed by a concurrent commit.",
                                         indexEntry.indexFile().fileName(), indexRange)));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkCentroidSourceChanges(
+            Snapshot latestSnapshot, List<IndexManifestEntry> indexEntries) {
+        Map<Long, List<IndexManifestEntry>> byBaseline = new HashMap<>();
+        long firstBaseline = latestSnapshot.id();
+        for (IndexManifestEntry index : indexEntries) {
+            IndexFileMeta file = index.indexFile();
+            if (index.kind() == FileKind.ADD
+                    && file.globalIndexMeta() != null
+                    && CentroidIndexMeta.isRoutingModel(file.globalIndexMeta().indexMeta())) {
+                long baseline =
+                        DataEvolutionIndexSourceMeta.fromIndexFile(index.indexFile())
+                                .scanSnapshotId();
+                byBaseline.computeIfAbsent(baseline, ignored -> new ArrayList<>()).add(index);
+                firstBaseline = Math.min(firstBaseline, baseline);
+            }
+        }
+
+        Map<BinaryRow, Map<Integer, RowRangeIndex>> active = new HashMap<>();
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIds = new HashMap<>();
+        for (long baseline = firstBaseline; baseline < latestSnapshot.id(); baseline++) {
+            List<IndexManifestEntry> starting = byBaseline.get(baseline);
+            if (starting != null) {
+                Map<Pair<BinaryRow, Integer>, List<Range>> additions = new HashMap<>();
+                for (IndexManifestEntry index : starting) {
+                    GlobalIndexMeta meta = index.indexFile().globalIndexMeta();
+                    for (int fieldId : meta.getIndexedFieldIds()) {
+                        additions
+                                .computeIfAbsent(
+                                        Pair.of(index.partition(), fieldId),
+                                        ignored -> new ArrayList<>())
+                                .add(meta.rowRange());
+                    }
+                }
+                additions.forEach(
+                        (key, ranges) -> {
+                            Map<Integer, RowRangeIndex> fields =
+                                    active.computeIfAbsent(
+                                            key.getLeft(), ignored -> new HashMap<>());
+                            RowRangeIndex existing = fields.get(key.getRight());
+                            if (existing != null) {
+                                ranges.addAll(existing.ranges());
+                            }
+                            fields.put(key.getRight(), RowRangeIndex.create(ranges));
+                        });
+            }
+            Snapshot snapshot = snapshotManager.snapshot(baseline + 1);
+            for (ManifestEntry change :
+                    commitScanner()
+                            .readIncrementalEntries(snapshot, new ArrayList<>(active.keySet()))) {
+                DataFileMeta file = change.file();
+                Map<Integer, RowRangeIndex> fields = active.get(change.partition());
+                if (fields == null || file.firstRowId() == null) {
+                    continue;
+                }
+                Range changed = file.nonNullRowIdRange();
+                for (Map.Entry<Integer, RowRangeIndex> field : fields.entrySet()) {
+                    if (!field.getValue().intersects(changed.from, changed.to)) {
+                        continue;
+                    }
+                    Set<Integer> written =
+                            fileFieldIds.computeIfAbsent(
+                                    Pair.of(file.schemaId(), file.writeCols()),
+                                    key ->
+                                            fileFieldIds(
+                                                    schemas.computeIfAbsent(
+                                                            key.getLeft(), commitScanner()::schema),
+                                                    file));
+                    if (written.contains(field.getKey())) {
+                        return Optional.of(
+                                new RuntimeException(
+                                        "Centroid index source rows changed in snapshot "
+                                                + snapshot.id()
+                                                + "; rebuild the index against the latest snapshot."));
+                    }
+                }
             }
         }
         return Optional.empty();

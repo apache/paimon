@@ -40,10 +40,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT cases for tag management actions. */
 public class TagActionITCase extends ActionITCaseBase {
 
+    protected void initReadWriteEnvironment() throws Exception {
+        init(warehouse);
+    }
+
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testCreateAndDeleteTag(String invoker) throws Exception {
-        init(warehouse);
+        initReadWriteEnvironment();
 
         RowType rowType =
                 RowType.of(
@@ -253,7 +257,7 @@ public class TagActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testRenameTag(String invoker) throws Exception {
-        init(warehouse);
+        initReadWriteEnvironment();
 
         RowType rowType =
                 RowType.of(
@@ -354,7 +358,7 @@ public class TagActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testCreateLatestTag(String invoker) throws Exception {
-        init(warehouse);
+        initReadWriteEnvironment();
 
         RowType rowType =
                 RowType.of(

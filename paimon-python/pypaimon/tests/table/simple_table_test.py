@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -578,12 +579,26 @@ class SimpleTableTest(unittest.TestCase):
         snapshot_mgr = table.snapshot_manager()
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
 
-        # Rollback to snapshot 3
+        changelog_mgr = table.changelog_manager()
+        for snapshot_id in (2, 5):
+            table.file_io.copy_file(snapshot_mgr.get_snapshot_path(snapshot_id),
+                                    changelog_mgr.long_lived_changelog_path(snapshot_id))
+        changelog_mgr.commit_long_lived_changelog_earliest_hint(2)
+        changelog_mgr.commit_long_lived_changelog_latest_hint(5)
+
+        # Retry a rollback after LATEST was advanced and a newer snapshot is missing.
+        table.file_io.overwrite_file_utf8(snapshot_mgr.latest_file, "3")
+        table.file_io.delete(snapshot_mgr.get_snapshot_path(4))
         table.rollback_to(3)
 
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
         self.assertIsNone(snapshot_mgr.get_snapshot_by_id(4))
         self.assertIsNone(snapshot_mgr.get_snapshot_by_id(5))
+        self.assertTrue(changelog_mgr.long_lived_changelog_exists(2))
+        self.assertFalse(changelog_mgr.long_lived_changelog_exists(5))
+        self.assertEqual(changelog_mgr.latest_long_lived_changelog_id(), 2)
+        self.assertEqual(table.file_io.read_file_utf8(
+            f"{changelog_mgr.changelog_directory()}/LATEST"), "2")
 
     def test_table_rollback_to_tag(self):
         """Test table-level rollback to a specific tag."""
@@ -618,14 +633,81 @@ class SimpleTableTest(unittest.TestCase):
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
 
         # Rollback to tag v3
-        table.rollback_to("v3")
+        with patch.object(type(tag_mgr), "delete_tag", side_effect=AssertionError(
+                "Rollback must delete tag files directly")):
+            table.rollback_to("v3")
 
         self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
         # Tags with snapshot > 3 should be cleaned
         self.assertFalse(tag_mgr.tag_exists("v4"))
         self.assertFalse(tag_mgr.tag_exists("v5"))
-        # Tag v3 should still exist
-        self.assertTrue(tag_mgr.tag_exists("v3"))
+        self.assertEqual(sorted(tag_mgr.list_tags()), ["v1", "v2", "v3"])
+
+    def test_table_rollback_to_tag_after_snapshot_expired(self):
+        """Rolling back to a tag whose snapshot expired must move EARLIEST back to it."""
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table('default.test_rollback_expired_tag', schema, False)
+        table = self.catalog.get_table('default.test_rollback_expired_tag')
+
+        def write(k):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            table_write.write_arrow(pa.Table.from_pydict(
+                {'pt': [1], 'k': [k], 'v': [k * 100]}, schema=self.pa_schema))
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        def read_k(options):
+            read_builder = table.copy(options).new_read_builder()
+            splits = read_builder.new_scan().plan().splits()
+            return sorted(read_builder.new_read().to_arrow(splits)['k'].to_pylist())
+
+        for k in range(1, 6):
+            write(k)
+        table.create_tag("v2", 2)
+
+        # Expire snapshots 1-4 the way snapshot expiration leaves the snapshot
+        # directory: their files are gone and EARLIEST points at snapshot 5.
+        # The tag keeps the metadata and data files of snapshot 2.
+        snapshot_mgr = table.snapshot_manager()
+        changelog_mgr = table.changelog_manager()
+        for snapshot_id in (3, 4):
+            table.file_io.copy_file(snapshot_mgr.get_snapshot_path(snapshot_id),
+                                    changelog_mgr.long_lived_changelog_path(snapshot_id))
+        changelog_mgr.commit_long_lived_changelog_earliest_hint(3)
+        for snapshot_id in range(1, 5):
+            table.file_io.delete(snapshot_mgr.get_snapshot_path(snapshot_id))
+        earliest_file = "{}/EARLIEST".format(snapshot_mgr.snapshot_dir)
+        table.file_io.overwrite_file_utf8(earliest_file, "5")
+
+        overwrite_hint = table.file_io.overwrite_file_utf8
+
+        def fail_earliest_hint(path, content):
+            if path == earliest_file:
+                raise OSError("EARLIEST write failed")
+            overwrite_hint(path, content)
+
+        with patch.object(table.file_io, "overwrite_file_utf8", side_effect=fail_earliest_hint):
+            with self.assertRaisesRegex(OSError, "EARLIEST write failed"):
+                table.rollback_to(2)
+
+        table.rollback_to("v2")
+        self.assertEqual(list(changelog_mgr.changelogs()), [])
+        self.assertIsNone(changelog_mgr.earliest_long_lived_changelog_id())
+        self.assertIsNone(changelog_mgr.latest_long_lived_changelog_id())
+        self.assertEqual(table.file_io.read_file_utf8(
+            f"{changelog_mgr.changelog_directory()}/LATEST"), "-1")
+        for k in range(6, 9):
+            write(k)
+
+        s2, s3, s5 = (snapshot_mgr.get_snapshot_by_id(i).time_millis for i in (2, 3, 5))
+        self.assertEqual(
+            read_k({'incremental-between-timestamp': '{},{}'.format(s2, s5)}), [6, 7, 8])
+        self.assertEqual(read_k({'scan.timestamp-millis': str(s3)}), [1, 2, 6])
+        self.assertEqual(table.file_io.read_file_utf8(earliest_file).strip(), "2")
+        self.assertEqual(snapshot_mgr.try_get_earliest_snapshot().id, 2)
 
     def test_table_rollback_to_nonexistent_snapshot(self):
         """Test that rollback to a non-existent snapshot raises ValueError."""

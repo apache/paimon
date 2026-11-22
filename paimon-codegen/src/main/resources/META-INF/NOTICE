@@ -6,6 +6,6 @@ The Apache Software Foundation (http://www.apache.org/).
 
 This project bundles the following dependencies under the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
 
-- org.scala-lang:scala-compiler:2.12.15
-- org.scala-lang:scala-library:2.12.15
-- org.scala-lang:scala-reflect:2.12.15
+- org.scala-lang:scala-compiler:2.12.18
+- org.scala-lang:scala-library:2.12.18
+- org.scala-lang:scala-reflect:2.12.18

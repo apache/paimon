@@ -113,9 +113,9 @@ FROM `media_samples$table_indexes`
 WHERE index_field_name = 'category';
 ```
 
-The default search mode is `fast`, which searches indexed coverage. If you append
-more records, build again before expecting indexed queries to include them, or
-select an appropriate [search mode](./global-index/manage-indexes#coverage-and-freshness).
+Ordinary scalar queries default to `full`, which also scans rows outside the index coverage.
+Use the [search modes](./global-index/manage-indexes#coverage-and-freshness) to configure that
+behavior explicitly.
 Updates to an indexed column also have a separate
 [update policy](./global-index/manage-indexes#update-indexed-columns); this example enriches
 the data before building the index.
@@ -123,14 +123,13 @@ the data before building the index.
 ## 5. Refresh After an Append
 
 Append another matching record after the first index build. With the default
-`scalar-index.search-mode=fast`, the indexed query still searches the original
-coverage:
+scalar scan mode, the query finds both rows:
 
 ```sql
 INSERT INTO media_samples VALUES (3, 'animals', X'070809', NULL, NULL);
 
 SELECT id FROM media_samples WHERE category = 'animals' ORDER BY id;
--- 1 (the new row is outside the current index coverage)
+-- 1, 3
 ```
 
 Build again to cover the new row, then repeat the query:
@@ -146,9 +145,8 @@ SELECT id FROM media_samples WHERE category = 'animals' ORDER BY id;
 -- 1, 3
 ```
 
-The second build adds missing coverage. It does not make later appends refresh
-automatically. For reads that must include uncovered rows before the next build,
-see the `full` and `detail` [search modes](./global-index/manage-indexes#coverage-and-freshness).
+The second build adds missing coverage for this append. Rebuild after later appends to
+accelerate queries on those rows.
 
 ## Next Steps
 

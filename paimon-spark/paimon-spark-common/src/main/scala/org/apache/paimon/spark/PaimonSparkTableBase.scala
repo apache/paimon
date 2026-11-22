@@ -30,9 +30,10 @@ import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{CatalogTableType, Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 
-import org.apache.spark.sql.connector.catalog._
+import org.apache.spark.sql.connector.catalog.{Table => SparkCatalogTable, _}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
@@ -48,12 +49,17 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   lazy val coreOptions = new CoreOptions(table.options())
 
-  lazy val useV2Write: Boolean = {
-    val v2WriteConfigured = OptionUtils.useV2Write()
-    v2WriteConfigured && supportsV2Write
+  lazy val useV2Write: Boolean = useV2WriteWithOptions(Collections.emptyMap())
+
+  private def useV2WriteWithOptions(writeOptions: JMap[String, String]): Boolean = {
+    val key = SparkConnectorOptions.USE_V2_WRITE.key()
+    val options = Option(new CaseInsensitiveStringMap(writeOptions).get(key))
+      .map(value => Collections.singletonMap(key, value))
+      .getOrElse(table.options())
+    OptionUtils.useV2Write(options) && supportsV2Write
   }
 
-  private def supportsV2Write: Boolean = {
+  protected def supportsV2Write: Boolean = {
     !coreOptions.bucketFunctionProvider().isPresent &&
     coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
@@ -117,8 +123,28 @@ abstract class PaimonSparkTableBase(val table: Table)
     capabilities
   }
 
+  // Masks can return NULL even for partition keys declared NOT NULL. Expose this on the
+  // relation as well as the metadata struct so Spark retains null checks and IS NULL filters.
+  override lazy val schema: StructType = {
+    val tableType = SparkTypeUtils.fromPaimonRowType(table.rowType())
+    if (coreOptions.queryAuthEnabled()) {
+      StructType(tableType.fields.map {
+        field =>
+          if (table.partitionKeys().contains(field.name)) field.copy(nullable = true) else field
+      })
+    } else {
+      tableType
+    }
+  }
+
   override def metadataColumns: Array[MetadataColumn] = {
-    val partitionType = SparkTypeUtils.toSparkPartitionType(table)
+    val rawPartitionType = SparkTypeUtils.toSparkPartitionType(table)
+    val partitionType =
+      if (coreOptions.queryAuthEnabled()) {
+        StructType(rawPartitionType.fields.map(_.copy(nullable = true)))
+      } else {
+        rawPartitionType
+      }
 
     val _metadataColumns = ArrayBuffer[MetadataColumn]()
 
@@ -175,7 +201,7 @@ abstract class PaimonSparkTableBase(val table: Table)
     table match {
       case fileStoreTable: FileStoreTable =>
         val options = Options.fromMap(info.options)
-        if (useV2Write) {
+        if (useV2WriteWithOptions(info.options().asCaseSensitiveMap())) {
           new PaimonV2WriteBuilder(fileStoreTable, info.schema(), options)
         } else {
           new PaimonWriteBuilder(fileStoreTable, options)
@@ -193,5 +219,30 @@ abstract class PaimonSparkTableBase(val table: Table)
       commit.close()
     }
     true
+  }
+}
+
+object PaimonSparkTableBase {
+
+  /** Bind the operation's switch before Spark selects write capabilities and a writer. */
+  def withWriteOptions(
+      table: SparkCatalogTable,
+      options: JMap[String, String]): SparkCatalogTable = {
+    val key = SparkConnectorOptions.USE_V2_WRITE.key()
+    Option(new CaseInsensitiveStringMap(options).get(key)) match {
+      case Some(value) =>
+        table match {
+          case target: SparkTable if target.getTable.options().get(key) != value =>
+            SparkTable.of(target.getTable.copy(Collections.singletonMap(key, value)))
+          case staged: RollbackStagedTable =>
+            val updated = withWriteOptions(staged.wrappedTable(), options)
+            if (updated ne staged.wrappedTable()) {
+              staged.replaceWrappedTable(updated)
+            }
+            staged
+          case _ => table
+        }
+      case None => table
+    }
   }
 }

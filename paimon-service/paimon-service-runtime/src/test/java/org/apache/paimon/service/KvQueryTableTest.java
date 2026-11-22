@@ -18,6 +18,7 @@
 
 package org.apache.paimon.service;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -216,11 +217,13 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
         write.write(row(partition, key, value), bucket);
         CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
+        Snapshot latest = table.snapshotManager().latestSnapshot();
         query.refreshFiles(
                 message.partition(),
                 message.bucket(),
                 Collections.emptyList(),
-                message.newFilesIncrement().newFiles());
+                message.newFilesIncrement().newFiles(),
+                latest == null ? -1L : latest.id());
     }
 
     private int computeBucket(int partition, int key, int value) throws Exception {

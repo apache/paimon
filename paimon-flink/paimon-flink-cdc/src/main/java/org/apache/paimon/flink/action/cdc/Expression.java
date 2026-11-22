@@ -386,12 +386,12 @@ public interface Expression extends Serializable {
                         milliseconds = numericValue;
                         break;
                     case 6:
-                        milliseconds = numericValue / 1000;
-                        nanosOfMillisecond = (int) (numericValue % 1000 * 1000);
+                        milliseconds = Math.floorDiv(numericValue, 1000L);
+                        nanosOfMillisecond = (int) (Math.floorMod(numericValue, 1000L) * 1000);
                         break;
                     case 9:
-                        milliseconds = numericValue / 1_000_000;
-                        nanosOfMillisecond = (int) (numericValue % 1_000_000);
+                        milliseconds = Math.floorDiv(numericValue, 1_000_000L);
+                        nanosOfMillisecond = (int) Math.floorMod(numericValue, 1_000_000L);
                         break;
                         // no error case because precision is validated
                 }

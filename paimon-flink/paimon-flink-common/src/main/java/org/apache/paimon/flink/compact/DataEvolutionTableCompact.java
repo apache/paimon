@@ -21,12 +21,15 @@ package org.apache.paimon.flink.compact;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.DataEvolutionTableCompactSink;
 import org.apache.paimon.flink.source.DataEvolutionTableCompactSource;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -37,6 +40,11 @@ import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 /** Build for data-evolution table flink compaction job. */
 public class DataEvolutionTableCompact {
 
@@ -45,6 +53,7 @@ public class DataEvolutionTableCompact {
     private final FileStoreTable table;
 
     @Nullable private PartitionPredicate partitionPredicate;
+    @Nullable private Duration partitionIdleTime;
 
     public DataEvolutionTableCompact(
             StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
@@ -57,6 +66,10 @@ public class DataEvolutionTableCompact {
         this.partitionPredicate = partitionPredicate;
     }
 
+    public void withPartitionIdleTime(@Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
+    }
+
     public void build() {
         DataEvolutionCompactCoordinator.validateOptions(table.coreOptions());
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
@@ -65,11 +78,30 @@ public class DataEvolutionTableCompact {
             return;
         }
         DataEvolutionTableCompactSource source =
-                new DataEvolutionTableCompactSource(table, partitionPredicate, snapshot);
+                new DataEvolutionTableCompactSource(table, partitionFilter(snapshot), snapshot);
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionTableCompactSource.buildSource(env, source, tableIdentifier);
 
         sinkFromSource(sourceStream, snapshot);
+    }
+
+    @Nullable
+    private PartitionPredicate partitionFilter(Snapshot snapshot) {
+        if (partitionIdleTime == null) {
+            return partitionPredicate;
+        }
+
+        long cutoff = Instant.now().minus(partitionIdleTime).toEpochMilli();
+        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshot);
+        snapshotReader.withPartitionFilter(partitionPredicate);
+        Set<BinaryRow> idlePartitions =
+                snapshotReader.partitionEntries().stream()
+                        .filter(entry -> entry.lastFileCreationTime() <= cutoff)
+                        .map(PartitionEntry::partition)
+                        .collect(Collectors.toSet());
+        return idlePartitions.isEmpty()
+                ? PartitionPredicate.ALWAYS_FALSE
+                : PartitionPredicate.fromMultiple(table.store().partitionType(), idlePartitions);
     }
 
     private void sinkFromSource(

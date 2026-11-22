@@ -20,17 +20,29 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for default predicate composition in {@link FileIndexReader}. */
 public class FileIndexReaderTest {
+
+    @Test
+    public void testUnsupportedBoundingBoxRemainsForDataFiltering() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.GEOMETRY()));
+
+        assertThat(builder.bboxIntersects(0, 0, 0, 1, 1).visit(new FileIndexReader() {}))
+                .isSameAs(REMAIN);
+    }
 
     @Test
     public void testNotInCombinesNotEqualResultsWithAnd() {

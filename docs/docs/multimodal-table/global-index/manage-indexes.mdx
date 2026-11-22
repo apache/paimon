@@ -226,9 +226,10 @@ batch as ready for indexed queries.
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Build the global index again
-to create index files for newly uncovered data. The scalar, vector, and full-text families
-default to `fast`, which searches indexed row ranges.
-Choose a search mode deliberately when recently appended data must be included.
+to create index files for newly uncovered data. Ordinary Data Evolution batch scans default to
+`full`, which includes uncovered rows. Vector and full-text searches default to `fast`, including
+the scalar coverage mode used for their row filters. An explicit `fast` can omit matches in
+uncovered ranges.
 Updates to already indexed rows also require the [update policy](#update-indexed-columns).
 
 | Mode | How coverage is checked | Use when |
@@ -279,10 +280,19 @@ the latest column values. An update that preserves row IDs can therefore leave
 stale index entries even when coverage is complete. Handle those updates through
 the [index update policy](#update-indexed-columns) and an index build.
 
-Use `scalar-index.search-mode`, `vector-index.search-mode`, or
-`full-text-index.search-mode` for one index family. The legacy
-`global-index.search-mode` has no default and is used as a fallback when the corresponding
-family-specific option is not explicitly configured.
+Each query uses the first explicitly configured option in its list, followed by its default.
+
+| Query | Search mode precedence |
+| --- | --- |
+| Ordinary Data Evolution scalar batch scan | `scalar-index.search-mode` → `global-index.search-mode` → `full` |
+| Scalar prefilter in vector and full-text search | `scalar-index.prefilter.search-mode` → `scalar-index.search-mode` → `global-index.search-mode` → `fast` |
+| Vector search | `vector-index.search-mode` → `global-index.search-mode` → `fast` |
+| Full-text search | `full-text-index.search-mode` → `global-index.search-mode` → `fast` |
+
+Set `scalar-index.prefilter.search-mode` to tune filter coverage independently of ordinary
+scalar scans. For example, `scalar-index.search-mode=full` and
+`scalar-index.prefilter.search-mode=fast` retain uncovered rows in ordinary scans and limit
+search prefilters to indexed scalar coverage.
 
 To temporarily disable global-index scan acceleration while keeping the index files, set:
 
@@ -438,6 +448,31 @@ matched_files = table.drop_global_index(
 
 </Tabs>
 
+## Null-Heavy Scalar Index Builds
+
+Set `sorted-index.null-bitmap-shuffle.enabled=true` in the table or build options
+to enable adaptive null bitmap shuffle for Spark and Flink single-column BTree
+and Bitmap index builds. The default is `false`, which retains Spark's original
+SQL range shuffle and Flink's original three-field shuffle without bitmap
+compression or expansion operators.
+
+When enabled, the builder batches null row IDs into compressed bitmaps only
+with a high observed null ratio (currently at least 80%). Sparse and non-null
+inputs use the compact original-row encoding instead. The optimization does not
+change the persisted index format.
+
+Spark reuses the range-sampling pass to measure the null ratio. If sampling does
+not provide a ratio, such as with a single output partition, it conservatively
+uses original rows. Flink adapts to bounded observation windows as it reads rows.
+Bitmap buffers contain at most 4,096 row IDs and never cross assigned shuffle
+destinations. Rows are restored before local sorting, preserving the original
+three-field values, file rotation and query layout for the same sampled boundaries.
+
+This reduces network traffic for null-heavy builds; it does not remove local
+sorting or guarantee lower elapsed time for every workload. Composite and
+Multivalue indexes retain their existing build paths. Evaluate CPU, network and
+spill costs on a representative cluster before enabling it for a workload.
+
 ## Shared Options
 
 These table options affect global index build and read behavior:
@@ -447,13 +482,15 @@ These table options affect global index build and read behavior:
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
-| `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, and FM queries. |
+| `scalar-index.search-mode` | `full` | Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters. |
+| `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
 | `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
 | `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. Falls back to `sorted-index.records-per-range`, then `btree-index.records-per-range`. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `sorted-index.null-bitmap-shuffle.enabled` | `false` | Enable adaptive null bitmap compression during Spark/Flink single-column BTree and Bitmap index shuffle. Disabled builds retain their original shuffle paths. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
 | `global-index.build.parallelism` | `1` | Number of shards built concurrently by the local PyPaimon builder. Each shard may use native worker threads, so increase this value conservatively. |
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |

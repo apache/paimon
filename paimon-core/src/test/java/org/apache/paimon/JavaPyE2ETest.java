@@ -707,6 +707,28 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonBucketedAppendOrder() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable)
+                        catalog.getTable(identifier("bucketed_append_order_python_to_java"));
+        // The bucket already holds six files, so this write compacts it.
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, 6));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<String> result =
+                getResult(
+                        table.newRead(),
+                        table.newScan().plan().splits(),
+                        row -> String.valueOf(row.getInt(1)));
+        assertThat(result).containsExactly("0", "1", "2", "3", "4", "5", "6");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadPythonDynamicBucketHashIndex() throws Exception {
         Identifier identifier = identifier("dynamic_hash_python_to_java");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);

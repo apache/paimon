@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -69,6 +70,35 @@ final class RESTCatalogServerUtils {
             throw new InvalidRequestException(
                     errorMessage(invalidArgument == null ? e : invalidArgument), e);
         }
+    }
+
+    static Map<String, String> getParameters(String query) {
+        return Arrays.stream(query.split("&"))
+                .map(pair -> pair.split("=", 2))
+                .collect(
+                        Collectors.toMap(
+                                pair -> pair[0].trim(),
+                                pair -> RESTUtil.decodeString(pair[1].trim()),
+                                (existing, replacement) -> existing));
+    }
+
+    static String sqlPatternToRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char current = pattern.charAt(i);
+            if (escaped) {
+                regex.append(current);
+                escaped = false;
+            } else if (current == '\\') {
+                escaped = true;
+            } else if (current == '%') {
+                regex.append(".*");
+            } else {
+                regex.append(current);
+            }
+        }
+        return "^" + regex + "$";
     }
 
     @Nullable

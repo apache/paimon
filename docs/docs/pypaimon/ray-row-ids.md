@@ -92,6 +92,37 @@ print(metrics)   # {"num_updated": 50}
   snapshot and reject deleted IDs before writing that file group. Physical row
   positions are preserved during partial-column rewrites. A concurrent delete
   remains effective even if its row was live when this update was planned.
+- If concurrent compaction changes file boundaries after updates have been
+  staged, eligible updates are rebased by Ray workers before retrying the commit.
+  Recovery reads the staged files without rerunning the source transformations
+  and is not subject to the local Python
+  positive `data-evolution.row-id-conflict-rewrite.max-size` limit. Setting it
+  to `0 B` disables automatic recovery, including Ray recovery. This also applies when
+  a `process_row_id_ranges` processor calls `update_by_row_id`.
+  Recovery shares one `commit.timeout` budget across rewrite groups, retry waits,
+  and subsequent commit attempts. An expired recovery stops before publishing;
+  an already successful publication is still reported as successful.
+- Distributed recovery retains the self-merge eligibility checks: the original
+  row IDs must remain covered, required snapshot history must be available, and
+  conflicting logical updates are rejected. Recovery is not supported for
+  deletion-vector tables or staged existing-row dedicated
+  BLOB/vector files. It handles normal forward snapshot progress, not table rollback.
+- Compatible schema changes, such as adding nullable columns or renaming fields,
+  are resolved by field ID using the current schema and normal read-time conversions.
+  Dropped update fields, including nested fields in written ROW, ARRAY, and MAP
+  columns, are rejected even if their names are reused, file boundaries are unchanged,
+  or DDL has not published a data snapshot. Recovery prechecks plan only the partitions
+  present in the staged updates. Each rewrite group reuses that snapshot's complete
+  file groups from its candidate partitions for Ray routing, without planning the
+  whole table again.
+  Python commits repeat field-identity validation against the schema recorded in each
+  snapshot attempt, including retries after a failed snapshot publication. Logical conflict
+  checks also resolve nested write paths from Java partial updates using each file's
+  historical schema.
+  If a written ROW has gained nested fields since the update was staged, recovery
+  rejects the rewrite: reading it with the expanded current type would replace the
+  new fields with nulls. Restage that update against the current schema. Renames and
+  compatible type widening that preserve the written field IDs remain supported.
 
 ## Read By Row Id
 

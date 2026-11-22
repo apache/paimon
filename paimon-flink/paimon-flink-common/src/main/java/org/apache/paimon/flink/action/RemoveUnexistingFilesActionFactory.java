@@ -44,6 +44,10 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
             action.dryRun();
         }
 
+        if (params.has(PARTITION)) {
+            action.withPartitions(getPartitions(params));
+        }
+
         if (params.has(PARALLELISM)) {
             action.withParallelism(Integer.parseInt(params.get(PARALLELISM)));
         }

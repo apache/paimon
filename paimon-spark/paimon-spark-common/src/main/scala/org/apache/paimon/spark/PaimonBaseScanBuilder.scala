@@ -24,11 +24,12 @@ import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAn
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
 import org.apache.paimon.predicate.FullTextSearch
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.BUCKET_COLUMN
-import org.apache.paimon.table.{SpecialFields, Table}
+import org.apache.paimon.table.{FullTextSearchTable, HybridSearchTable, SpecialFields, Table, VectorSearchTable}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import java.util.{List => JList}
@@ -102,6 +103,12 @@ abstract class PaimonBaseScanBuilder
             postScan.append(predicate)
           case None =>
             converter.convert(predicate) match {
+              case Some(paimonPredicate)
+                  if coreOptions.queryAuthEnabled() && predicate.name() == "IS_NOT_NULL" &&
+                    paimonPredicate.visit(partitionPredicateVisitor) =>
+                // Spark infers null checks for joins. Masks can null partition keys, so evaluate
+                // these checks on visible rows instead of using them for physical pruning.
+                postScan.append(predicate)
               case Some(paimonPredicate) =>
                 pushable.append(predicate)
                 if (paimonPredicate.visit(partitionPredicateVisitor)) {
@@ -111,6 +118,16 @@ abstract class PaimonBaseScanBuilder
                   postScan.append(predicate)
                 }
               case None =>
+                // An envelope match can only prune candidates for the exact spatial predicate.
+                if (coreOptions.dataEvolutionEnabled() && !coreOptions.queryAuthEnabled()) {
+                  val ranked = table.isInstanceOf[FullTextSearchTable] ||
+                    table.isInstanceOf[VectorSearchTable] || table.isInstanceOf[HybridSearchTable]
+                  SparkShimLoader.shim.spatialCandidate(predicate, newRowType, ranked).foreach {
+                    candidate =>
+                      pushableDataFilters.append(candidate)
+                      pushable.append(predicate)
+                  }
+                }
                 postScan.append(predicate)
             }
         }
