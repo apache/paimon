@@ -764,7 +764,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
 
         byte[] sourceMeta() {
-            return new DataEvolutionIndexSourceMeta(snapshotId).serialize();
+            return new DataEvolutionIndexSourceMeta(snapshotId, schemaId).serialize();
         }
 
         CommitMessageImpl message(List<IndexFileMeta> files) {

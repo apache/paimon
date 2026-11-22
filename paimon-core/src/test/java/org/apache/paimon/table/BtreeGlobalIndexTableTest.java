@@ -22,17 +22,23 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
@@ -45,6 +51,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -63,6 +70,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -70,6 +79,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -821,6 +831,163 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testRebuildAcrossSchemaChangeWithMultipleGlobalIndexTypes() throws Exception {
+        write(8);
+        createIndex("f0");
+        createIndex("f0", null, "bitmap");
+        createIndex("f1", null, "bitmap");
+        FileStoreTable original = (FileStoreTable) catalog.getTable(identifier());
+        long originalSnapshotId = original.latestSnapshot().get().id();
+
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnType("f0", DataTypes.BIGINT()), false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate idFilter = new PredicateBuilder(table.rowType()).equal(0, 7L);
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.create(
+                                table, PartitionPredicate.ALWAYS_TRUE, idFilter))
+                .isEmpty();
+        assertThat(
+                        globalIndexScan(
+                                table,
+                                new PredicateBuilder(table.rowType())
+                                        .equal(1, BinaryString.fromString("a7"))))
+                .containsExactly(7L);
+
+        for (boolean queryInReader : new boolean[] {false, true}) {
+            FileStoreTable view =
+                    table.copy(
+                            Collections.singletonMap(
+                                    CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
+                                    Boolean.toString(queryInReader)));
+            assertThat(readF1(view, idFilter)).containsExactly("a7");
+        }
+        TopN topN = new TopN(new FieldRef(0, "f0", DataTypes.BIGINT()), DESCENDING, NULLS_LAST, 1);
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, topN))
+                .isEmpty();
+        FileStoreTable historical =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                Long.toString(originalSnapshotId)));
+        assertThat(
+                        globalIndexScan(
+                                historical, new PredicateBuilder(historical.rowType()).equal(0, 7)))
+                .containsExactly(7L);
+
+        createIndexIncremental("f0", "btree");
+        createIndexIncremental("f0", "bitmap");
+        FileStoreTable rebuilt = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(globalIndexScan(rebuilt, idFilter)).containsExactly(7L);
+        assertThat(rebuilt.store().newIndexFileHandler().scanEntries())
+                .hasSize(3)
+                .allSatisfy(
+                        entry -> {
+                            IndexFileMeta file = entry.indexFile();
+                            DataEvolutionIndexSourceMeta source =
+                                    DataEvolutionIndexSourceMeta.fromIndexFile(file);
+                            if (file.globalIndexMeta().indexFieldId()
+                                    == rebuilt.rowType().getField("f0").id()) {
+                                assertThat(source.sourceSchemaId())
+                                        .isEqualTo(rebuilt.schema().id());
+                                if ("btree".equals(file.indexType())) {
+                                    // This data snapshot still records the pre-ALTER schema.
+                                    assertThat(source.scanSnapshotId())
+                                            .isEqualTo(originalSnapshotId);
+                                }
+                            } else {
+                                assertThat(source.sourceSchemaId())
+                                        .isEqualTo(original.schema().id());
+                            }
+                        });
+    }
+
+    @Test
+    public void testIndexScanReadsHistoricalSchemaOnce() throws Exception {
+        write(1);
+        createIndex("f0");
+        FileStoreTable original = (FileStoreTable) catalog.getTable(identifier());
+        String historicalSchemaName = "schema-" + original.schema().id();
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnComment("f0", "New comment"), false);
+
+        AtomicInteger historicalSchemaReads = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public String readFileUtf8(Path path) throws IOException {
+                        if (historicalSchemaName.equals(path.getName())) {
+                            historicalSchemaReads.incrementAndGet();
+                        }
+                        return super.readFileUtf8(path);
+                    }
+                };
+        FileStoreTable evolved = FileStoreTableFactory.create(fileIO, original.location());
+        Predicate predicate = new PredicateBuilder(evolved.rowType()).equal(0, 0);
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(evolved, null, predicate).get()) {
+            assertThat(scanner.scan(predicate))
+                    .hasValueSatisfying(
+                            result -> assertThat(result.results().contains(0L)).isTrue());
+        }
+        assertThat(historicalSchemaReads.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void testIndexSchemaCompatibilityUsesRecordedSchemaAndField() throws Exception {
+        write(1);
+        FileStoreTable original = (FileStoreTable) catalog.getTable(identifier());
+        long snapshotId = original.latestSnapshot().get().id();
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnType("f0", DataTypes.BIGINT()), false);
+        FileStoreTable evolved = (FileStoreTable) catalog.getTable(identifier());
+        int changedField = evolved.rowType().getField("f0").id();
+        int unchangedField = evolved.rowType().getField("f1").id();
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(evolved);
+        byte[] oldSource =
+                new DataEvolutionIndexSourceMeta(snapshotId, original.schema().id()).serialize();
+        byte[] newSource =
+                new DataEvolutionIndexSourceMeta(snapshotId, evolved.schema().id()).serialize();
+
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, oldSource)))
+                .isFalse();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", unchangedField, oldSource)))
+                .isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, newSource)))
+                .isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, oldSource)))
+                .isFalse();
+        for (String indexType : Arrays.asList("full-text", "ivf-pq")) {
+            assertThat(schema.isCompatible(indexFileWithSource(indexType, changedField, oldSource)))
+                    .as("index type %s", indexType)
+                    .isTrue();
+        }
+
+        byte[] legacy =
+                ByteBuffer.allocate(16).putInt(0x44454958).putInt(1).putLong(snapshotId).array();
+        byte[] unknown = new DataEvolutionIndexSourceMeta(snapshotId).serialize();
+        for (byte[] source : Arrays.asList(null, legacy, unknown)) {
+            assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, source)))
+                    .isTrue();
+            assertThat(schema.isCompatible(indexFileWithSource("btree", Integer.MAX_VALUE, source)))
+                    .isFalse();
+        }
+    }
+
+    private static IndexFileMeta indexFileWithSource(
+            String indexType, int fieldId, byte[] sourceMeta) {
+        return new IndexFileMeta(
+                indexType,
+                "index",
+                1,
+                1,
+                new GlobalIndexMeta(0, 0, fieldId, null, null, sourceMeta),
+                null);
+    }
+
+    @Test
     public void testBTreeGlobalIndexOnAddedColumnContainsOldRowsAsNull() throws Exception {
         long oldRowCount = 10L;
         write(oldRowCount);
@@ -894,9 +1061,13 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     private void createIndexIncremental(String fieldName) throws Exception {
+        createIndexIncremental(fieldName, "btree");
+    }
+
+    private void createIndexIncremental(String fieldName, String indexType) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree")
+                new SortedGlobalIndexScanner(table, indexType)
                         .withIndexFields(Collections.singletonList(fieldName));
         ScanResult<DataSplit> scanResult =
                 builder.incrementalScan()
@@ -908,7 +1079,17 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         for (DataSplit dataSplit : scanResult.entries()) {
             commitMessages.addAll(
                     SortedGlobalIndexTestUtils.buildIndex(
-                            table, "btree", fieldName, dataSplit, scanResult.scanSnapshotId()));
+                            table, indexType, fieldName, dataSplit, scanResult.scanSnapshotId()));
+        }
+        for (IndexManifestEntry entry : scanResult.deletedIndexEntries()) {
+            commitMessages.add(
+                    new CommitMessageImpl(
+                            entry.partition(),
+                            entry.bucket(),
+                            null,
+                            DataIncrement.deleteIndexIncrement(
+                                    Collections.singletonList(entry.indexFile())),
+                            CompactIncrement.emptyIncrement()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
@@ -920,9 +1101,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
+        createIndex(fieldName, rowRanges, "btree");
+    }
+
+    private void createIndex(String fieldName, List<Range> rowRanges, String indexType)
+            throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree")
+                new SortedGlobalIndexScanner(table, indexType)
                         .withIndexFields(Collections.singletonList(fieldName));
         ScanResult<DataSplit> scanResult =
                 builder.scan()
@@ -934,7 +1120,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         for (DataSplit dataSplit : indexSplits(table, rowRanges, scanResult.entries())) {
             commitMessages.addAll(
                     SortedGlobalIndexTestUtils.buildIndex(
-                            table, "btree", fieldName, dataSplit, scanResult.scanSnapshotId()));
+                            table, indexType, fieldName, dataSplit, scanResult.scanSnapshotId()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);

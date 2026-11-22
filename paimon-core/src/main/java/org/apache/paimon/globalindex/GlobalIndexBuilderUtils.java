@@ -49,12 +49,15 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -151,6 +154,25 @@ public class GlobalIndexBuilderUtils {
         }
         indexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
         return Range.sortAndMergeOverlap(dataRange.exclude(indexedRanges), true);
+    }
+
+    public static Set<IndexManifestEntry> indexesWithIncompatibleSchema(
+            FileStoreTable table, List<IndexManifestEntry> currentIndexes) {
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
+        return currentIndexes.stream()
+                .filter(entry -> !schema.isCompatible(entry.indexFile()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    public static List<Range> rowRangesToBuild(
+            Snapshot snapshot,
+            List<IndexManifestEntry> currentIndexes,
+            Collection<IndexManifestEntry> indexesToRefresh) {
+        List<Range> ranges = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
+        for (IndexManifestEntry entry : indexesToRefresh) {
+            ranges.add(entry.indexFile().globalIndexMeta().rowRange());
+        }
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     public static List<IndexManifestEntry> currentIndexEntries(

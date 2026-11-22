@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -265,9 +266,10 @@ public class DataEvolutionVectorScan implements VectorScan {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         DataEvolutionGlobalIndexCoverage coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table, snapshot, partitionFilter, scalarFiles, searchMode);
+                        table, snapshot, partitionFilter, scalarFiles, searchMode, schema);
         List<Range> dataRanges = coverage.unindexedRanges(Collections.emptySet(), null);
         boolean possiblyPartial = false;
         for (int fieldId : filterFieldIds) {
@@ -286,7 +288,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         // use the actual contributing fields so a declined OR arm does not generate raw work.
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, snapshot, partitionFilter, scalarFiles, searchMode);
+                        table, snapshot, partitionFilter, scalarFiles, searchMode, schema);
         if (!optionalScanner.isPresent()) {
             return Collections.emptyList();
         }

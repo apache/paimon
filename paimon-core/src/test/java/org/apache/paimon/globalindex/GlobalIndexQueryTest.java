@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -655,6 +656,7 @@ class GlobalIndexQueryTest {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
         FileStoreTable table = mock(FileStoreTable.class);
         when(table.rowType()).thenReturn(rowType);
+        when(table.coreOptions()).thenReturn(new CoreOptions(new Options()));
         PredicateBuilder builder = new PredicateBuilder(rowType);
         int firstId = rowType.getFields().get(0).id();
         int secondId = rowType.getFields().get(1).id();
