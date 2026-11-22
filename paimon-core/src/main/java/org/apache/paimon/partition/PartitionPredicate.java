@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -51,6 +52,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -221,10 +223,15 @@ public interface PartitionPredicate extends Serializable {
         private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
+        @Nullable private final Object[][] partitionValues;
+        @Nullable private final RowDataToObjectArrayConverter converter;
 
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
+            // For a single partition the combined bounds already describe its field values.
+            this.partitionValues = partitions.size() > 1 ? new Object[partitions.size()][] : null;
+            this.converter = partitionValues == null ? null : converter;
             RowType partitionType = converter.rowType();
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
@@ -236,8 +243,12 @@ public interface PartitionPredicate extends Serializable {
                 serializers[i] = InternalSerializers.create(partitionType.getTypeAt(i));
                 collectors[i] = new FullSimpleColStatsCollector();
             }
+            int index = 0;
             for (BinaryRow part : partitions) {
                 Object[] fields = converter.convert(part);
+                if (partitionValues != null) {
+                    partitionValues[index++] = fields;
+                }
                 for (int i = 0; i < fields.length; i++) {
                     collectors[i].collect(fields[i], serializers[i]);
                 }
@@ -272,7 +283,10 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow minValues,
                 InternalRow maxValues,
                 InternalArray nullCounts) {
-            if (fieldNum == 0) {
+            if (fieldNum == 0
+                    || minValues.getFieldCount() < fieldNum
+                    || maxValues.getFieldCount() < fieldNum
+                    || (nullCounts.size() > 0 && nullCounts.size() < fieldNum)) {
                 return true;
             }
 
@@ -280,6 +294,46 @@ public interface PartitionPredicate extends Serializable {
                 if (!min[i].test(rowCount, minValues, maxValues, nullCounts)
                         || !max[i].test(rowCount, minValues, maxValues, nullCounts)) {
                     return false;
+                }
+            }
+            if (partitionValues == null || rowCount <= 0) {
+                return true;
+            }
+            Object[] lower = converter.convert(minValues);
+            Object[] upper = converter.convert(maxValues);
+            long[] nulls = new long[fieldNum];
+            for (int i = 0; i < fieldNum; i++) {
+                nulls[i] =
+                        nullCounts.size() == 0 || nullCounts.isNullAt(i)
+                                ? -1
+                                : nullCounts.getLong(i);
+            }
+            // At least one requested partition must match on every field for the manifest to
+            // matter.
+            for (Object[] partition : partitionValues) {
+                if (mayContainPartition(partition, lower, upper, nulls, rowCount)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean mayContainPartition(
+                Object[] partition, Object[] lower, Object[] upper, long[] nulls, long rowCount) {
+            for (int i = 0; i < fieldNum; i++) {
+                Object value = partition[i];
+                if (value == null) {
+                    if (nulls[i] == 0) {
+                        return false;
+                    }
+                } else if (nulls[i] == rowCount) {
+                    return false;
+                } else if (lower[i] != null && upper[i] != null) {
+                    DataType type = converter.rowType().getTypeAt(i);
+                    if (compareLiteral(type, value, lower[i]) < 0
+                            || compareLiteral(type, value, upper[i]) > 0) {
+                        return false;
+                    }
                 }
             }
             return true;
