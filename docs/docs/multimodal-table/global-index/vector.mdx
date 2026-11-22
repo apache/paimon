@@ -323,8 +323,9 @@ columns, each query runs ANN once per shard. Post-filtering may return fewer tha
 when matches exist outside the candidates. Increasing the factor trades more ANN/scalar
 work for more candidates. Post-filtering does not retry or scan raw data to fill Top-K.
 Raw work outside vector coverage still follows the configured index search modes. When a
-scalar index can evaluate the predicate but covers only some rows, scalar `full`/`detail`
-modes also plan raw scans for its uncovered rows.
+scalar index can evaluate the predicate but covers only some rows, setting
+[`scalar-index.prefilter.search-mode`](./manage-indexes#coverage-and-freshness)
+to `full` or `detail` also plans raw scans for its uncovered rows.
 
 Build a BTree index for frequently used metadata filters, such as `category`, `tenant_id`,
 or `event_time`, to restrict candidate row IDs before ANN.
@@ -653,6 +654,36 @@ for the current 8-bit PQ codes, `pq.m=64` uses twice the code bytes of
 `pq.m=32`. OPQ and larger training limits are also workload-dependent choices,
 not recall guarantees. Record the resolved build options, total index size,
 query file reads, and achieved recall when comparing configurations.
+
+### Scalar Bitmap Filters in Centroid Shards
+
+In Spark, pass the vector column in `index_column` and a JSON object mapping scalar column names
+to index types in `extra_fields`. The supported scalar index type is `bitmap`.
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.sharding=centroid',
+    extra_fields => '{"tenant_id":"bitmap","status":"bitmap"}'
+);
+```
+
+Each populated centroid gets one additional scalar index file. In `GlobalIndexMeta.indexMeta`, the
+centroid metadata wraps the build schema ID and one entry per `extraFieldIds` field, in the same
+order. Each entry stores the index type, section length, and original Bitmap metadata. The file
+stores the Bitmap sections consecutively, so the reader derives offsets from the section lengths.
+
+A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
+conjunctions of these predicates. It applies the exact matches before ranking and skips opening
+the ANN file when no visible vector matches. Other predicates use the existing scalar-filter path.
+
+To change the scalar columns, run the centroid build again with the new `extra_fields`. For the selected
+partitions, the build replaces the indexes of the same type on the vector column. Pass just the
+vector column as `index_column` to `sys.drop_global_index` to remove the group. Updates to any
+indexed column follow `THROW_ERROR` or `DROP_PARTITION_INDEX`. Drop the group before using an
+older Java reader that lacks support for centroid Bitmap files.
 
 ## Per-Field Options
 

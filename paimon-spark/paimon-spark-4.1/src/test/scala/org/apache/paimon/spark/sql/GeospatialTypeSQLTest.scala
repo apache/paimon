@@ -200,10 +200,11 @@ class GeospatialTypeSQLTest extends PaimonSparkTestBase {
           .takeWhile(_ != null)
           .exists(e => Option(e.getMessage).exists(_.contains("same SRID"))))
 
-      // A matching append outside the published index distinguishes an indexed fast scan
-      // from a full scan. Full mode must also find the newly appended geometry.
+      // The default scan includes a matching append outside the published index.
       sql(s"INSERT INTO t VALUES (5, $point)")
       val select = s"SELECT id FROM t WHERE ST_Intersects(geom, $point)"
+      checkAnswer(sql(select), Seq(Row(2), Row(5)))
+      sql("ALTER TABLE t SET TBLPROPERTIES ('scalar-index.search-mode' = 'fast')")
       checkAnswer(sql(select), Seq(Row(2)))
       sql("ALTER TABLE t SET TBLPROPERTIES ('scalar-index.search-mode' = 'full')")
       checkAnswer(sql(select), Seq(Row(2), Row(5)))
