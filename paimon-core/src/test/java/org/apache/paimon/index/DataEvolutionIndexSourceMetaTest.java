@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataOutputSerializer;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,8 +40,27 @@ class DataEvolutionIndexSourceMetaTest {
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(serialized)).isTrue();
         assertThat(DataEvolutionIndexSourceMeta.deserialize(serialized).scanSnapshotId())
                 .isEqualTo(42L);
+        assertThat(DataEvolutionIndexSourceMeta.deserialize(serialized).sourceSchemaId()).isNull();
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(null)).isFalse();
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(new byte[] {1})).isFalse();
+    }
+
+    @Test
+    void testSourceSchemaIdRoundTrip() {
+        DataEvolutionIndexSourceMeta source = new DataEvolutionIndexSourceMeta(42L, 0L);
+        DataEvolutionIndexSourceMeta restored =
+                DataEvolutionIndexSourceMeta.deserialize(source.serialize());
+
+        assertThat(restored.scanSnapshotId()).isEqualTo(42L);
+        assertThat(restored.sourceSchemaId()).isZero();
+        assertThat(source.serialize())
+                .isEqualTo(
+                        ByteBuffer.allocate(24)
+                                .putInt(0x44454958)
+                                .putInt(2)
+                                .putLong(42)
+                                .putLong(0)
+                                .array());
     }
 
     @Test
@@ -62,7 +82,7 @@ class DataEvolutionIndexSourceMetaTest {
                 .hasMessageContaining("Not data-evolution index source metadata");
 
         byte[] wrongVersion = new DataEvolutionIndexSourceMeta(1L).serialize();
-        wrongVersion[7] = 2;
+        wrongVersion[7] = 3;
         assertThatThrownBy(() -> DataEvolutionIndexSourceMeta.deserialize(wrongVersion))
                 .hasMessageContaining("Unsupported data-evolution index source version");
     }

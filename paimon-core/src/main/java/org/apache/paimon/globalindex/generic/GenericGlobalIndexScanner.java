@@ -38,9 +38,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.currentIndexEntries;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.indexesWithIncompatibleSchema;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.rowRangesToBuild;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Scanner for generic (non-btree) global index. */
@@ -139,24 +141,21 @@ public class GenericGlobalIndexScanner implements Serializable {
         List<IndexManifestEntry> currentIndexes =
                 currentIndexEntries(
                         table, scanSnapshot, indexType, indexFields, partitionPredicate);
-        List<Range> rangesToBuild =
-                new ArrayList<>(unindexedRowRanges(scanSnapshot, currentIndexes));
-        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
+        Set<IndexManifestEntry> deletedIndexEntries =
+                indexesWithIncompatibleSchema(table, scanSnapshot, currentIndexes);
         Options mergedOptions = new Options(table.options(), options.toMap());
         if (mergedOptions.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
                 == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {
-            deletedIndexEntries =
+            deletedIndexEntries.addAll(
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
                             table.schemaManager(),
                             scanResult.entries(),
                             currentIndexes,
-                            indexFields);
-            for (IndexManifestEntry entry : deletedIndexEntries) {
-                rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
-            }
+                            indexFields));
         }
 
-        rangesToBuild = Range.sortAndMergeOverlap(rangesToBuild, true);
+        List<Range> rangesToBuild =
+                rowRangesToBuild(scanSnapshot, currentIndexes, deletedIndexEntries);
         if (rangesToBuild.isEmpty()) {
             return Optional.empty();
         }
@@ -165,6 +164,6 @@ public class GenericGlobalIndexScanner implements Serializable {
                         scanResult.scanSnapshotId(),
                         RowRangeIndex.create(rangesToBuild),
                         scanResult.entries(),
-                        deletedIndexEntries));
+                        new ArrayList<>(deletedIndexEntries)));
     }
 }

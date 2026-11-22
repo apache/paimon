@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -104,6 +105,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         @Nullable
         Snapshot snapshot =
                 pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
@@ -132,6 +134,14 @@ public class DataEvolutionVectorScan implements VectorScan {
         for (IndexManifestEntry entry : indexEntries) {
             IndexFileMeta file = entry.indexFile();
             GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
+            // Centroid Bitmap filters validate their own fields before evaluating postings.
+            boolean compatible =
+                    CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                            ? schema.isPrimaryFieldCompatible(file)
+                            : schema.isCompatible(file);
+            if (!compatible) {
+                continue;
+            }
             if (filter != null && canServeScalarFilter(meta)) {
                 scalarFiles.add(file);
             }

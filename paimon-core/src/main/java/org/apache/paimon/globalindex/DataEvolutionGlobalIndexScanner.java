@@ -232,17 +232,20 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
+        if (indexFiles.isEmpty()) {
+            return Optional.empty();
+        }
+        Snapshot snapshot = pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table);
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
         List<IndexFileMeta> globalIndexFiles =
-                globalIndexFiles(indexFiles).stream()
-                        .filter(file -> isIndexInSchema(table.rowType(), file))
-                        .collect(Collectors.toList());
+                indexFiles.stream().filter(schema::isCompatible).collect(Collectors.toList());
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
                 new DataEvolutionGlobalIndexScanner(
                         table,
-                        pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table),
+                        snapshot,
                         partitionFilter,
                         searchMode,
                         globalIndexFiles,
@@ -266,7 +269,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         }
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
-                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
+                        .scan(snapshot, indexFileFilter(table, snapshot, partitionFilter, filter))
+                        .stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         if (indexFiles.isEmpty()) {
@@ -307,10 +311,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
         DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
         int fieldId = indexField.id();
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
                         .scan(snapshot, topNIndexFileFilter(partitionFilter, fieldId)).stream()
                         .map(IndexManifestEntry::indexFile)
+                        .filter(schema::isCompatible)
                         .collect(Collectors.toList());
         if (indexFiles.isEmpty()) {
             return Optional.empty();
@@ -352,23 +358,23 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     static Filter<IndexManifestEntry> indexFileFilter(
             FileStoreTable table,
+            @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
         if (filter == null) {
             return entry -> false;
         }
         Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
                     if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null
-                            || !isIndexInSchema(table.rowType(), entry.indexFile())) {
-                        return false;
-                    }
-                    return filterFieldIds.contains(globalIndex.indexFieldId());
+                    return globalIndex != null
+                            && filterFieldIds.contains(globalIndex.indexFieldId())
+                            && schema.isCompatible(entry.indexFile());
                 };
         return indexFileFilter;
     }
@@ -382,12 +388,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     static boolean isIndexInSchema(RowType rowType, IndexFileMeta file) {
         return file.globalIndexMeta().getIndexedFieldIds().stream()
                 .allMatch(rowType::containsField);
-    }
-
-    private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
-        return indexFiles.stream()
-                .filter(indexFile -> indexFile.globalIndexMeta() != null)
-                .collect(Collectors.toList());
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {

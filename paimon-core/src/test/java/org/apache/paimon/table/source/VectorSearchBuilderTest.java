@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -38,6 +39,7 @@ import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -56,6 +58,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.TableTestBase;
@@ -127,6 +130,71 @@ public class VectorSearchBuilderTest extends TableTestBase {
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                 .option("test.vector.dimension", String.valueOf(DIMENSION))
                 .option("test.vector.metric", "l2");
+    }
+
+    @Test
+    public void testCentroidVectorPlanKeepsIndexAfterBitmapColumnWidens() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeVectors(table, new float[][] {{1, 0}, {0, 1}});
+        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+        byte[] source =
+                new DataEvolutionIndexSourceMeta(
+                                table.latestSnapshot().get().id(), table.schema().id())
+                        .serialize();
+        List<IndexFileMeta> files = new ArrayList<>();
+        for (ResultEntry entry :
+                Arrays.asList(
+                        CentroidIndexMeta.router(
+                                new ResultEntry("router", 0, null), "model", 1, true),
+                        CentroidIndexMeta.shard(
+                                new ResultEntry("vector", 2, null), "model", 0, true),
+                        CentroidIndexMeta.scalarIndex(
+                                new ResultEntry("bitmap", 2, null), "model", 0))) {
+            files.add(
+                    new IndexFileMeta(
+                            TestVectorGlobalIndexerFactory.IDENTIFIER,
+                            entry.fileName(),
+                            1,
+                            entry.rowCount(),
+                            new GlobalIndexMeta(
+                                    0,
+                                    1,
+                                    vectorField.id(),
+                                    new int[] {table.rowType().getField("id").id()},
+                                    entry.meta(),
+                                    source),
+                            null));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(files),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnType("id", DataTypes.BIGINT()), false);
+        FileStoreTable evolved = getTableDefault();
+        VectorScan.Plan plan =
+                new DataEvolutionVectorScan(
+                                evolved,
+                                null,
+                                null,
+                                evolved.rowType().getField(VECTOR_FIELD_NAME),
+                                Collections.singletonMap(
+                                        CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "fast"))
+                        .scan();
+        assertThat(plan.splits())
+                .singleElement()
+                .isInstanceOfSatisfying(
+                        IndexVectorSearchSplit.class,
+                        split ->
+                                assertThat(split.vectorIndexFiles())
+                                        .containsExactlyInAnyOrderElementsOf(files));
     }
 
     @Test

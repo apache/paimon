@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -115,10 +116,14 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         List<IndexManifestEntry> currentIndexes =
                 GlobalIndexBuilderUtils.currentIndexEntries(
                         table, snapshot, indexType, indexFields, partitionPredicate);
+        Set<IndexManifestEntry> indexesToRefresh =
+                GlobalIndexBuilderUtils.indexesWithIncompatibleSchema(
+                        table, snapshot, currentIndexes);
         List<Range> rowRangesToBuild =
-                new ArrayList<>(
-                        GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, currentIndexes));
-        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(snapshot.id()).serialize();
+                GlobalIndexBuilderUtils.rowRangesToBuild(
+                        snapshot, currentIndexes, indexesToRefresh);
+        byte[] sourceMeta =
+                new DataEvolutionIndexSourceMeta(snapshot.id(), table.schema().id()).serialize();
         boolean detectDataFileChange =
                 new Options(table.options(), options.toMap()).get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
                         == IGNORE;
@@ -132,16 +137,14 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         .withPartitionFilter(partitionPredicate)
                         .plan()
                         .files();
-        List<IndexManifestEntry> indexesToRefresh = Collections.emptyList();
         if (detectDataFileChange) {
-            indexesToRefresh =
+            indexesToRefresh.addAll(
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table.schemaManager(), entries, currentIndexes, indexFields);
-            for (IndexManifestEntry index : indexesToRefresh) {
-                rowRangesToBuild.add(index.indexFile().globalIndexMeta().rowRange());
-            }
+                            table.schemaManager(), entries, currentIndexes, indexFields));
+            rowRangesToBuild =
+                    GlobalIndexBuilderUtils.rowRangesToBuild(
+                            snapshot, currentIndexes, indexesToRefresh);
         }
-        rowRangesToBuild = Range.sortAndMergeOverlap(rowRangesToBuild, true);
         if (rowRangesToBuild.isEmpty()) {
             return Collections.emptyList();
         }

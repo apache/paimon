@@ -420,7 +420,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         .scan(
                                 snapshot,
                                 DataEvolutionGlobalIndexScanner.indexFileFilter(
-                                        table, partitionFilter, indexFilter))
+                                        table, snapshot, partitionFilter, indexFilter))
                         .stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());

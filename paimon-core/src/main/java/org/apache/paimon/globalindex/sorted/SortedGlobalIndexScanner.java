@@ -42,10 +42,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.currentIndexEntries;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.indexesWithIncompatibleSchema;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.rowRangesToBuild;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -139,19 +141,16 @@ public class SortedGlobalIndexScanner implements Serializable {
         Preconditions.checkArgument(indexFields != null, "indexFields must be set before scan.");
         List<IndexManifestEntry> currentIndexes =
                 currentIndexEntries(table, snapshot, indexType, indexFields, partitionPredicate);
-        List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
-        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
+        Set<IndexManifestEntry> deletedIndexEntries =
+                indexesWithIncompatibleSchema(table, snapshot, currentIndexes);
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
-            deletedIndexEntries =
+            deletedIndexEntries.addAll(
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table, snapshot, partitionPredicate, currentIndexes, indexFields);
-            for (IndexManifestEntry entry : deletedIndexEntries) {
-                rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
-            }
+                            table, snapshot, partitionPredicate, currentIndexes, indexFields));
         }
 
-        rangesToBuild = Range.sortAndMergeOverlap(rangesToBuild, true);
+        List<Range> rangesToBuild = rowRangesToBuild(snapshot, currentIndexes, deletedIndexEntries);
         if (rangesToBuild.isEmpty()) {
             return Optional.empty();
         }
@@ -161,7 +160,7 @@ public class SortedGlobalIndexScanner implements Serializable {
                         snapshot.id(),
                         RowRangeIndex.create(rangesToBuild),
                         snapshotReader.read().dataSplits(),
-                        deletedIndexEntries));
+                        new ArrayList<>(deletedIndexEntries)));
     }
 
     private boolean detectDataFileChange() {

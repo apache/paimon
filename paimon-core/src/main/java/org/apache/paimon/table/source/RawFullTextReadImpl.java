@@ -104,26 +104,29 @@ class RawFullTextReadImpl {
             ScoredGlobalIndexResult indexedResult,
             List<Range> rawRowRanges,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable String rawIndexType) {
         rawRowRanges = Range.sortAndMergeOverlap(rawRowRanges, true);
         if (rawRowRanges.isEmpty()) {
             return indexedResult;
         }
 
-        ScoredGlobalIndexResult rawResult = readRawSearch(rawRowRanges, splitsByColumn, executor);
+        ScoredGlobalIndexResult rawResult =
+                readRawSearch(rawRowRanges, splitsByColumn, executor, rawIndexType);
         return overrideWithRawSearch(indexedResult, rawRowRanges, rawResult);
     }
 
     private ScoredGlobalIndexResult readRawSearch(
             List<Range> rawRowRanges,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable String rawIndexType) {
         RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
         TableScan.Plan plan = rawReadBuilder(readType).withRowRanges(rawRowRanges).newScan().plan();
         ReadBuilder readBuilder = rawReadBuilder(readType);
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         Map<String, RawFullTextIndex> rawIndexes =
-                createRawFullTextIndexes(splitsByColumn, readType, rawRowRanges);
+                createRawFullTextIndexes(splitsByColumn, readType, rawRowRanges, rawIndexType);
         // Every raw row is indexed so the temporary index scores against the full raw corpus;
         // the row filter only decides which rows the search may return.
         RoaringNavigableMap64 matchingRows = filter == null ? null : new RoaringNavigableMap64();
@@ -199,15 +202,17 @@ class RawFullTextReadImpl {
     private Map<String, RawFullTextIndex> createRawFullTextIndexes(
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             RowType readType,
-            List<Range> rawRowRanges) {
+            List<Range> rawRowRanges,
+            @Nullable String rawIndexType) {
         Map<String, RawFullTextIndex> rawIndexes = new HashMap<>();
         long rowRangeStart = rawRowRanges.get(0).from;
         long rowRangeEnd = rawRowRanges.get(rawRowRanges.size() - 1).to;
-        String fallbackIndexType = firstIndexType(splitsByColumn);
         String column = textColumn.name();
         String indexType = indexType(column, splitsByColumn);
         if (indexType == null) {
-            indexType = checkNotNull(fallbackIndexType);
+            indexType =
+                    checkNotNull(
+                            rawIndexType == null ? firstIndexType(splitsByColumn) : rawIndexType);
         }
         GlobalIndexer globalIndexer =
                 GlobalIndexer.create(

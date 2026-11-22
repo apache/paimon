@@ -46,6 +46,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -1599,6 +1600,42 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(plan.splits()).hasSize(1);
         assertThat(searchBuilder.executeLocal().results().toRangeList())
                 .containsExactly(new Range(0, 0));
+    }
+
+    @Test
+    public void testFullTextSearchFallsBackAfterIndexedTypeChanges() throws Exception {
+        Identifier name = identifier("evolved_full_text");
+        catalog.createTable(
+                name,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.VARCHAR(32))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(name);
+        String[] documents = {"Apache Paimon", "other document"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        catalog.alterTable(
+                name, SchemaChange.updateColumnType(TEXT_FIELD_NAME, DataTypes.VARCHAR(64)), false);
+
+        for (String mode : Arrays.asList("full", "detail")) {
+            FullTextSearchBuilder builder =
+                    getTable(name)
+                            .copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), mode))
+                            .newFullTextSearchBuilder()
+                            .withQuery(TEXT_FIELD_NAME, matchQuery("Paimon"))
+                            .withLimit(2);
+            assertThat(builder.newFullTextScan().scan().splits())
+                    .singleElement()
+                    .isInstanceOf(RawFullTextSearchSplit.class);
+            assertThat(builder.executeLocal().results()).containsExactly(0L);
+        }
     }
 
     @Test

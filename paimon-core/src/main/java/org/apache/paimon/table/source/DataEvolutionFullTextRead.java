@@ -128,6 +128,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         Map<String, List<IndexFullTextSearchSplit>> splitsByColumn = new HashMap<>();
         List<IndexFullTextSearchSplit> indexSplits = new ArrayList<>();
         List<Range> rawRowRanges = new ArrayList<>();
+        String rawIndexType = null;
         for (FullTextSearchSplit split : splits) {
             if (split instanceof IndexFullTextSearchSplit) {
                 IndexFullTextSearchSplit indexSplit = (IndexFullTextSearchSplit) split;
@@ -136,7 +137,11 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                         .computeIfAbsent(indexSplit.columnName(), k -> new ArrayList<>())
                         .add(indexSplit);
             } else if (split instanceof RawFullTextSearchSplit) {
-                rawRowRanges.addAll(((RawFullTextSearchSplit) split).rowRanges());
+                RawFullTextSearchSplit raw = (RawFullTextSearchSplit) split;
+                rawRowRanges.addAll(raw.rowRanges());
+                if (rawIndexType == null) {
+                    rawIndexType = raw.indexType();
+                }
             }
         }
 
@@ -162,7 +167,8 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                                     limit,
                                     textColumn,
                                     this::evalQuery)
-                            .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
+                            .withRawSearch(
+                                    result, rawRowRanges, splitsByColumn, executor, rawIndexType);
         }
         return result.topK(limit);
     }

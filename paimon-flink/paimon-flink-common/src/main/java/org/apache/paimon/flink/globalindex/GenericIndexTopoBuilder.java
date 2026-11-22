@@ -229,7 +229,8 @@ public class GenericIndexTopoBuilder {
 
         Options mergedOptions = new Options(table.options(), userOptions);
         byte[] sourceMeta =
-                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
+                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId(), table.schema().id())
+                        .serialize();
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(

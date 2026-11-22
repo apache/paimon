@@ -27,30 +27,49 @@ import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Data snapshot scanned to build a global index for a data-evolution table. */
+/** Snapshot and table schema used to build a global index for a Data Evolution table. */
 public final class DataEvolutionIndexSourceMeta {
 
     // "DEIX". The marker distinguishes this metadata from primary-key index source metadata.
     private static final int MAGIC = 0x44454958;
     private static final int VERSION = 1;
+    private static final int VERSION_WITH_SCHEMA = 2;
+    private static final int SNAPSHOT_ONLY_SIZE = 2 * Integer.BYTES + Long.BYTES;
 
     private final long scanSnapshotId;
+    @Nullable private final Long sourceSchemaId;
 
     public DataEvolutionIndexSourceMeta(long scanSnapshotId) {
+        this(scanSnapshotId, null);
+    }
+
+    public DataEvolutionIndexSourceMeta(long scanSnapshotId, @Nullable Long sourceSchemaId) {
         checkArgument(scanSnapshotId > 0, "Scan snapshot id must be positive.");
+        checkArgument(
+                sourceSchemaId == null || sourceSchemaId >= 0,
+                "Source schema id must be non-negative.");
         this.scanSnapshotId = scanSnapshotId;
+        this.sourceSchemaId = sourceSchemaId;
     }
 
     public long scanSnapshotId() {
         return scanSnapshotId;
     }
 
+    @Nullable
+    public Long sourceSchemaId() {
+        return sourceSchemaId;
+    }
+
     public byte[] serialize() {
         try {
-            DataOutputSerializer output = new DataOutputSerializer(16);
+            DataOutputSerializer output = new DataOutputSerializer(SNAPSHOT_ONLY_SIZE + Long.BYTES);
             output.writeInt(MAGIC);
-            output.writeInt(VERSION);
+            output.writeInt(sourceSchemaId == null ? VERSION : VERSION_WITH_SCHEMA);
             output.writeLong(scanSnapshotId);
+            if (sourceSchemaId != null) {
+                output.writeLong(sourceSchemaId);
+            }
             return output.getCopyOfBuffer();
         } catch (IOException e) {
             throw new RuntimeException(
@@ -76,14 +95,15 @@ public final class DataEvolutionIndexSourceMeta {
             checkArgument(magic == MAGIC, "Not data-evolution index source metadata.");
             int version = input.readInt();
             checkArgument(
-                    version == VERSION,
+                    version == VERSION || version == VERSION_WITH_SCHEMA,
                     "Unsupported data-evolution index source version: %s.",
                     version);
             long scanSnapshotId = input.readLong();
+            Long sourceSchemaId = version == VERSION_WITH_SCHEMA ? input.readLong() : null;
             checkArgument(
                     input.available() == 0,
                     "Unexpected trailing bytes in data-evolution index source metadata.");
-            return new DataEvolutionIndexSourceMeta(scanSnapshotId);
+            return new DataEvolutionIndexSourceMeta(scanSnapshotId, sourceSchemaId);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to deserialize data-evolution index source metadata.", e);
