@@ -676,8 +676,10 @@ order. Each entry stores the index type, section length, and original Bitmap met
 stores the Bitmap sections consecutively, so the reader derives offsets from the section lengths.
 
 A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
-conjunctions of these predicates. It applies the exact matches before ranking and skips opening
-the ANN file when no visible vector matches. Other predicates use the existing scalar-filter path.
+combinations of these predicates with `AND` or `OR`, including across columns. It applies the
+exact matches before ranking and skips opening the ANN file when no visible vector matches.
+If any branch cannot be evaluated exactly by the shard Bitmaps, the filter uses the existing
+scalar-filter path.
 
 To change the scalar columns, run the centroid build again with the new `extra_fields`. For the selected
 partitions, the build replaces the indexes of the same type on the vector column. Pass just the

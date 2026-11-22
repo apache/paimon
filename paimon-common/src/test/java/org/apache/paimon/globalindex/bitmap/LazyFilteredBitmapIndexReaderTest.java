@@ -34,7 +34,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -126,14 +126,17 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         int[] extraFieldIds = {state.id(), dataField.id()};
         PredicateBuilder builder = new PredicateBuilder(fields);
-        List<LeafPredicate> predicates =
-                Arrays.asList(
-                        (LeafPredicate) builder.equal(0, BinaryString.fromString("red")),
-                        (LeafPredicate) builder.isNull(1));
+        Predicate red = builder.equal(0, BinaryString.fromString("red"));
+        Predicate conjunction = PredicateBuilder.and(red, builder.isNull(1));
         assertThat(
                         CentroidBitmapIndex.match(
-                                fileReader, meta, extraFieldIds, fields, fields, predicates))
+                                fileReader, meta, extraFieldIds, fields, fields, conjunction))
                 .containsExactly(90_000L);
+        Predicate disjunction = PredicateBuilder.or(red, builder.isNotNull(1), builder.isNull(1));
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader, meta, extraFieldIds, fields, fields, disjunction))
+                .containsExactly(90L, 90_000L);
         GlobalIndexIOMeta incomplete =
                 new GlobalIndexIOMeta(path, meta.fileSize() - 1, 2, result.meta());
         assertThatThrownBy(
@@ -147,7 +150,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                                         extraFieldIds,
                                         fields,
                                         fields,
-                                        predicates))
+                                        conjunction))
                 .hasMessageContaining("Invalid centroid bitmap section");
     }
 
