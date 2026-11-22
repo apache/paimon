@@ -499,13 +499,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
         CoreOptions options = table.coreOptions();
-        // Incremental endpoints are resolved by batchScan, not by the independent index scanner.
-        if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
+        boolean incremental = options.startupMode() == CoreOptions.StartupMode.INCREMENTAL;
+        if (incremental && globalIndexResult != null) {
             Preconditions.checkArgument(
-                    globalIndexResult == null,
-                    "Unbound global-index results are not supported for incremental reads; "
+                    !batchScan.usesSnapshotDiff(),
+                    "Unbound global-index results are not supported for incremental DIFF reads; "
                             + "use withRowRanges for explicit row-id selections.");
-            return Optional.empty();
         }
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
@@ -516,7 +515,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
-        if (filter == null) {
+        // Historical endpoints are resolved by batchScan, separately from automatic index lookup.
+        if (incremental || filter == null) {
             return Optional.empty();
         }
         if (!options.globalIndexEnabled()) {

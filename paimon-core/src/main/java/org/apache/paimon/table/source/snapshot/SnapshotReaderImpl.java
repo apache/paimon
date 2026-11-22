@@ -678,6 +678,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
             FileStoreScan.Plan afterPlan,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
+        DataEvolutionFileStoreScan evolutionScan = (DataEvolutionFileStoreScan) scan;
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> selected = new HashMap<>();
         Map<Pair<BinaryRow, Integer>, RowRangeIndex> changedRanges = new HashMap<>();
         RangeHelper<ManifestEntry> ranges =
@@ -700,8 +701,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         }
                     }
                     if (changed) {
-                        // Shared files still supply untouched columns and the current DV anchor.
-                        dependencies.addAll(group);
+                        // Keep changed RowIDs from the full group, even when a changed file
+                        // supplies neither projected columns nor filter columns.
+                        dependencies.addAll(evolutionScan.pruneIncrementalDiffDependencies(group));
                     }
                 }
                 if (!addedRanges.isEmpty()) {

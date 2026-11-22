@@ -232,6 +232,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
+    /** Prunes a complete dependency group after identifying the changed RowIDs. */
+    public List<ManifestEntry> pruneIncrementalDiffDependencies(List<ManifestEntry> group) {
+        if (readType != null && readType.containsField(SpecialFields.SEQUENCE_NUMBER.name())) {
+            // The newest file can supply the sequence number without any projected data columns.
+            return group;
+        }
+        return pruneByReadType(group);
+    }
+
     /**
      * Per-file column pruning within a row-id-range group: drop files whose physical columns have
      * no overlap with the query's {@code readType} or filter. Necessary for columnar-split DE

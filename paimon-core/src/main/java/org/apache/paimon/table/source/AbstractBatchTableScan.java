@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.snapshot.IncrementalDiffStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -121,9 +122,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             return preProcessedPlan;
         }
 
-        if (startingScanner == null) {
-            startingScanner = createStartingScanner(false);
-        }
+        StartingScanner scanner = startingScanner();
 
         StartingScanner.Result result;
         Optional<StartingScanner.Result> pushed = applyPushDownLimit();
@@ -131,7 +130,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             result = pushed.get();
         } else {
             pushed = applyPushDownTopN();
-            result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
+            result = pushed.orElseGet(() -> scanner.scan(snapshotReader));
         }
 
         if (result instanceof ScannedResult) {
@@ -156,16 +155,25 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         // it would report partitions the caller cannot read, and pushing a filter on a masked
         // column against raw partition values would drop partitions the query matches
         applyAuthRules();
-        if (startingScanner == null) {
-            startingScanner = createStartingScanner(false);
-        }
-        return startingScanner.scanPartitions(snapshotReader);
+        return startingScanner().scanPartitions(snapshotReader);
     }
 
     @Override
     public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
         return PartitionTopNUtils.topNFileStorePartitions(
                 listPartitionEntries(), schema.logicalPartitionType(), num, partitionFieldCount);
+    }
+
+    /** Whether the resolved starting scanner compares two complete snapshots. */
+    public boolean usesSnapshotDiff() {
+        return startingScanner() instanceof IncrementalDiffStartingScanner;
+    }
+
+    private StartingScanner startingScanner() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+        return startingScanner;
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {

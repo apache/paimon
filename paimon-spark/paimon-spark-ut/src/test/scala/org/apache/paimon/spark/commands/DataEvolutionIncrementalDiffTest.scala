@@ -76,6 +76,36 @@ class DataEvolutionIncrementalDiffTest extends PaimonSparkTestBase {
     }
   }
 
+  test("DE diff preserves physical metadata for an untouched column after a partial update") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, a INT, b INT) TBLPROPERTIES (
+            |'bucket'='-1','row-tracking.enabled'='true',
+            |'data-evolution.enabled'='true','deletion-vectors.enabled'='true',
+            |'write-only'='true')""".stripMargin)
+      sql(
+        "INSERT INTO t SELECT CAST(id AS INT), CAST(id * 10 AS INT), " +
+          "CAST(id * 100 AS INT) FROM range(1, 4, 1, 1)")
+      val before = loadTable("t").snapshotManager().latestSnapshot().id()
+      val latest = spark.table("t").select("a", "__paimon_file_path", "__paimon_row_index")
+      val original = latest.orderBy("a").collect()
+      assert(original.map(_.getLong(2)).toSeq == Seq(0L, 1L, 2L))
+      val filePath = original.head.getString(1)
+      assert(original.forall(_.getString(1) == filePath))
+      sql("UPDATE t SET b=b+1")
+      sql("DELETE FROM t WHERE id=2")
+      val after = loadTable("t").snapshotManager().latestSnapshot().id()
+      val diff = spark.read
+        .option("incremental-between", s"$before,$after")
+        .option("incremental-between-scan-mode", "diff")
+        .table("t")
+
+      checkAnswer(
+        diff.select("a", "__paimon_file_path", "__paimon_row_index"),
+        Seq(Row(10, filePath, 0L), Row(30, filePath, 2L)))
+      checkAnswer(diff.select("a", "b"), Seq(Row(10, 101), Row(30, 301)))
+    }
+  }
+
   test("DE diff preserves untouched columns and deletion visibility after SQL updates") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, a INT, b INT) TBLPROPERTIES (

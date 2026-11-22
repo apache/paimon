@@ -25,6 +25,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.PaimonBaseScan
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
@@ -449,6 +450,7 @@ case class LateralVectorSearchExec(
   private def createSearchContext(
       rightProjection: UnsafeProjection,
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
+    PaimonBaseScan.checkIncrementalSearch(innerTable)
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(

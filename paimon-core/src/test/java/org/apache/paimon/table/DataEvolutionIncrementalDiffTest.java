@@ -37,6 +37,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.IndexFileMeta;
@@ -48,6 +49,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -59,6 +61,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -147,6 +150,17 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
                 .containsExactly(row(0, "name-0", "new-0"), row(1, "name-1", null));
         assertThat(collect(diff(table, "1,3").withProjection(new int[] {0})))
                 .containsExactly(GenericRow.of(0), GenericRow.of(1));
+
+        RowType tracking = SpecialFields.rowTypeWithRowTracking(table.rowType());
+        List<InternalRow> projected =
+                collect(
+                        diff(table, "2,3")
+                                .withReadType(
+                                        tracking.project(
+                                                Arrays.asList(
+                                                        "f0",
+                                                        SpecialFields.SEQUENCE_NUMBER.name()))));
+        assertThat(projected).containsExactly(GenericRow.of(0, 3L), GenericRow.of(1, 3L));
     }
 
     @Test
@@ -403,20 +417,56 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
         assertThat(collect(latest)).containsExactly(GenericRow.of(200, 30));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"delta", "auto"})
+    void testDeltaPreservesSuppliedScores(String mode) throws Exception {
+        FileStoreTable table = create();
+        write(table, row(100, "a", "old"));
+        write(table, row(200, "b", "new"), row(300, "c", "new"));
+        Map<String, String> options = new HashMap<>();
+        options.put("incremental-between", "1,2");
+        options.put("incremental-between-scan-mode", mode);
+        ReadBuilder builder = table.copy(options).newReadBuilder();
+        ScoredGlobalIndexResult result =
+                ScoredGlobalIndexResult.create(
+                        GlobalIndexResult.fromRange(new Range(2, 2)).results(), id -> 0.42f);
+        List<Split> splits = builder.newScan().withGlobalIndexResult(result).plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(((IndexedSplit) splits.get(0)).scores()).containsExactly(0.42f);
+        assertThat(collect(builder, splits)).containsExactly(row(300, "c", "new"));
+        try (RecordReader<InternalRow> reader = builder.newRead().createReader(splits.get(0))) {
+            ScoreRecordIterator<InternalRow> batch =
+                    (ScoreRecordIterator<InternalRow>) reader.readBatch();
+            try {
+                assertThat(batch.next().getInt(0)).isEqualTo(300);
+                assertThat(batch.returnedRowId()).isEqualTo(2L);
+                assertThat(batch.returnedScore()).isEqualTo(0.42f);
+            } finally {
+                batch.releaseBatch();
+            }
+        }
+    }
+
     @Test
     void testIncrementalRejectsUnboundExternalIndexResults() throws Exception {
         FileStoreTable table = create();
         write(table, row(100, "a", "old"));
         write(table, row(200, "b", "new"));
-        assertThatThrownBy(
-                        () ->
-                                diff(table, "1,2")
-                                        .newScan()
-                                        .withGlobalIndexResult(GlobalIndexResult.createEmpty())
-                                        .plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("incremental")
-                .hasMessageContaining("withRowRanges");
+        table.createTag("before", 1);
+        table.createTag("end", 2);
+        ReadBuilder tagDiff =
+                table.copy(Collections.singletonMap("incremental-between", "before,end"))
+                        .newReadBuilder();
+        for (ReadBuilder builder : Arrays.asList(diff(table, "1,2"), tagDiff)) {
+            assertThatThrownBy(
+                            () ->
+                                    builder.newScan()
+                                            .withGlobalIndexResult(GlobalIndexResult.createEmpty())
+                                            .plan())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("incremental DIFF")
+                    .hasMessageContaining("withRowRanges");
+        }
         ReadBuilder latest = table.newReadBuilder();
         List<Split> selected =
                 latest.newScan()
