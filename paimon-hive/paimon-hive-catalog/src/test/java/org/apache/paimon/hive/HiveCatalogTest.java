@@ -64,6 +64,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -75,6 +76,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -359,6 +361,44 @@ public class HiveCatalogTest extends CatalogTestBase {
         assertThat(catalog.listTables(database)).doesNotContain(identifier.getTableName());
         assertThat(fileIO.exists(table.location())).isEqualTo(external);
         assertThat(fileIO.exists(externalPath)).isEqualTo(external);
+    }
+
+    @Test
+    public void testDropManagedTableWithTemplateFiles() throws Exception {
+        Identifier id = Identifier.create("default", "template_drop");
+        java.nio.file.Path shared =
+                Files.createTempDirectory(
+                        java.nio.file.Paths.get(new Path(warehouse).toUri()), "template-files-");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                "entropy-inject-template")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                shared.toUri() + "{hash}")
+                        .build();
+        catalog.createTable(id, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(id);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+        try (Stream<java.nio.file.Path> files = Files.walk(shared)) {
+            assertThat(files.anyMatch(Files::isRegularFile)).isTrue();
+        }
+
+        catalog.dropTable(id, false);
+
+        assertThat(catalog.listTables("default")).doesNotContain(id.getTableName());
+        assertThat(table.fileIO().exists(table.location())).isFalse();
+        try (Stream<java.nio.file.Path> files = Files.walk(shared)) {
+            assertThat(files.noneMatch(Files::isRegularFile)).isTrue();
+        }
     }
 
     @Test

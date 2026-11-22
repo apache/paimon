@@ -31,9 +31,13 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -55,7 +59,6 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -233,29 +236,14 @@ public class EntropyInjectTemplateTest {
     }
 
     @Test
-    public void testDropTableKeepsTheFilesWhenTheCatalogRefusesIt() throws Exception {
-        java.nio.file.Path warehouse = tempPath.resolve("refusing-warehouse");
-        try (Catalog refusing =
-                new FileSystemCatalog(LocalFileIO.create(), new Path("file://" + warehouse)) {
-                    @Override
-                    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
-                        throw new RuntimeException("the metastore refuses to drop the table");
-                    }
-                }) {
-            refusing.createDatabase(DATABASE, true);
-            Identifier id = Identifier.create(DATABASE, "kept");
-            refusing.createTable(id, sharedSchema("kept"), false);
-            write((FileStoreTable) refusing.getTable(id), 1, "a");
-            Set<String> files = sharedTableFiles("kept");
-            assertThat(files).hasSize(1);
-
-            assertThatThrownBy(() -> refusing.dropTable(id, false))
-                    .hasMessageContaining("refuses to drop the table");
-
-            FileStoreTable keptTable = (FileStoreTable) refusing.getTable(id);
-            TemplateFileDeletionPlan.retryTableDrops(keptTable.fileIO(), keptTable.location(), 1);
-            assertThat(sharedTableFiles("kept")).isEqualTo(files);
-        }
+    public void testExecuteWithoutCleanupDirectoryPreservesTable() throws Exception {
+        FileStoreTable table = createTable("kept");
+        write(table, 1, "a");
+        Set<String> files = sharedTableFiles("kept");
+        TemplateFileDeletionPlan.init(table.fileIO(), table.location()).execute();
+        assertThat(catalog.getTable(Identifier.create(DATABASE, "kept")))
+                .isInstanceOf(FileStoreTable.class);
+        assertThat(sharedTableFiles("kept")).hasSize(1).isEqualTo(files);
     }
 
     @ParameterizedTest
@@ -350,40 +338,94 @@ public class EntropyInjectTemplateTest {
 
         assertThat(table.branchManager().branches()).doesNotContain("dev");
         assertThat(sharedTableFiles("t1")).isEqualTo(files);
+        table.createBranch("dev", "fork");
+        write(table.switchToBranch("dev"), 3, "new dev");
+        table.branchManager().dropBranch("dev");
+        assertThat(sharedTableFiles("t1")).hasSize(3);
         catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
         assertThat(sharedTableFiles("t1")).isEmpty();
     }
 
     @Test
-    public void testDropPlanSpillsPathsInBatches() throws Exception {
-        FileStoreTable table = createTable("batched");
-        LocalFileIO fileIO = LocalFileIO.create();
-        TemplateFileDeletionPlan plan = TemplateFileDeletionPlan.prepare(fileIO, table.location());
-        for (int i = 0; i <= 1024; i++) {
-            plan.add(new Path("file://" + sharedRoot.resolve("file-" + i)));
-        }
-        plan.seal();
-        try (Stream<java.nio.file.Path> files =
-                Files.walk(java.nio.file.Paths.get(table.location().toUri()))) {
-            assertThat(
-                            files.filter(path -> path.getFileName().toString().startsWith("batch-"))
-                                    .count())
-                    .isEqualTo(2);
-        }
-        catalog.dropTable(Identifier.create(DATABASE, "batched"), false);
-        try (Stream<java.nio.file.Path> files = Files.walk(tempPath.resolve("warehouse"))) {
-            assertThat(files.noneMatch(path -> path.getFileName().toString().startsWith("batch-")))
-                    .isTrue();
-        }
+    public void testDropSkipsTruncatedCleanupManifest() throws Exception {
+        FileStoreTable table = createTable("truncated");
+        write(table, 1, "main");
+        java.nio.file.Path plan =
+                java.nio.file.Paths.get(table.location().toUri())
+                        .resolve(".paimon-template-drops/branch-interrupted");
+        Files.createDirectories(plan);
+        Files.write(plan.resolve("manifest-incomplete.avro"), new byte[] {'O', 'b', 'j', 1});
+        assertThat(sharedTableFiles("truncated")).hasSize(1);
+
+        LocalFileIO unavailable =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        throw new IOException("storage unavailable");
+                    }
+                };
+        assertThatThrownBy(
+                        () ->
+                                TemplateFileDeletionPlan.init(unavailable, table.location())
+                                        .execute())
+                .hasRootCauseMessage("storage unavailable");
+        assertThat(sharedTableFiles("truncated")).hasSize(1);
+
+        catalog.dropTable(Identifier.create(DATABASE, "truncated"), false);
+
+        assertThat(sharedTableFiles("truncated")).isEmpty();
+        assertThat(table.fileIO().exists(table.location())).isFalse();
     }
 
     @Test
-    public void testDropTableRetriesFailedTemplateDeletion() throws Exception {
+    public void testDropPlanRollsAtManifestTargetSize() throws Exception {
+        FileStoreTable table = createTable("batched");
+        CoreOptions options =
+                new CoreOptions(
+                        new Options()
+                                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofBytes(1)));
+        RollingFileWriter<Path, Path> plan =
+                TemplateFileDeletionPlan.newManifestWriter(
+                        table.fileIO(),
+                        new Path(table.location(), ".paimon-template-drops/branch-batched"),
+                        options);
+        for (int i = 0; i < 20_000; i++) {
+            plan.write(new Path("file://" + sharedRoot.resolve("file-" + i)));
+        }
+        plan.close();
+        try (Stream<java.nio.file.Path> files =
+                Files.walk(java.nio.file.Paths.get(table.location().toUri()))) {
+            assertThat(
+                            files.filter(path -> path.getFileName().toString().endsWith(".avro"))
+                                    .count())
+                    .isGreaterThan(1);
+        }
+        catalog.dropTable(Identifier.create(DATABASE, "batched"), false);
+        assertThat(table.fileIO().exists(table.location())).isFalse();
+    }
+
+    @Test
+    public void testEmptyCleanupDirectoryBlocksCreateUntilCleaned() throws Exception {
+        Path path = new Path(tempPath.toUri());
+        LocalFileIO io = LocalFileIO.create();
+        io.mkdirs(new Path(path, ".paimon-template-drops"));
+        assertThatThrownBy(() -> TemplateFileDeletionPlan.checkCanCreateTable(io, path))
+                .hasMessageContaining("before recreating the table");
+        TemplateFileDeletionPlan.init(io, path).execute();
+        TemplateFileDeletionPlan.checkCanCreateTable(io, path);
+    }
+
+    @Test
+    public void testResumeFailedTemplateDeletionFromTablePath() throws Exception {
         Path warehouse = new Path("file://" + tempPath.resolve("retry-warehouse"));
         LocalFileIO failingFileIO =
                 new LocalFileIO() {
                     @Override
                     public boolean delete(Path path, boolean recursive) throws IOException {
+                        if (path.getName().equals("already-deleted")) {
+                            throw new AssertionError(
+                                    "Missing file should be skipped before delete");
+                        }
                         if (!recursive
                                 && path.toUri().getPath().startsWith(sharedRoot.toString() + "/")) {
                             throw new IOException("transient data deletion failure");
@@ -392,19 +434,60 @@ public class EntropyInjectTemplateTest {
                     }
                 };
         Identifier identifier = Identifier.create(DATABASE, "retry");
+        Path tablePath = new Path(warehouse, DATABASE + ".db/retry");
         try (Catalog retrying = new FileSystemCatalog(failingFileIO, warehouse)) {
             retrying.createDatabase(DATABASE, true);
             retrying.createTable(identifier, sharedSchema("retry"), false);
-            write((FileStoreTable) retrying.getTable(identifier), 1, "a");
+            FileStoreTable table = (FileStoreTable) retrying.getTable(identifier);
+            write(table, 1, "a");
 
-            retrying.dropTable(identifier, false);
+            // A plan from an earlier branch drop can be reclaimed independently.
+            RollingFileWriter<Path, Path> branchPlan =
+                    TemplateFileDeletionPlan.newManifestWriter(
+                            failingFileIO,
+                            new Path(table.location(), ".paimon-template-drops/branch-archived"),
+                            table.coreOptions());
+            branchPlan.write(new Path(warehouse, "already-deleted"));
+            branchPlan.close();
 
+            assertThatThrownBy(() -> retrying.dropTable(identifier, false))
+                    .hasMessageContaining("file cleanup is incomplete")
+                    .hasMessageContaining("saved cleanup plan");
+
+            assertThat(retrying.listTables(DATABASE)).contains("retry");
+            assertThat(failingFileIO.exists(table.location())).isTrue();
+            assertThat(failingFileIO.exists(new Path(warehouse, ".paimon-template-drops")))
+                    .isFalse();
             assertThat(sharedTableFiles("retry")).hasSize(1);
+            try (Stream<java.nio.file.Path> files =
+                    Files.walk(
+                            java.nio.file.Paths.get(tablePath.toUri())
+                                    .resolve(".paimon-template-drops"))) {
+                assertThat(
+                                files.filter(
+                                                path ->
+                                                        path.getFileName()
+                                                                .toString()
+                                                                .endsWith(".avro"))
+                                        .count())
+                        .isEqualTo(1);
+            }
+
+            assertThatThrownBy(
+                            () -> TemplateFileDeletionPlan.init(failingFileIO, tablePath).execute())
+                    .hasMessageContaining("file cleanup is incomplete");
         }
 
-        try (Catalog retrying = new FileSystemCatalog(LocalFileIO.create(), warehouse)) {
-            retrying.dropTable(identifier, true);
-            assertThat(sharedTableFiles("retry")).isEmpty();
+        TemplateFileDeletionPlan saved =
+                TemplateFileDeletionPlan.init(LocalFileIO.create(), tablePath);
+        saved.execute();
+        assertThat(LocalFileIO.create().exists(new Path(tablePath, "schema"))).isTrue();
+        TemplateFileDeletionPlan.checkCanCreateTable(LocalFileIO.create(), tablePath);
+        assertThat(sharedTableFiles("retry")).isEmpty();
+        try (Stream<java.nio.file.Path> files =
+                Files.walk(java.nio.file.Paths.get(warehouse.toUri()))) {
+            assertThat(files.noneMatch(path -> path.getFileName().toString().endsWith(".avro")))
+                    .isTrue();
         }
     }
 

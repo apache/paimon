@@ -37,6 +37,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
@@ -1267,8 +1268,12 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
+        Path path = getTableLocation(identifier);
         try {
             boolean externalTable = isExternalTable(getHmsTable(identifier));
+            if (!externalTable) {
+                TemplateFileDeletionPlan.init(fileIO, path).execute();
+            }
             clients()
                     .execute(
                             client ->
@@ -1288,7 +1293,6 @@ public class HiveCatalog extends AbstractCatalog {
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
-            Path path = getTableLocation(identifier);
             try {
                 FileIO fileIO = fileIO(path);
                 if (fileIO.exists(path)) {

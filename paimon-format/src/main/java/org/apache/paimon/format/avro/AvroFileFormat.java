@@ -36,7 +36,9 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExceptionUtils;
 
+import org.apache.avro.InvalidAvroMagicException;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
@@ -44,6 +46,7 @@ import org.apache.avro.io.EncoderFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
@@ -81,6 +84,12 @@ public class AvroFileFormat extends FileFormat {
         this.options = getIdentifierPrefixOptions(context.options());
         this.zstdLevel = context.zstdLevel();
         this.blockSize = context.blockSize();
+    }
+
+    /** Whether a reader found an incomplete Avro file or an invalid file header. */
+    public static boolean isIncompleteFile(Throwable error) {
+        return ExceptionUtils.findThrowable(error, EOFException.class).isPresent()
+                || ExceptionUtils.findThrowable(error, InvalidAvroMagicException.class).isPresent();
     }
 
     @Override

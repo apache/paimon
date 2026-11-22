@@ -29,7 +29,6 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
-import org.apache.paimon.operation.EntropyInjectTemplateFilesDeletion;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.Options;
@@ -86,7 +85,6 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -384,23 +382,12 @@ public abstract class AbstractCatalog implements Catalog {
 
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
-                try {
-                    Path tablePath = getTableLocation(identifier);
-                    TemplateFileDeletionPlan.retryTableDrops(
-                            fileIO(tablePath),
-                            tablePath,
-                            Runtime.getRuntime().availableProcessors());
-                } catch (RuntimeException e) {
-                    LOG.warn("Cannot retry file cleanup for {}", identifier, e);
-                }
                 return;
             }
             throw new TableNotExistException(identifier);
         }
 
         Set<Path> externalPaths = new HashSet<>();
-        TemplateFileDeletionPlan plan = null;
-        int cleanupThreads = 1;
         Path tablePath = getTableLocation(identifier);
         if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
             CoreOptions options = CoreOptions.fromMap(loadTableSchema(identifier).options());
@@ -418,26 +405,15 @@ public abstract class AbstractCatalog implements Catalog {
                     Optional<TableSchema> latest = branchSchema.latest();
                     if (!isExternal
                             && latest.isPresent()
-                            && EntropyInjectTemplateFilesDeletion.isTemplate(latest.get())) {
-                        if (plan == null) {
-                            plan = TemplateFileDeletionPlan.prepare(tableFileIO, tablePath);
-                            cleanupThreads = options.fileOperationThreadNum();
-                        }
-                        EntropyInjectTemplateFilesDeletion.collect(
-                                tableFileIO, tablePath, branch, latest.get(), plan);
+                            && TemplateFileDeletionPlan.isTemplate(latest.get())) {
+                        TemplateFileDeletionPlan.save(
+                                tableFileIO, tablePath, branch, latest.get(), false);
                     }
                 }
             }
         }
 
-        if (plan != null) {
-            plan = plan.archiveForTableDrop();
-        }
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
-        if (plan != null) {
-            checkState(!tableExists(identifier), "Table %s still exists after DROP.", identifier);
-            plan.confirmTableDrop(cleanupThreads);
-        }
     }
 
     protected boolean tableExists(Identifier identifier) {
@@ -454,7 +430,7 @@ public abstract class AbstractCatalog implements Catalog {
                             Map<String, String> options = schema.toSchema().options();
                             return Arrays.stream(
                                     new String[] {
-                                        EntropyInjectTemplateFilesDeletion.isTemplate(schema)
+                                        TemplateFileDeletionPlan.isTemplate(schema)
                                                 ? null
                                                 : options.get(DATA_FILE_EXTERNAL_PATHS.key()),
                                         options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
@@ -489,6 +465,8 @@ public abstract class AbstractCatalog implements Catalog {
         } catch (TableNotExistException ignored) {
         }
 
+        Path tablePath = getTableLocation(identifier);
+        TemplateFileDeletionPlan.checkCanCreateTable(fileIO(tablePath), tablePath);
         copyTableDefaultOptions(schema.options());
         validateCreateTable(schema, false);
 

@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -122,6 +123,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         Path path = getTableLocation(identifier);
+        TemplateFileDeletionPlan.init(fileIO(path), path).execute();
         deleteDirectory(path);
         // The drop cannot be retried once the table is gone, so attempt every external path.
         RuntimeException failure = null;
