@@ -35,8 +35,8 @@ class DataEvolutionIndexSourceMeta:
     def __post_init__(self):
         if self.scan_snapshot_id <= 0:
             raise ValueError('Scan snapshot id must be positive.')
-        if self.source_schema_id is not None and self.source_schema_id < 0:
-            raise ValueError('Source schema id must be non-negative.')
+        if self.source_schema_id is not None and self.source_schema_id < -1:
+            raise ValueError('Source schema id must be -1 or non-negative.')
 
     def serialize(self):
         if self.source_schema_id is None:

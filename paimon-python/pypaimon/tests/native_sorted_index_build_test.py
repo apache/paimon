@@ -404,7 +404,8 @@ def test_both_index_types_can_share_one_explicit_commit(rest_catalog):
 
 
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])
-def test_native_query_reads_index_with_version_two_source_meta(rest_catalog, kind):
+@pytest.mark.parametrize('source_schema_id', [0, -1])
+def test_native_query_reads_index_with_version_two_source_meta(rest_catalog, kind, source_schema_id):
     catalog, _ = rest_catalog
     table = _create(catalog)
     _append(table, ROWS)
@@ -413,12 +414,12 @@ def test_native_query_reads_index_with_version_two_source_meta(rest_catalog, kin
         meta = file.global_index_meta
         source = DataEvolutionIndexSourceMeta.deserialize(meta.source_meta)
         meta.source_meta = DataEvolutionIndexSourceMeta(
-            source.scan_snapshot_id, table.table_schema.id).serialize()
+            source.scan_snapshot_id, source_schema_id).serialize()
     _commit(table, messages)
 
     files = _files(table)
     assert files
-    assert all(file.global_index_meta.source_meta == struct.pack('>iiqq', 0x44454958, 2, 1, 0)
+    assert all(file.global_index_meta.source_meta == struct.pack('>iiqq', 0x44454958, 2, 1, source_schema_id)
                for file in files)
     predicate = table.new_read_builder().new_predicate_builder().equal('name', 'a')
     assert any(isinstance(split, IndexedSplit) for split in native_plan(table, predicate=predicate).splits())

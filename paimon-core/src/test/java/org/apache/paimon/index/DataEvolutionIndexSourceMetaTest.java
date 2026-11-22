@@ -40,7 +40,8 @@ class DataEvolutionIndexSourceMetaTest {
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(serialized)).isTrue();
         assertThat(DataEvolutionIndexSourceMeta.deserialize(serialized).scanSnapshotId())
                 .isEqualTo(42L);
-        assertThat(DataEvolutionIndexSourceMeta.deserialize(serialized).sourceSchemaId()).isNull();
+        assertThat(DataEvolutionIndexSourceMeta.deserialize(serialized).sourceSchemaId())
+                .isEqualTo(-1L);
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(null)).isFalse();
         assertThat(DataEvolutionIndexSourceMeta.isDataEvolutionMeta(new byte[] {1})).isFalse();
     }
@@ -64,9 +65,33 @@ class DataEvolutionIndexSourceMetaTest {
     }
 
     @Test
+    void testReadsVersionOneAndWritesVersionTwoWithUnknownSchema() {
+        byte[] legacy = ByteBuffer.allocate(16).putInt(0x44454958).putInt(1).putLong(42L).array();
+        DataEvolutionIndexSourceMeta source = DataEvolutionIndexSourceMeta.deserialize(legacy);
+
+        assertThat(source.scanSnapshotId()).isEqualTo(42L);
+        assertThat(source.sourceSchemaId()).isEqualTo(-1L);
+        byte[] upgraded =
+                ByteBuffer.allocate(24)
+                        .putInt(0x44454958)
+                        .putInt(2)
+                        .putLong(42L)
+                        .putLong(-1L)
+                        .array();
+        assertThat(source.serialize()).isEqualTo(upgraded);
+        assertThat(new DataEvolutionIndexSourceMeta(42L).serialize()).isEqualTo(upgraded);
+    }
+
+    @Test
     void testRejectsInvalidSnapshotId() {
         assertThatThrownBy(() -> new DataEvolutionIndexSourceMeta(0L))
                 .hasMessageContaining("snapshot id must be positive");
+    }
+
+    @Test
+    void testRejectsInvalidSourceSchemaId() {
+        assertThatThrownBy(() -> new DataEvolutionIndexSourceMeta(1L, -2L))
+                .hasMessageContaining("Source schema id must be -1 or non-negative");
     }
 
     @Test

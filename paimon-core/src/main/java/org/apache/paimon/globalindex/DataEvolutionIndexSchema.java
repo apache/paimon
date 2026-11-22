@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.index.DataEvolutionIndexSourceMeta.UNKNOWN_SCHEMA_ID;
+
 /** Checks index encoding compatibility with the table schema used for a Data Evolution scan. */
 public final class DataEvolutionIndexSchema {
 
@@ -63,7 +65,7 @@ public final class DataEvolutionIndexSchema {
         if (!table.coreOptions().dataEvolutionEnabled()) {
             return fieldIds.stream().allMatch(readType::containsField);
         }
-        Long sourceSchemaId = null;
+        long sourceSchemaId = UNKNOWN_SCHEMA_ID;
         byte[] sourceMeta = meta.sourceMeta();
         if (DataEvolutionIndexSourceMeta.isDataEvolutionMeta(sourceMeta)) {
             try {
@@ -74,7 +76,7 @@ public final class DataEvolutionIndexSchema {
                 return false;
             }
         }
-        if (sourceSchemaId != null) {
+        if (sourceSchemaId != UNKNOWN_SCHEMA_ID) {
             Optional<RowType> sourceType = schema(sourceSchemaId);
             return sourceType.isPresent()
                     && fieldIds.stream().allMatch(id -> sameType(sourceType.get(), id));
