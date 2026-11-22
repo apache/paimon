@@ -240,7 +240,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.mergeEngine(),
                 options.changelogProducer(),
                 options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
-                options.fileIndexReadIgnoreUnknownType());
+                options.fileIndexReadIgnoreUnknownType(),
+                tableName);
     }
 
     @Override

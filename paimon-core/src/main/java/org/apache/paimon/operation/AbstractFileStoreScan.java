@@ -81,6 +81,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final Integer parallelism;
+    private final String tableName;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
@@ -108,7 +109,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            @Nullable Integer parallelism) {
+            @Nullable Integer parallelism,
+            String tableName) {
         this.manifestsReader = manifestsReader;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
@@ -116,6 +118,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestFileFactory = manifestFileFactory;
         this.tableSchemas = new ConcurrentHashMap<>();
         this.parallelism = parallelism;
+        this.tableName = tableName;
         this.dropStats = false;
     }
 
@@ -314,10 +317,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestEntry> result = files;
 
         long scanDuration = (System.nanoTime() - started) / 1_000_000;
-        LOG.info(
-                "File store scan plan completed in {} ms. Files size : {}",
-                scanDuration,
-                result.size());
+        LOG.info("File store scan plan completed in {} ms for table {}", scanDuration, tableName);
         if (scanMetrics != null) {
             long allDataFiles =
                     manifestsResult.allManifests.stream()
