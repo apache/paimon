@@ -174,6 +174,53 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
+  test("centroid shard bitmaps apply cross-column OR before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant_id INT, status STRING, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("""INSERT INTO T VALUES
+                  |(0, array(0.0f, 0.0f), 7, 'private', 0),
+                  |(1, array(1.0f, 0.0f), NULL, 'public', 0),
+                  |(2, array(2.0f, 0.0f), 42, NULL, 0),
+                  |(3, array(3.0f, 0.0f), 42, 'public', 0),
+                  |(4, array(4.0f, 0.0f), NULL, NULL, 0),
+                  |(5, array(0.1f, 0.0f), 7, 'private', 1)""".stripMargin)
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1',
+               |extra_fields => '{"tenant_id":"bitmap","status":"bitmap"}')""".stripMargin)
+        .collect()
+
+      def nearest(predicate: String, limit: Int = 1): Seq[Int] =
+        spark
+          .sql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),$limit,
+                  |map('centroid.nprobe','1','ivf.nprobe','1')) WHERE $predicate ORDER BY id""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      val crossColumnOr = "tenant_id = 42 OR status = 'public'"
+      for (distributed <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> distributed.toString) {
+          assert(nearest(crossColumnOr) == Seq(1))
+          assert(nearest("status = 'public' OR tenant_id = 42", 4) == Seq(1, 2, 3))
+          assert(nearest(s"($crossColumnOr) AND status IS NULL") == Seq(2))
+          assert(
+            nearest("(tenant_id = 42 AND status IS NULL) OR status = 'public'", 3) ==
+              Seq(1, 2, 3))
+          assert(nearest("tenant_id = 99 OR status = 'public'") == Seq(1))
+          assert(nearest("tenant_id = 99 OR status = 'missing'").isEmpty)
+          assert(nearest("tenant_id = 42 OR id = 0") == Seq(0))
+          assert(nearest("status LIKE 'priv%' OR tenant_id = 42") == Seq(0))
+        }
+      }
+    }
+  }
+
   private def build(): Unit = {
     spark
       .sql(
