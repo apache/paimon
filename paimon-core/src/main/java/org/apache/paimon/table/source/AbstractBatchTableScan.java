@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.ReadPlanStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
@@ -124,6 +125,11 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         SnapshotReader configured =
                 ((ReadPlanStartingScanner) startingScanner).prepareRead(snapshotReader);
         return configured == null ? null : configured.specifiedSnapshot();
+    }
+
+    /** Uses an already resolved snapshot for a full batch read. */
+    public void withStartingSnapshot(Snapshot snapshot) {
+        startingScanner = new FullStartingScanner(snapshotReader.snapshotManager(), snapshot);
     }
 
     @Override

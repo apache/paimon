@@ -273,6 +273,8 @@ def cmd_table_full_text_search(args):
         args: Parsed command line arguments.
     """
     from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    from pypaimon.table.file_store_table import FileStoreTable
 
     config_path = args.config
     config = load_catalog_config(config_path)
@@ -296,6 +298,8 @@ def cmd_table_full_text_search(args):
     limit = args.limit
 
     try:
+        if isinstance(table, FileStoreTable):
+            table = table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(table))
         builder = table.new_full_text_search_builder()
         builder.with_query(args.column, args.query)
         builder.with_limit(limit)

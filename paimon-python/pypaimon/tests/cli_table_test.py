@@ -214,6 +214,40 @@ class CliTableTest(unittest.TestCase):
         self.assertEqual('', err)
         return out
 
+    def test_full_text_search_reads_ranking_snapshot_after_overwrite(self):
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
+        from pypaimon.utils.range import Range
+
+        identifier = 'test_db.full_text_snapshot'
+        schema = Schema.from_pyarrow_schema(pa.schema([('id', pa.int64()), ('content', pa.string())]))
+        schema.options.update({
+            'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        self._append_table_row(identifier, id=1, content='apache paimon')
+        table = self.catalog.get_table(identifier)
+        row_id = table.snapshot_manager().get_latest_snapshot().next_row_id - 1
+
+        def search_and_overwrite(_):
+            result = GlobalIndexResult.from_range(Range(row_id, row_id))
+            overwrite = table.new_batch_write_builder().overwrite()
+            writer, commit = overwrite.new_write(), overwrite.new_commit()
+            try:
+                writer.write_arrow(pa.table({'id': [9], 'content': ['later content']}))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+            return result
+
+        with patch.object(FullTextSearchBuilderImpl, 'execute_local', search_and_overwrite):
+            output = self._run_table_command_success(
+                'full-text-search', identifier, '--column', 'content', '--query', 'paimon',
+                '--select', 'id', '--format', 'json')
+
+        self.assertEqual([{'id': 1}], json.loads(output))
+
     def _append_table_row(self, identifier, **values):
         builder = self.catalog.get_table(identifier).new_batch_write_builder()
         writer = builder.new_write()

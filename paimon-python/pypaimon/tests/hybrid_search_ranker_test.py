@@ -112,6 +112,17 @@ class HybridSearchRankerTest(unittest.TestCase):
         self.assertAlmostEqual(getter(2), 1.0, places=6)
         self.assertGreater(getter(1), getter(2))
 
+    def test_weighted_score_handles_finite_scores_with_overflowing_range(self):
+        max_score = 3.4028234663852886e38
+        vector_route = _route_result(4.0, {1: -max_score, 2: 0.0, 3: max_score})
+        text_route = _route_result(1.0, {1: 1.0, 2: 0.0, 3: 0.0})
+
+        ranked = _rank(2, WEIGHTED_SCORE_RANKER, [vector_route, text_route])
+
+        self.assertEqual({2, 3}, set(ranked.results()))
+        self.assertEqual(2.0, ranked.score_getter()(2))
+        self.assertEqual(4.0, ranked.score_getter()(3))
+
     def test_weighted_score_single_hit_route_maps_to_full_weight(self):
         # min == max: must not divide by zero and must keep contributing.
         single_hit = _route_result(2.0, {7: 42.0})

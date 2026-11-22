@@ -283,6 +283,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return this;
     }
 
+    /** Applies a row-ID selection against the snapshot on which it was evaluated. */
+    public DataEvolutionBatchScan withGlobalIndexResult(
+            GlobalIndexResult globalIndexResult, Snapshot snapshot) {
+        withGlobalIndexResult(globalIndexResult);
+        batchScan.withStartingSnapshot(snapshot);
+        return this;
+    }
+
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         return batchScan.listPartitionEntries();

@@ -97,6 +97,20 @@ public class HybridSearchRankerTest {
     }
 
     @Test
+    public void testWeightedScoreHandlesFiniteScoresWithOverflowingRange() {
+        ScoredGlobalIndexResult vectorRoute =
+                result(new long[] {1, 2, 3}, new float[] {-Float.MAX_VALUE, 0F, Float.MAX_VALUE});
+        ScoredGlobalIndexResult textRoute = result(new long[] {1, 2, 3}, new float[] {1F, 0F, 0F});
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.weightedScore(
+                        Arrays.asList(vectorRoute, textRoute), new float[] {4F, 1F}, 2);
+
+        assertThat(ranked.results()).containsExactly(2L, 3L);
+        assertThat(ranked.scoreGetter().score(2L)).isEqualTo(2F);
+        assertThat(ranked.scoreGetter().score(3L)).isEqualTo(4F);
+    }
+
+    @Test
     public void testWeightedScoreSingleHitRouteMapsToFullWeight() {
         // A route with a single hit has no spread (min == max); it must not produce NaN/Infinity
         // and must keep contributing rather than being zeroed out.
