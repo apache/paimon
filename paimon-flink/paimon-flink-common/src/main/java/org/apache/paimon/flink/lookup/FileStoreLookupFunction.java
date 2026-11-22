@@ -343,6 +343,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionLoader == null) {
                 return lookupInternal(key);
             }
+            // An empty selection must not keep serving a previously loaded partition.
+            if (partitionLoader.partitions().isEmpty()) {
+                return Collections.emptyList();
+            }
             List<BinaryRow> partitions =
                     partitionRefresher != null
                             ? partitionRefresher.currentPartitions()

@@ -42,6 +42,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.table.data.RowData;
@@ -60,6 +61,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
@@ -296,6 +298,53 @@ public class FileStoreLookupFunctionTest {
                                         s -> s.toString().contains(tempDir.toString()))
                                 .size())
                 .isEqualTo(0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FULL, false", "FULL, true", "MEMORY, false", "MEMORY, true", "AUTO, false"})
+    public void testLookupAfterDroppingAllDynamicPartitions(
+            FlinkConnectorOptions.LookupCacheMode cacheMode, boolean partitionRefreshAsync)
+            throws Exception {
+        Options options = new Options();
+        options.set(LOOKUP_CACHE_MODE, cacheMode);
+        options.set(
+                FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC,
+                partitionRefreshAsync);
+        options.set(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL, Duration.ZERO);
+        table = createFileStoreTable(true, true, false, null).copy(options.toMap());
+        try (StreamTableWrite writer = table.newStreamWriteBuilder().newWrite()) {
+            writer.write(GenericRow.of(1, 2, 3L));
+            commit(writer.prepareCommit(true, 1));
+        }
+
+        lookupFunction =
+                new FileStoreLookupFunction(table, new int[] {0, 1, 2}, new int[] {1}, null, null);
+        lookupFunction.open(tempDir.toString());
+        RowData key = new FlinkRowData(GenericRow.of(2));
+        assertThat(lookupFunction.lookup(key))
+                .extracting(row -> row.getLong(2))
+                .containsExactly(3L);
+
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.truncatePartitions(
+                    Collections.singletonList(Collections.singletonMap("pt", "1")));
+        }
+        assertThat(table.newReadBuilder().newScan().topNPartitions(1, 1)).isEmpty();
+        assertThat(lookupFunction.lookup(key)).isEmpty();
+        assertThat(lookupFunction.lookup(key)).isEmpty();
+
+        // Reusing the same partition must load the new rows instead of the old cache.
+        try (StreamTableWrite writer = table.newStreamWriteBuilder().newWrite()) {
+            writer.write(GenericRow.of(1, 2, 4L));
+            commit(writer.prepareCommit(true, 3));
+        }
+        CommonTestUtils.waitUtil(
+                () -> lookupFunction.lookup(key).stream().anyMatch(row -> row.getLong(2) == 4L),
+                Duration.ofSeconds(10),
+                Duration.ofMillis(10));
+        assertThat(lookupFunction.lookup(key))
+                .extracting(row -> row.getLong(2))
+                .containsExactly(4L);
     }
 
     @Test
