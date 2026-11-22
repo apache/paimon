@@ -141,6 +141,15 @@ public class DecimalTest {
         assertThat(add(bigMax, bigOne, 38, 2)).isNull();
         assertThat(subtract(bigMax, Decimal.fromBigDecimal(new BigDecimal("-2"), 38, 2), 38, 2))
                 .isNull();
+
+        // a target scale different from the operands' scale must rescale via BigDecimal,
+        // not reuse the compact unscaled value under a new scale
+        Decimal d10 = Decimal.fromUnscaledLong(10, 5, 0);
+        Decimal d15 = Decimal.fromUnscaledLong(15, 5, 0);
+        assertThat(add(d10, d15, 5, 2))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("25.00"), 5, 2));
+        assertThat(subtract(d10, d15, 5, 2))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("-5.00"), 5, 2));
     }
 
     @Test

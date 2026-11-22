@@ -56,7 +56,9 @@ public class FieldSumAgg extends FieldAggregator {
                                 inFieldDD,
                                 mergeFieldDD.precision(),
                                 mergeFieldDD.scale());
-                if (sum == null) {
+                // a precision overflow has no wrap-around semantics: with fail-on-overflow the
+                // job fails loudly; by default the aggregated value becomes NULL, like product
+                if (failOnOverflow && sum == null) {
                     throw new ArithmeticException(
                             String.format(
                                     "Decimal overflow: %s + %s (precision=%d, scale=%d)",
@@ -115,7 +117,7 @@ public class FieldSumAgg extends FieldAggregator {
                                 inFieldDD,
                                 mergeFieldDD.precision(),
                                 mergeFieldDD.scale());
-                if (sum == null) {
+                if (failOnOverflow && sum == null) {
                     throw new ArithmeticException(
                             String.format(
                                     "Decimal overflow: %s - %s (precision=%d, scale=%d)",
