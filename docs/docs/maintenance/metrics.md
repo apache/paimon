@@ -465,6 +465,11 @@ are not an exhaustive traffic partition and must not be added together as total 
 `blobFetchHttp503` classifies the logical fetch's terminal error. It does not count every HTTP
 response, hidden client retry, or redirect, and HTTP 503 alone does not prove rate limiting.
 
+Compute counter rates only when the exporter preserves each producer's identity and resets.
+The existing Spark adapter shares registry keys for same-table writers in one JVM; later
+registrations may replace exported gauges. Such series do not establish concurrent-writer
+totals or per-writer rates. This option does not change that adapter behavior.
+
 ### Compaction Metrics
 
 <table class="table table-bordered">
