@@ -116,10 +116,36 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       MarkHiveDynamicPartitionWrite,
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
-      SparkShimLoader.shim.rewritePaimonSQLFunctionCommands(sparkSession),
+      SparkShimLoader.shim.rewritePaimonSQLFunctionCommands(sparkSession)
+    ) ++ spark42CreateTableLikeRule.map(_.newInstance(sparkSession)) ++ Seq(
       RewriteCreateTableLikeCommand(sparkSession),
       RewriteSparkDDLCommands(sparkSession)
     )
+  }
+
+  /**
+   * Loaded by name because the class is compiled only for Spark 4.2 and later. Without it on the
+   * classpath CREATE TABLE LIKE is left to Spark.
+   */
+  private lazy val spark42CreateTableLikeRule
+      : Option[java.lang.reflect.Constructor[Rule[LogicalPlan]]] = {
+    if (org.apache.spark.SPARK_VERSION >= "4.2") {
+      val className =
+        "org.apache.spark.sql.catalyst.parser.extensions.Spark42RewriteCreateTableLike"
+      try {
+        Some(
+          Class
+            .forName(className)
+            .getConstructor(classOf[SparkSession])
+            .asInstanceOf[java.lang.reflect.Constructor[Rule[LogicalPlan]]])
+      } catch {
+        case _: ClassNotFoundException =>
+          logWarning(s"$className is not on the classpath; CREATE TABLE LIKE is left to Spark.")
+          None
+      }
+    } else {
+      None
+    }
   }
 
   /** Parses a string to an Expression. */
@@ -184,10 +210,10 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
   /**
    * Cheap token-level check for `CREATE TABLE [IF NOT EXISTS] x.y[.z] LIKE ...` shape. Used as a
    * gate for the Paimon parser fallback when the delegate parser rejects a catalog-qualified CREATE
-   * TABLE LIKE statement.
+   * TABLE LIKE statement. Spark 4.2 parses such names itself, into a plan the fallback cannot use.
    */
   private def maybeCatalogCreateTableLike(sqlText: String): Boolean = {
-    if (org.apache.spark.SPARK_VERSION < "3.4") {
+    if (org.apache.spark.SPARK_VERSION < "3.4" || org.apache.spark.SPARK_VERSION >= "4.2") {
       return false
     }
     if (!startsWithCreateTable(sqlText)) {

@@ -27,6 +27,7 @@ import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogManager, Identifier, LookupCatalog, TableCatalog}
+import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.MultipartIdentifierHelper
 import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
 
 case class RewriteCreateTableLikeCommand(spark: SparkSession)
@@ -43,43 +44,76 @@ case class RewriteCreateTableLikeCommand(spark: SparkSession)
 
     plan.resolveOperatorsUp {
       case c: SparkCreateTableLikeCommand =>
-        val targetParts = toMultipartIdentifier(c.targetTable)
+        rewrite(
+          toMultipartIdentifier(c.targetTable),
+          toMultipartIdentifier(c.sourceTable),
+          c.provider,
+          c.fileFormat,
+          c.properties,
+          c.ifNotExists).getOrElse(c)
+    }
+  }
 
-        targetParts match {
-          case CatalogAndIdentifier(targetCatalog: SparkCatalog, targetIdent) =>
-            if (usesHiveStorageSyntax(c.fileFormat)) {
-              throw new UnsupportedOperationException(
-                "CREATE TABLE LIKE ... STORED AS is not supported for SparkCatalog.")
-            }
-            createTableLikeCommand(c, targetCatalog, targetIdent)
-          case CatalogAndIdentifier(targetCatalog: SparkGenericCatalog, targetIdent)
-              if !usesHiveStorageSyntax(c.fileFormat) &&
-                c.provider.exists(SparkBaseCatalog.usePaimon) =>
-            createTableLikeCommand(c, targetCatalog, targetIdent)
-          case _ => c
+  /**
+   * The Paimon command for a CREATE TABLE LIKE whose target is a Paimon table, or None to leave the
+   * statement to Spark. `fileFormat` is evaluated only for a Paimon target.
+   */
+  private[extensions] def rewrite(
+      targetParts: Seq[String],
+      sourceParts: Seq[String],
+      provider: Option[String],
+      fileFormat: => CatalogStorageFormat,
+      properties: Map[String, String],
+      ifNotExists: Boolean): Option[LogicalPlan] = {
+    val target: Option[(SparkBaseCatalog, Identifier)] = targetParts match {
+      case CatalogAndIdentifier(targetCatalog: SparkCatalog, targetIdent) =>
+        if (usesHiveStorageSyntax(fileFormat)) {
+          throw new UnsupportedOperationException(
+            "CREATE TABLE LIKE ... STORED AS is not supported for SparkCatalog.")
         }
+        Some((targetCatalog, targetIdent))
+      case CatalogAndIdentifier(targetCatalog: SparkGenericCatalog, targetIdent)
+          if provider.exists(SparkBaseCatalog.usePaimon) && !usesHiveStorageSyntax(fileFormat) =>
+        Some((targetCatalog, targetIdent))
+      case _ => None
+    }
+    target.map {
+      case (targetCatalog, targetIdent) =>
+        createTableLikeCommand(
+          targetCatalog,
+          targetIdent,
+          sourceParts,
+          provider,
+          fileFormat.locationUri.map(_.toString),
+          properties,
+          ifNotExists)
     }
   }
 
   private def createTableLikeCommand(
-      command: SparkCreateTableLikeCommand,
       targetCatalog: SparkBaseCatalog,
-      targetIdent: Identifier): LogicalPlan = {
-    toMultipartIdentifier(command.sourceTable) match {
+      targetIdent: Identifier,
+      sourceParts: Seq[String],
+      provider: Option[String],
+      location: Option[String],
+      properties: Map[String, String],
+      ifNotExists: Boolean): LogicalPlan = {
+    sourceParts match {
       case CatalogAndIdentifier(sourceCatalog: TableCatalog, sourceIdent) =>
         PaimonCreateTableLikeCommand(
           targetCatalog,
           targetIdent,
           sourceCatalog,
           sourceIdent,
-          command.provider,
-          command.fileFormat.locationUri.map(_.toString),
-          command.properties,
-          command.ifNotExists
+          provider,
+          location,
+          properties,
+          ifNotExists
         )
       case _ =>
         throw new UnsupportedOperationException(
-          s"CREATE TABLE LIKE source table must be resolved from TableCatalog: ${command.sourceTable}.")
+          s"CREATE TABLE LIKE source table must be resolved from TableCatalog: " +
+            s"${sourceParts.quoted}.")
     }
   }
 
