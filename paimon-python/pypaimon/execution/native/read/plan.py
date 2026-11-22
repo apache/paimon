@@ -69,8 +69,18 @@ def native_plan(
     if not runtime.native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs the pypaimon-rust extension")
+    planning_table = table
+    if (predicate is not None and incremental_range is None
+            and row_ranges is None and global_index_result is None
+            and table.options.data_evolution_enabled() and table.options.global_index_enabled()
+            and not table.options.options.contains(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+            and not table.options.options.contains(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)):
+        # Released native runtimes may still default scalar scans to fast.
+        planning_table = table.copy_without_time_travel({
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): table.options.scalar_scan_search_mode().value,
+        })
     builder = native_builder._configure_native_read_builder(
-        native_builder._native_read_builder(table), predicate, limit, projection)
+        native_builder._native_read_builder(planning_table), predicate, limit, projection)
     if partition_predicate is not None:
         builder = builder.with_partition_filter(native_builder._predicate_to_native(partition_predicate))
     if row_ranges is not None:

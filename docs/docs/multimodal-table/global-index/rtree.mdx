@@ -118,8 +118,8 @@ when `global-index.filter.refine-from-data` is false.
 ## Coverage and Updates
 
 The normal [coverage and freshness rules](./manage-indexes#coverage-and-freshness)
-apply. The default scalar search mode is `fast`, which can omit unindexed rows.
-Choose `scalar-index.search-mode=full` or `detail` when uncovered ranges must be
+apply. Ordinary Data Evolution batch scans default to `full`. An explicit `fast` can
+omit unindexed rows. Choose `full` or `detail` when uncovered ranges must be
 scanned, and refresh indexes as new data arrives.
 
 Changing the geometry column makes existing envelopes stale even when row IDs
