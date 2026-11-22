@@ -44,6 +44,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -372,66 +373,28 @@ public interface PartitionPredicate extends Serializable {
                     InternalRow minValues,
                     InternalRow maxValues,
                     InternalArray nullCounts) {
-                Object[] lower = converter.convert(minValues);
-                Object[] upper = converter.convert(maxValues);
-                long[] nulls = new long[lower.length];
-                for (int i = 0; i < lower.length; i++) {
-                    nulls[i] =
-                            nullCounts.size() == 0 || nullCounts.isNullAt(i)
-                                    ? -1
-                                    : nullCounts.getLong(i);
-                }
+                ManifestLookup lookup =
+                        new ManifestLookup(
+                                partitionValues,
+                                converter.convert(minValues),
+                                converter.convert(maxValues),
+                                nullCounts,
+                                rowCount);
                 if (columns == null) {
-                    return matchesAny(
-                            partitionValues,
-                            0,
-                            partitionValues.length,
-                            lower,
-                            upper,
-                            nulls,
-                            rowCount,
-                            null);
+                    return matches(lookup);
                 }
 
-                CandidateRange best = null;
                 ColumnRangeIndex ready = null;
-                Object readyLower = null;
-                Object readyUpper = null;
                 boolean trackRejections = false;
                 long requiredRejections = (long) partitionValues.length * LINEAR_SCANS_BEFORE_SORT;
-                for (int field = 0; field < columns.length; field++) {
-                    ColumnRangeIndex column = columns[field];
-                    boolean checkBounds =
-                            column.min != null
-                                    && lower[field] != null
-                                    && upper[field] != null
-                                    && nulls[field] != rowCount;
-                    Object lowerBound =
-                            checkBounds && compareLiteral(column.type, column.min, lower[field]) < 0
-                                    ? lower[field]
-                                    : null;
-                    Object upperBound =
-                            checkBounds && compareLiteral(column.type, column.max, upper[field]) > 0
-                                    ? upper[field]
-                                    : null;
-                    if (lowerBound == null && upperBound == null) {
-                        // No non-null value is excluded by the bounds of this column.
-                        lower[field] = null;
-                        if ((nulls[field] != 0 || column.nullCount == 0)
-                                && (nulls[field] != rowCount || column.min == null)) {
-                            continue;
-                        }
+                for (ColumnRangeIndex column : columns) {
+                    if (!column.restrict(lookup)) {
+                        continue;
                     }
-                    Object[][] sorted = sortedPartitions(field);
+                    Object[][] sorted = column.sortedPartitions;
                     if (sorted != null) {
-                        CandidateRange range =
-                                column.search(
-                                        sorted, lowerBound, upperBound, nulls[field], rowCount);
-                        if (range == null) {
+                        if (!column.selectCandidates(sorted, lookup)) {
                             return false;
-                        }
-                        if (best == null || range.size() < best.size()) {
-                            best = range;
                         }
                     } else {
                         trackRejections = true;
@@ -439,70 +402,24 @@ public interface PartitionPredicate extends Serializable {
                                 && (ready == null
                                         || column.rejectedPartitions > ready.rejectedPartitions)) {
                             ready = column;
-                            readyLower = lowerBound;
-                            readyUpper = upperBound;
                         }
                     }
                 }
 
                 // Reuse a small candidate set instead of building another index for this lookup.
                 if (ready != null
-                        && (best == null || best.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH)) {
-                    CandidateRange range =
-                            ready.search(
-                                    ready.build(partitionValues),
-                                    readyLower,
-                                    readyUpper,
-                                    nulls[ready.field],
-                                    rowCount);
-                    if (range == null) {
-                        return false;
-                    }
-                    if (best == null || range.size() < best.size()) {
-                        best = range;
-                    }
+                        && (lookup.indexedField < 0
+                                || lookup.candidateCount() >= MIN_PARTITIONS_FOR_RANGE_SEARCH)
+                        && !ready.selectCandidates(ready.build(partitionValues), lookup)) {
+                    return false;
                 }
 
-                int[] rejections = trackRejections ? new int[columns.length] : null;
-                boolean matches;
-                if (best == null) {
-                    matches =
-                            matchesAny(
-                                    partitionValues,
-                                    0,
-                                    partitionValues.length,
-                                    lower,
-                                    upper,
-                                    nulls,
-                                    rowCount,
-                                    rejections);
-                } else {
-                    // The candidate intervals have already checked the bounds on this column.
-                    lower[best.field] = null;
-                    matches =
-                            matchesAny(
-                                            best.partitions,
-                                            0,
-                                            best.nullEnd,
-                                            lower,
-                                            upper,
-                                            nulls,
-                                            rowCount,
-                                            rejections)
-                                    || matchesAny(
-                                            best.partitions,
-                                            best.start,
-                                            best.end,
-                                            lower,
-                                            upper,
-                                            nulls,
-                                            rowCount,
-                                            rejections);
-                }
-                if (rejections != null) {
-                    for (int i = 0; i < rejections.length; i++) {
-                        if (rejections[i] > 0 && sortedPartitions(i) == null) {
-                            columns[i].recordRejections(rejections[i]);
+                lookup.rejections = trackRejections ? new int[columns.length] : null;
+                boolean matches = matches(lookup);
+                if (lookup.rejections != null) {
+                    for (int i = 0; i < columns.length; i++) {
+                        if (lookup.rejections[i] > 0 && columns[i].sortedPartitions == null) {
+                            columns[i].recordRejections(lookup.rejections[i]);
                         }
                     }
                 }
@@ -514,17 +431,18 @@ public interface PartitionPredicate extends Serializable {
                 return columns == null ? null : columns[field].sortedPartitions;
             }
 
-            private boolean matchesAny(
-                    Object[][] candidates,
-                    int start,
-                    int end,
-                    Object[] lower,
-                    Object[] upper,
-                    long[] nulls,
-                    long rowCount,
-                    @Nullable int[] rejections) {
+            private boolean matches(ManifestLookup lookup) {
+                if (lookup.indexedField >= 0) {
+                    lookup.clearBounds(lookup.indexedField);
+                }
+                return matchesAny(0, lookup.nullEnd, lookup)
+                        || matchesAny(lookup.start, lookup.end, lookup);
+            }
+
+            private boolean matchesAny(int start, int end, ManifestLookup lookup) {
+                int[] rejections = lookup.rejections;
                 for (int i = start; i < end; i++) {
-                    int rejectedField = firstMismatch(candidates[i], lower, upper, nulls, rowCount);
+                    int rejectedField = firstMismatch(lookup.candidates[i], lookup);
                     if (rejectedField < 0) {
                         return true;
                     }
@@ -536,29 +454,83 @@ public interface PartitionPredicate extends Serializable {
                 return false;
             }
 
-            private int firstMismatch(
-                    Object[] partition,
-                    Object[] lower,
-                    Object[] upper,
-                    long[] nulls,
-                    long rowCount) {
+            private int firstMismatch(Object[] partition, ManifestLookup lookup) {
                 for (int i = 0; i < partition.length; i++) {
                     Object value = partition[i];
                     if (value == null) {
-                        if (nulls[i] == 0) {
+                        if (lookup.nulls[i] == 0) {
                             return i;
                         }
-                    } else if (nulls[i] == rowCount) {
+                    } else if (lookup.nulls[i] == lookup.rowCount) {
                         return i;
-                    } else if (lower[i] != null && upper[i] != null) {
+                    } else if (lookup.lower[i] != null && lookup.upper[i] != null) {
                         DataType type = converter.rowType().getTypeAt(i);
-                        if (compareLiteral(type, value, lower[i]) < 0
-                                || compareLiteral(type, value, upper[i]) > 0) {
+                        if (compareLiteral(type, value, lookup.lower[i]) < 0
+                                || compareLiteral(type, value, lookup.upper[i]) > 0) {
                             return i;
                         }
                     }
                 }
                 return -1;
+            }
+
+            private static final class ManifestLookup {
+
+                private final Object[] lower;
+                private final Object[] upper;
+                private final long[] nulls;
+                private final long rowCount;
+                @Nullable private int[] rejections;
+                private Object[][] candidates;
+                private int indexedField = -1;
+                private int nullEnd;
+                private int start;
+                private int end;
+
+                private ManifestLookup(
+                        Object[][] partitions,
+                        Object[] lower,
+                        Object[] upper,
+                        InternalArray nullCounts,
+                        long rowCount) {
+                    this.candidates = partitions;
+                    this.end = partitions.length;
+                    this.lower = lower;
+                    this.upper = upper;
+                    this.rowCount = rowCount;
+                    this.nulls = new long[lower.length];
+                    for (int i = 0; i < lower.length; i++) {
+                        nulls[i] =
+                                nullCounts.size() == 0 || nullCounts.isNullAt(i)
+                                        ? -1
+                                        : nullCounts.getLong(i);
+                    }
+                }
+
+                private void clearBounds(int field) {
+                    lower[field] = null;
+                    upper[field] = null;
+                }
+
+                private int candidateCount() {
+                    return nullEnd + (end - start);
+                }
+
+                private boolean consider(
+                        Object[][] sorted, int field, int nullEnd, int start, int end) {
+                    int count = nullEnd + (end - start);
+                    if (count == 0) {
+                        return false;
+                    }
+                    if (indexedField < 0 || count < candidateCount()) {
+                        candidates = sorted;
+                        indexedField = field;
+                        this.nullEnd = nullEnd;
+                        this.start = start;
+                        this.end = end;
+                    }
+                    return true;
+                }
             }
 
             private static final class ColumnRangeIndex implements Serializable {
@@ -579,6 +551,21 @@ public interface PartitionPredicate extends Serializable {
                     this.nullCount = checkNotNull(stats.nullCount()).intValue();
                     this.min = stats.min();
                     this.max = stats.max();
+                }
+
+                private boolean restrict(ManifestLookup lookup) {
+                    long manifestNulls = lookup.nulls[field];
+                    if (min != null
+                            && lookup.lower[field] != null
+                            && lookup.upper[field] != null
+                            && manifestNulls != lookup.rowCount
+                            && (compareLiteral(type, min, lookup.lower[field]) < 0
+                                    || compareLiteral(type, max, lookup.upper[field]) > 0)) {
+                        return true;
+                    }
+                    lookup.clearBounds(field);
+                    return (manifestNulls == 0 && nullCount != 0)
+                            || (manifestNulls == lookup.rowCount && min != null);
                 }
 
                 private synchronized void recordRejections(int count) {
@@ -620,52 +607,40 @@ public interface PartitionPredicate extends Serializable {
 
                 private Object[][] sortPartitions(Object[][] partitions) {
                     Object[][] sorted = partitions.clone();
-                    if (nullCount != 0) {
-                        int nextNull = 0;
-                        int nextKey = nullCount;
-                        for (Object[] partition : partitions) {
-                            if (partition[field] == null) {
-                                sorted[nextNull++] = partition;
-                            } else {
-                                sorted[nextKey++] = partition;
-                            }
-                        }
+                    if (nullCount == 0) {
+                        Arrays.sort(
+                                sorted,
+                                (left, right) -> compareLiteral(type, left[field], right[field]));
+                    } else {
+                        Comparator<Object> keys =
+                                Comparator.nullsFirst(
+                                        (left, right) -> compareLiteral(type, left, right));
+                        Arrays.sort(
+                                sorted, Comparator.comparing(partition -> partition[field], keys));
                     }
-                    Arrays.sort(
-                            sorted,
-                            nullCount,
-                            sorted.length,
-                            (left, right) -> compareLiteral(type, left[field], right[field]));
                     return sorted;
                 }
 
-                @Nullable
-                private CandidateRange search(
-                        Object[][] sorted,
-                        @Nullable Object lower,
-                        @Nullable Object upper,
-                        long manifestNulls,
-                        long rowCount) {
+                private boolean selectCandidates(Object[][] sorted, ManifestLookup lookup) {
+                    long manifestNulls = lookup.nulls[field];
                     int nullEnd = manifestNulls == 0 ? 0 : nullCount;
-                    if (manifestNulls == rowCount) {
-                        return nullEnd == 0
-                                ? null
-                                : new CandidateRange(field, sorted, nullEnd, nullCount, nullCount);
+                    int start = nullCount;
+                    int end = nullCount;
+                    if (manifestNulls != lookup.rowCount) {
+                        Object lower = lookup.lower[field];
+                        Object upper = lookup.upper[field];
+                        if (lower != null && compareLiteral(type, min, lower) < 0) {
+                            start = findBound(sorted, lower, nullCount, false);
+                        }
+                        end = start;
+                        if (upper == null || compareLiteral(type, max, upper) <= 0) {
+                            end = sorted.length;
+                        } else if (start < sorted.length
+                                && compareLiteral(type, sorted[start][field], upper) <= 0) {
+                            end = findBound(sorted, upper, start + 1, true);
+                        }
                     }
-                    int start =
-                            lower == null ? nullCount : findBound(sorted, lower, nullCount, false);
-                    if (start == sorted.length
-                            || (upper != null
-                                    && compareLiteral(type, sorted[start][field], upper) > 0)) {
-                        return nullEnd == 0
-                                ? null
-                                : new CandidateRange(field, sorted, nullEnd, start, start);
-                    }
-                    int end =
-                            upper == null
-                                    ? sorted.length
-                                    : findBound(sorted, upper, start + 1, true);
-                    return new CandidateRange(field, sorted, nullEnd, start, end);
+                    return lookup.consider(sorted, field, nullEnd, start, end);
                 }
 
                 private int findBound(
@@ -681,28 +656,6 @@ public interface PartitionPredicate extends Serializable {
                         }
                     }
                     return start;
-                }
-            }
-
-            private static final class CandidateRange {
-
-                private final int field;
-                private final Object[][] partitions;
-                private final int nullEnd;
-                private final int start;
-                private final int end;
-
-                private CandidateRange(
-                        int field, Object[][] partitions, int nullEnd, int start, int end) {
-                    this.field = field;
-                    this.partitions = partitions;
-                    this.nullEnd = nullEnd;
-                    this.start = start;
-                    this.end = end;
-                }
-
-                private int size() {
-                    return nullEnd + (end - start);
                 }
             }
         }
