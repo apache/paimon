@@ -142,7 +142,7 @@ public class SortedGlobalIndexScanner implements Serializable {
         List<IndexManifestEntry> currentIndexes =
                 currentIndexEntries(table, snapshot, indexType, indexFields, partitionPredicate);
         Set<IndexManifestEntry> deletedIndexEntries =
-                indexesWithIncompatibleSchema(table, snapshot, currentIndexes);
+                indexesWithIncompatibleSchema(table, currentIndexes);
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
             deletedIndexEntries.addAll(

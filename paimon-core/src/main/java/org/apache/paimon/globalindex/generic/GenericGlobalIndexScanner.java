@@ -142,7 +142,7 @@ public class GenericGlobalIndexScanner implements Serializable {
                 currentIndexEntries(
                         table, scanSnapshot, indexType, indexFields, partitionPredicate);
         Set<IndexManifestEntry> deletedIndexEntries =
-                indexesWithIncompatibleSchema(table, scanSnapshot, currentIndexes);
+                indexesWithIncompatibleSchema(table, currentIndexes);
         Options mergedOptions = new Options(table.options(), options.toMap());
         if (mergedOptions.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
                 == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {

@@ -157,8 +157,8 @@ public class GlobalIndexBuilderUtils {
     }
 
     public static Set<IndexManifestEntry> indexesWithIncompatibleSchema(
-            FileStoreTable table, Snapshot snapshot, List<IndexManifestEntry> currentIndexes) {
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
+            FileStoreTable table, List<IndexManifestEntry> currentIndexes) {
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         return currentIndexes.stream()
                 .filter(entry -> !schema.isCompatible(entry.indexFile()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));

@@ -65,7 +65,7 @@ public class DataEvolutionGlobalIndexCoverage {
         this.partitionFilter = partitionFilter;
         this.searchMode = checkNotNull(searchMode);
         this.coverageByField = new HashMap<>();
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             // Single-field coverage belongs to single-field index definitions. Multi-field

@@ -18,14 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
-
-import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.util.Collections;
@@ -41,14 +38,12 @@ public final class DataEvolutionIndexSchema {
 
     private final FileStoreTable table;
     private final RowType readType;
-    @Nullable private final Snapshot snapshot;
     private final Map<Long, Optional<RowType>> schemas = new HashMap<>();
-    private final Map<Integer, Boolean> legacyFields = new HashMap<>();
+    private final Map<Long, Map<Integer, Boolean>> fieldCompatibility = new HashMap<>();
 
-    public DataEvolutionIndexSchema(FileStoreTable table, @Nullable Snapshot snapshot) {
+    public DataEvolutionIndexSchema(FileStoreTable table) {
         this.table = table;
         this.readType = table.rowType();
-        this.snapshot = snapshot;
     }
 
     public boolean isCompatible(IndexFileMeta file) {
@@ -62,12 +57,10 @@ public final class DataEvolutionIndexSchema {
     }
 
     private boolean isCompatible(GlobalIndexMeta meta, List<Integer> fieldIds) {
-        if (!table.coreOptions().dataEvolutionEnabled()) {
-            return fieldIds.stream().allMatch(readType::containsField);
-        }
         long sourceSchemaId = UNKNOWN_SCHEMA_ID;
         byte[] sourceMeta = meta.sourceMeta();
-        if (DataEvolutionIndexSourceMeta.isDataEvolutionMeta(sourceMeta)) {
+        if (table.coreOptions().dataEvolutionEnabled()
+                && DataEvolutionIndexSourceMeta.isDataEvolutionMeta(sourceMeta)) {
             try {
                 sourceSchemaId =
                         DataEvolutionIndexSourceMeta.deserialize(sourceMeta).sourceSchemaId();
@@ -76,36 +69,20 @@ public final class DataEvolutionIndexSchema {
                 return false;
             }
         }
-        if (sourceSchemaId != UNKNOWN_SCHEMA_ID) {
-            Optional<RowType> sourceType = schema(sourceSchemaId);
-            return sourceType.isPresent()
-                    && fieldIds.stream().allMatch(id -> sameType(sourceType.get(), id));
+        if (sourceSchemaId == UNKNOWN_SCHEMA_ID) {
+            return fieldIds.stream().allMatch(readType::containsField);
         }
-        return fieldIds.stream()
-                .allMatch(id -> legacyFields.computeIfAbsent(id, this::legacyCompatible));
-    }
-
-    private boolean legacyCompatible(int fieldId) {
-        if (!readType.containsField(fieldId)) {
+        Optional<RowType> sourceType = schema(sourceSchemaId);
+        if (!sourceType.isPresent()) {
             return false;
         }
-        long readSchemaId = table.schema().id();
-        long lastSchemaId =
-                snapshot == null ? readSchemaId : Math.max(readSchemaId, snapshot.schemaId());
-        // A legacy index can use any schema that contained the field. A schema-only ALTER
-        // may have advanced the build schema beyond the source snapshot's schema.
-        for (long id = 0; id <= lastSchemaId; id++) {
-            if (id == readSchemaId) {
-                continue;
-            }
-            Optional<RowType> historical = schema(id);
-            if (!historical.isPresent()
-                    || (historical.get().containsField(fieldId)
-                            && !sameType(historical.get(), fieldId))) {
-                return false;
-            }
-        }
-        return true;
+        Map<Integer, Boolean> fields =
+                fieldCompatibility.computeIfAbsent(sourceSchemaId, id -> new HashMap<>());
+        return fieldIds.stream()
+                .allMatch(
+                        id ->
+                                fields.computeIfAbsent(
+                                        id, fieldId -> sameType(sourceType.get(), fieldId)));
     }
 
     private boolean sameType(RowType source, int fieldId) {

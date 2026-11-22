@@ -117,8 +117,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 GlobalIndexBuilderUtils.currentIndexEntries(
                         table, snapshot, indexType, indexFields, partitionPredicate);
         Set<IndexManifestEntry> indexesToRefresh =
-                GlobalIndexBuilderUtils.indexesWithIncompatibleSchema(
-                        table, snapshot, currentIndexes);
+                GlobalIndexBuilderUtils.indexesWithIncompatibleSchema(table, currentIndexes);
         List<Range> rowRangesToBuild =
                 GlobalIndexBuilderUtils.rowRangesToBuild(
                         snapshot, currentIndexes, indexesToRefresh);

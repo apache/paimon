@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
@@ -67,6 +68,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -896,6 +898,47 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         .isEqualTo(original.schema().id());
                             }
                         });
+    }
+
+    @Test
+    public void testIndexSchemaCompatibilityUsesRecordedSchemaAndField() throws Exception {
+        write(1);
+        FileStoreTable original = (FileStoreTable) catalog.getTable(identifier());
+        long snapshotId = original.latestSnapshot().get().id();
+        catalog.alterTable(
+                identifier(), SchemaChange.updateColumnType("f0", DataTypes.BIGINT()), false);
+        FileStoreTable evolved = (FileStoreTable) catalog.getTable(identifier());
+        int changedField = evolved.rowType().getField("f0").id();
+        int unchangedField = evolved.rowType().getField("f1").id();
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(evolved);
+        byte[] oldSource =
+                new DataEvolutionIndexSourceMeta(snapshotId, original.schema().id()).serialize();
+        byte[] newSource =
+                new DataEvolutionIndexSourceMeta(snapshotId, evolved.schema().id()).serialize();
+
+        assertThat(schema.isCompatible(indexFileWithSource(changedField, oldSource))).isFalse();
+        assertThat(schema.isCompatible(indexFileWithSource(unchangedField, oldSource))).isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource(changedField, newSource))).isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource(changedField, oldSource))).isFalse();
+
+        byte[] legacy =
+                ByteBuffer.allocate(16).putInt(0x44454958).putInt(1).putLong(snapshotId).array();
+        byte[] unknown = new DataEvolutionIndexSourceMeta(snapshotId).serialize();
+        for (byte[] source : Arrays.asList(null, legacy, unknown)) {
+            assertThat(schema.isCompatible(indexFileWithSource(changedField, source))).isTrue();
+            assertThat(schema.isCompatible(indexFileWithSource(Integer.MAX_VALUE, source)))
+                    .isFalse();
+        }
+    }
+
+    private static IndexFileMeta indexFileWithSource(int fieldId, byte[] sourceMeta) {
+        return new IndexFileMeta(
+                "btree",
+                "index",
+                1,
+                1,
+                new GlobalIndexMeta(0, 0, fieldId, null, null, sourceMeta),
+                null);
     }
 
     @Test

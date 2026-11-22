@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexReader;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
@@ -1618,7 +1619,13 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         FileStoreTable table = getTable(name);
         String[] documents = {"Apache Paimon", "other document"};
         writeDocuments(table, documents);
-        buildAndCommitIndex(table, documents);
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
+                new DataEvolutionIndexSourceMeta(
+                                table.latestSnapshot().get().id(), table.schema().id())
+                        .serialize());
         catalog.alterTable(
                 name, SchemaChange.updateColumnType(TEXT_FIELD_NAME, DataTypes.VARCHAR(64)), false);
 
@@ -1766,6 +1773,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     private void buildAndCommitIndexWithFields(
             FileStoreTable table, String[] documents, List<DataField> indexFields)
             throws Exception {
+        buildAndCommitIndexWithFields(table, documents, indexFields, null);
+    }
+
+    private void buildAndCommitIndexWithFields(
+            FileStoreTable table,
+            String[] documents,
+            List<DataField> indexFields,
+            @Nullable byte[] sourceMeta)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
@@ -1791,7 +1807,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        null);
+                        sourceMeta);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

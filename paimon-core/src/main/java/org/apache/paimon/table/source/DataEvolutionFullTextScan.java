@@ -116,7 +116,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         @Nullable
         Snapshot snapshot =
                 pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table, snapshot);
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {

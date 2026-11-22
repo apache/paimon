@@ -675,16 +675,16 @@ class GlobalIndexQueryTest {
 
         Predicate suffix = builder.equal(1, 7);
         assertThat(
-                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, null, suffix)
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, suffix)
                                 .test(composite))
                 .isFalse();
         assertThat(
-                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, null, suffix)
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, suffix)
                                 .test(dedicated))
                 .isTrue();
         Predicate prefix = PredicateBuilder.and(builder.equal(0, 1), suffix);
         assertThat(
-                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, null, prefix)
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, prefix)
                                 .test(composite))
                 .isTrue();
     }
