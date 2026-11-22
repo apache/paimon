@@ -21,17 +21,23 @@ package org.apache.paimon.partition;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate.PartitionRangeIndex;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -126,25 +132,35 @@ public class PartitionPredicateTest {
                 .isFalse();
     }
 
-    @Test
-    public void testPartitionValuesAgainstRangeAndNullStatistics() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 64})
+    public void testPartitionValuesAgainstRangeAndNullStatistics(int additionalPartitions)
+            throws Exception {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         BinaryRow nullPartition = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(nullPartition);
         writer.setNullAt(0);
         writer.writeInt(1, 100);
         writer.complete();
+        List<BinaryRow> partitions =
+                new ArrayList<>(
+                        Arrays.asList(createPart(1, 100), createPart(19, 5), nullPartition));
+        for (int i = 0; i < additionalPartitions; i++) {
+            partitions.add(createPart(20 + i, 100));
+        }
         PartitionPredicate predicate =
-                InstantiationUtil.clone(
-                        PartitionPredicate.fromMultiple(
-                                type,
-                                Arrays.asList(
-                                        createPart(1, 100), createPart(19, 5), nullPartition)));
+                InstantiationUtil.clone(PartitionPredicate.fromMultiple(type, partitions));
         GenericRow lower = GenericRow.of(1, 5);
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
-        assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        for (int i = 0; i < 17; i++) {
+            assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        }
         assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
+        assertThat(predicate.test(10, GenericRow.of(3, 5), GenericRow.of(4, 100), noNulls))
+                .isFalse();
+        assertThat(predicate.test(10, lower, GenericRow.of(4, null), noNulls)).isTrue();
+        assertThat(predicate.test(10, GenericRow.of(1, null), upper, noNulls)).isTrue();
         // Day 1 no longer matches, but the null partition could match event 100.
         lower = GenericRow.of(3, 98);
         upper = GenericRow.of(4, 100);
@@ -175,10 +191,96 @@ public class PartitionPredicateTest {
     }
 
     @Test
+    public void testRangeIndexRequiresEnoughRejectedPartitions() throws Exception {
+        Object[] first = {Integer.MIN_VALUE, 0};
+        Object[] second = {-1, 2};
+        Object[] third = {-1, 1};
+        Object[] fourth = {Integer.MAX_VALUE, 0};
+        Object[][] partitions = {fourth, second, first, third};
+        PartitionRangeIndex index =
+                new PartitionRangeIndex(
+                        partitions,
+                        new RowDataToObjectArrayConverter(
+                                RowType.of(DataTypes.INT(), DataTypes.INT())),
+                        new SimpleColStats[] {
+                            new SimpleColStats(Integer.MIN_VALUE, Integer.MAX_VALUE, 0L),
+                            new SimpleColStats(0, 2, 0L)
+                        });
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        GenericRow firstMatch = GenericRow.of(Integer.MAX_VALUE, 0);
+        GenericRow lower = GenericRow.of(0, 0);
+        GenericRow upper = GenericRow.of(0, 2);
+        for (int i = 0; i < 17; i++) {
+            assertThat(index.test(10, firstMatch, firstMatch, noNulls)).isTrue();
+            assertThat(index.test(10, lower, upper, noNulls)).isFalse();
+            assertThat(index.sortedPartitions(0)).isNull();
+        }
+        GenericRow duplicate = GenericRow.of(-1, 1);
+        assertThat(index.test(10, duplicate, duplicate, noNulls)).isTrue();
+        Object[][] sorted = index.sortedPartitions(0);
+        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third, fourth);
+        assertThat(index.test(10, lower, upper, noNulls)).isFalse();
+        assertThat(index.sortedPartitions(0)).isSameAs(sorted);
+        assertThat(Arrays.asList(partitions)).containsExactly(fourth, second, first, third);
+
+        PartitionRangeIndex restored = InstantiationUtil.clone(index);
+        assertThat(restored.sortedPartitions(0)).isNull();
+        for (int i = 0; i < 17; i++) {
+            assertThat(restored.test(10, lower, upper, noNulls)).isFalse();
+            assertThat(restored.sortedPartitions(0)).isNull();
+        }
+        assertThat(restored.test(10, duplicate, duplicate, noNulls)).isTrue();
+        assertThat(restored.sortedPartitions(0)).isNotNull();
+    }
+
+    @Test
+    public void testRangeIndexesBuildIndependentlyForNullableColumns() {
+        BinaryString a = BinaryString.fromString("a");
+        BinaryString b = BinaryString.fromString("b");
+        BinaryString c = BinaryString.fromString("c");
+        Object[][] partitions = {{null, c}, {0, a}, {2, c}, {4, null}};
+        PartitionRangeIndex index =
+                new PartitionRangeIndex(
+                        partitions,
+                        new RowDataToObjectArrayConverter(
+                                RowType.of(DataTypes.DATE(), DataTypes.STRING())),
+                        new SimpleColStats[] {
+                            new SimpleColStats(0, 4, 1L), new SimpleColStats(a, c, 1L)
+                        });
+        BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        GenericRow firstLower = GenericRow.of(1, b);
+        GenericRow firstUpper = GenericRow.of(1, c);
+        for (int i = 0; i < 18; i++) {
+            assertThat(index.test(10, firstLower, firstUpper, noNulls)).isFalse();
+        }
+        assertThat(index.sortedPartitions(0)[0]).isSameAs(partitions[0]);
+        assertThat(index.sortedPartitions(1)).isNull();
+
+        GenericRow secondGap = GenericRow.of(null, b);
+        BinaryArray unknownDateNulls = BinaryArray.fromLongArray(new Long[] {null, 0L});
+        for (int i = 0; i < 17; i++) {
+            assertThat(index.test(10, secondGap, secondGap, unknownDateNulls)).isFalse();
+        }
+        assertThat(index.sortedPartitions(1)).isNull();
+        assertThat(index.test(10, secondGap, secondGap, unknownDateNulls)).isFalse();
+        assertThat(index.sortedPartitions(1)[0]).isSameAs(partitions[3]);
+
+        GenericRow correlatedMiss = GenericRow.of(0, c);
+        assertThat(index.test(10, correlatedMiss, correlatedMiss, noNulls)).isFalse();
+        GenericRow nullableDate = GenericRow.of(1, c);
+        assertThat(index.test(10, nullableDate, nullableDate, unknownDateNulls)).isTrue();
+        assertThat(index.test(10, nullableDate, nullableDate, noNulls)).isFalse();
+        BinaryArray allNullStrings = BinaryArray.fromLongArray(new Long[] {0L, 10L});
+        GenericRow nullableString = GenericRow.of(4, null);
+        assertThat(index.test(10, nullableString, nullableString, allNullStrings)).isTrue();
+    }
+
+    @Test
     public void testManifestRangesAgainstPartitionSet() {
         Set<BinaryRow> partitions = new HashSet<>();
         for (int day = 0; day < 40; day++) {
             partitions.add(createPart(day, day % 7));
+            partitions.add(createPart(day, (day + 2) % 7));
         }
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(
@@ -203,6 +305,10 @@ public class PartitionPredicateTest {
                                         createPart(day + 2, event + 1),
                                         noNulls))
                         .isEqualTo(expected);
+
+                BinaryRow point = createPart(day, event);
+                assertThat(predicate.test(5, point, point, noNulls))
+                        .isEqualTo(partitions.contains(point));
             }
         }
     }
