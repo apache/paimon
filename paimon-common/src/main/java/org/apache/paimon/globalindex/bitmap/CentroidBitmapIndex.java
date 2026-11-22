@@ -28,6 +28,8 @@ import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NotEqual;
+import org.apache.paimon.predicate.NotIn;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
@@ -152,11 +154,17 @@ public final class CentroidBitmapIndex {
             if (Equal.INSTANCE.equals(leaf.function())) {
                 return reader.visitEqual(leaf.literals().get(0)).get().results();
             }
+            if (NotEqual.INSTANCE.equals(leaf.function())) {
+                return reader.visitNotEqual(leaf.literals().get(0)).get().results();
+            }
             if (IsNull.INSTANCE.equals(leaf.function())) {
                 return reader.visitIsNull().get().results();
             }
             if (IsNotNull.INSTANCE.equals(leaf.function())) {
                 return reader.visitIsNotNull().get().results();
+            }
+            if (NotIn.INSTANCE.equals(leaf.function())) {
+                return reader.visitNotIn(leaf.literals()).get().results();
             }
             checkArgument(
                     In.INSTANCE.equals(leaf.function()),

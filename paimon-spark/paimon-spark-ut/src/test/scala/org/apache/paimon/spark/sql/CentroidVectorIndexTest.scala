@@ -579,6 +579,134 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
+  test("centroid shard bitmaps apply negated predicates before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, status STRING, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1')""".stripMargin)
+
+      // In each shard, the deleted rows fill the default post-filter window for top K = 1.
+      val deletedRows = for (p <- 0 to 1; i <- 0 until 12) yield {
+        s"(${p * 100 + i}, array($i.0f, 0.0f), 'deleted', $p)"
+      }
+      val otherRows = Seq(
+        "(12, array(12.0f, 0.0f), NULL, 0)",
+        "(13, array(13.0f, 0.0f), 'archived', 0)",
+        "(14, array(14.0f, 0.0f), 'active', 0)",
+        "(112, array(15.0f, 0.0f), NULL, 1)",
+        "(113, array(16.0f, 0.0f), 'archived', 1)",
+        "(114, array(17.0f, 0.0f), 'active', 1)"
+      )
+      spark.sql(s"INSERT INTO T VALUES ${(deletedRows ++ otherRows).mkString(", ")}")
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1',
+               |extra_fields => '{"status":"bitmap"}')""".stripMargin)
+        .collect()
+
+      def nearest(predicate: String): Seq[Int] =
+        spark
+          .sql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+                  |map('centroid.nprobe','1','ivf.nprobe','1')) WHERE $predicate""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      val excluded = "'deleted', 'archived'"
+      // Lists longer than 20 produce a NotIn leaf instead of a conjunction of NotEqual leaves.
+      val longExcluded = (excluded +: (1 to 19).map(i => s"'unused-$i'")).mkString(", ")
+      for (distributed <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> distributed.toString) {
+          assert(nearest("status <> 'deleted'") == Seq(13))
+          assert(nearest(s"status NOT IN ($excluded)") == Seq(14))
+          assert(nearest(s"status NOT IN ($longExcluded)") == Seq(14))
+          assert(nearest(s"status NOT IN ($longExcluded, NULL)").isEmpty)
+          assert(nearest("status <> 'deleted' OR status IS NULL") == Seq(12))
+          assert(nearest("status <> 'deleted' OR id = 0") == Seq(0))
+        }
+      }
+    }
+  }
+
+  test("centroid vector search preserves Spark signed-zero comparisons before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, f FLOAT, d DOUBLE, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1')""".stripMargin)
+      spark.sql("""INSERT INTO T VALUES
+                  |(1, array(0.0f, 0.0f), CAST('-0.0' AS FLOAT), CAST('-0.0' AS DOUBLE), 0),
+                  |(2, array(1.0f, 0.0f), 0.0f, 0.0d, 0),
+                  |(3, array(2.0f, 0.0f), 1.0f, 1.0d, 0),
+                  |(4, array(3.0f, 0.0f), 0.0f, 0.0d, 1)""".stripMargin)
+      val zeros = spark.sql("SELECT f, d FROM T WHERE id IN (1, 2) ORDER BY id").collect()
+      assert(
+        zeros.map(row => java.lang.Float.floatToRawIntBits(row.getFloat(0))).toSeq ==
+          Seq(Int.MinValue, 0))
+      assert(
+        zeros.map(row => java.lang.Double.doubleToRawLongBits(row.getDouble(1))).toSeq ==
+          Seq(Long.MinValue, 0L))
+
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1',
+               |extra_fields => '{"f":"bitmap","d":"bitmap"}')""".stripMargin)
+        .collect()
+
+      val options = "map('centroid.nprobe','1','ivf.nprobe','1')"
+      def ids(sql: String): Seq[Int] = spark.sql(sql).collect().map(_.getInt(0)).toSeq
+      def nearest(predicate: String): Seq[Int] =
+        ids(s"SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,$options) WHERE $predicate")
+
+      val notZero = "d <> 0.0d"
+      val mixedEquality = "d = 0.0d OR f <> 0.0f"
+      val mixedRange = "d >= 0.0d OR f <> 0.0f"
+      val includesZero =
+        Seq(mixedEquality, mixedRange, "d = 0.0d", "d IN (0.0d, 99.0d)", "d BETWEEN 0.0d AND 1.0d")
+      for (distributed <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> distributed.toString) {
+          includesZero.foreach {
+            predicate =>
+              withClue(s"distributed=$distributed, $predicate: ") {
+                assert(nearest(predicate) == Seq(1))
+              }
+          }
+          assert(nearest("d > 0.0d OR f < 0.0f") == Seq(3))
+
+          for ((field, dataType) <- Seq("f" -> "FLOAT", "d" -> "DOUBLE")) {
+            val extra = (99 to 118).map(n => s"CAST($n AS $dataType)")
+            for (sign <- Seq("0.0", "-0.0")) {
+              val zero = s"CAST('$sign' AS $dataType)"
+              val predicates = Seq(
+                s"$field <> $zero",
+                s"$field NOT IN ($zero, ${extra.head})",
+                s"$field NOT IN ($zero, ${extra.mkString(", ")})")
+              predicates.foreach {
+                predicate =>
+                  withClue(s"distributed=$distributed, $predicate: ") {
+                    assert(nearest(predicate) == Seq(3))
+                  }
+              }
+            }
+          }
+          assert(nearest(s"$notZero AND id >= 0") == Seq(3))
+        }
+      }
+
+      assert(ids(s"""SELECT r.id FROM (SELECT v FROM T WHERE id = 1) AS q, LATERAL (
+                    |  SELECT id FROM vector_search('T','v',q.v,1,$options) WHERE $mixedRange
+                    |) AS r""".stripMargin) == Seq(1))
+      assert(
+        ids(s"""SELECT id FROM hybrid_search('T',
+               |array(named_struct('field','v','query_vector',array(0.0f,0.0f),
+               |'limit',1,'options',$options)), array(), 1) WHERE $mixedEquality""".stripMargin) ==
+          Seq(1))
+    }
+  }
+
   private def build(): Unit = {
     spark
       .sql(

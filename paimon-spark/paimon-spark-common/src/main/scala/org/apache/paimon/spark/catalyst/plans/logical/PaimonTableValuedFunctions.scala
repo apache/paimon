@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.globalindex.HybridSearchRanker
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, HybridSearchRoute, Predicate, VectorSearch}
 import org.apache.paimon.spark.{SparkTable, SparkTypeUtils, SparkV2FilterConverter}
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils.normalizeVectorSearchFilters
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FullTextSearchTable, HybridSearchTable, InnerTable, VectorSearchTable}
@@ -285,7 +286,10 @@ object PaimonTableValuedFunctions {
               case None => return None
             }
         }
-      Some(predicates.toSeq)
+      Some(
+        normalizeVectorSearchFilters(
+          predicates.toSeq,
+          CoreOptions.fromMap(innerTable.options()).dataEvolutionEnabled()))
     } catch {
       case NonFatal(_) => None
     }
