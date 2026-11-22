@@ -89,7 +89,8 @@ class CachePolicyFileIO(FileIO):
 
         origin_options = cls._origin_options(catalog_options)
         origin_file_io = file_io_factory(path, origin_options)
-        if not cls._cache_enabled(catalog_options):
+        if (not cls._cache_enabled(catalog_options)
+                or catalog_options.get(OssOptions.OSS_ENDPOINT) == origin_options.get(OssOptions.OSS_ENDPOINT)):
             return origin_file_io
 
         cache_options = catalog_options.copy()

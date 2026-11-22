@@ -198,6 +198,25 @@ def _options(**overrides):
 
 class CachePolicyFileIOTest(unittest.TestCase):
 
+    def test_equal_endpoints_use_plain_file_io_without_cache_probe(self):
+        for impl in ("jindo", "legacy"):
+            for origin in (None, "", " ", "cache-endpoint"):
+                with self.subTest(impl=impl, origin=origin):
+                    options = _options(**{
+                        OssOptions.OSS_IMPL.key(): impl,
+                        CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): origin})
+                    factory = _RecordingFactory()
+                    io = CachePolicyFileIO.create(TABLE_ROOT, options, factory)
+                    self.assertIsInstance(io, _RecordingFileIO)
+                    self.assertNotIsInstance(io, CachePolicyFileIO)
+                    io.new_input_stream(DATA_PATH)
+                    io.new_output_stream(DATA_PATH)
+                    io.get_file_status(DATA_PATH)
+                    self.assertEqual(1, len(factory.calls))
+                    self.assertEqual([("read", DATA_PATH), ("write", DATA_PATH),
+                                      ("status", DATA_PATH)], io.calls)
+                    self.assertEqual("cache-endpoint", io.properties.get(OssOptions.OSS_ENDPOINT))
+
     def test_vortex_native_options_follow_operation_path_and_disabled_state(self):
         from pypaimon.filesystem.vortex_utils import to_vortex_specified
 

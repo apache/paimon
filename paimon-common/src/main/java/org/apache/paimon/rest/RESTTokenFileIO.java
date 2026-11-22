@@ -34,6 +34,7 @@ import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -344,11 +345,17 @@ public class RESTTokenFileIO implements FileIO {
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
         Options catalogOptions = catalogContext.options();
-        // Preserve the server endpoint; use the client endpoint only when the server omits it.
+        // Include client routing overrides in the token used by both native callers and the
+        // token-keyed FileIO cache. Credentials still come from the server token.
+        for (Map.Entry<String, String> entry : catalogOptions.toMap().entrySet()) {
+            String key = entry.getKey();
+            if ((key.equals("fs.oss.endpoint") || key.startsWith("io-cache."))
+                    && entry.getValue() != null) {
+                newToken.put(key, entry.getValue());
+            }
+        }
         String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
-        if (!newToken.containsKey("fs.oss.endpoint")
-                && dlfOssEndpoint != null
-                && !dlfOssEndpoint.isEmpty()) {
+        if (!StringUtils.isNullOrWhitespaceOnly(dlfOssEndpoint)) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
         return ImmutableMap.copyOf(newToken);

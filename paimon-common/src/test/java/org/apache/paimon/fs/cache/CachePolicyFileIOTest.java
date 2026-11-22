@@ -34,6 +34,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 
 import java.io.FileNotFoundException;
@@ -147,6 +148,47 @@ class CachePolicyFileIOTest {
                 assertThat(loader.delegate("origin").options.keySet())
                         .doesNotContain(IO_CACHE_ORIGIN_ENDPOINT.key());
             }
+        }
+    }
+
+    @Test
+    void testEqualEndpointsUseOrdinaryFileIOWithoutCacheProbe() throws Exception {
+        for (String origin : new String[] {null, "", " ", "cache"}) {
+            Options options = options();
+            if (origin == null) {
+                options.remove(IO_CACHE_ORIGIN_ENDPOINT);
+            } else {
+                options.set(IO_CACHE_ORIGIN_ENDPOINT, origin);
+            }
+            RecordingLoader loader = new RecordingLoader();
+            try (FileIO fileIO = create(options, loader)) {
+                assertThat(fileIO).isInstanceOf(RecordingFileIO.class);
+                int created = loader.created.size();
+                fileIO.newInputStream(DATA);
+                fileIO.newOutputStream(DATA, false);
+                fileIO.getFileStatus(DATA);
+                assertThat(loader.created).hasSize(created);
+                assertThat(loader.delegate("cache").calls).containsExactly("read", "write", "stat");
+            }
+        }
+    }
+
+    @Test
+    void testEqualEndpointsIncludeHadoopConfigurationFallback() throws Exception {
+        Options options = options();
+        options.remove("fs.oss.endpoint");
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "origin");
+        Configuration conf = new Configuration(false);
+        conf.set("fs.oss.endpoint", "origin");
+        RecordingLoader loader = new RecordingLoader();
+        try (FileIO fileIO =
+                CachePolicyFileIO.create(
+                        ROOT, CatalogContext.create(options, conf, loader, null))) {
+            assertThat(fileIO).isInstanceOf(RecordingFileIO.class);
+            assertThat(loader.delegate("origin").options.get("fs.oss.endpoint"))
+                    .isEqualTo("origin");
+            assertThat(options.get("fs.oss.endpoint")).isNull();
+            assertThat(conf.get("fs.oss.endpoint")).isEqualTo("origin");
         }
     }
 

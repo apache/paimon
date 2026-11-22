@@ -43,6 +43,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
@@ -91,15 +92,16 @@ public class CachePolicyFileIO implements FileIO, HadoopOptionsProvider {
         CatalogContext originContext =
                 withEndpoint(context, context.options().get(IO_CACHE_ORIGIN_ENDPOINT));
         FileIO origin = FileIO.get(path, originContext);
-        if (!policy.enabled()) {
+        if (!policy.enabled() || Objects.equals(endpoint(context), endpoint(originContext))) {
             return origin;
         }
         return new CachePolicyFileIO(
-                path,
-                policy,
-                origin,
-                originContext,
-                withEndpoint(context, context.options().get("fs.oss.endpoint")));
+                path, policy, origin, originContext, withEndpoint(context, endpoint(context)));
+    }
+
+    private static String endpoint(CatalogContext context) {
+        return context.options()
+                .getString("fs.oss.endpoint", context.hadoopConf().get("fs.oss.endpoint"));
     }
 
     private static CatalogContext withEndpoint(CatalogContext context, String endpoint) {

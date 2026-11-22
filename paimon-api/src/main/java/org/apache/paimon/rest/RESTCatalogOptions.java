@@ -102,7 +102,9 @@ public class RESTCatalogOptions {
             ConfigOptions.key("dlf.oss-endpoint")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog DLF OSS endpoint.");
+                    .withDescription(
+                            "REST Catalog client override for fs.oss.endpoint, taking precedence "
+                                    + "over both client and REST token endpoint settings.");
 
     public static final ConfigOption<String> DLF_SIGNING_ALGORITHM =
             ConfigOptions.key("dlf.signing-algorithm")
@@ -160,7 +162,8 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The table-level cache policy provided by the REST server, combined with: meta,read,write."
+                            "The file I/O cache policy. Explicit client settings override the REST token policy. "
+                                    + "Combined with: meta,read,write. "
                                     + "`meta`: meta cache is enabled for visiting files; "
                                     + "`read`: cache is enabled when reading files; "
                                     + "`write`: data is also cached when writing files; "

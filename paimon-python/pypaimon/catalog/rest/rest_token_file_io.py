@@ -206,22 +206,27 @@ class RESTTokenFileIO(FileIO):
     def _merged_options(self, token: RESTToken) -> Options:
         merged_properties = RESTUtil.merge(
             self.catalog_options.to_map() if self.catalog_options else {},
-            token.token
+            self._merge_token_with_catalog_options(token.token)
         )
-        if self.catalog_options and OssOptions.OSS_ENDPOINT.key() not in token.token:
-            dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return Options(merged_properties)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
-        """Keep the server endpoint, falling back to the client endpoint when absent."""
+        """Apply this client's routing overrides without changing shared credentials."""
         merged_token = dict(token)
-        if self.catalog_options and OssOptions.OSS_ENDPOINT.key() not in merged_token:
+        if self.catalog_options:
+            for key, value in self.catalog_options.to_map().items():
+                if (key == OssOptions.OSS_ENDPOINT.key() or key.startswith("io-cache.")) and value is not None:
+                    merged_token[key] = value
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return merged_token
+
+    def _token_with_catalog_options(self, token: Optional[RESTToken]) -> Optional[RESTToken]:
+        if token is None:
+            return None
+        properties = self._merge_token_with_catalog_options(token.token)
+        return token if properties == token.token else RESTToken(properties, token.expire_at_millis)
 
     def new_input_stream(self, path: str):
         return self.file_io().new_input_stream(path)
@@ -418,8 +423,8 @@ class RESTTokenFileIO(FileIO):
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
 
-        merged_token_dict = self._merge_token_with_catalog_options(response.token)
-        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
+        # Shared tokens must not retain another client's endpoint or cache-policy overrides.
+        new_token = RESTToken(dict(response.token), response.expires_at_millis)
         self.token = new_token
         if self._is_token_expired(new_token):
             self._log_short_token(new_token)
@@ -441,12 +446,12 @@ class RESTTokenFileIO(FileIO):
 
     def valid_token(self):
         self.try_to_refresh_token()
-        return self.token
+        return self._token_with_catalog_options(self.token)
 
     def _existing_valid_token(self) -> Optional[RESTToken]:
         """Return this instance's valid token without locks or refresh requests."""
         token = self.token
-        return token if not self._is_token_expired(token) else None
+        return self._token_with_catalog_options(token) if not self._is_token_expired(token) else None
 
     def close(self):
         pass

@@ -136,7 +136,8 @@ class CatalogOptions:
     DLF_TOKEN_PATH = ConfigOptions.key("dlf.token-path").string_type().no_default_value().with_description(
         "DLF token file path")
     DLF_OSS_ENDPOINT = ConfigOptions.key("dlf.oss-endpoint").string_type().no_default_value().with_description(
-        "DLF OSS endpoint")
+        "REST Catalog client override for fs.oss.endpoint, taking precedence "
+        "over both client and REST token endpoint settings.")
     DLF_TOKEN_LOADER = ConfigOptions.key("dlf.token-loader").string_type().no_default_value().with_description(
         "DLF token loader")
     DLF_TOKEN_ECS_ROLE_NAME = ConfigOptions.key(
@@ -180,7 +181,7 @@ class CatalogOptions:
         .string_type()
         .no_default_value()
         .with_description(
-            "The table-level cache policy provided by the REST server, combined with: "
+            "The file I/O cache policy. Explicit client settings override the REST token policy. Combined with: "
             "meta,read,write. meta enables metadata operations, read enables file reads, "
             "write enables file writes, and none disables the cache."
         )
