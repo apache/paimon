@@ -373,6 +373,7 @@ public interface PartitionPredicate extends Serializable {
 
             private static final long serialVersionUID = 1L;
             private static final int LINEAR_LOOKUPS_BEFORE_SORT = 16;
+            private static final int EARLY_SORT_REMAINING_MULTIPLIER = 4;
             private static final int MANIFESTS_PER_SORT_LEVEL = 3;
 
             private final Object[][] partitionValues;
@@ -422,19 +423,24 @@ public interface PartitionPredicate extends Serializable {
                     boolean restrictEnd = compareLiteral(type, max, upper[field]) > 0;
                     if (restrictStart || restrictEnd) {
                         Object[][] sorted = sortedPartitions(remainingManifests);
-                        if (sorted != null) {
-                            int start =
-                                    restrictStart
-                                            ? findBound(sorted, type, lower[field], 0, false)
-                                            : 0;
-                            int end =
-                                    restrictEnd
-                                            ? findBound(sorted, type, upper[field], start, true)
-                                            : sorted.length;
-                            // The index has already checked the bounds for these candidates.
-                            lower[field] = null;
-                            return matchesAny(sorted, start, end, lower, upper, nulls, rowCount);
+                        if (sorted == null) {
+                            return matchesUnsortedRange(type, lower, upper, nulls, rowCount);
                         }
+                        int start =
+                                restrictStart ? findBound(sorted, type, lower[field], 0, false) : 0;
+                        if (start == sorted.length
+                                || (restrictEnd
+                                        && compareLiteral(type, sorted[start][field], upper[field])
+                                                > 0)) {
+                            return false;
+                        }
+                        int end =
+                                restrictEnd
+                                        ? findBound(sorted, type, upper[field], start + 1, true)
+                                        : sorted.length;
+                        // The index has already checked the bounds for these candidates.
+                        lower[field] = null;
+                        return matchesAny(sorted, start, end, lower, upper, nulls, rowCount);
                     } else {
                         // The manifest covers the entire range of the indexed field.
                         lower[field] = null;
@@ -456,7 +462,12 @@ public interface PartitionPredicate extends Serializable {
                 }
                 synchronized (this) {
                     if (sortedPartitions == null) {
-                        if (selectiveLookups < LINEAR_LOOKUPS_BEFORE_SORT) {
+                        int linearLookups = LINEAR_LOOKUPS_BEFORE_SORT;
+                        if (remainingManifests
+                                >= EARLY_SORT_REMAINING_MULTIPLIER * minimumRemainingManifests) {
+                            linearLookups /= 2;
+                        }
+                        if (selectiveLookups < linearLookups) {
                             selectiveLookups++;
                             return null;
                         }
@@ -488,6 +499,26 @@ public interface PartitionPredicate extends Serializable {
                     }
                 }
                 return start;
+            }
+
+            private boolean matchesUnsortedRange(
+                    DataType type, Object[] lower, Object[] upper, long[] nulls, long rowCount) {
+                if (nulls[field] == rowCount) {
+                    return false;
+                }
+                Object lowerBound = lower[field];
+                Object upperBound = upper[field];
+                lower[field] = null;
+                // Check the indexed field first so only candidates in range need a tuple check.
+                for (Object[] partition : partitionValues) {
+                    Object value = partition[field];
+                    if (compareLiteral(type, value, lowerBound) >= 0
+                            && compareLiteral(type, value, upperBound) <= 0
+                            && mayContainPartition(partition, lower, upper, nulls, rowCount)) {
+                        return true;
+                    }
+                }
+                return false;
             }
 
             private boolean matchesAny(

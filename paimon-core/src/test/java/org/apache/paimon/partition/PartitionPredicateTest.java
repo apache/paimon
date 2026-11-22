@@ -214,7 +214,13 @@ public class PartitionPredicateTest {
         assertThat(Arrays.asList(partitions)).containsExactly(third, first, second);
 
         PartitionRangeIndex restored = InstantiationUtil.clone(index);
-        assertThat(restored.sortedPartitions(6)).isNull();
+        for (int i = 0; i < 8; i++) {
+            assertThat(restored.sortedPartitions(24)).isNull();
+        }
+        assertThat(restored.sortedPartitions(23)).isNull();
+        assertThat(restored.sortedPartitions(0)).isNull();
+        assertThat(Arrays.stream(restored.sortedPartitions(24)).map(fields -> fields[0]))
+                .containsExactly(1, 2, 3);
     }
 
     @Test
