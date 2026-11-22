@@ -177,7 +177,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             ).unindexed_ranges(
                 self._table.fields,
                 self._filter,
-                search_mode=effective_core.scalar_index_search_mode(),
+                search_mode=effective_core.scalar_prefilter_search_mode(),
             )
             if vector_search_mode == GlobalIndexSearchMode.FAST:
                 scalar_unindexed_ranges = Range.and_(

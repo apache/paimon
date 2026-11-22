@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -27,6 +28,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,10 +39,10 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
 
     static final String DEFAULT_METRIC = "inner_product";
 
-    private final DataType fieldType;
-    private final Map<String, String> options;
-    private final String identifier;
-    private final double trainSampleRatio;
+    final DataType fieldType;
+    final Map<String, String> options;
+    final String identifier;
+    final double trainSampleRatio;
 
     public NativeVectorGlobalIndexer(
             DataType fieldType, Map<String, String> options, String identifier) {
@@ -70,6 +72,18 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
         this.trainSampleRatio = trainSampleRatio;
     }
 
+    /** Normalize nonzero vectors before native cosine computes their squared norm in float. */
+    static void normalizeCosine(float[] source, float[] target) {
+        double squared = 0;
+        for (float coordinate : source) {
+            squared += (double) coordinate * coordinate;
+        }
+        double scale = squared == 0 ? 1 : 1 / Math.sqrt(squared);
+        for (int i = 0; i < source.length; i++) {
+            target[i] = (float) (source[i] * scale);
+        }
+    }
+
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
         return new NativeVectorGlobalIndexWriter(
@@ -83,7 +97,23 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
             long totalRowCount,
             List<Range> rowRanges,
             ExecutorService executor) {
-        return new NativeVectorGlobalIndexReader(fileReader, files, fieldType, executor);
+        if (!files.isEmpty() && files.get(0) instanceof CentroidIndexFile) {
+            return new NativeCentroidRoutedIndexReader(
+                    fileReader, files, fieldType, executor, identifier);
+        }
+        return new NativeVectorGlobalIndexReader(
+                fileReader, files, fieldType, executor, identifier, totalRowCount);
+    }
+
+    @Override
+    public NativeVectorGlobalIndexer forRead(
+            GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
+        if (files.isEmpty() || !(files.get(0) instanceof CentroidIndexFile)) {
+            return this;
+        }
+        Map<String, String> bound = new LinkedHashMap<>(options);
+        bound.put("metric", NativeCentroidVectorGlobalIndexer.storedMetric(reader, files));
+        return new NativeVectorGlobalIndexer(fieldType, bound, identifier, trainSampleRatio);
     }
 
     @Override

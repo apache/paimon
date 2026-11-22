@@ -75,8 +75,7 @@ public class DataEvolutionGlobalIndexCoverage {
             if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
                 continue;
             }
-            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            addCoverage(meta.indexFieldId(), range);
+            addCoverage(meta.indexFieldId(), meta.rowRange());
         }
     }
 

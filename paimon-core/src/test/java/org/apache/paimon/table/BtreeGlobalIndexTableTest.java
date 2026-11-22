@@ -59,6 +59,8 @@ import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.appender.OutputStreamAppender;
 import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -369,8 +371,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         createIndex("f1");
         appendRows(100, 110);
 
-        FileStoreTable table =
-                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         TopN topN =
                 new TopN(
                         new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
@@ -585,11 +586,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
             assertThat(logs)
                     .containsPattern(
                             "INFO Scan table '[^']+' with global index\\. "
-                                    + "searchMode='fast', total=\\d+ ms, metadata=\\d+ ms, "
+                                    + "searchMode='full', total=\\d+ ms, metadata=\\d+ ms, "
                                     + "lookup=\\d+ ms, coverage=\\d+ ms\\.")
                     .containsPattern(
                             "INFO Scan table '[^']+' with BTree global index TopN\\. "
-                                    + "searchMode='fast', topN='[^']+', total=\\d+ ms, "
+                                    + "searchMode='full', topN='[^']+', total=\\d+ ms, "
                                     + "metadata=\\d+ ms, lookup=\\d+ ms, coverage=\\d+ ms\\.")
                     .containsPattern(
                             "INFO Global index lookup table='[^']+', type='btree', "
@@ -604,13 +605,20 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         }
     }
 
-    @Test
-    public void testBTreeGlobalIndexSearchModeControlsUnindexedData() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testBTreeGlobalIndexSearchModeControlsUnindexedData(boolean queryInReader)
+            throws Exception {
         write(500L);
         createIndex("f1");
         appendRows(500, 1000);
 
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable table =
+                ((FileStoreTable) catalog.getTable(identifier()))
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(),
+                                        Boolean.toString(queryInReader)));
         Predicate predicate =
                 new PredicateBuilder(table.rowType())
                         .in(
@@ -619,11 +627,15 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         BinaryString.fromString("a100"),
                                         BinaryString.fromString("a700")));
 
-        // Default scalar-index.search-mode is 'fast': only indexed rows are
-        // returned, so the unindexed a700 is dropped.
-        assertThat(readF1(table, predicate)).containsExactly("a100");
+        assertThat(readF1(table, predicate)).containsExactlyInAnyOrder("a100", "a700");
 
         assertThat(readF1(tableWithSearchMode(table, "fast"), predicate)).containsExactly("a100");
+        FileStoreTable familyOverride =
+                tableWithSearchMode(table, "fast")
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full"));
+        assertThat(readF1(familyOverride, predicate)).containsExactly("a100", "a700");
         assertThat(readF1(tableWithSearchMode(table, "full"), predicate))
                 .containsExactly("a100", "a700");
         assertThat(readF1(tableWithSearchMode(table, "detail"), predicate))
@@ -635,8 +647,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b700")));
 
-        // Default 'fast': a700 lives in the unindexed range, so it is dropped.
-        assertThat(readF1(table, andWithUnindexedField)).isEmpty();
+        assertThat(readF1(table, andWithUnindexedField)).containsExactly("a700");
         assertThat(readF1(tableWithSearchMode(table, "fast"), andWithUnindexedField)).isEmpty();
         assertThat(readF1(tableWithSearchMode(table, "full"), andWithUnindexedField))
                 .containsExactly("a700");
@@ -749,8 +760,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b700")));
 
-        // Default 'fast': a700 is in the unindexed range, so it is dropped.
-        assertThat(readF1(table, andPredicate)).isEmpty();
+        assertThat(readF1(table, andPredicate)).containsExactly("a700");
         assertThat(readF1(tableWithSearchMode(table, "fast"), andPredicate)).isEmpty();
         assertThat(readF1(tableWithSearchMode(table, "full"), andPredicate))
                 .containsExactly("a700");
@@ -762,8 +772,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b701")));
 
-        // Default 'fast': a700 is unindexed and dropped; a701 (f2 indexed) stays.
-        assertThat(readF1(table, orPredicate)).containsExactly("a701");
+        assertThat(readF1(table, orPredicate)).containsExactly("a700", "a701");
         assertThat(readF1(tableWithSearchMode(table, "fast"), orPredicate)).containsExactly("a701");
         assertThat(readF1(tableWithSearchMode(table, "full"), orPredicate))
                 .containsExactly("a700", "a701");

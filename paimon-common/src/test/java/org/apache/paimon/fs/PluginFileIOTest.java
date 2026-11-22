@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -80,6 +81,40 @@ class PluginFileIOTest {
         verify(delegate).listFilesIterative(tableRoot, true);
         // the interface default would construct its own iterator backed by listStatus
         verify(delegate, never()).listStatus(any());
+        assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
+    }
+
+    @Test
+    void testDirectoryListingUsesPluginClassLoaderBetweenPages() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        ClassLoader pluginClassLoader = new ClassLoader() {};
+        PluginFileIO fileIO = new TestPluginFileIO(delegate, pluginClassLoader);
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        Path path = new Path("oss://bucket/dir");
+        FileStatus status = mock(FileStatus.class);
+        @SuppressWarnings("unchecked")
+        RemoteIterator<FileStatus> entries = mock(RemoteIterator.class);
+        when(delegate.listStatusIterative(path)).thenReturn(entries);
+        when(entries.next())
+                .thenAnswer(
+                        ignored -> {
+                            assertThat(Thread.currentThread().getContextClassLoader())
+                                    .isSameAs(pluginClassLoader);
+                            return status;
+                        });
+        IOException failure = new IOException("Failed to fetch the next page");
+        when(entries.hasNext())
+                .thenAnswer(
+                        ignored -> {
+                            assertThat(Thread.currentThread().getContextClassLoader())
+                                    .isSameAs(pluginClassLoader);
+                            throw failure;
+                        });
+
+        RemoteIterator<FileStatus> actual = fileIO.listStatusIterative(path);
+        assertThat(actual.next()).isSameAs(status);
+        assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
+        assertThatThrownBy(actual::hasNext).isSameAs(failure);
         assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
     }
 

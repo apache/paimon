@@ -22,10 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
+import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Contains;
 import org.apache.paimon.predicate.EndsWith;
+import org.apache.paimon.predicate.GeometryIntersectsTransform;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Like;
@@ -44,10 +47,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 
@@ -83,26 +88,58 @@ class FilteredRowIdReader {
      * non-exact answer through {@link #matchingRowIds} first.
      */
     static boolean isExact(
-            RowType rowType, Predicate filter, GlobalIndexEvaluator.Evaluation evaluation) {
+            RowType rowType,
+            Predicate filter,
+            GlobalIndexEvaluator.Evaluation evaluation,
+            Set<IndexFileMeta> indexFiles) {
         Set<Integer> filterFieldIds = collectFieldIds(rowType, filter);
         if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
             return false;
         }
-        return !hasCandidateOnlyLeaf(filter);
+        Set<Integer> rtreeFields =
+                indexFiles.stream()
+                        .filter(
+                                file ->
+                                        RTreeGlobalIndexerFactory.IDENTIFIER.equals(
+                                                file.indexType()))
+                        .map(file -> file.globalIndexMeta().indexFieldId())
+                        .collect(Collectors.toSet());
+        return !hasCandidateOnlyLeaf(filter, rowType, rtreeFields);
     }
 
-    private static boolean hasCandidateOnlyLeaf(Predicate predicate) {
+    /** An envelope can prune spatial matches, but exact geometry must decide ranked slots. */
+    static boolean shouldRefine(FileStoreTable table, Predicate predicate) {
+        return table.coreOptions().globalIndexFilterRefineFromData() || hasSpatialFilter(predicate);
+    }
+
+    private static boolean hasSpatialFilter(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            return ((CompoundPredicate) predicate)
+                    .children().stream().anyMatch(FilteredRowIdReader::hasSpatialFilter);
+        }
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).transform() instanceof GeometryIntersectsTransform;
+    }
+
+    private static boolean hasCandidateOnlyLeaf(
+            Predicate predicate, RowType rowType, Set<Integer> rtreeFields) {
         if (predicate instanceof CompoundPredicate) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {
-                if (hasCandidateOnlyLeaf(child)) {
+                if (hasCandidateOnlyLeaf(child, rowType, rtreeFields)) {
                     return true;
                 }
             }
             return false;
         }
         if (predicate instanceof LeafPredicate) {
-            LeafFunction function = ((LeafPredicate) predicate).function();
-            return function instanceof Contains
+            LeafPredicate leaf = (LeafPredicate) predicate;
+            LeafFunction function = leaf.function();
+            // A bbox on this field may have supplied candidates for a sibling geometry comparison.
+            return leaf.transform() instanceof GeometryIntersectsTransform
+                    || (!rtreeFields.isEmpty()
+                            && !RTreeGlobalIndexerFactory.canEvaluate(leaf)
+                            && !Collections.disjoint(rtreeFields, collectFieldIds(rowType, leaf)))
+                    || function instanceof Contains
                     || function instanceof EndsWith
                     || function instanceof Like;
         }

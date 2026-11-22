@@ -27,6 +27,7 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
@@ -156,6 +157,34 @@ public class CompactRewriterFactoryTest {
             assertThatThrownBy(() -> write.withCompactRewriterFactory((p, b, delegate) -> delegate))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("before creating bucket writers");
+        }
+    }
+
+    @Test
+    public void testDefaultRewriterExposesItsBucketWriterFactory() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap(), true);
+        List<KeyValueFileWriterFactory> factories = new ArrayList<>();
+        try (StreamTableWrite write = table.newWrite("test");
+                StreamTableCommit commit = table.newCommit("test")) {
+            write.withCompactRewriterFactory(
+                    (partition, bucket, delegate) -> {
+                        factories.add(((MergeTreeCompactRewriter) delegate).writerFactory());
+                        return delegate;
+                    });
+            write.write(GenericRow.of(1, 1, 10));
+            write.compact(partition(1), 0, true);
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        assertThat(factories).hasSize(1);
+        KeyValueFileWriterFactory factory = factories.get(0);
+        assertThat(factory.valueType()).isEqualTo(table.rowType());
+        List<DataFileMeta> files = new ArrayList<>();
+        table.newSnapshotReader().read().dataSplits().forEach(s -> files.addAll(s.dataFiles()));
+        assertThat(files).isNotEmpty();
+        for (DataFileMeta file : files) {
+            assertThat(factory.getFileIO().exists(factory.pathFactory(file.level()).toPath(file)))
+                    .isTrue();
         }
     }
 

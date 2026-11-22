@@ -41,7 +41,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
     extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
-    if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) {
+    if (org.apache.spark.SPARK_VERSION >= "4.2") {
       val resolver = Class
         .forName("org.apache.spark.sql.paimon.PaimonSemanticViewResolver")
         .getConstructor(classOf[org.apache.spark.sql.SparkSession])
@@ -106,6 +106,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // scalar function extensions
+    SparkShimLoader.shim.injectSpatialFunctions(extensions)
     BucketExpression.supportedFnNames.foreach {
       fnName => extensions.injectFunction(BucketExpression.getFunctionInjection(fnName))
     }

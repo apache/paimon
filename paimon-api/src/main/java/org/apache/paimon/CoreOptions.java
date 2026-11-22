@@ -3189,8 +3189,19 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .withDescription(
+                            "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                                    + "setting also serves as a fallback for scalar prefilters.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
+            key("scalar-index.prefilter.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription("Search mode for scalar index queries.");
+                    .withDescription(
+                            "Search mode for scalar prefilters in vector and full-text search. If "
+                                    + "unset, use an explicit scalar-index.search-mode, then an "
+                                    + "explicit global-index.search-mode, then fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -3203,6 +3214,18 @@ public class CoreOptions implements Serializable {
                     .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
+
+    public static final ConfigOption<Integer> VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR =
+            key("vector-index.post-filter.candidates-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Positive multiplier of the original Top-K for a single ANN query "
+                                    + "when scalar indexes cannot evaluate a DE vector search filter. "
+                                    + "The candidate count is at least the reranking limit and capped by "
+                                    + "the shard size and integer limit. Candidates are checked against "
+                                    + "the pinned data; fewer than Top-K matches are returned without retry "
+                                    + "or raw scoring of indexed ranges.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
             key("global-index.filter.refine-from-data")
@@ -4515,6 +4538,7 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(String::trim)
                 .map(
                         x ->
                                 PartitionMarkDoneAction.valueOf(
@@ -5070,7 +5094,20 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST);
+    }
+
+    public GlobalIndexSearchMode scalarScanSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarPrefilterSearchMode() {
+        return options.getOptional(SCALAR_INDEX_PREFILTER_SEARCH_MODE)
+                .orElseGet(
+                        () ->
+                                indexSearchMode(
+                                        SCALAR_INDEX_SEARCH_MODE,
+                                        SCALAR_INDEX_PREFILTER_SEARCH_MODE.defaultValue()));
     }
 
     public boolean globalIndexFilterRefineFromData() {
@@ -5087,11 +5124,14 @@ public class CoreOptions implements Serializable {
 
     private GlobalIndexSearchMode indexSearchMode(
             ConfigOption<GlobalIndexSearchMode> familySearchMode) {
-        if (options.contains(familySearchMode)) {
-            return options.get(familySearchMode);
-        }
-        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
-                .orElseGet(() -> options.get(familySearchMode));
+        return indexSearchMode(familySearchMode, familySearchMode.defaultValue());
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode,
+            GlobalIndexSearchMode defaultMode) {
+        return options.getOptional(familySearchMode)
+                .orElseGet(() -> options.getOptional(GLOBAL_INDEX_SEARCH_MODE).orElse(defaultMode));
     }
 
     public Integer globalIndexThreadNum() {
@@ -5122,6 +5162,12 @@ public class CoreOptions implements Serializable {
         return options.contains(VECTOR_FILE_FORMAT);
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(List)}.
+     */
+    @Deprecated
     public Set<String> vectorField() {
         String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
@@ -5130,12 +5176,61 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(Map, List)}.
+     */
+    @Deprecated
     public static Set<String> vectorField(Map<String, String> options) {
         String vectorFields = options.getOrDefault(CoreOptions.VECTOR_FIELD.key(), null);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
             return Collections.emptySet();
         }
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public Set<String> vectorField(List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD), fieldNames));
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public static Set<String> vectorField(Map<String, String> options, List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD.key()), fieldNames));
+    }
+
+    /**
+     * Rewrites a {@link #VECTOR_FIELD} value as the field names it resolves to, so that adding a
+     * field later cannot change which fields the stored value refers to. A value that names unknown
+     * fields, or that would refer to other fields once rewritten, is returned unchanged.
+     */
+    public static String normalizeVectorField(String vectorFields, List<String> fieldNames) {
+        List<String> names = resolveVectorFields(vectorFields, fieldNames);
+        String normalized = String.join(",", names);
+        return fieldNames.containsAll(names)
+                        && resolveVectorFields(normalized, fieldNames).equals(names)
+                ? normalized
+                : vectorFields;
+    }
+
+    /**
+     * Uses a name exactly as written when a field has that name, which keeps existing tables with
+     * spaces in field names working, and its trimmed form otherwise.
+     */
+    private static List<String> resolveVectorFields(
+            @Nullable String vectorFields, List<String> fieldNames) {
+        List<String> fields = new ArrayList<>();
+        if (vectorFields == null) {
+            return fields;
+        }
+        for (String field : vectorFields.trim().split(",")) {
+            String name = fieldNames.contains(field) ? field : field.trim();
+            if (!name.isEmpty()) {
+                fields.add(name);
+            }
+        }
+        return fields;
     }
 
     public long vectorTargetFileSize() {
@@ -5172,6 +5267,19 @@ public class CoreOptions implements Serializable {
 
     public boolean fmIndexEnabled() {
         return !fmIndexColumns().isEmpty();
+    }
+
+    /**
+     * Whether any source-backed primary-key index (vector, full-text, FM, BTree, bitmap,
+     * multivalue) is configured.
+     */
+    public boolean primaryKeyIndexEnabled() {
+        return !VectorIndexOptions.columns(options).isEmpty()
+                || fullTextIndexEnabled()
+                || fmIndexEnabled()
+                || !btreeIndexColumns().isEmpty()
+                || !bitmapIndexColumns().isEmpty()
+                || !multiValueIndexColumns().isEmpty();
     }
 
     public List<String> btreeIndexColumns() {
@@ -5215,7 +5323,8 @@ public class CoreOptions implements Serializable {
     }
 
     public static boolean isVectorIndexType(String type) {
-        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm", "rtree")
+                .contains(type);
     }
 
     public List<String> globalIndexColumns(String type) {

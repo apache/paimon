@@ -26,22 +26,42 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedAttribute, UnresolvedFunction, UnresolvedStar}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.trees.Origin
+import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+
+import java.util.Locale
 
 import scala.collection.mutable
 
 /** Compile field references before Spark sees the model, preserving source/field shadowing. */
 private[paimon] object OssieToSparkMetricView {
   private val aggregates = Set("sum", "count", "avg", "min", "max")
-  private val functions = aggregates ++ Set("abs", "round", "floor", "ceil", "ceiling", "coalesce")
+  private val functions =
+    aggregates ++ Set(
+      "abs",
+      "round",
+      "floor",
+      "ceil",
+      "ceiling",
+      "coalesce",
+      "date_trunc",
+      "extract")
+  private val dateTruncUnits =
+    Set("YEAR", "QUARTER", "MONTH", "WEEK", "DAY", "HOUR", "MINUTE", "SECOND")
+  private val dateTruncFunction = Seq("system", "builtin", "date_trunc")
+  private val extractFunctions = Map("YEAR" -> "year", "MONTH" -> "month", "DAY" -> "dayofmonth")
+
+  case class Conversion(yaml: String, dateTruncOrigins: Set[Origin])
 
   def convert(
       spark: SparkSession,
       model: OssieModel,
       source: Seq[String],
-      sourceColumns: Seq[String]): String = {
+      sourceColumns: Seq[String]): Conversion = {
     val sourceNames = sourceColumns.map(n => OssieModel.normalize(n) -> n).toMap
     require(sourceNames.size == sourceColumns.size, "Ambiguous case-insensitive source columns")
     val publicNames =
@@ -115,8 +135,30 @@ private[paimon] object OssieToSparkMetricView {
     measures.foreach {
       case (name, expr) => metricNodes.addObject().put("name", name).put("expr", expr)
     }
+    val parser = spark.sessionState.sqlParser
+    val expressions = parser.parsePlan(sql).expressions ++
+      measures.map { case (_, expression) => parser.parseExpression(expression) }
+    val dateTruncOrigins = expressions
+      .flatMap(_.collect {
+        case f: UnresolvedFunction if f.nameParts == dateTruncFunction => f.origin
+      })
+      .toSet
     // JSON is a YAML subset, and avoids another serialization path for SQL strings.
-    mapper.writeValueAsString(root)
+    Conversion(mapper.writeValueAsString(root), dateTruncOrigins)
+  }
+
+  def validateDateTruncInputs(plan: LogicalPlan, dateTruncOrigins: Set[Origin]): Unit = {
+    // Spark inserts the session-zone cast during analysis, including for computed arguments.
+    // Match model call origins so SQL UDF bodies retain their own timestamp semantics.
+    val truncatesLocalTimestamp = plan.exists {
+      node =>
+        node.expressions.exists(_.exists {
+          case t @ TruncTimestamp(_, cast: Cast, _) =>
+            dateTruncOrigins.contains(t.origin) && cast.child.dataType == TimestampNTZType
+          case _ => false
+        })
+    }
+    require(!truncatesLocalTimestamp, "Ossie DATE_TRUNC does not support TIMESTAMP_NTZ inputs")
   }
 
   private def parse(spark: SparkSession, sql: String, metric: Boolean): Expression = {
@@ -128,7 +170,7 @@ private[paimon] object OssieToSparkMetricView {
     val expr =
       SQLConf.withExistingConf(conf)(CatalystSqlParser.parseExpression(normalizeStrings(sql)))
     var aggregate = false
-    expr.foreach {
+    val validated = expr.transformDown {
       case f: UnresolvedFunction =>
         require(
           f.ignoreNulls.isEmpty && f.orderingWithinGroup.isEmpty,
@@ -138,6 +180,17 @@ private[paimon] object OssieToSparkMetricView {
           s"Unsupported OSSIE_SQL_2026 function: ${f.nameParts.mkString(".")}"
         )
         val name = OssieModel.normalize(f.nameParts.head)
+        if (name == "date_trunc") {
+          f.arguments match {
+            case Seq(Literal(unit: UTF8String, _: StringType), _) =>
+              require(
+                dateTruncUnits.contains(unit.toString.toUpperCase(Locale.ROOT)),
+                s"Unsupported Ossie DATE_TRUNC unit: $unit")
+            case _ =>
+              throw new IllegalArgumentException(
+                "Ossie DATE_TRUNC expects a unit string literal followed by an input expression")
+          }
+        }
         if (aggregates.contains(name)) {
           require(metric, "Ossie field expressions cannot contain aggregates")
           aggregate = true
@@ -145,22 +198,39 @@ private[paimon] object OssieToSparkMetricView {
         require(
           !f.arguments.exists(_.isInstanceOf[UnresolvedStar]) || name == "count",
           "Only COUNT(*) supports a star in Ossie expressions")
-      case _: Literal | _: UnresolvedAttribute | _: UnresolvedStar =>
-      case _: Add | _: Subtract | _: Multiply | _: Divide | _: Remainder | _: UnaryMinus |
+        if (name == "extract") {
+          f.arguments match {
+            // Spark constructs the unit literal at the call's origin only for EXTRACT(... FROM ...).
+            case Seq(unit @ Literal(value: UTF8String, _: StringType), input)
+                if unit.origin == f.origin =>
+              val builtin = extractFunctions.getOrElse(
+                value.toString.toUpperCase(Locale.ROOT),
+                throw new IllegalArgumentException(s"Unsupported Ossie EXTRACT unit: $value"))
+              f.copy(nameParts = Seq("system", "builtin", builtin), arguments = Seq(input))
+            case _ =>
+              throw new IllegalArgumentException("Ossie EXTRACT expects EXTRACT(unit FROM input)")
+          }
+        } else {
+          f
+        }
+      case e @ (_: Literal | _: UnresolvedAttribute | _: UnresolvedStar) => e
+      case e @ (_: Add | _: Subtract | _: Multiply | _: Divide | _: Remainder | _: UnaryMinus |
           _: UnaryPositive | _: CaseWhen | _: EqualTo | _: LessThan | _: LessThanOrEqual |
           _: GreaterThan | _: GreaterThanOrEqual | _: And | _: Or | _: Not | _: IsNull |
-          _: IsNotNull | _: In =>
+          _: IsNotNull | _: In) =>
+        e
       case c: Cast =>
         require(
           c.dataType.isInstanceOf[NumericType] || c.dataType == StringType ||
             c.dataType == BooleanType || c.dataType == DateType,
           s"Unsupported Ossie cast type: ${c.dataType}"
         )
+        c
       case other =>
         throw new IllegalArgumentException(s"Unsupported OSSIE_SQL_2026 expression: ${other.sql}")
     }
     require(!metric || aggregate, "Ossie metrics must contain a supported aggregate")
-    expr
+    validated
   }
 
   // Ossie strings use ANSI doubled quotes and literal backslashes. Normalize only string tokens
@@ -238,11 +308,19 @@ private[paimon] object OssieToSparkMetricView {
       // Native Metric View parsing uses session settings; binary literals avoid a second round
       // of string escaping regardless of escapedStringLiterals.
       RenderedSQL(s"CAST(X'$hex' AS STRING)")
+    case Literal(micros: Long, TimestampType) =>
+      // Use an explicit type and UTC offset so reparsing preserves the instant.
+      RenderedSQL(s"TIMESTAMP_LTZ '${DateTimeUtils.microsToInstant(micros)}'")
     case f: UnresolvedFunction =>
+      val nameParts = if (OssieModel.normalize(f.nameParts.head) == "date_trunc") {
+        dateTruncFunction
+      } else {
+        f.nameParts
+      }
       val distinct = if (f.isDistinct) "DISTINCT " else ""
       val filter = f.filter.map(p => s" FILTER (WHERE ${p.sql})").getOrElse("")
       RenderedSQL(
-        s"${f.nameParts.map(quote).mkString(".")}($distinct${f.arguments.map(_.sql).mkString(", ")})$filter")
+        s"${nameParts.map(quote).mkString(".")}($distinct${f.arguments.map(_.sql).mkString(", ")})$filter")
   }.sql
 
   private case class RenderedSQL(text: String) extends LeafExpression with Unevaluable {

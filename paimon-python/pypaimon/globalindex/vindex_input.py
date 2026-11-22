@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from urllib.parse import urlparse
 
 from pypaimon.common.file_io import pread, supports_pread
+from pypaimon.globalindex.global_index_meta import range_vector_index_file
 from pypaimon.globalindex.vindex_options import READ_PARALLELISM_PARAMETER
 
 
@@ -92,10 +93,9 @@ class VindexReaderResources:
     """Manage an index stream and its callbacks without choosing a query engine."""
 
     def __init__(self, file_io, index_path, io_metas, options=None):
-        assert len(io_metas) == 1, "Expected exactly one index file per shard"
         self._file_io = file_io
         self._index_path = index_path
-        self._io_meta = io_metas[0]
+        self._io_meta = range_vector_index_file(io_metas)
         self._options = dict(options or {})
         self._stream = None
         self._index_input = None

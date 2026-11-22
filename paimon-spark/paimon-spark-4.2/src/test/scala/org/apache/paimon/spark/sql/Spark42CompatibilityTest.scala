@@ -25,13 +25,16 @@ import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
 import org.apache.spark.sql.test.SharedSparkSession
 
 import java.nio.file.Files
 import java.util.Collections
 
-/** Exercise the APIs whose signatures changed in Spark 4.2 using real Paimon files. */
+/**
+ * Exercise the APIs whose signatures changed in Spark 4.2 using real Paimon files. The Spark 4.3
+ * connector compiles and runs this suite too.
+ */
 class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
   private val warehouse = Files.createTempDirectory("paimon-spark42-").toFile
   private lazy val server = {
@@ -54,6 +57,8 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     .set("spark.sql.catalog.paimon.token", "test-token")
     .set("spark.sql.defaultCatalog", "paimon")
     .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+    // Spark 4.3 dual-runs the single-pass resolver in tests, and it cannot resolve Paimon views.
+    .set("spark.sql.analyzer.singlePassResolver.dualRunWithLegacy", "false")
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
@@ -86,6 +91,41 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("create or replace table as select") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, label STRING) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (1, 'old')")
+      sql(
+        "CREATE OR REPLACE TABLE t TBLPROPERTIES ('file.format'='avro') " +
+          "AS SELECT 2 AS id, 'new' AS label")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(2, "new")))
+    }
+  }
+
+  test("replace table with a column list") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, label STRING) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (1, 'old')")
+      sql("CREATE OR REPLACE TABLE t (id INT, score DOUBLE) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (2, 0.5)")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(2, 0.5)))
+    }
+  }
+
+  test("replace table rejects table constraints and keeps the old table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT) TBLPROPERTIES ('file.format'='avro')")
+      sql("INSERT INTO t VALUES (7)")
+      val e = intercept[AnalysisException] {
+        sql(
+          "CREATE OR REPLACE TABLE t (id INT, CONSTRAINT positive CHECK (id > 0)) " +
+            "TBLPROPERTIES ('file.format'='avro')")
+      }
+      assert(e.getCondition === "UNSUPPORTED_FEATURE.TABLE_OPERATION")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(7)))
+    }
+  }
+
   test("ordinary views, table description and partition description") {
     withTable("t") {
       sql(
@@ -101,6 +141,21 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
             .collect()
             .exists(_.getString(0) == "# Detailed Partition Information"))
       } finally { sql("DROP VIEW IF EXISTS v") }
+    }
+  }
+
+  test("describe a binary partition") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p BINARY) PARTITIONED BY (p)")
+      sql("INSERT INTO t VALUES (1, CAST('2021' AS BINARY)), (2, CAST('2022' AS BINARY))")
+      // Spark renders a BINARY partition value as hex bytes by default.
+      withSQLConf("spark.sql.binaryOutputStyle" -> "UTF-8") {
+        checkAnswer(
+          sql("DESCRIBE FORMATTED t PARTITION (p = '2021')")
+            .filter("col_name = 'Partition Values'")
+            .select("data_type"),
+          Seq(Row("[p=2021]")))
+      }
     }
   }
 
@@ -193,6 +248,20 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
             "hex(ST_AsBinary(a[0])), hex(ST_AsBinary(gg)), ST_Srid(g), ST_Srid(a[0]) FROM typed"),
         Seq(Row(1, point, point, point, 3857, 3857))
       )
+    }
+  }
+
+  test("spatial SQL passes a constant geometry to the Paimon scan") {
+    val point =
+      "ST_SetSrid(ST_GeomFromWKB(unhex('01010000000000000000000000000000000000F03F')), 4326)"
+    withTable("locations") {
+      sql("""CREATE TABLE locations (geom GEOMETRY(4326)) TBLPROPERTIES (
+            | 'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            | 'data-evolution.enabled' = 'true')""".stripMargin)
+      sql(s"INSERT INTO locations VALUES ($point), (NULL)")
+      val query = sql(s"SELECT ST_Srid(geom) FROM locations WHERE ST_Intersects(geom, $point)")
+      assert(query.queryExecution.executedPlan.toString().contains("BBoxIntersects"))
+      checkAnswer(query, Seq(Row(4326)))
     }
   }
 }

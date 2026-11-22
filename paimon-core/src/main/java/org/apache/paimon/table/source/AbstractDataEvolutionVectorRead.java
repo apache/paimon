@@ -19,19 +19,24 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.CentroidShardFilterReader;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.MaxSimScorer;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -47,10 +52,13 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -62,14 +70,17 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -90,6 +101,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final int limit;
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
+    @Nullable protected final float[][] queryMatrix;
+    private final int candidatesFactor;
+    private final GlobalIndexSearchMode scalarPrefilterMode;
+    // Serialized with Spark/Flink worker closures; reset for each new read.
+    private boolean postFiltering;
 
     /** Snapshot the plan was built against; pins filters and raw reads to it. */
     @Nullable protected Snapshot planSnapshot;
@@ -101,7 +117,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      */
     @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
 
-    private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
+    private transient Map<List<IndexFileMeta>, IOFunction<Integer, RoaringNavigableMap64>>
+            shardFilters;
+    private transient Map<Long, RowType> shardBuildSchemas;
+
+    static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
 
@@ -112,6 +132,18 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             int limit,
             DataField vectorColumn,
             @Nullable Map<String, String> options) {
+        this(table, partitionFilter, filter, limit, vectorColumn, options, null);
+    }
+
+    protected AbstractDataEvolutionVectorRead(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            @Nullable Map<String, String> options,
+            @Nullable float[][] queryMatrix) {
+        this.queryMatrix = queryMatrix;
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
@@ -121,41 +153,77 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 options == null
                         ? Collections.emptyMap()
                         : Collections.unmodifiableMap(new HashMap<>(options));
+        Map<String, String> mergedOptions =
+                new HashMap<>(table == null ? Collections.emptyMap() : table.options());
+        mergedOptions.putAll(this.options);
+        Options effectiveOptions = Options.fromMap(mergedOptions);
+        this.candidatesFactor =
+                effectiveOptions.get(CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR);
+        this.scalarPrefilterMode =
+                filter == null
+                        ? null
+                        : new CoreOptions(effectiveOptions).scalarPrefilterSearchMode();
+        if (candidatesFactor <= 0) {
+            throw new IllegalArgumentException(
+                    CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key()
+                            + " must be positive, got "
+                            + candidatesFactor);
+        }
+    }
+
+    protected static Collection<List<IndexVectorSearchSplit>> groupByIndexType(
+            List<IndexVectorSearchSplit> splits) {
+        Map<Pair<String, Boolean>, List<IndexVectorSearchSplit>> groups =
+                new TreeMap<>(
+                        Comparator.comparing((Pair<String, Boolean> key) -> key.getLeft())
+                                .thenComparing(Pair::getRight));
+        for (IndexVectorSearchSplit split : splits) {
+            IndexFileMeta file = split.vectorIndexFiles().get(0);
+            boolean routed =
+                    CentroidIndexMeta.isWrapped(checkNotNull(file.globalIndexMeta()).indexMeta());
+            groups.computeIfAbsent(Pair.of(file.indexType(), routed), k -> new ArrayList<>())
+                    .add(split);
+        }
+        return groups.values();
     }
 
     protected GlobalIndexer createGlobalIndexer(List<IndexVectorSearchSplit> splits) {
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
-        return createGlobalIndexer(firstFile.indexType(), firstMeta);
+        GlobalIndexer indexer = createGlobalIndexer(firstFile.indexType(), firstMeta);
+        if (CentroidIndexMeta.isWrapped(firstMeta.indexMeta())
+                && indexer instanceof VectorGlobalIndexer) {
+            return ((VectorGlobalIndexer) indexer)
+                    .forRead(
+                            file -> table.fileIO().newInputStream(file.filePath()),
+                            buildIOMetaList(
+                                    table.store().pathFactory().globalIndexFileFactory(),
+                                    splits.get(0).vectorIndexFiles()));
+        }
+        return indexer;
     }
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
-        return GlobalIndexer.create(
+        return GlobalIndexer.createForRead(
                 indexType,
                 Collections.singletonList(vectorColumn),
                 table.coreOptions().toConfiguration());
     }
 
     private GlobalIndexer createGlobalIndexer(String indexType, GlobalIndexMeta meta) {
-        if (meta.extraFieldIds() == null) {
+        if (meta.extraFieldIds() == null || CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
             return createGlobalIndexer(indexType);
         }
-        return GlobalIndexer.create(
+        return GlobalIndexer.createForRead(
                 indexType,
                 meta.getIndexedFields(table.rowType()),
                 table.coreOptions().toConfiguration());
     }
 
     /**
-     * Splits the search splits into index and raw splits, then moves the index splits aside when
-     * the scalar index cannot evaluate {@link #filter}: the index path answers with all-or-nothing
-     * bitmaps, so with an unevaluable filter it can neither honor the filter (an empty bitmap
-     * silently drops every covered row) nor ignore it (the top-K would be polluted by non-matching
-     * rows). Instead, suppress the index splits and route their ranges through the raw search,
-     * where the exact final-read filter decides; the raw read merges ranges, so overlap with an
-     * existing raw split is deduplicated. Splits routed this way reuse the vector index type so raw
-     * scoring keeps its metric. The computed scalar pre-filter is cached for {@link #preFilters} to
-     * reuse.
+     * Prefer an exact scalar pre-filter. If it cannot be evaluated, retain index work for one ANN
+     * query followed by exact candidate filtering. Raw sources retain their requested exact
+     * scoring.
      */
     protected void prepareSplits(
             List<? extends VectorSearchSplit> splits,
@@ -163,23 +231,43 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<RawVectorSearchSplit> rawSplits) {
         splitSearchSplits(splits, indexSplits, rawSplits);
         scalarPreFilter = null;
+        postFiltering = false;
+        shardFilters = new IdentityHashMap<>();
+        shardBuildSchemas = new HashMap<>();
         if (filter == null || indexSplits.isEmpty()) {
             return;
         }
-        RoaringNavigableMap64 matchedRows = scalarMatchedRows(indexSplits);
+        List<IndexVectorSearchSplit> otherSplits = new ArrayList<>();
+        for (IndexVectorSearchSplit split : indexSplits) {
+            IOFunction<Integer, RoaringNavigableMap64> shardFilter =
+                    CentroidBitmapFilter.create(
+                            table, filter, split.vectorIndexFiles(), shardBuildSchemas);
+            shardFilters.put(split.vectorIndexFiles(), shardFilter);
+            if (shardFilter == null) {
+                otherSplits.add(split);
+            }
+        }
+        if (otherSplits.isEmpty()) {
+            return;
+        }
+        RoaringNavigableMap64 matchedRows = scalarMatchedRows(otherSplits);
         if (matchedRows != null) {
             scalarPreFilter = matchedRows;
             return;
         }
-        List<Range> ranges = new ArrayList<>();
-        List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
-        for (IndexVectorSearchSplit split : indexSplits) {
-            ranges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
-            scalarIndexFiles.addAll(split.scalarIndexFiles());
+        postFiltering = true;
+    }
+
+    @Nullable
+    private IOFunction<Integer, RoaringNavigableMap64> shardFilter(List<IndexFileMeta> files) {
+        if (shardFilters != null && shardFilters.containsKey(files)) {
+            return shardFilters.get(files);
         }
-        rawSplits.add(
-                new RawVectorSearchSplit(ranges, scalarIndexFiles, vectorIndexType(indexSplits)));
-        indexSplits.clear();
+        // Distributed readers receive deserialized splits and recreate file readers on the worker.
+        if (shardBuildSchemas == null) {
+            shardBuildSchemas = new HashMap<>();
+        }
+        return CentroidBitmapFilter.create(table, filter, files, shardBuildSchemas);
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
@@ -191,12 +279,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         RoaringNavigableMap64 liveRows =
                 GlobalIndexLiveRowFilter.liveRows(
                         table, planSnapshot, partitionFilter, indexedRowRanges);
-        RoaringNavigableMap64 matchedRows =
-                scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
+        RoaringNavigableMap64 matchedRows = postFiltering ? null : scalarPreFilter;
+        if (!postFiltering && matchedRows == null && shardFilters == null) {
+            matchedRows = scalarMatchedRows(splits);
+        }
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
-        for (Range splitRange : indexedRowRanges) {
+        for (int i = 0; i < indexedRowRanges.size(); i++) {
+            Range splitRange = indexedRowRanges.get(i);
             RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
@@ -204,7 +295,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             if (liveRows != null) {
                 include.and(liveRows);
             }
-            if (matchedRows != null) {
+            if (matchedRows != null && shardFilter(splits.get(i).vectorIndexFiles()) == null) {
                 include.and(matchedRows);
             }
 
@@ -244,7 +335,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
+                        table,
+                        planSnapshot,
+                        partitionFilter,
+                        scalarIndexFiles,
+                        scalarPrefilterMode);
         if (!optionalScanner.isPresent()) {
             return null;
         }
@@ -255,10 +350,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 return null;
             }
             RoaringNavigableMap64 matched = evaluation.get().result().results();
-            if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
+            if (FilteredRowIdReader.isExact(
+                    table.rowType(), filter, evaluation.get(), scalarIndexFiles)) {
                 return matched;
             }
-            if (!table.coreOptions().globalIndexFilterRefineFromData()) {
+            if (!FilteredRowIdReader.shouldRefine(table, filter)) {
                 FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
                 return new RoaringNavigableMap64();
             }
@@ -288,7 +384,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, planSnapshot, partitionFilter, scalarIndexFiles);
+                        table,
+                        planSnapshot,
+                        partitionFilter,
+                        scalarIndexFiles,
+                        scalarPrefilterMode);
         if (!optionalScanner.isPresent()) {
             return null;
         }
@@ -321,27 +421,63 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             int searchLimit,
             @Nullable RoaringNavigableMap64 includeRowIds,
             ExecutorService executor) {
+        if (queryMatrix != null) {
+            return evalBatch(
+                            globalIndexer,
+                            indexPathFactory,
+                            rowRangeStart,
+                            rowRangeEnd,
+                            vectorIndexFiles,
+                            queryMatrix,
+                            searchLimit,
+                            includeRowIds,
+                            executor)
+                    .thenApply(
+                            perToken -> {
+                                List<ScoredGlobalIndexResult> candidates = new ArrayList<>();
+                                for (Optional<ScoredGlobalIndexResult> hits : perToken) {
+                                    hits.ifPresent(candidates::add);
+                                }
+                                return Optional.of(mergeIndexedCandidates(candidates));
+                            });
+        }
         if (vectorIndexFiles.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        List<GlobalIndexIOMeta> indexIOMetaList =
-                buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
+        IOFunction<Integer, RoaringNavigableMap64> shardFilter = shardFilter(vectorIndexFiles);
         GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        indexFileReader,
-                        indexIOMetaList,
-                        rowRangeEnd - rowRangeStart + 1,
-                        null,
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
+                        shardFilter,
                         executor);
+        if (postFiltering && shardFilter == null) {
+            CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> batch =
+                    evalPostFilter(
+                            reader,
+                            rowRangeStart,
+                            rowRangeEnd,
+                            new float[][] {vector},
+                            searchLimit,
+                            includeRowIds);
+            CompletableFuture<Optional<ScoredGlobalIndexResult>> single =
+                    batch.thenApply(results -> results.get(0));
+            single.whenComplete(
+                    (result, failure) -> {
+                        if (single.isCancelled()) {
+                            batch.cancel(false);
+                        }
+                    });
+            return single;
+        }
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitVectorSearch(vectorSearch)
+        return reader.visitVectorSearch(vectorSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
@@ -359,6 +495,35 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             return CompletableFuture.completedFuture(emptyOptionalResults(vectors.length));
         }
 
+        IOFunction<Integer, RoaringNavigableMap64> shardFilter = shardFilter(vectorIndexFiles);
+        GlobalIndexReader reader =
+                createVectorReader(
+                        globalIndexer,
+                        indexPathFactory,
+                        rowRangeStart,
+                        rowRangeEnd,
+                        vectorIndexFiles,
+                        shardFilter,
+                        executor);
+        if (postFiltering && shardFilter == null) {
+            return evalPostFilter(
+                    reader, rowRangeStart, rowRangeEnd, vectors, searchLimit, includeRowIds);
+        }
+        BatchVectorSearch batchVectorSearch =
+                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
+                        .withIncludeRowIds(includeRowIds);
+        return reader.visitBatchVectorSearch(batchVectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+    }
+
+    private GlobalIndexReader createVectorReader(
+            GlobalIndexer globalIndexer,
+            IndexPathFactory indexPathFactory,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> vectorIndexFiles,
+            @Nullable IOFunction<Integer, RoaringNavigableMap64> shardFilter,
+            ExecutorService executor) {
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
         @SuppressWarnings("resource")
@@ -371,12 +536,52 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         rowRangeEnd - rowRangeStart + 1,
                         null,
                         executor);
-        BatchVectorSearch batchVectorSearch =
-                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
-                        .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitBatchVectorSearch(batchVectorSearch)
-                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+        if (shardFilter != null) {
+            ((CentroidShardFilterReader) reader).withShardFilter(shardFilter);
+        }
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd);
+    }
+
+    private CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalPostFilter(
+            GlobalIndexReader reader,
+            long from,
+            long to,
+            float[][] vectors,
+            int searchLimit,
+            @Nullable RoaringNavigableMap64 include) {
+        try {
+            int candidates =
+                    VectorSearchPostFilter.candidateLimit(
+                            limit, candidatesFactor, searchLimit, to - from + 1);
+            return VectorSearchPostFilter.search(
+                    vectors,
+                    candidates,
+                    searchLimit,
+                    new Range(from, to),
+                    include,
+                    queries ->
+                            reader.visitBatchVectorSearch(
+                                    new BatchVectorSearch(
+                                                    queries,
+                                                    candidates,
+                                                    vectorColumn.name(),
+                                                    options)
+                                            .withIncludeRowIds(include)),
+                    rows ->
+                            new FilteredRowIdReader(
+                                            table,
+                                            planSnapshot,
+                                            partitionFilter,
+                                            checkNotNull(filter))
+                                    .matchingRowIds(rows),
+                    () -> IOUtils.closeQuietly(reader));
+        } catch (Throwable error) {
+            IOUtils.closeQuietly(reader);
+            CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> failed =
+                    new CompletableFuture<>();
+            failed.completeExceptionally(error);
+            return failed;
+        }
     }
 
     protected ScoredGlobalIndexResult withRawSearch(
@@ -385,6 +590,16 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             @Nullable GlobalIndexer globalIndexer,
             @Nullable RoaringNavigableMap64 preFilter,
             float[] queryVector) {
+        return withRawSearch(result, rawSplits, globalIndexer, preFilter, queryVector, null);
+    }
+
+    protected ScoredGlobalIndexResult withRawSearch(
+            ScoredGlobalIndexResult result,
+            List<RawVectorSearchSplit> rawSplits,
+            @Nullable GlobalIndexer globalIndexer,
+            @Nullable RoaringNavigableMap64 preFilter,
+            float[] queryVector,
+            @Nullable RoaringNavigableMap64 indexedRows) {
         List<Range> rawRowRanges = rawRowRanges(rawSplits);
         if (rawRowRanges.isEmpty()) {
             return result.topK(limit);
@@ -396,11 +611,33 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         preFilter,
                         rawSearchIndexer(rawSplits, globalIndexer),
                         queryVector);
+        if (indexedRows != null) {
+            // An indexed row keeps its first score even if it was evicted from the heap.
+            RoaringNavigableMap64 unique = new RoaringNavigableMap64();
+            unique.or(rawResult.results());
+            unique.andNot(indexedRows);
+            rawResult = ScoredGlobalIndexResult.create(unique, rawResult.scoreGetter());
+        }
         return result.or(rawResult).topK(limit);
     }
 
     protected int indexedSearchLimit(String indexType) {
-        return VectorSearchRefineOptions.searchLimit(limit, configuredRefineFactor(indexType));
+        int factor = configuredRefineFactor(indexType);
+        // Several moderately good token matches can outrank each token's individual winner.
+        return VectorSearchRefineOptions.searchLimit(
+                limit, queryMatrix != null && factor == 0 ? 4 : factor);
+    }
+
+    protected ScoredGlobalIndexResult mergeIndexedCandidates(List<ScoredGlobalIndexResult> hits) {
+        if (queryMatrix == null) {
+            return ScoredGlobalIndexResult.merge(hits);
+        }
+        // Only row IDs survive token retrieval. The full lists supply all MaxSim scores.
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (ScoredGlobalIndexResult hit : hits) {
+            rows.or(hit.results());
+        }
+        return ScoredGlobalIndexResult.create(rows, id -> 0f);
     }
 
     protected ScoredGlobalIndexResult maybeRerankIndexedResult(
@@ -408,7 +645,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             String indexType,
             @Nullable GlobalIndexer globalIndexer,
             float[] queryVector) {
-        if (configuredRefineFactor(indexType) == 0 || result.results().isEmpty()) {
+        if (queryMatrix != null && !result.results().isEmpty()) {
+            return readRawRefineSearch(result.results(), globalIndexer, queryVector);
+        }
+        if ((!VectorIndexUtils.isMultiVector(vectorColumn.type())
+                        && configuredRefineFactor(indexType) == 0)
+                || result.results().isEmpty()) {
             return result;
         }
         ScoredGlobalIndexResult candidates = result.topK(indexedSearchLimit(indexType));
@@ -419,24 +661,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return firstVectorIndexFile(splits).indexType();
     }
 
-    protected ScoredGlobalIndexResult[] emptyScoredResults(int n) {
-        ScoredGlobalIndexResult[] results = new ScoredGlobalIndexResult[n];
-        for (int i = 0; i < n; i++) {
-            results[i] = ScoredGlobalIndexResult.createEmpty();
-        }
-        return results;
-    }
-
     private List<GlobalIndexIOMeta> buildIOMetaList(
             IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            indexIOMetaList.add(
-                    new GlobalIndexIOMeta(
-                            indexPathFactory.toPath(indexFile),
-                            indexFile.fileSize(),
-                            meta.indexMeta()));
+            indexIOMetaList.add(CentroidIndexMeta.file(indexFile, indexPathFactory));
         }
         return indexIOMetaList;
     }
@@ -509,31 +738,31 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             String metric,
             float[] queryVector,
             boolean includeFilter) {
-        RowType readType = rawSearchReadType(includeFilter);
         rawRowRanges = filteredRawRowRanges(rawRowRanges, preFilter);
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
-        TableScan.Plan plan =
-                newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
-        ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
-        int vectorIndex = readType.getFieldIndex(vectorColumn.name());
-        int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         PriorityQueue<long[]> topKHeap =
                 new PriorityQueue<>(Math.max(1, limit + 1), WEAKEST_SCORE_FIRST);
+        MaxSimScorer scorer =
+                VectorIndexUtils.isMultiVector(vectorColumn.type())
+                        ? new MaxSimScorer(
+                                (ArrayType) vectorColumn.type(),
+                                queryMatrix == null ? new float[][] {queryVector} : queryMatrix)
+                        : null;
 
-        try (RecordReader<InternalRow> reader =
-                readBuilder.newRead().executeFilter().createReader(plan)) {
-            reader.forEachRemaining(
-                    row -> {
-                        long rowId = row.getLong(rowIdIndex);
-                        if (scoreCandidates != null && !scoreCandidates.contains(rowId)) {
-                            return;
+        readRawVectorRows(
+                rawRowRanges,
+                scoreCandidates,
+                includeFilter,
+                (rowId, row, vectorIndex) -> {
+                    if (scorer != null) {
+                        float score = scorer.score(row.getArray(vectorIndex));
+                        if (score != Float.NEGATIVE_INFINITY) {
+                            offerScore(topKHeap, limit, rowId, score);
                         }
-                        if (row.isNullAt(vectorIndex)) {
-                            return;
-                        }
+                    } else {
                         float[] stored = getVector(row, vectorIndex);
                         checkVectorDimension(queryVector, stored);
                         offerScore(
@@ -541,11 +770,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                                 limit,
                                 rowId,
                                 VectorSearchMetric.computeScore(queryVector, stored, metric));
-                    });
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read raw vectors for vector search.", e);
-        }
-
+                    }
+                });
         return scoredResult(topKHeap);
     }
 
@@ -558,16 +784,32 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<Range> rawRowRanges,
             @Nullable RoaringNavigableMap64 candidates,
             boolean includeFilter) {
-        RowType readType = rawSearchReadType(includeFilter);
-        rawRowRanges = filteredRawRowRanges(rawRowRanges, null);
-        if (rawRowRanges.isEmpty()) {
-            return Collections.emptyMap();
-        }
+        Map<Long, float[]> rawVectors = new HashMap<>();
+        readRawVectorRows(
+                rawRowRanges,
+                candidates,
+                includeFilter,
+                (rowId, row, vectorIndex) -> rawVectors.put(rowId, getVector(row, vectorIndex)));
+        return rawVectors;
+    }
 
+    @FunctionalInterface
+    interface RawVectorConsumer {
+        void accept(long rowId, InternalRow row, int vectorIndex);
+    }
+
+    void readRawVectorRows(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 candidates,
+            boolean includeFilter,
+            RawVectorConsumer consumer) {
+        if (rawRowRanges.isEmpty()) {
+            return;
+        }
+        RowType readType = rawSearchReadType(includeFilter);
         TableScan.Plan plan =
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
         ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
-        Map<Long, float[]> rawVectors = new HashMap<>();
         int vectorIndex = readType.getFieldIndex(vectorColumn.name());
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
 
@@ -582,14 +824,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         if (row.isNullAt(vectorIndex)) {
                             return;
                         }
-                        float[] stored = getVector(row, vectorIndex);
-                        rawVectors.put(rowId, stored);
+                        consumer.accept(rowId, row, vectorIndex);
                     });
         } catch (IOException e) {
             throw new RuntimeException("Failed to read raw vectors for vector search.", e);
         }
-
-        return rawVectors;
     }
 
     private List<Range> filteredRawRowRanges(
@@ -625,8 +864,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return scoredResult(topKHeap);
     }
 
-    private static void offerScore(
-            PriorityQueue<long[]> topKHeap, int topK, long rowId, float score) {
+    static void offerScore(PriorityQueue<long[]> topKHeap, int topK, long rowId, float score) {
         if (topK <= 0) {
             return;
         }
@@ -639,7 +877,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
     }
 
-    private static ScoredGlobalIndexResult scoredResult(PriorityQueue<long[]> topKHeap) {
+    static ScoredGlobalIndexResult scoredResult(PriorityQueue<long[]> topKHeap) {
         if (topKHeap.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
@@ -756,6 +994,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected String rawSearchMetric(@Nullable GlobalIndexer globalIndexer) {
+        if (VectorIndexUtils.isMultiVector(vectorColumn.type())) {
+            return "cosine";
+        }
         String metric = null;
         if (globalIndexer != null) {
             if (!(globalIndexer instanceof VectorGlobalIndexer)) {
@@ -784,12 +1025,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         if (options.containsKey(fieldPrefix + "index-options")) {
             CoreOptions configured = new CoreOptions(new Options(table.options(), options));
             VectorIndexOptions resolved =
-                    VectorIndexOptions.resolve(
-                            configured.toConfiguration(), null, vectorColumn.name(), false);
+                    VectorIndexOptions.resolveConfigured(
+                            configured.toConfiguration(), null, vectorColumn.name());
             if (resolved.type() == null) {
                 resolved =
-                        VectorIndexOptions.resolve(
-                                configured.toConfiguration(), "vector", vectorColumn.name(), false);
+                        VectorIndexOptions.resolveConfigured(
+                                configured.toConfiguration(), "vector", vectorColumn.name());
             }
             String configuredMetric = resolved.options().get(resolved.type() + ".metric");
             if (configuredMetric != null) {

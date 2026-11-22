@@ -78,6 +78,12 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
+    public Boolean visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return false;
+    }
+
+    @Override
     public Boolean visitNotContains(FieldRef fieldRef, Object literal) {
         return false;
     }

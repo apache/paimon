@@ -117,6 +117,46 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testVectorFieldNameWithLeadingSpace() throws Exception {
+        // Existing tables may name a vector field " embedding_v2" and list it as "embedding,
+        // embedding_v2", so the exact name must win over its trimmed form.
+        Schema schema =
+                vectorSchema("json")
+                        .column(" embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.VECTOR_FIELD.key(), "embedding, embedding_v2")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        write(getTableDefault(), GenericRow.of(0, vector(1), vector(2)));
+
+        List<InternalRow> rows = read(getTableDefault());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getVector(2).toFloatArray()[0]).isEqualTo(2F);
+    }
+
+    @Test
+    public void testVectorFieldWithSpacesAfterAddingSimilarColumn() throws Exception {
+        Schema schema =
+                vectorSchema("json")
+                        .column("embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.VECTOR_FIELD.key(), "embedding, embedding_v2")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        assertThat(getTableDefault().options())
+                .containsEntry(CoreOptions.VECTOR_FIELD.key(), "embedding,embedding_v2");
+
+        // A new string field named " embedding_v2" must not become one of the vector fields.
+        catalog.alterTable(
+                identifier(), SchemaChange.addColumn(" embedding_v2", DataTypes.STRING()), false);
+        write(
+                getTableDefault(),
+                GenericRow.of(0, vector(1), vector(2), BinaryString.fromString("text")));
+
+        List<InternalRow> rows = read(getTableDefault());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(3).toString()).isEqualTo("text");
+    }
+
+    @Test
     public void testPartialUpdateOfSharedVectorFile() throws Exception {
         Schema schema =
                 vectorSchema("json")

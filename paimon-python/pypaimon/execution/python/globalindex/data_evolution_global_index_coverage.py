@@ -49,8 +49,6 @@ class DataEvolutionGlobalIndexCoverage:
                 continue
             row_range = Range(meta.row_range_start, meta.row_range_end)
             self._add_coverage(meta.index_field_id, row_range)
-            for field_id in meta.extra_field_ids or []:
-                self._add_coverage(field_id, row_range)
 
     def unindexed_ranges(
         self,

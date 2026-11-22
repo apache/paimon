@@ -19,11 +19,15 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.partition.PartitionStatistics
+import org.apache.paimon.data.{GenericRow, InternalRow => PaimonInternalRow, Timestamp}
+import org.apache.paimon.data.serializer.InternalRowSerializer
+import org.apache.paimon.options.Options
+import org.apache.paimon.partition.{PartitionPredicate, PartitionStatistics}
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.table.{FileStoreTable, FormatTable, Table}
 import org.apache.paimon.table.source.ScanMode
-import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
+import org.apache.paimon.types.{DataTypeChecks, RowType}
+import org.apache.paimon.utils.{DateTimeUtils, InternalRowPartitionComputer, TypeUtils}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.Row
@@ -31,8 +35,10 @@ import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{SupportsAtomicPartitionManagement, TableCatalog}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.unsafe.types.UTF8String
 
-import java.util.{Map => JMap, Objects}
+import java.nio.charset.StandardCharsets
+import java.util.{Arrays, LinkedHashMap => JLinkedHashMap, Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
 
@@ -94,25 +100,176 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
       new SparkRow(currentPartitionRowType, rowConverter(row).asInstanceOf[Row]))
   }
 
+  /**
+   * The first partition column whose value in `spec` does not parse back to its value in `row`. A
+   * spec holds each value as a string, and a blank one is written as the default partition name,
+   * which parses back as NULL.
+   */
+  private def columnNotParsedBack(row: InternalRow, spec: JMap[String, String]): Option[String] = {
+    val names = table.partitionKeys().asScala.toSeq.take(row.numFields)
+    val specRowType = TypeUtils.project(table.rowType, names.asJava)
+    val parsed = InternalRowPartitionComputer.convertSpecToInternal(
+      spec,
+      specRowType,
+      CoreOptions.fromMap(table.options()).partitionDefaultName())
+    names.zipWithIndex
+      .find {
+        case (name, index) =>
+          val parsedValue =
+            DataConverter.fromPaimon(parsed.get(name), specRowType.getField(name).`type`())
+          !Objects.deepEquals(row.get(index, partitionSchema(name).dataType), parsedValue)
+      }
+      .map(_._1)
+  }
+
+  /** Whether the Spark value is a STRING or BINARY value equal to `text`. */
+  private def isText(value: Any, text: String): Boolean = value match {
+    case s: UTF8String => s.toString == text
+    case b: Array[Byte] => new String(b, StandardCharsets.UTF_8) == text
+    case _ => false
+  }
+
+  /** The first column of `row` whose value is the default partition name, which is not NULL. */
+  private def columnHoldingDefaultPartitionName(row: InternalRow): Option[String] = {
+    val defaultPartitionName = CoreOptions.fromMap(table.options()).partitionDefaultName()
+    partitionSchema.fields.take(row.numFields).zipWithIndex.collectFirst {
+      case (field, i) if isText(row.get(i, field.dataType), defaultPartitionName) => field.name
+    }
+  }
+
+  /**
+   * The Paimon values of the partition columns each row holds, the first ones of the table, with
+   * timestamps at the column's precision.
+   */
+  private def toPaimonPartitionValues(rows: Seq[InternalRow]): Seq[Array[AnyRef]] = {
+    val converters = rows
+      .map(_.numFields)
+      .distinct
+      .map {
+        numFields =>
+          val names = table.partitionKeys().asScala.toSeq.take(numFields)
+          val rowType = TypeUtils.project(table.rowType, names.asJava)
+          val toScala = CatalystTypeConverters.createToScalaConverter(
+            CharVarcharUtils.replaceCharVarcharWithString(
+              SparkTypeUtils.fromPaimonRowType(rowType)))
+          val getters = rowType.getFields.asScala.zipWithIndex.map {
+            case (field, i) =>
+              field.`type`() -> PaimonInternalRow.createFieldGetter(field.`type`(), i)
+          }
+          numFields -> {
+            (row: InternalRow) =>
+              val paimonRow = new SparkRow(rowType, toScala(row).asInstanceOf[Row])
+              getters.map {
+                case (dataType, getter) =>
+                  getter.getFieldOrNull(paimonRow) match {
+                    case timestamp: Timestamp =>
+                      DateTimeUtils.truncate(timestamp, DataTypeChecks.getPrecision(dataType))
+                    case other => other
+                  }
+              }.toArray
+          }
+      }
+      .toMap
+    rows.map(row => converters(row.numFields)(row))
+  }
+
+  /**
+   * The partitions `values` address, compared by value: full values address their own partition, a
+   * prefix every partition under it.
+   */
+  private def toPartitionPredicate(values: Seq[Array[AnyRef]]): PartitionPredicate = {
+    if (values.forall(_.length == partitionRowType.getFieldCount)) {
+      val serializer = new InternalRowSerializer(partitionRowType)
+      PartitionPredicate.fromMultiple(
+        partitionRowType,
+        values.map(v => serializer.toBinaryRow(GenericRow.of(v: _*)).copy()).asJava)
+    } else {
+      val names = partitionRowType.getFieldNames
+      val predicates = values.map {
+        v =>
+          val spec = new JLinkedHashMap[String, AnyRef]()
+          v.indices.foreach(i => spec.put(names.get(i), v(i)))
+          PartitionPredicate.createPartitionPredicate(partitionRowType, spec)
+      }
+      PartitionPredicate.fromPredicate(partitionRowType, PredicateBuilder.or(predicates.asJava))
+    }
+  }
+
+  private def toPartitionPredicate(row: InternalRow): PartitionPredicate =
+    toPartitionPredicate(toPaimonPartitionValues(Seq(row)))
+
+  /** The specs of the partitions to drop by name; each must address its own partition. */
+  private def toRemovedPaimonPartitions(rows: Array[InternalRow]): Array[JMap[String, String]] = {
+    val specs = toPaimonPartitions(rows)
+    rows.zip(specs).foreach {
+      case (row, spec) =>
+        columnNotParsedBack(row, spec).foreach {
+          name =>
+            val nullPartitionHint = if (columnHoldingDefaultPartitionName(row).contains(name)) {
+              s" If you meant the NULL partition, use $name = NULL."
+            } else {
+              ""
+            }
+            throw new IllegalArgumentException(
+              s"Partition spec $spec of table ${table.name()} does not name the partition to " +
+                s"remove: the value of partition column $name does not parse back from it." +
+                nullPartitionHint)
+        }
+    }
+    specs
+  }
+
+  /**
+   * Removes the data of the partitions the rows address. The commit matches them by value in the
+   * snapshot it commits on, as it matches a partition spec.
+   */
+  private def truncatePartitionsByValue(
+      fileStoreTable: FileStoreTable,
+      rows: Array[InternalRow]): Unit = {
+    if (rows.isEmpty) {
+      return
+    }
+    rows.foreach {
+      row =>
+        columnHoldingDefaultPartitionName(row).foreach {
+          name =>
+            val reader = fileStoreTable.newSnapshotReader().withMode(ScanMode.ALL)
+            if (reader.withPartitionFilter(toPartitionPredicate(row)).partitions().isEmpty) {
+              throw new IllegalArgumentException(
+                s"No partition of table ${table.name()} has the default partition name as the " +
+                  s"value of partition column $name. If you meant the NULL partition, use " +
+                  s"$name = NULL.")
+            }
+        }
+    }
+    val values = toPaimonPartitionValues(rows.toSeq)
+    logInfo(
+      s"Try to truncate the partitions of table ${table.name()} matching " +
+        values.map(v => Arrays.deepToString(v)).mkString(", "))
+    val commit =
+      fileStoreTable.newCommit(CoreOptions.createCommitUser(new Options(fileStoreTable.options())))
+    try {
+      commit.truncatePartitions(toPartitionPredicate(values))
+    } finally {
+      commit.close()
+    }
+  }
+
   override def dropPartitions(rows: Array[InternalRow]): Boolean = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val partitions = toPaimonPartitions(rows).toSeq.asJava
-        logInfo("Try to drop partitions: " + partitions.asScala.mkString(","))
         val partitionModification = fileStoreTable.catalogEnvironment().partitionModification()
         if (partitionModification != null) {
+          // The catalog drops partitions by name.
           try {
+            val partitions = toRemovedPaimonPartitions(rows).toSeq.asJava
+            logInfo("Try to drop partitions: " + partitions.asScala.mkString(","))
             partitionModification.dropPartitions(partitions)
           } finally {
             partitionModification.close()
           }
         } else {
-          val commit = fileStoreTable.newBatchWriteBuilder().newCommit()
-          try {
-            commit.truncatePartitions(partitions)
-          } finally {
-            commit.close()
-          }
+          truncatePartitionsByValue(fileStoreTable, rows)
         }
         true
 
@@ -122,12 +279,17 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
-    val partitions = toPaimonPartitions(idents).toSeq.asJava
-    val commit = table.newBatchWriteBuilder().newCommit()
-    try {
-      commit.truncatePartitions(partitions)
-    } finally {
-      commit.close()
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        truncatePartitionsByValue(fileStoreTable, idents)
+      case _ =>
+        val partitions = toPaimonPartitions(idents).toSeq.asJava
+        val commit = table.newBatchWriteBuilder().newCommit()
+        try {
+          commit.truncatePartitions(partitions)
+        } finally {
+          commit.close()
+        }
     }
     true
   }
@@ -145,25 +307,26 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val partitionSpec = toPaimonPartitions(Array(ident)).head
-        val partitionEntries = fileStoreTable
+        val partitionEntry = fileStoreTable
           .newSnapshotReader()
           .withMode(ScanMode.ALL)
-          .withPartitionFilter(partitionSpec)
+          .withPartitionFilter(toPartitionPredicate(ident))
           .partitionEntries()
+          .asScala
+          .headOption
 
-        if (!partitionEntries.isEmpty) {
-          val entry = partitionEntries.get(0)
-          Map(
-            PartitionStatistics.FIELD_RECORD_COUNT -> entry.recordCount().toString,
-            PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> entry.fileSizeInBytes().toString,
-            PartitionStatistics.FIELD_FILE_COUNT -> entry.fileCount().toString,
-            PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> entry
-              .lastFileCreationTime()
-              .toString
-          ).asJava
-        } else {
-          Map.empty[String, String].asJava
+        partitionEntry match {
+          case Some(entry) =>
+            Map(
+              PartitionStatistics.FIELD_RECORD_COUNT -> entry.recordCount().toString,
+              PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> entry.fileSizeInBytes().toString,
+              PartitionStatistics.FIELD_FILE_COUNT -> entry.fileCount().toString,
+              PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> entry
+                .lastFileCreationTime()
+                .toString
+            ).asJava
+          case None =>
+            Map.empty[String, String].asJava
         }
       case formatTable: FormatTable =>
         val partitionManager = formatTable.partitionManager()
@@ -233,7 +396,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
               case (partitionName, index) =>
                 val internalRowIndex = partitionSchema.fieldIndex(partitionName)
                 val structField = partitionSchema.fields(internalRowIndex)
-                Objects.equals(
+                // `deepEquals`: a BINARY partition value is a `byte[]`.
+                Objects.deepEquals(
                   sparkInternalRow.get(internalRowIndex, structField.dataType),
                   internalRow.get(index, structField.dataType))
             }

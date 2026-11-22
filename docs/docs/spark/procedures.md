@@ -59,6 +59,7 @@ Choose a group, then use the page contents to jump to a procedure:
 ### Compaction and Cleanup
 
 [`compact`](./procedures/maintenance#compact),
+[`sort_data_evolution`](./procedures/maintenance#sort_data_evolution),
 [`compact_database`](./procedures/maintenance#compact_database),
 [`compact_chain_table`](./procedures/maintenance#compact_chain_table),
 [`compact_manifest`](./procedures/maintenance#compact_manifest),

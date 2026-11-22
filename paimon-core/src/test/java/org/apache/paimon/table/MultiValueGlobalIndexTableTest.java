@@ -97,13 +97,12 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         write(table, GenericRow.of(6, array(RED)));
         table = getTableDefault();
 
-        // Fast search only returns covered rows. Full search retains the uncovered append.
-        assertThat(readIds(table, containsRed)).containsExactlyInAnyOrder(1, 5);
-        FileStoreTable fullSearchTable =
+        assertThat(readIds(table, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
+        FileStoreTable fastSearchTable =
                 table.copy(
                         Collections.singletonMap(
-                                CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
-        assertThat(readIds(fullSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
+                                CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast"));
+        assertThat(readIds(fastSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5);
     }
 
     private void buildIndex(FileStoreTable table) throws Exception {

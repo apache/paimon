@@ -29,6 +29,9 @@ import java.util.List;
 /** An {@link AbstractStartingScanner} to return plan. */
 public abstract class ReadPlanStartingScanner extends AbstractStartingScanner {
 
+    private boolean prepared;
+    @Nullable private SnapshotReader preparedReader;
+
     ReadPlanStartingScanner(SnapshotManager snapshotManager) {
         super(snapshotManager);
     }
@@ -36,9 +39,19 @@ public abstract class ReadPlanStartingScanner extends AbstractStartingScanner {
     @Nullable
     protected abstract SnapshotReader configure(SnapshotReader snapshotReader);
 
+    /** Configures the reader once for callers that need the snapshot before reading. */
+    @Nullable
+    public SnapshotReader prepareRead(SnapshotReader snapshotReader) {
+        if (!prepared) {
+            preparedReader = configure(snapshotReader);
+            prepared = true;
+        }
+        return preparedReader;
+    }
+
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        SnapshotReader configured = configure(snapshotReader);
+        SnapshotReader configured = prepared ? preparedReader : configure(snapshotReader);
         if (configured == null) {
             return new NoSnapshot();
         }

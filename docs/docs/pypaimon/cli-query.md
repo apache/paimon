@@ -38,6 +38,7 @@ paimon table read mydb.users
 **Options:**
 
 - `--select, -s`: Select specific columns to read (comma-separated)
+- `--snapshot-id` reads all rows visible at the specified positive snapshot ID on the table's branch. Use the column names from that snapshot in `--select` and `--where`.
 - `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
 - `--format, -f`: Output format: `table` (default) or `json`
@@ -50,6 +51,9 @@ paimon table read mydb.users -l 50
 
 # Read specific columns
 paimon table read mydb.users -s id,name,age
+
+# Read the rows visible at snapshot 5 using the column names at that time
+paimon table read mydb.users --snapshot-id 5 -s id,name -w "age >= 20"
 
 # Filter with WHERE clause
 paimon table read mydb.users --where "age > 18"
@@ -122,6 +126,7 @@ paimon table explain mydb.events
 **Options:**
 
 - `--select, -s`: Project specific columns (comma-separated)
+- `--snapshot-id` plans the scan for the specified positive snapshot ID using the same branch, schema, and selection rules as `table read`.
 - `--where, -w`: Filter condition in SQL-like syntax (same operators as `table read`)
 - `--limit, -l`: Row limit to push down
 - `--verbose, -v`: List every split with its files
@@ -132,6 +137,9 @@ paimon table explain mydb.events
 ```shell
 # Whole-table scan plan
 paimon table explain mydb.events
+
+# Inspect the plan for the snapshot 5 query from the Table Read example
+paimon table explain mydb.users --snapshot-id 5 -s id,name -w "age >= 20" --verbose
 
 # Push filter and projection through the planner
 paimon table explain mydb.events --where "dt = '2026-05-16' AND id = 7" -s dt,id,val
@@ -423,6 +431,68 @@ Output:
       }
     }
   ]
+}
+```
+
+## Table List Files
+
+List the live data files referenced by the latest or a specific retained snapshot.
+
+```shell
+paimon table list-files mydb.orders
+paimon table list-files mydb.orders --snapshot-id 1 --format json
+paimon table list-files mydb.orders --bucket 0 --limit 20
+```
+
+**Options:**
+
+- `--snapshot-id`: Positive snapshot ID. Omit it to use the latest snapshot.
+- `--bucket`: Only display files in the specified bucket.
+- `--limit, -l`: Positive maximum number of live files after filtering. Omit it to show all.
+- `--format, -f`: Output format: `table` (default) or `json`.
+
+Table output follows the `$files` system table, with `snapshot_id` as the first column and
+`delete_row_count` for the delete-row count. It includes partition, bucket, full file path, format,
+file schema ID, level, record count, size, key bounds, column statistics, sequence-number bounds,
+creation time, file source, first row ID, and written columns. JSON output contains
+`table`, `snapshot_id`, and a `files` array.
+
+Output (selected columns):
+```text
+snapshot_id bucket                                               file_path file_format record_count file_size_in_bytes              creation_time
+          1      0 /warehouse/mydb.db/orders/bucket-0/data-example.parquet     parquet            2                803 2026-11-14T18:23:49.778000
+```
+
+## Table File
+
+Inspect a Parquet file's schema and footer metadata without reading data records. Use the
+`file_path` returned by `list-files`:
+
+```shell
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet
+paimon table file mydb.orders --file /warehouse/mydb.db/orders/bucket-0/data-example.parquet --format table
+```
+
+**Options:**
+
+- `--file`: Actual Parquet file path or filesystem URI. **Required**.
+- `--format, -f`: Output format: `json` (default) or `table`.
+
+If a `file:` input matches both a literal path and a different URL-decoded file, the command
+reports an ambiguity. Use a plain filesystem path to select the intended file.
+
+Output includes the file path, format, size, schema, and Parquet metadata such as row groups and
+column statistics. Table output displays `schema` and `metadata` as indented, multiline JSON.
+
+Output (selected fields):
+```json
+{
+  "table": "mydb.orders",
+  "file_path": "/warehouse/mydb.db/orders/bucket-0/data-example.parquet",
+  "file_format": "parquet",
+  "file_size_in_bytes": 803,
+  "schema": {"arrow": "id: int64\nname: string"},
+  "metadata": {"num_columns": 2, "num_rows": 2, "num_row_groups": 1}
 }
 ```
 

@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
@@ -31,7 +32,7 @@ import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal, MetadataAttribute}
@@ -41,9 +42,9 @@ import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, Colum
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, STUtils}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, ResolveTableConstraints, STUtils}
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
-import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.expressions.{Expression => V2Expression, Transform}
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{FormatTableFileIndex, SparkFormatTable, SparkPlan}
@@ -60,6 +61,15 @@ import org.apache.spark.unsafe.types.VariantVal
 import java.util.{Map => JMap}
 
 class Spark4Shim extends SparkShim {
+
+  override def injectSpatialFunctions(extensions: SparkSessionExtensions): Unit =
+    SpatialIntersects.register(extensions)
+
+  override def spatialCandidate(
+      predicate: V2Expression,
+      rowType: RowType,
+      ranked: Boolean): Option[Predicate] =
+    SpatialIntersects.candidate(predicate, rowType, ranked)
 
   override def classicApi: ClassicApi = new Classic4Api
 
@@ -186,9 +196,16 @@ class Spark4Shim extends SparkShim {
     val statementType = "REPLACE TABLE"
     val columns = schemaOrColumns.asInstanceOf[Seq[ColumnDefinition]]
     ResolveDefaultColumns.validateCatalogForDefaultValue(columns, catalog, ident)
-    GeneratedColumn.validateGeneratedColumns(tableSchema, catalog, ident, statementType)
+    validateGeneratedColumns(tableSchema, columns, catalog, ident, statementType)
     IdentityColumn.validateIdentityColumn(tableSchema, catalog, ident)
     columns.map(_.toV2Column(statementType)).toArray
+  }
+
+  override def validateTableConstraints(
+      tableSpec: TableSpec,
+      catalog: TableCatalog,
+      ident: Identifier): Unit = {
+    ResolveTableConstraints.validateCatalogForTableConstraint(tableSpec.constraints, catalog, ident)
   }
 
   override def copyTableSpec(
@@ -196,6 +213,27 @@ class Spark4Shim extends SparkShim {
       additionalProperties: Map[String, String],
       location: Option[String]): TableSpec = {
     tableSpec.copy(properties = tableSpec.properties ++ additionalProperties, location = location)
+  }
+
+  // Spark 4.3 keeps only the catalog check here and verifies generation expressions in
+  // CheckAnalysis.
+  private def validateGeneratedColumns(
+      tableSchema: StructType,
+      columns: Seq[ColumnDefinition],
+      catalog: TableCatalog,
+      ident: Identifier,
+      statementType: String): Unit = {
+    val methods = GeneratedColumn.getClass.getMethods
+    val (method, args) = methods.find(_.getName == "validateGeneratedColumns") match {
+      case Some(m) => (m, Seq(tableSchema, catalog, ident, statementType))
+      case None =>
+        val m = methods
+          .find(_.getName == "validateCatalogForGeneratedColumn")
+          .getOrElse(throw new IllegalStateException("No generated column validation in Spark"))
+        (m, Seq(columns, catalog, ident))
+    }
+    try { method.invoke(GeneratedColumn, args: _*) }
+    catch { case e: java.lang.reflect.InvocationTargetException => throw e.getCause }
   }
 
   private def invalidateCache(tableCatalog: TableCatalog, ident: Identifier): Unit = {
@@ -405,7 +443,7 @@ class Spark4Shim extends SparkShim {
     readSpatial(array, pos, geography = true)
 
   private def readSpatial(value: AnyRef, pos: Int, geography: Boolean): Array[Byte] = {
-    val modern = org.apache.spark.SPARK_VERSION.startsWith("4.2.")
+    val modern = org.apache.spark.SPARK_VERSION >= "4.2"
     val getter = if (modern) "getBinaryView" else if (geography) "getGeography" else "getGeometry"
     val raw = value.getClass
       .getMethod(getter, java.lang.Integer.TYPE)
@@ -430,7 +468,7 @@ class Spark4Shim extends SparkShim {
   override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object = {
     val geographyType = sparkGeographyType(crs, algorithm)
     val name =
-      if (org.apache.spark.SPARK_VERSION.startsWith("4.2.")) "stGeogSetSrid" else "stSetSrid"
+      if (org.apache.spark.SPARK_VERSION >= "4.2") "stGeogSetSrid" else "stSetSrid"
     val raw = STUtils.stGeogFromWKB(wkb)
     val method = Class
       .forName("org.apache.spark.sql.catalyst.util.STUtils")

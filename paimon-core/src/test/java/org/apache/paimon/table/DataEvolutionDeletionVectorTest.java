@@ -19,12 +19,16 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -37,12 +41,14 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -69,6 +75,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -86,6 +93,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -94,11 +102,20 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+import static org.apache.paimon.table.DataEvolutionRangeSortTest.writePlannedRows;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests filename-anchored deletion vectors for data evolution tables. */
 public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
@@ -111,6 +128,72 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                     new DvSpec(new Range(0, 4), 1, 4),
                     new DvSpec(new Range(5, 9), 6),
                     new DvSpec(new Range(10, 14), 10, 12));
+
+    @Test
+    public void testCompactScansDeletionVectorIndexesOnceAcrossPartitions() throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("compact_dv_scan", false);
+        writePartitionRows(table, "a", 0, 1, 2);
+        writePartitionRows(table, "a", 3, 4, 5);
+        writePartitionRows(table, "b", 6, 7, 8);
+        writePartitionRows(table, "b", 9, 10, 11);
+        writePartitionRows(table, "c", 12, 13, 14);
+        BinaryRow partitionA = partition(table, "a");
+        BinaryRow partitionB = partition(table, "b");
+        commitDeletionVectors(
+                table,
+                partitionA,
+                Arrays.asList(new DvSpec(new Range(0, 2), 1), new DvSpec(new Range(3, 5), 4)));
+        commitDeletionVectors(
+                table,
+                partitionB,
+                Arrays.asList(new DvSpec(new Range(6, 8), 7), new DvSpec(new Range(9, 11), 10)));
+        commitDeletionVectors(
+                table,
+                partition(table, "c"),
+                Collections.singletonList(new DvSpec(new Range(12, 14), 13)));
+        writePartialStrings(table, "a", 0, 0, 1, 2);
+        writePartialStrings(table, "b", 6, 6, 7, 8);
+        List<String> rowsBefore = readPartitionedRows(table);
+        List<String> anchorsBefore = liveDeletionVectorDataFileNames(table);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (BinaryRow partition : Arrays.asList(partitionA, partitionB)) {
+            long firstRowId = partition.equals(partitionA) ? 0 : 6;
+            List<DataFileMeta> files =
+                    currentDataFiles(table, partition).stream()
+                            .filter(file -> file.nonNullFirstRowId() == firstRowId)
+                            .collect(Collectors.toList());
+            messages.add(
+                    new DataEvolutionNormalCompactTask(
+                                    partition, files, Collections.emptyList(), false)
+                            .doCompact(table, "test-compact-dv-scan"));
+        }
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        IndexFileHandler indexFileHandler = spy(table.store().newIndexFileHandler());
+        FileStore store = mock(FileStore.class);
+        FileStoreTable rewriteTable = mock(FileStoreTable.class);
+        when(rewriteTable.coreOptions()).thenReturn(table.coreOptions());
+        when(rewriteTable.store()).thenReturn(store);
+        when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
+
+        messages.addAll(
+                new DataEvolutionCompactDeletionVectorRewriter(rewriteTable, snapshot)
+                        .rewriteDeletionVectors(messages));
+
+        verify(indexFileHandler)
+                .scanBucketEntries(
+                        snapshot,
+                        DELETION_VECTORS_INDEX,
+                        Arrays.asList(partitionA, partitionB).stream()
+                                .map(partition -> Pair.of(partition, UNAWARE_BUCKET))
+                                .collect(Collectors.toSet()));
+        verify(indexFileHandler, never()).scan(snapshot, DELETION_VECTORS_INDEX);
+        commit(table, messages);
+        assertThat(readPartitionedRows(table)).containsExactlyInAnyOrderElementsOf(rowsBefore);
+        List<String> anchorsAfter = liveDeletionVectorDataFileNames(table);
+        assertThat(anchorsAfter).hasSize(5);
+        assertThat(anchorsBefore.stream().filter(anchorsAfter::contains).count()).isEqualTo(3L);
+    }
 
     @Test
     public void testMergedReadAfterManyDeletedBatches() throws Exception {
@@ -963,6 +1046,86 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .doesNotContainAnyElementsOf(oldAnchorFiles);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"before", "after", "retry", "fully-deleted"})
+    public void testMaterializeInvalidatesGlobalIndexesAtCommit(String indexTiming)
+            throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("materialize_global_indexes", false);
+        writePartitionRows(table, "a", 0, 1, 2);
+        writePartitionRows(table, "b", 3, 4, 5);
+        BinaryRow partitionA = partition(table, "a");
+        boolean fullyDeleted = "fully-deleted".equals(indexTiming);
+        commitDeletionVectors(
+                table,
+                partitionA,
+                Collections.singletonList(
+                        new DvSpec(
+                                new Range(0, 2),
+                                fullyDeleted ? new long[] {0, 1, 2} : new long[] {1})));
+        commitGlobalIndex(
+                table, partition(table, "b"), globalIndexFile("untouched-index", new Range(3, 5)));
+        IndexFileMeta oldIndex = globalIndexFile("old-index", new Range(0, 2));
+        if (!"after".equals(indexTiming)) {
+            commitGlobalIndex(table, partitionA, oldIndex);
+        }
+        List<String> rowsBefore = readPartitionedRows(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMaterializeDeletionVectors(table, snapshot, null);
+        assertThat(
+                        messages.stream()
+                                .flatMap(
+                                        message ->
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement().deletedIndexFiles()
+                                                                .stream())
+                                .filter(file -> file.globalIndexMeta() != null))
+                .isEmpty();
+        if ("after".equals(indexTiming)) {
+            commitGlobalIndex(table, partitionA, globalIndexFile("late-index", new Range(0, 2)));
+        }
+
+        AtomicInteger publicationAttempts = new AtomicInteger();
+        FileStoreTable commitTable = table;
+        if ("retry".equals(indexTiming)) {
+            FileIO fileIO = spy(table.fileIO());
+            doAnswer(
+                            invocation -> {
+                                Path path = invocation.getArgument(0);
+                                if (path.getName().startsWith("snapshot-")
+                                        && publicationAttempts.getAndIncrement() == 0) {
+                                    // Replace old-index after this attempt generated its deletions.
+                                    // The retry must regenerate DELETE concurrent-index.
+                                    commit(
+                                            table,
+                                            Collections.singletonList(
+                                                    indexCompactMessage(
+                                                            partitionA,
+                                                            oldIndex,
+                                                            globalIndexFile(
+                                                                    "concurrent-index",
+                                                                    new Range(0, 2)))));
+                                }
+                                return invocation.callRealMethod();
+                            })
+                    .when(fileIO)
+                    .tryToWriteAtomic(any(Path.class), anyString());
+            commitTable =
+                    new AppendOnlyFileStoreTable(
+                            fileIO, table.location(), table.schema(), table.catalogEnvironment());
+        }
+        commitMaterializeDeletionVectors(
+                commitTable, snapshot, messages, "test-materialize-global-index");
+
+        assertThat(liveGlobalIndexFileNames(table)).containsExactly("untouched-index");
+        assertThat(readPartitionedRows(table)).containsExactlyInAnyOrderElementsOf(rowsBefore);
+        if ("retry".equals(indexTiming)) {
+            assertThat(publicationAttempts.get()).isEqualTo(2);
+        }
+        if (fullyDeleted) {
+            assertThat(currentDataFiles(table, partitionA)).isEmpty();
+        }
+    }
+
     @Test
     public void testStaleMaterializeRejectedAfterConcurrentUpdate() throws Exception {
         createTableDefault();
@@ -1198,6 +1361,91 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .containsExactly(new Range(0, 4));
         assertThat(normalFileRowRanges(tasks.get(1).compactBefore()))
                 .containsExactly(new Range(10, 14));
+    }
+
+    @Test
+    public void testRangeSortFailsOnMissingInput() throws Exception {
+        createTableDefault();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        options.put(CoreOptions.BLOB_WRITE_NULL_ON_MISSING_FILE.key(), "true");
+        FileStoreTable table = getTableDefault().copy(options);
+        writeBaseRows(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        DataEvolutionRangeSortPlan plan =
+                DataEvolutionRangeSortPlan.plan(
+                                table,
+                                snapshot,
+                                new Range(0, 4),
+                                null,
+                                Collections.singletonList("f0"))
+                        .get(0);
+        DataFileMeta blob =
+                plan.readSplits().stream()
+                        .flatMap(split -> split.dataSplit().dataFiles().stream())
+                        .filter(f -> BlobFileFormat.isBlobFile(f.fileName()))
+                        .findFirst()
+                        .get();
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0)
+                        .toPath(blob);
+        assertThat(table.fileIO().delete(path, false)).isTrue();
+        assertThatThrownBy(() -> writePlannedRows(table, plan, "f0", "range-sort"))
+                .hasStackTraceContaining(blob.fileName());
+    }
+
+    @Test
+    public void testRangeSortDropsOnlyOverlappingGlobalIndexesWithoutDeletionVectors()
+            throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(0), GenericRow.of(1));
+        write(table, GenericRow.of(2), GenericRow.of(3));
+        write(table, GenericRow.of(4), GenericRow.of(5));
+        write(table, GenericRow.of(6), GenericRow.of(7));
+        write(table, GenericRow.of(8), GenericRow.of(9));
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        commitGlobalIndex(table, partition, globalIndexFile("before", new Range(0, 0)));
+        commitGlobalIndex(table, partition, globalIndexFile("left-endpoint", new Range(1, 2)));
+        commitGlobalIndex(table, partition, globalIndexFile("in-gap", new Range(4, 5)));
+        commitGlobalIndex(table, partition, globalIndexFile("inside", new Range(3, 3)));
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = new ArrayList<>();
+        // Leave a live same-partition index inside the gap between the two input groups.
+        for (Range range : Arrays.asList(new Range(2, 3), new Range(6, 7))) {
+            DataEvolutionRangeSortPlan plan =
+                    DataEvolutionRangeSortPlan.plan(
+                                    table, snapshot, range, null, Collections.singletonList("id"))
+                            .get(0);
+            messages.add(writePlannedRows(table, plan, "id", "range-sort"));
+        }
+        commitGlobalIndex(
+                table, partition, globalIndexFile("late-right-endpoint", new Range(7, 8)));
+        commitGlobalIndex(table, partition, globalIndexFile("late-after", new Range(9, 9)));
+        messages.replaceAll(
+                message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
+        try (TableCommitImpl commit = table.newCommit("range-sort")) {
+            commit.dataEvolutionRangeSortCheck().commit(messages);
+        }
+        assertThat(liveGlobalIndexFileNames(table))
+                .containsExactly("before", "in-gap", "late-after");
+        assertThat(normalFileRowRanges(table))
+                .containsExactly(
+                        new Range(0, 1),
+                        new Range(4, 5),
+                        new Range(8, 9),
+                        new Range(10, 11),
+                        new Range(12, 13));
     }
 
     @Test

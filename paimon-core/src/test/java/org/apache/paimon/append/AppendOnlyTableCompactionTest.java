@@ -26,6 +26,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -42,6 +43,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -227,6 +230,72 @@ public class AppendOnlyTableCompactionTest {
         assertThat(batchCoordinator.scan()).isTrue();
         assertThat(batchCoordinator.batchRemainFiles()).isTrue();
         assertThat(batchCoordinator.listRestoredFiles().size()).isEqualTo(5);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"10,5", "12,5", "11,5", "5,5", "4,5"})
+    public void testBatchChunksKeepEveryEligibleFile(int numberOfFiles, int fileLimit)
+            throws Exception {
+        commit(writeCommit(numberOfFiles));
+        List<String> expectedFiles =
+                appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(expectedFiles).hasSize(numberOfFiles);
+        List<String> expectedRows = readRows();
+        assertThat(expectedRows).hasSize(numberOfFiles);
+        Map<String, String> options = new HashMap<>();
+        options.put("compaction.file-num-limit", String.valueOf(fileLimit));
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(options);
+        List<AppendCompactTask> tasks = new ArrayList<>();
+        boolean finished = false;
+        for (int round = 0; round <= numberOfFiles; round++) {
+            try {
+                tasks.addAll(batchCoordinator.run());
+            } catch (EndOfScanException e) {
+                finished = true;
+                break;
+            }
+            if (!batchCoordinator.batchRemainFiles()) {
+                finished = true;
+                break;
+            }
+        }
+        assertThat(finished).isTrue();
+        List<String> coveredFiles = new ArrayList<>();
+        tasks.forEach(
+                task -> {
+                    assertThat(task.compactBefore()).hasSizeLessThanOrEqualTo(fileLimit);
+                    task.compactBefore().forEach(file -> coveredFiles.add(file.fileName()));
+                });
+        batchCoordinator.listRestoredFiles().forEach(file -> coveredFiles.add(file.fileName()));
+        assertThat(coveredFiles).containsExactlyInAnyOrderElementsOf(expectedFiles);
+
+        commit(doCompact(tasks));
+        assertThat(appendOnlyFileStoreTable.store().newScan().plan().files())
+                .hasSize((numberOfFiles + fileLimit - 1) / fileLimit);
+        assertThat(readRows()).containsExactlyInAnyOrderElementsOf(expectedRows);
+    }
+
+    private List<String> readRows() throws Exception {
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                appendOnlyFileStoreTable
+                        .newReadBuilder()
+                        .newRead()
+                        .createReader(appendOnlyFileStoreTable.newReadBuilder().newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getInt(0)
+                                            + ","
+                                            + row.getString(1)
+                                            + ","
+                                            + row.getString(2)
+                                            + ","
+                                            + row.getString(3)));
+        }
+        return rows;
     }
 
     @Test

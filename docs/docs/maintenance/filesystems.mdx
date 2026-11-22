@@ -306,7 +306,7 @@ SELECT COUNT(1) FROM test_table;
 
 From version 0.8, paimon-trino uses trino filesystem as basic file read and write system. We strongly recommend you to use jindo-sdk in trino.
 
-You can find [How to config jindo sdk on trino](https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.12/oss/presto/jindosdk_on_presto) here.
+You can find [How to config jindo sdk on trino](https://www.alibabacloud.com/help/en/oss/user-guide/use-jindosdk-with-trino-to-query-data-stored-in-oss-hdfs) here. The guide is written for OSS-HDFS; for a plain OSS bucket, follow the same steps with the bucket's OSS endpoint.
 Please note that:
 * Use paimon to replace hive-hadoop2 when you decompress the plugin jar and find location to put in.
 * You can specify the `core-site.xml` in `paimon.properties` on configuration [hive.config.resources](https://trino.io/docs/current/connector/hive.html#hdfs-configuration).

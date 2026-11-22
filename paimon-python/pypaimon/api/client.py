@@ -324,12 +324,19 @@ class HttpClient(RESTClient):
 
     def get_with_params(self, path: str, query_params: Dict[str, str],
                         response_type: Type[T],
-                        rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+                        rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]],
+                        *, preserve_encoded_dots: bool = False) -> T:
         auth_headers = _get_headers(path, "GET", query_params, None, rest_auth_function)
         url = self._get_request_url(path, query_params)
-
+        encoded_dot_segments = None
+        if preserve_encoded_dots:
+            encoded_dot_segments = {
+                offset: segment
+                for offset, segment in enumerate(reversed(path.split('/')), start=1)
+                if segment in ('%2E', '%2E%2E')
+            }
         return self._execute_request("GET", url, headers=auth_headers,
-                                     response_type=response_type)
+                                     response_type=response_type, encoded_dot_segments=encoded_dot_segments)
 
     def post(self, path: str, body: RESTRequest,
              rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
@@ -386,16 +393,25 @@ class HttpClient(RESTClient):
     def _execute_request(self, method: str, url: str,
                          data: Optional[str] = None,
                          headers: Optional[Dict[str, str]] = None,
-                         response_type: Optional[Type[T]] = None) -> T:
+                         response_type: Optional[Type[T]] = None,
+                         encoded_dot_segments: Optional[Dict[int, str]] = None) -> T:
         try:
             start_time = int(time.time() * 1_000_000_000)
-            response = self.session.request(
-                method=method,
-                url=url,
-                data=data.encode('utf-8') if data else None,
-                headers=headers,
-                timeout=self._timeout,
-            )
+            payload = data.encode('utf-8') if data else None
+            if encoded_dot_segments:
+                prepared = self.session.prepare_request(requests.Request(method, url, headers=headers, data=payload))
+                prepared_url = urllib.parse.urlsplit(prepared.url)
+                segments = prepared_url.path.split('/')
+                # Requests unescapes encoded dots. Restore only the signed resource segments,
+                # counting from the end so normalization of the base URI remains intact.
+                for offset, segment in encoded_dot_segments.items():
+                    segments[-offset] = segment
+                prepared.url = prepared_url._replace(path='/'.join(segments)).geturl()
+                settings = self.session.merge_environment_settings(prepared.url, {}, None, None, None)
+                response = self.session.send(prepared, timeout=self._timeout, **settings)
+            else:
+                response = self.session.request(method=method, url=url, data=payload, headers=headers,
+                                                timeout=self._timeout)
             duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
 

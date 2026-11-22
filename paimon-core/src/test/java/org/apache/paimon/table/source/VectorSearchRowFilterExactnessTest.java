@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -27,6 +28,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
@@ -46,6 +49,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
@@ -53,11 +57,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Vector search with a row filter must rank an exact match set: candidate-only scalar index answers
@@ -66,9 +72,367 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 public class VectorSearchRowFilterExactnessTest extends TableTestBase {
 
+    @Test
+    public void testPostFilterKeepsIndexedRangesOffRawPath() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        String[] names = new String[128];
+        float[][] vectors = new float[128][2];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = i >= 8 ? "match" : "other";
+            vectors[i][0] = i;
+        }
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("match"));
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(2)
+                        .withFilter(filter)
+                        .newVectorScan()
+                        .scan();
+        DataEvolutionVectorRead read =
+                new DataEvolutionVectorRead(
+                        table,
+                        null,
+                        filter,
+                        2,
+                        table.rowType().getField("vec"),
+                        new float[] {0, 0},
+                        Collections.emptyMap()) {
+                    @Override
+                    protected ScoredGlobalIndexResult readRawSearch(
+                            List<Range> ranges,
+                            org.apache.paimon.utils.RoaringNavigableMap64 include,
+                            GlobalIndexer indexer,
+                            float[] query) {
+                        throw new AssertionError(
+                                "Indexed candidates must be filtered without raw scoring");
+                    }
+                };
+        assertThat(read.read(plan).results()).containsExactly(8L, 9L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testPostFilterFactorAllowsShortResultsWithoutRawRecovery(String scalarMode)
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "post_filter_" + scalarMode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), scalarMode)
+                                .option(
+                                        CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR
+                                                .key(),
+                                        "64"));
+        String[] names = new String[128];
+        float[][] vectors = new float[128][2];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = i > 90 ? "match" : "other";
+            vectors[i][0] = i;
+        }
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitIdBTreeIndex(table, names.length);
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        // One indexed arm and one unindexed arm make the whole OR unevaluable.
+        Predicate filter =
+                PredicateBuilder.or(
+                        predicates.lessThan(0, 0),
+                        predicates.equal(1, BinaryString.fromString("match")));
+        for (String factor : Arrays.asList("2", "64")) {
+            BatchVectorSearchBuilder builder =
+                    table.newBatchVectorSearchBuilder()
+                            .withVectors(new float[][] {{0, 0}, {127, 0}})
+                            .withVectorColumn("vec")
+                            .withLimit(2)
+                            .withFilter(filter)
+                            .withOption(
+                                    CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key(),
+                                    factor);
+            VectorScan.Plan captured = builder.newVectorScan().scan();
+            assertThat(captured.splits()).noneMatch(split -> split instanceof RawVectorSearchSplit);
+            List<VectorSearchSplit> transported = new ArrayList<>();
+            for (VectorSearchSplit split : captured.splits()) {
+                transported.add(
+                        InstantiationUtil.deserializeObject(
+                                InstantiationUtil.serializeObject(split),
+                                getClass().getClassLoader()));
+            }
+            VectorScan.Plan restored =
+                    new VectorScan.Plan() {
+                        @Override
+                        public List<VectorSearchSplit> splits() {
+                            return transported;
+                        }
+
+                        @Override
+                        public Snapshot snapshot() {
+                            return captured.snapshot();
+                        }
+                    };
+            List<GlobalIndexResult> results = builder.newBatchVectorRead().readBatch(restored);
+            assertThat(results.get(0).results())
+                    .containsExactly(factor.equals("2") ? new Long[0] : new Long[] {91L, 92L});
+            assertThat(results.get(1).results()).containsExactlyInAnyOrder(127L, 126L);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testUnsupportedOrWithPartialScalarCoveragePlansNoRaw(String scalarMode)
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "unsupported_partial_or_" + scalarMode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), scalarMode));
+        String[] names = {"other", "other", "other", "other", "other", "other", "match", "other"};
+        float[][] vectors = linearVectors(names.length);
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitIdBTreeIndex(table, new Range(0, 3));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate filter =
+                PredicateBuilder.or(
+                        predicates.lessThan(0, 0),
+                        predicates.equal(1, BinaryString.fromString("match")));
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .withOption(
+                                CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key(), "1");
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+        assertThat(rawRanges(plan)).isEmpty();
+        assertThat(builder.newVectorRead().read(plan).results()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testPartialScalarAndUsesContributingCoverageAndQueryMode(String scalarMode)
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "partial_scalar_and_" + scalarMode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast"));
+        String[] names = {"other", "match", "other", "other", "other", "other", "match", "other"};
+        float[][] vectors = linearVectors(names.length);
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitIdBTreeIndex(table, new Range(0, 3));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate filter =
+                PredicateBuilder.and(
+                        predicates.greaterOrEqual(0, 0),
+                        predicates.equal(1, BinaryString.fromString("match")));
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {6, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .withOption(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), scalarMode);
+        VectorScan.Plan plan = transportPlan(builder.newVectorScan().scan());
+        if (scalarMode.equals("fast")) {
+            assertThat(rawRanges(plan)).isEmpty();
+            assertThat(builder.newVectorRead().read(plan).results()).containsExactly(1L);
+        } else {
+            assertThat(rawRanges(plan)).containsExactly(new Range(4, 7));
+            assertThat(builder.newVectorRead().read(plan).results()).containsExactly(6L);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    public void testEmptyScalarMatchesStillPlanUncoveredRows(String scalarMode) throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "empty_partial_scalar_" + scalarMode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast"));
+        String[] names = {"other", "other", "other", "other", "other", "other", "match", "other"};
+        float[][] vectors = linearVectors(names.length);
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitIdBTreeIndex(table, new Range(0, 3));
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 6);
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {6, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .withOption(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), scalarMode);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+        assertThat(rawRanges(plan)).containsExactly(new Range(4, 7));
+        assertThat(builder.newVectorRead().read(plan).results()).containsExactly(6L);
+    }
+
+    @Test
+    public void testDeclinedPartialScalarOperatorPlansNoRaw() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "declined_partial_scalar",
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full")
+                                .option("btree-index.fallback-scan-max-size", "0"));
+        String[] names = {
+            "other-0", "other-1", "other-2", "other-3", "other-4", "other-5", "match", "other-7"
+        };
+        float[][] vectors = linearVectors(names.length);
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names, new Range(0, 3));
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).contains(1, BinaryString.fromString("match"));
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .withOption(
+                                CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key(), "1");
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+        assertThat(rawRanges(plan)).isEmpty();
+        assertThat(builder.newVectorRead().read(plan).results()).isEmpty();
+    }
+
+    @Test
+    public void testExplicitRawSourceRetainsScoringDuringPostFilter() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        String[] names = {"other", "other", "match"};
+        float[][] vectors = linearVectors(names.length);
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("match"));
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter)
+                        .withOption(
+                                CoreOptions.VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR.key(), "1");
+        VectorScan.Plan captured = builder.newVectorScan().scan();
+        List<VectorSearchSplit> splits = new ArrayList<>(captured.splits());
+        splits.add(
+                new RawVectorSearchSplit(
+                        Collections.singletonList(new Range(2, 2)),
+                        Collections.emptyList(),
+                        TestVectorGlobalIndexerFactory.IDENTIFIER));
+        VectorScan.Plan plan =
+                new VectorScan.Plan() {
+                    @Override
+                    public List<VectorSearchSplit> splits() {
+                        return splits;
+                    }
+
+                    @Override
+                    public Snapshot snapshot() {
+                        return captured.snapshot();
+                    }
+                };
+        assertThat(builder.newVectorRead().read(transportPlan(plan)).results()).containsExactly(2L);
+    }
+
+    private VectorScan.Plan transportPlan(VectorScan.Plan captured) throws Exception {
+        List<VectorSearchSplit> splits = new ArrayList<>();
+        for (VectorSearchSplit split : captured.splits()) {
+            splits.add(
+                    InstantiationUtil.deserializeObject(
+                            InstantiationUtil.serializeObject(split), getClass().getClassLoader()));
+        }
+        return new VectorScan.Plan() {
+            @Override
+            public List<VectorSearchSplit> splits() {
+                return splits;
+            }
+
+            @Override
+            public Snapshot snapshot() {
+                return captured.snapshot();
+            }
+        };
+    }
+
+    private static float[][] linearVectors(int count) {
+        float[][] vectors = new float[count][2];
+        for (int i = 0; i < count; i++) {
+            vectors[i][0] = i;
+        }
+        return vectors;
+    }
+
+    private static List<Range> rawRanges(VectorScan.Plan plan) {
+        List<Range> ranges = new ArrayList<>();
+        for (VectorSearchSplit split : plan.splits()) {
+            if (split instanceof RawVectorSearchSplit) {
+                ranges.addAll(((RawVectorSearchSplit) split).rowRanges());
+            }
+        }
+        return Range.sortAndMergeOverlap(ranges, true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1", "bad", "2147483648"})
+    public void testPostFilterRejectsInvalidCandidateFactor(String value) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        assertThatThrownBy(
+                        () ->
+                                table.newVectorSearchBuilder()
+                                        .withVector(new float[] {0, 0})
+                                        .withVectorColumn("vec")
+                                        .withLimit(2)
+                                        .withOption(
+                                                CoreOptions
+                                                        .VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR
+                                                        .key(),
+                                                value)
+                                        .newVectorRead())
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Override
     protected Schema schemaDefault() {
         return schemaBuilder(true).build();
+    }
+
+    @Test
+    public void testPostFilterPinsCandidateReadsAndDeletionVectorsToPlanSnapshot()
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "post_filter_snapshot",
+                        schemaBuilder(true)
+                                .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        String[] names = {"other", "match", "match"};
+        float[][] vectors = {{0, 0}, {1, 0}, {2, 0}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("match"));
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0, 0})
+                        .withVectorColumn("vec")
+                        .withLimit(1)
+                        .withFilter(filter);
+        VectorScan.Plan oldPlan = builder.newVectorScan().scan();
+        DeletionVectorTestUtils.commitDeletionVectors(table, 1L);
+        assertThat(builder.newVectorRead().read(oldPlan).results()).containsExactly(1L);
+        assertThat(builder.executeLocal().results()).containsExactly(2L);
     }
 
     /**
@@ -530,6 +894,11 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
 
     private void buildAndCommitNameBTreeIndex(FileStoreTable table, String[] names)
             throws Exception {
+        buildAndCommitNameBTreeIndex(table, names, new Range(0, names.length - 1));
+    }
+
+    private void buildAndCommitNameBTreeIndex(FileStoreTable table, String[] names, Range rowRange)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField nameField = table.rowType().getField("name");
         GlobalIndexSingleColumnWriter writer =
@@ -540,13 +909,13 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                                 Collections.singletonList(nameField),
                                 options);
         // The btree writer needs sorted keys.
-        Integer[] order = new Integer[names.length];
-        for (int i = 0; i < names.length; i++) {
-            order[i] = i;
+        Integer[] order = new Integer[(int) rowRange.count()];
+        for (int i = 0; i < order.length; i++) {
+            order[i] = (int) rowRange.from + i;
         }
         Arrays.sort(order, (a, b) -> names[a].compareTo(names[b]));
         for (int rowId : order) {
-            writer.write(BinaryString.fromString(names[rowId]), rowId);
+            writer.write(BinaryString.fromString(names[rowId]), rowId - rowRange.from);
         }
         commitIndex(
                 table,
@@ -554,13 +923,17 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
-                        new Range(0, names.length - 1),
+                        rowRange,
                         nameField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         writer.finish()));
     }
 
     private void buildAndCommitIdBTreeIndex(FileStoreTable table, int rowCount) throws Exception {
+        buildAndCommitIdBTreeIndex(table, new Range(0, rowCount - 1));
+    }
+
+    private void buildAndCommitIdBTreeIndex(FileStoreTable table, Range rowRange) throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField idField = table.rowType().getField("id");
         GlobalIndexSingleColumnWriter writer =
@@ -570,8 +943,8 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                                 BTreeGlobalIndexerFactory.IDENTIFIER,
                                 Collections.singletonList(idField),
                                 options);
-        for (int i = 0; i < rowCount; i++) {
-            writer.write(i, i);
+        for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
+            writer.write((int) rowId, rowId - rowRange.from);
         }
         commitIndex(
                 table,
@@ -579,7 +952,7 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
-                        new Range(0, rowCount - 1),
+                        rowRange,
                         idField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         writer.finish()));
