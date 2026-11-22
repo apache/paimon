@@ -43,6 +43,14 @@ public class ConsumerProgressCalculator {
         this.consumingSnapshotPerReader = new HashMap<>(parallelism);
     }
 
+    public void resetReaderProgress(int subtaskId) {
+        assignedSnapshotPerReader.remove(subtaskId);
+        consumingSnapshotPerReader.remove(subtaskId);
+        // These minima were computed before the reader reset and cannot describe its restored
+        // split state. Wait for fresh progress before advancing the consumer again.
+        minNextSnapshotPerCheckpoint.clear();
+    }
+
     public void updateConsumeProgress(int subtaskId, ReaderConsumeProgressEvent event) {
         consumingSnapshotPerReader.put(subtaskId, event.lastConsumeSnapshotId());
     }

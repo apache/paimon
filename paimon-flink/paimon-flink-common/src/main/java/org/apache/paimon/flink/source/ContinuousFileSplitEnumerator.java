@@ -204,7 +204,9 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> splits, int subtaskId) {
         LOG.debug("File Source Enumerator adds splits back: {}", splits);
+        readersAwaitingSplit.remove(subtaskId);
         splitAssigner.addSplitsBack(subtaskId, splits);
+        consumerProgressCalculator.resetReaderProgress(subtaskId);
     }
 
     @Override
