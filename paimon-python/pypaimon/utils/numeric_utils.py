@@ -28,6 +28,7 @@ def java_float_compare(left: float, right: float) -> int:
 
     Negative zero precedes positive zero, and all NaNs tie above positive infinity.
     """
+    left, right = float(left), float(right)
     if left == right:
         if left == 0.0:
             left_sign = math.copysign(1.0, left)

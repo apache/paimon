@@ -33,7 +33,7 @@ class CompositeKeySerializer(KeySerializer):
         self._types = [field.type.type.upper() for field in fields]
         self._serializers = [create_serializer(field.type) for field in fields]
         self._comparators = [
-            _java_float_compare if type_name in ('FLOAT', 'DOUBLE')
+            java_float_compare if type_name in ('FLOAT', 'DOUBLE')
             else serializer.create_comparator()
             for type_name, serializer in zip(self._types, self._serializers)
         ]
@@ -140,7 +140,3 @@ def compare_nullable(left, right, comparator):
     if right is None:
         return 1
     return comparator(left, right)
-
-
-def _java_float_compare(left, right):
-    return java_float_compare(float(left), float(right))
