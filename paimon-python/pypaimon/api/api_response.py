@@ -24,6 +24,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import T, json_field, optional_json_field
 from pypaimon.common.options import Options
 from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.java_string import is_blank
 from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
@@ -629,6 +630,44 @@ class ListFunctionsGloballyResponse(PagedResponse[Identifier]):
             result["functions"] = None
         result["nextPageToken"] = self.next_page_token
         return result
+
+
+@dataclass
+class SemanticViewDefinition:
+    format: str
+    content: str
+
+    def __post_init__(self):
+        if not isinstance(self.format, str) or is_blank(self.format):
+            raise ValueError("Semantic view format must not be blank")
+        if not isinstance(self.content, str) or is_blank(self.content):
+            raise ValueError("Semantic view content must not be blank")
+        if len(self.content.encode('utf-8')) > 1024 * 1024:
+            raise ValueError("Semantic view content must not exceed 1 MiB in UTF-8")
+
+
+@dataclass
+class GetSemanticViewResponse(RESTResponse):
+    name: str
+    definition: SemanticViewDefinition
+
+    def __post_init__(self):
+        if not isinstance(self.name, str) or is_blank(self.name):
+            raise ValueError("Semantic view name must not be blank")
+        if self.definition is None:
+            raise ValueError("Semantic view definition must not be null")
+
+
+@dataclass
+class ListSemanticViewsResponse(PagedResponse[str]):
+    semantic_views: Optional[List[str]] = json_field("semanticViews", default=None)
+    next_page_token: Optional[str] = json_field(PagedResponse.FIELD_NEXT_PAGE_TOKEN, default=None)
+
+    def data(self) -> List[str]:
+        return self.semantic_views or []
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self.next_page_token
 
 
 @dataclass

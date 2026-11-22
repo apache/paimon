@@ -33,6 +33,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ErrorResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
+                                       GetSemanticViewResponse,
                                        GetTableResponse,
                                        GetTableTokenResponse, GetTagResponse,
                                        ListBranchesResponse,
@@ -42,6 +43,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionsResponse,
                                        ListPermissionsResponse,
                                        ListPoliciesResponse,
+                                       ListSemanticViewsResponse,
                                        CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
@@ -54,7 +56,7 @@ from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
 from pypaimon.api.resource_paths import ResourcePaths
-from pypaimon.api.rest_exception import NoSuchResourceException
+from pypaimon.api.rest_exception import NoSuchResourceException, RESTException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
 from pypaimon.common import user_agent
@@ -745,6 +747,40 @@ class RESTApi:
             request,
             self.rest_auth_function,
         )
+
+    def get_semantic_view(self, identifier: Identifier) -> GetSemanticViewResponse:
+        if identifier is None:
+            raise ValueError("Identifier cannot be None")
+        response = self.client.get_with_params(
+            self.resource_paths.semantic_view(identifier.get_database_name(), identifier.get_object_name()),
+            {},
+            GetSemanticViewResponse,
+            self.rest_auth_function,
+            preserve_encoded_dots=True,
+        )
+        if response is None:
+            raise RESTException("Semantic view response must not be null")
+        return response
+
+    def list_semantic_views_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[str]:
+        if max_results is not None and (
+                isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 1000):
+            raise ValueError("max_results must be an integer between 1 and 1000")
+        response = self.client.get_with_params(
+            self.resource_paths.semantic_views(database_name),
+            self.__build_paged_query_params(max_results, page_token, {}),
+            ListSemanticViewsResponse,
+            self.rest_auth_function,
+            preserve_encoded_dots=True,
+        )
+        if response is None:
+            raise RESTException("Semantic view list response must not be null")
+        return PagedList(response.data(), response.get_next_page_token())
 
     def list_models(self, database_name: str) -> List[GetModelResponse]:
         self._validate_resource_path_component(database_name, "Database name")
