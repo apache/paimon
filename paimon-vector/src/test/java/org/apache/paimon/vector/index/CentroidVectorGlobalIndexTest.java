@@ -36,16 +36,24 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.VectorGlobalModelTrainer;
 import org.apache.paimon.globalindex.VectorTrainingModel;
+import org.apache.paimon.globalindex.bitmap.CentroidBitmapIndex;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.vector.CentroidRouter;
 import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorIndexTrainer;
 import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.predicate.BatchVectorSearch;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompatibilityTestUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
@@ -58,8 +66,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -67,6 +77,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -609,6 +620,89 @@ class CentroidVectorGlobalIndexTest {
         } finally {
             ((Closeable) shard).close();
         }
+    }
+
+    @Test
+    void readsRustCentroidIndexWithBitmapFilters() throws Exception {
+        CompatibilityTestUtils.unzip("centroid-rust.zip", temp.toString());
+        Properties rows = new Properties();
+        try (InputStream input = Files.newInputStream(temp.resolve("rows.properties"))) {
+            rows.load(input);
+        }
+        DataEvolutionIndexSourceMeta source =
+                DataEvolutionIndexSourceMeta.deserialize(
+                        Files.readAllBytes(temp.resolve("source.meta")));
+        assertThat(source.scanSnapshotId()).isEqualTo(1);
+        assertThat(source.sourceSchemaId()).isZero();
+
+        CentroidIndexFile router = rustFixtureFile("router", rows);
+        assertThat(router.routingModel()).isTrue();
+        assertThat(router.nlist()).isEqualTo(2);
+        List<GlobalIndexIOMeta> files = new ArrayList<>();
+        files.add(router);
+        Map<Integer, CentroidIndexFile> bitmaps = new HashMap<>();
+        for (int id = 0; id < router.nlist(); id++) {
+            CentroidIndexFile shard = rustFixtureFile("shard-" + id, rows);
+            assertThat(shard.centroid()).isEqualTo(id);
+            assertThat(ByteBuffer.wrap(shard.metadata()).getInt()).isEqualTo(1);
+            files.add(shard);
+            CentroidIndexFile bitmap = rustFixtureFile("bitmap-" + id, rows);
+            assertThat(bitmap.scalarIndex()).isTrue();
+            assertThat(bitmap.centroid()).isEqualTo(id);
+            assertThat(bitmap.rowCount()).isEqualTo(shard.rowCount());
+            bitmaps.put(id, bitmap);
+            files.add(bitmap);
+        }
+
+        RowType fields =
+                RowType.of(
+                        new DataField(2, "status", DataTypes.INT()),
+                        new DataField(0, "id", DataTypes.INT()));
+        int[] extraFieldIds = {0, 2};
+        PredicateBuilder predicates = new PredicateBuilder(fields);
+        Predicate filter = PredicateBuilder.or(predicates.equal(1, 2), predicates.isNull(0));
+        FileIO io = new LocalFileIO();
+        GlobalIndexFileReader input = meta -> io.newInputStream(meta.filePath());
+        NativeVectorGlobalIndexer indexer =
+                new NativeVectorGlobalIndexer(
+                        new ArrayType(new FloatType()), Collections.emptyMap(), "ivf-flat");
+        assertThat(indexer.forRead(input, files).metric()).isEqualTo("l2");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try (GlobalIndexReader reader = indexer.createReader(input, files, 5, null, executor)) {
+            ((CentroidShardFilterReader) reader)
+                    .withShardFilter(
+                            id ->
+                                    CentroidBitmapIndex.match(
+                                            input,
+                                            bitmaps.get(id),
+                                            extraFieldIds,
+                                            fields,
+                                            fields,
+                                            filter));
+            OffsetGlobalIndexReader offset = new OffsetGlobalIndexReader(reader, BASE, BASE + 4);
+            ScoredGlobalIndexResult result =
+                    offset.visitVectorSearch(
+                                    new VectorSearch(
+                                            new float[] {0f, 0f},
+                                            2,
+                                            "embedding",
+                                            Collections.singletonMap("centroid.nprobe", "1")))
+                            .get(30, TimeUnit.SECONDS)
+                            .get();
+            assertThat(result.results()).containsExactly(BASE + 1, BASE + 2);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private CentroidIndexFile rustFixtureFile(String name, Properties rows) throws IOException {
+        java.nio.file.Path file = temp.resolve(name + ".index");
+        return (CentroidIndexFile)
+                CentroidIndexMeta.file(
+                        new Path(file.toUri()),
+                        Files.size(file),
+                        Long.parseLong(rows.getProperty(name)),
+                        Files.readAllBytes(temp.resolve(name + ".meta")));
     }
 
     @Test
