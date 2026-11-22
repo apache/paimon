@@ -260,7 +260,13 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
             } else {
                 InternalArray keyArray = map.keyArray();
                 InternalArray valueArray = map.valueArray();
+                // A decoded null is a zeroed BinaryArray slot, which reads as an empty string.
+                boolean rejectNull = map instanceof AvroBytesStringMap && !valueType.isNullable();
                 for (int i = 0; i < numElements; i += 1) {
+                    if (rejectNull && valueArray.isNullAt(i)) {
+                        throw new IllegalArgumentException(
+                                "Map value expected not null but found null value.");
+                    }
                     encoder.startItem();
                     STRING_WRITER.write(keyArray, i, encoder);
                     valueWriter.write(valueArray, i, encoder);

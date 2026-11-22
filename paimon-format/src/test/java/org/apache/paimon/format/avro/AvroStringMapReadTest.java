@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -40,6 +43,7 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -53,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests external Avro string-map layouts and subsequent writes with Paimon's schema. */
 class AvroStringMapReadTest {
@@ -162,6 +167,43 @@ class AvroStringMapReadTest {
             }
         }
         assertThat(rewrittenMaps).containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    void testRejectNullWhenRewritingToRequiredValues() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        AvroFileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
+        RowType nullable = rowType(true);
+        Path source = new Path(tempDir.resolve("nullable.avro").toUri());
+        try (PositionOutputStream out = fileIO.newOutputStream(source, false);
+                FormatWriter writer = format.createWriterFactory(nullable).create(out, "null")) {
+            writer.addElement(
+                    GenericRow.of(
+                            1,
+                            new GenericMap(
+                                    Collections.singletonMap(BinaryString.fromString("key"), null)),
+                            BinaryString.fromString("tail")));
+        }
+
+        Path target = new Path(tempDir.resolve("required.avro").toUri());
+        try (PositionOutputStream out = fileIO.newOutputStream(target, false);
+                FormatWriter writer =
+                        format.createWriterFactory(rowType(false)).create(out, "null");
+                CloseableIterator<InternalRow> reader =
+                        format.createReaderFactory(nullable, nullable, Collections.emptyList())
+                                .createReader(
+                                        new FormatReaderContext(
+                                                fileIO,
+                                                source,
+                                                fileIO.getFileSize(source),
+                                                null,
+                                                null))
+                                .toCloseableIterator()) {
+            InternalRow row = reader.next();
+            assertThat(row.getMap(1)).isInstanceOf(AvroBytesStringMap.class);
+            assertThatThrownBy(() -> writer.addElement(row))
+                    .hasStackTraceContaining("Map value expected not null but found null value");
+        }
     }
 
     private static RowType rowType(boolean nullableValues) {
