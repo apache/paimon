@@ -357,9 +357,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
             String metric =
-                    nativeOptions
-                            .getOrDefault("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC)
-                            .trim();
+                    nativeOptions.getOrDefault("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
             byte[] header =
                     centroidShard
                                     && NativeCentroidRoutedIndexReader.storesLocalNlist(

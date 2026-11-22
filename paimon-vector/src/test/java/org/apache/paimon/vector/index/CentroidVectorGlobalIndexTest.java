@@ -586,15 +586,16 @@ class CentroidVectorGlobalIndexTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"l2", "inner_product", "cosine"})
-    void routerAndShardWriteOnlyTheMetadataUsedForProbing(String metric) throws IOException {
+    @CsvSource({"l2,l2", "inner_product,inner_product", "cosine,cosine", "'\u00a0l2\u00a0',l2"})
+    void routerAndShardWriteOnlyTheMetadataUsedForProbing(String option, String metric)
+            throws IOException {
         FileIO io = new LocalFileIO();
         Path directory = new Path(temp.toString());
         Map<String, String> options = new HashMap<>();
         options.put("dimension", "2");
         options.put("index.type", "ivf_flat");
         options.put("nlist", "1");
-        options.put("metric", metric);
+        options.put("metric", option);
         NativeCentroidVectorGlobalIndexer indexer =
                 new NativeCentroidVectorGlobalIndexer(
                         new ArrayType(new FloatType()), options, "ivf-flat", 1.0);

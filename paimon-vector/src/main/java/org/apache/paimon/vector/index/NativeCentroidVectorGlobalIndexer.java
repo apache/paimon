@@ -39,6 +39,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -46,12 +47,29 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
         implements CentroidVectorGlobalIndexer {
 
+    private static final Pattern METRIC_WHITESPACE = Pattern.compile("(?U)\\A\\s+|\\s+\\z");
+
+    private final String buildMetric;
+
     NativeCentroidVectorGlobalIndexer(
             DataType fieldType,
             Map<String, String> options,
             String identifier,
             double trainSampleRatio) {
         super(fieldType, options, identifier, trainSampleRatio);
+        // Native metric parsing trims Unicode whitespace, including non-breaking spaces.
+        this.buildMetric = METRIC_WHITESPACE.matcher(super.metric()).replaceAll("");
+    }
+
+    @Override
+    public String metric() {
+        return buildMetric;
+    }
+
+    private Map<String, String> buildOptions() {
+        Map<String, String> build = new LinkedHashMap<>(options);
+        build.put("metric", buildMetric);
+        return build;
     }
 
     @Override
@@ -66,7 +84,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
         try (OutputStream out = io.newOutputStream(name)) {
             out.write(payload);
         }
-        return new ResultEntry(name, 0, metric().trim().getBytes(StandardCharsets.UTF_8));
+        return new ResultEntry(name, 0, metric().getBytes(StandardCharsets.UTF_8));
     }
 
     static String storedMetric(List<GlobalIndexIOMeta> files) {
@@ -107,7 +125,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
         Map<String, String> coarse = new LinkedHashMap<>();
         coarse.put("index.type", "ivf_flat");
         coarse.put("dimension", options.get("dimension"));
-        coarse.put("metric", options.get("metric"));
+        coarse.put("metric", buildMetric);
         coarse.put("ivf.coarse-assignment", "exact");
         coarse.put("nlist", options.getOrDefault("centroid.nlist", "auto"));
         coarse.put(
@@ -123,7 +141,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
 
     @Override
     public GlobalIndexSingleColumnWriter createCentroidWriter(GlobalIndexFileWriter fileWriter) {
-        Map<String, String> local = new LinkedHashMap<>(options);
+        Map<String, String> local = buildOptions();
         if ("diskann".equals(identifier)) {
             local.remove("nlist");
             local.remove("ivf.train.max-points-per-centroid");
@@ -150,7 +168,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
     @Override
     public VectorGlobalModelTrainer createGlobalModelTrainer() {
         return new NativeVectorGlobalModelTrainer(
-                fieldType, options, trainSampleRatio, identifier, this);
+                fieldType, buildOptions(), trainSampleRatio, identifier, this);
     }
 
     @Override
