@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate.PartitionRangeIndex;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -150,7 +151,9 @@ public class PartitionPredicateTest {
         GenericRow lower = GenericRow.of(1, 5);
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
-        assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        for (int i = 0; i < 17; i++) {
+            assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+        }
         assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
         assertThat(predicate.test(10, lower, GenericRow.of(4, null), noNulls)).isTrue();
         assertThat(predicate.test(10, GenericRow.of(1, null), upper, noNulls)).isTrue();
@@ -181,6 +184,26 @@ public class PartitionPredicateTest {
                         predicate.test(
                                 10, lower, upper, BinaryArray.fromLongArray(new Long[] {10L, 0L})))
                 .isFalse();
+    }
+
+    @Test
+    public void testRangeIndexDefersSorting() throws Exception {
+        Object[] first = {1};
+        Object[] second = {2};
+        Object[] third = {3};
+        Object[][] partitions = {third, first, second};
+        PartitionRangeIndex index = new PartitionRangeIndex(0, DataTypes.INT(), 1, 3);
+
+        for (int i = 0; i < 16; i++) {
+            assertThat(index.sortedPartitions(partitions)).isNull();
+        }
+        Object[][] sorted = index.sortedPartitions(partitions);
+        assertThat(Arrays.asList(sorted)).containsExactly(first, second, third);
+        assertThat(index.sortedPartitions(partitions)).isSameAs(sorted);
+        assertThat(Arrays.asList(partitions)).containsExactly(third, first, second);
+
+        PartitionRangeIndex restored = InstantiationUtil.clone(index);
+        assertThat(restored.sortedPartitions(partitions)).isNull();
     }
 
     @Test
