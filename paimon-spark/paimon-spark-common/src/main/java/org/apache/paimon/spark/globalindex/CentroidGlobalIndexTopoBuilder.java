@@ -18,9 +18,15 @@
 
 package org.apache.paimon.spark.globalindex;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
@@ -28,16 +34,22 @@ import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorTrainingModel;
+import org.apache.paimon.globalindex.bitmap.CentroidBitmapIndex;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -47,6 +59,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.MutableObjectIteratorAdapter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.ThreadPoolUtils;
@@ -102,10 +115,42 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             DataField indexField,
             Options options)
             throws IOException {
+        return buildIndex(
+                spark,
+                relation,
+                partitionPredicate,
+                table,
+                indexType,
+                readType,
+                indexField,
+                Collections.emptyList(),
+                options);
+    }
+
+    @Override
+    public List<CommitMessage> buildIndex(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
+            FileStoreTable table,
+            String indexType,
+            RowType readType,
+            DataField indexField,
+            List<DataField> extraFields,
+            Options options)
+            throws IOException {
         CentroidVectorGlobalIndexer indexer = createIndexer(indexType, indexField, options);
         checkArgument(
                 table.coreOptions().dataEvolutionEnabled(),
                 "Centroid sharding requires a Data Evolution table.");
+        checkArgument(
+                extraFields.isEmpty()
+                        || table.coreOptions().globalIndexColumnUpdateAction()
+                                != GlobalIndexColumnUpdateAction.IGNORE,
+                "Centroid bitmap fields require THROW_ERROR or DROP_PARTITION_INDEX.");
+        for (DataField extraField : extraFields) {
+            KeySerializer.create(extraField.type());
+        }
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
             return Collections.emptyList();
@@ -138,9 +183,11 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 table,
                                 readType,
                                 indexField,
+                                extraFields,
                                 options,
                                 partition.getKey(),
                                 snapshot.id(),
+                                table.schema().id(),
                                 group.getKey(),
                                 indexType);
                 ranges.add(Pair.of(context, group.getValue()));
@@ -204,13 +251,18 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             }
         }
         Map<BinaryRow, List<IndexFileMeta>> previous =
-                GlobalIndexBuilderUtils.currentIndexEntries(
-                                table,
-                                snapshot,
-                                indexType,
-                                Collections.singletonList(indexField),
-                                partitionPredicate)
-                        .stream()
+                table.store().newIndexFileHandler().scan(snapshot, indexType).stream()
+                        .filter(
+                                entry ->
+                                        partitionPredicate == null
+                                                || partitionPredicate.test(entry.partition()))
+                        .filter(
+                                entry ->
+                                        entry.indexFile().globalIndexMeta() != null
+                                                && entry.indexFile()
+                                                                .globalIndexMeta()
+                                                                .indexFieldId()
+                                                        == indexField.id())
                         .collect(
                                 Collectors.groupingBy(
                                         IndexManifestEntry::partition,
@@ -242,11 +294,21 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             serializedSplits.add(InstantiationUtil.serializeObject(split));
         }
         byte[] contextBytes = InstantiationUtil.serializeObject(context);
-        JavaRDD<InternalRow> rows =
-                sc.parallelize(serializedSplits, Math.min(splits.size(), slots))
-                        .mapPartitions(
-                                input -> new VectorRows(BuildContext.restore(contextBytes), input));
-        byte[] payload = train(sc, contextBytes, rows, indexer, context.getter());
+        JavaRDD<byte[]> inputSplits =
+                sc.parallelize(serializedSplits, Math.min(splits.size(), slots));
+        JavaRDD<InternalRow> trainingRows =
+                inputSplits.mapPartitions(
+                        input -> {
+                            BuildContext build = BuildContext.restore(contextBytes);
+                            return new VectorRows(build, input, build.trainingReadType());
+                        });
+        byte[] payload =
+                train(
+                        sc,
+                        contextBytes,
+                        trainingRows,
+                        indexer,
+                        context.getter(context.trainingReadType()));
         String modelId = UUID.randomUUID().toString();
         if (payload == null) {
             // Record coverage so an all-null interval also satisfies index visibility checks.
@@ -260,8 +322,17 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         Broadcast<byte[]> broadcast = sc.broadcast(payload);
         try {
             int parallelism = Math.min(nlist, slots);
-            JavaPairRDD<Integer, Tuple2<Long, float[]>> assigned =
-                    rows.mapPartitionsToPair(
+            JavaRDD<InternalRow> routedRows =
+                    context.hasBitmaps()
+                            ? inputSplits.mapPartitions(
+                                    input -> {
+                                        BuildContext build = BuildContext.restore(contextBytes);
+                                        return new VectorRows(build, input, build.readType);
+                                    })
+                            : trainingRows;
+            // Keep the shuffle payload compatible with strict Spark Kryo registration.
+            JavaPairRDD<Integer, Tuple2<Long, Tuple2<float[], byte[]>>> assigned =
+                    routedRows.mapPartitionsToPair(
                             input ->
                                     route(
                                             BuildContext.restore(contextBytes),
@@ -308,41 +379,18 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 context.table.store().pathFactory().globalIndexFileFactory(),
                                 context.table.coreOptions(),
                                 context.rowRange,
-                                Collections.singletonList(context.field),
+                                context.indexFields,
                                 context.indexType,
                                 Collections.singletonList(
                                         CentroidIndexMeta.router(
                                                 indexer.writeRoutingModel(
                                                         io, modelFile, payload, modelId),
                                                 modelId,
-                                                nlist)),
+                                                nlist,
+                                                context.hasBitmaps())),
                                 context.sourceMeta())
                         .get(0);
         return context.message(Collections.singletonList(modelMeta));
-    }
-
-    @Override
-    public List<CommitMessage> buildIndex(
-            SparkSession spark,
-            DataSourceV2Relation relation,
-            PartitionPredicate partitionPredicate,
-            FileStoreTable table,
-            String indexType,
-            RowType readType,
-            DataField indexField,
-            List<DataField> extraFields,
-            Options options)
-            throws IOException {
-        checkArgument(extraFields.isEmpty(), "Centroid sharding supports one vector column.");
-        return buildIndex(
-                spark,
-                relation,
-                partitionPredicate,
-                table,
-                indexType,
-                readType,
-                indexField,
-                options);
     }
 
     @Nullable
@@ -415,19 +463,44 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
     }
 
-    private static Iterator<Tuple2<Integer, Tuple2<Long, float[]>>> route(
+    private static Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> route(
             BuildContext context, Iterator<InternalRow> input, byte[] payload) {
         VectorTrainingModel model = context.indexer().restoreTrainingModel(payload);
         closeOnTaskCompletion(model);
-        InternalRow.FieldGetter getter = context.getter();
-        int idPosition = context.rowIdPosition();
+        InternalRow.FieldGetter getter = context.getter(context.readType);
+        int idPosition = context.readType.getFieldIndex(SpecialFields.ROW_ID.name());
+        List<InternalRow.FieldGetter> extraGetters = new ArrayList<>();
+        for (DataField field : context.extraFields()) {
+            extraGetters.add(
+                    InternalRow.createFieldGetter(
+                            field.type(), context.readType.getFieldIndex(field.name())));
+        }
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(new RowType(context.extraFields()));
+        DataOutputSerializer buffer = new DataOutputSerializer(128);
+        GenericRow extras = new GenericRow(extraGetters.size());
         return Iterators.transform(
                 input,
                 row -> {
                     float[] vector = VectorIndexUtils.toFloatArray(getter.getFieldOrNull(row));
+                    byte[] keys = null;
+                    if (!extraGetters.isEmpty()) {
+                        for (int i = 0; i < extraGetters.size(); i++) {
+                            extras.setField(i, extraGetters.get(i).getFieldOrNull(row));
+                        }
+                        try {
+                            buffer.clear();
+                            serializer.serialize(extras, buffer);
+                            keys = buffer.getCopyOfBuffer();
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    }
                     return new Tuple2<>(
                             model.assignCentroid(vector),
-                            new Tuple2<>(row.getLong(idPosition), vector));
+                            new Tuple2<>(
+                                    row.getLong(idPosition) - context.rowRange.from,
+                                    new Tuple2<>(vector, keys)));
                 });
     }
 
@@ -447,14 +520,14 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
 
     private static Iterator<byte[]> writeShards(
             BuildContext context,
-            Iterator<Tuple2<Integer, Tuple2<Long, float[]>>> rows,
+            Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows,
             int partition,
             int parallelism,
             int nlist,
             String modelId)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
-        PeekingIterator<Tuple2<Integer, Tuple2<Long, float[]>>> input =
+        PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input =
                 Iterators.peekingIterator(rows);
         CentroidVectorGlobalIndexer indexer = context.indexer();
         GlobalIndexFileReadWrite io = context.io();
@@ -462,17 +535,128 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         // as well, without a second set of input tasks to shuffle sentinel records.
         for (int centroid = partition; centroid < nlist; centroid += parallelism) {
             GlobalIndexSingleColumnWriter writer = indexer.createCentroidWriter(io);
-            try {
+            try (BitmapSorters bitmapSorters =
+                    context.hasBitmaps() && input.hasNext() && input.peek()._1() == centroid
+                            ? new BitmapSorters(context)
+                            : null) {
                 while (input.hasNext() && input.peek()._1() == centroid) {
-                    Tuple2<Long, float[]> row = input.next()._2();
-                    writer.write(row._2(), row._1() - context.rowRange.from);
+                    Tuple2<Long, Tuple2<float[], byte[]>> row = input.next()._2();
+                    writer.write(row._2()._1(), row._1());
+                    if (bitmapSorters != null) {
+                        bitmapSorters.add(row._1(), row._2()._2());
+                    }
                 }
-                commits.add(context.finish(writer, modelId, centroid));
+                List<ResultEntry> files = new ArrayList<>();
+                for (ResultEntry file : writer.finish()) {
+                    files.add(
+                            CentroidIndexMeta.shard(file, modelId, centroid, context.hasBitmaps()));
+                }
+                if (bitmapSorters != null) {
+                    files.add(
+                            CentroidIndexMeta.scalarIndex(
+                                    bitmapSorters.finish(context, io), modelId, centroid));
+                }
+                commits.add(context.finish(files));
             } finally {
                 close(writer);
             }
         }
         return commits.iterator();
+    }
+
+    private static final class BitmapSorters implements AutoCloseable {
+        private final IOManager ioManager;
+        private final List<BinaryExternalSortBuffer> buffers = new ArrayList<>();
+        private final List<InternalRow.FieldGetter> getters = new ArrayList<>();
+        private final InternalRowSerializer serializer;
+        private final DataInputDeserializer input = new DataInputDeserializer();
+        private long count;
+
+        BitmapSorters(BuildContext context) throws Exception {
+            List<DataField> fields = context.extraFields();
+            this.serializer = new InternalRowSerializer(new RowType(fields));
+            CoreOptions options = new CoreOptions(context.options);
+            long memory =
+                    Math.max(3L * options.pageSize(), options.writeBufferSize() / fields.size());
+            this.ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+            try {
+                for (int i = 0; i < fields.size(); i++) {
+                    DataField field = fields.get(i);
+                    getters.add(InternalRow.createFieldGetter(field.type(), i));
+                    buffers.add(
+                            BinaryExternalSortBuffer.create(
+                                    ioManager,
+                                    RowType.of(field, SpecialFields.ROW_ID),
+                                    new int[] {0},
+                                    memory,
+                                    options.pageSize(),
+                                    options.localSortMaxNumFileHandles(),
+                                    options.spillCompressOptions(),
+                                    options.writeBufferSpillDiskSize()));
+                }
+            } catch (Exception | Error failure) {
+                try {
+                    close();
+                } catch (Exception cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw failure;
+            }
+        }
+
+        void add(long rowId, byte[] keys) throws IOException {
+            input.setBuffer(keys);
+            InternalRow row = serializer.deserialize(input);
+            for (int i = 0; i < buffers.size(); i++) {
+                Object value = getters.get(i).getFieldOrNull(row);
+                checkArgument(
+                        buffers.get(i).write(GenericRow.of(value, rowId)),
+                        "Centroid bitmap sort buffer could not accept a row.");
+            }
+            count++;
+        }
+
+        ResultEntry finish(BuildContext context, GlobalIndexFileReadWrite files)
+                throws IOException {
+            List<DataField> fields = context.extraFields();
+            try (CentroidBitmapIndex.Writer writer =
+                    new CentroidBitmapIndex.Writer(files, context.schemaId, fields.size(), count)) {
+                for (int i = 0; i < fields.size(); i++) {
+                    DataField field = fields.get(i);
+                    BinaryExternalSortBuffer buffer = buffers.get(i);
+                    Iterator<InternalRow> rows =
+                            new MutableObjectIteratorAdapter<>(
+                                    buffer.sortedIterator(), new BinaryRow(2));
+                    InternalRow.FieldGetter getter = InternalRow.createFieldGetter(field.type(), 0);
+                    writer.writeColumn(
+                            field,
+                            new CoreOptions(context.options)
+                                    .globalIndexOptions("bitmap", field.name()),
+                            bitmap -> {
+                                while (rows.hasNext()) {
+                                    InternalRow row = rows.next();
+                                    Object value = getter.getFieldOrNull(row);
+                                    bitmap.write(
+                                            value instanceof BinaryString
+                                                    ? ((BinaryString) value).copy()
+                                                    : value,
+                                            row.getLong(1));
+                                }
+                            });
+                    buffer.clear();
+                }
+                return writer.finish();
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                buffers.forEach(BinaryExternalSortBuffer::clear);
+            } finally {
+                ioManager.close();
+            }
+        }
     }
 
     private static void close(Object resource) throws IOException {
@@ -497,9 +681,11 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         private final FileStoreTable table;
         private final RowType readType;
         private final DataField field;
+        private final List<DataField> indexFields;
         private final Options options;
         private final BinaryRow partition;
         private final long snapshotId;
+        private final long schemaId;
         private final Range rowRange;
         private final String indexType;
 
@@ -507,19 +693,33 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 FileStoreTable table,
                 RowType readType,
                 DataField field,
+                List<DataField> extraFields,
                 Options options,
                 BinaryRow partition,
                 long snapshotId,
+                long schemaId,
                 Range rowRange,
                 String indexType) {
             this.table = table;
             this.readType = readType;
             this.field = field;
+            this.indexFields = new ArrayList<>(1 + extraFields.size());
+            this.indexFields.add(field);
+            this.indexFields.addAll(extraFields);
             this.options = options;
             this.partition = partition;
             this.snapshotId = snapshotId;
+            this.schemaId = schemaId;
             this.rowRange = rowRange;
             this.indexType = indexType;
+        }
+
+        List<DataField> extraFields() {
+            return indexFields.subList(1, indexFields.size());
+        }
+
+        boolean hasBitmaps() {
+            return indexFields.size() > 1;
         }
 
         static BuildContext restore(byte[] bytes) throws IOException, ClassNotFoundException {
@@ -536,13 +736,13 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                     table.fileIO(), table.store().pathFactory().globalIndexFileFactory());
         }
 
-        int rowIdPosition() {
-            return readType.getFieldIndex(SpecialFields.ROW_ID.name());
+        RowType trainingReadType() {
+            return hasBitmaps() ? RowType.of(field, SpecialFields.ROW_ID) : readType;
         }
 
-        InternalRow.FieldGetter getter() {
+        InternalRow.FieldGetter getter(RowType projection) {
             return InternalRow.createFieldGetter(
-                    field.type(), readType.getFieldIndex(field.name()));
+                    field.type(), projection.getFieldIndex(field.name()));
         }
 
         boolean contains(IndexedSplit split, long id) {
@@ -554,16 +754,17 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             return false;
         }
 
-        CloseableIterator<InternalRow> rows(IndexedSplit split) throws IOException {
+        CloseableIterator<InternalRow> rows(IndexedSplit split, RowType projection)
+                throws IOException {
             return table.newReadBuilder()
-                    .withReadType(readType)
+                    .withReadType(projection)
                     .newRead()
                     .createReader(split)
                     .toCloseableIterator();
         }
 
         byte[] sourceMeta() {
-            return new DataEvolutionIndexSourceMeta(snapshotId).serialize();
+            return new DataEvolutionIndexSourceMeta(snapshotId, schemaId).serialize();
         }
 
         CommitMessageImpl message(List<IndexFileMeta> files) {
@@ -576,19 +777,16 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                     .withCheckFromSnapshot(snapshotId);
         }
 
-        byte[] finish(GlobalIndexSingleColumnWriter writer, String modelId, int centroid)
-                throws IOException {
+        byte[] finish(List<ResultEntry> entries) throws IOException {
             List<IndexFileMeta> files =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                             table.fileIO(),
                             table.store().pathFactory().globalIndexFileFactory(),
                             table.coreOptions(),
                             rowRange,
-                            Collections.singletonList(field),
+                            indexFields,
                             indexType,
-                            writer.finish().stream()
-                                    .map(file -> CentroidIndexMeta.shard(file, modelId, centroid))
-                                    .collect(Collectors.toList()),
+                            entries,
                             sourceMeta());
             return new CommitMessageSerializer().serialize(message(files));
         }
@@ -597,6 +795,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
     private static final class VectorRows implements Iterator<InternalRow>, Closeable {
         private final BuildContext context;
         private final Iterator<byte[]> splits;
+        private final RowType projection;
         private final int vectorPosition;
         private final int idPosition;
         private CloseableIterator<InternalRow> rows;
@@ -604,11 +803,12 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         private InternalRow next;
         private boolean closed;
 
-        VectorRows(BuildContext context, Iterator<byte[]> splits) {
+        VectorRows(BuildContext context, Iterator<byte[]> splits, RowType projection) {
             this.context = context;
             this.splits = splits;
-            this.vectorPosition = context.readType.getFieldIndex(context.field.name());
-            this.idPosition = context.rowIdPosition();
+            this.projection = projection;
+            this.vectorPosition = projection.getFieldIndex(context.field.name());
+            this.idPosition = projection.getFieldIndex(SpecialFields.ROW_ID.name());
             closeOnTaskCompletion(this);
         }
 
@@ -635,7 +835,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 InstantiationUtil.deserializeObject(
                                         splits.next(),
                                         CentroidGlobalIndexTopoBuilder.class.getClassLoader());
-                        rows = context.rows(split);
+                        rows = context.rows(split, projection);
                         continue;
                     }
                     InternalRow row = rows.next();

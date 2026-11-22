@@ -16,7 +16,6 @@
 # under the License.
 
 import heapq
-import math
 from typing import Any, Callable, List, Optional
 
 from pypaimon.execution.python.read.reader.deduplicate_merge_function import \
@@ -29,6 +28,7 @@ from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.read.sequence_fields import (
     _base_type_name, _COMPARABLE_TYPE_NAMES, is_comparable_seq_field)
+from pypaimon.utils.numeric_utils import java_float_compare
 
 
 class SortMergeReaderWithMinHeap(RecordReader):
@@ -238,19 +238,10 @@ def _row_field_comparator(
                 raise ValueError(f"Unsupported {fields[idx].type} comparison")
 
             if floating_flags[pos]:
-                # Java Float/Double.compare: all NaNs tie above +inf, and
-                # -0.0 precedes +0.0. Primary-key equality is unchanged.
-                if math.isnan(val1):
-                    if not math.isnan(val2):
-                        return sign
-                    continue
-                if math.isnan(val2):
-                    return -sign
-                if val1 == val2 == 0.0:
-                    val1 = math.copysign(1.0, val1)
-                    val2 = math.copysign(1.0, val2)
-
-            if val1 < val2:
+                difference = java_float_compare(val1, val2)
+                if difference:
+                    return sign * difference
+            elif val1 < val2:
                 return -sign
             elif val1 > val2:
                 return sign

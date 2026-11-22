@@ -33,6 +33,7 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -467,6 +468,14 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
                     .hasMessageContaining("incremental DIFF")
                     .hasMessageContaining("withRowRanges");
         }
+        DataEvolutionBatchScan diffScan = (DataEvolutionBatchScan) diff(table, "1,2").newScan();
+        assertThatThrownBy(
+                        () ->
+                                diffScan.withGlobalIndexResult(
+                                        GlobalIndexResult.createEmpty(),
+                                        table.snapshotManager().snapshot(2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cannot replace an incremental scan");
         ReadBuilder latest = table.newReadBuilder();
         List<Split> selected =
                 latest.newScan()

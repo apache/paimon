@@ -28,6 +28,7 @@ import static org.apache.paimon.utils.DecimalUtils.castToBoolean;
 import static org.apache.paimon.utils.DecimalUtils.castToDecimal;
 import static org.apache.paimon.utils.DecimalUtils.castToIntegral;
 import static org.apache.paimon.utils.DecimalUtils.doubleValue;
+import static org.apache.paimon.utils.DecimalUtils.subtract;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link Decimal}. */
@@ -103,6 +104,52 @@ public class DecimalTest {
 
         Decimal decimal3 = Decimal.fromBigDecimal(new BigDecimal(10), 18, 0);
         Decimal decimal4 = Decimal.fromBigDecimal(new BigDecimal(15), 18, 0);
+    }
+
+    @Test
+    public void testAddSubtractPrecisionOverflow() {
+        // compact fast path: the unscaled result exceeds the declared precision
+        Decimal max = Decimal.fromUnscaledLong(99999, 5, 0);
+        Decimal one = Decimal.fromUnscaledLong(1, 5, 0);
+        assertThat(add(max, one, 5, 0)).isNull();
+        assertThat(subtract(Decimal.fromUnscaledLong(-99999, 5, 0), one, 5, 0)).isNull();
+        assertThat(add(max, Decimal.fromUnscaledLong(-1, 5, 0), 5, 0).toUnscaledLong())
+                .isEqualTo(99998);
+
+        // compact fast path with a non-zero scale: the bound stays 10^precision, not
+        // 10^(precision + scale)
+        Decimal scaledMax = Decimal.fromBigDecimal(new BigDecimal("999.99"), 5, 2);
+        Decimal scaledOne = Decimal.fromBigDecimal(new BigDecimal("0.01"), 5, 2);
+        assertThat(add(scaledMax, scaledOne, 5, 2)).isNull();
+        assertThat(
+                        subtract(
+                                Decimal.fromBigDecimal(new BigDecimal("-999.99"), 5, 2),
+                                scaledOne,
+                                5,
+                                2))
+                .isNull();
+        assertThat(
+                        add(scaledMax, Decimal.fromBigDecimal(new BigDecimal("-0.01"), 5, 2), 5, 2)
+                                .toUnscaledLong())
+                .isEqualTo(99998L);
+
+        // non-compact path: fromBigDecimal returns null when precision overflows
+        Decimal bigMax =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("999999999999999999999999999999999999.99"), 38, 2);
+        Decimal bigOne = Decimal.fromBigDecimal(new BigDecimal("1"), 38, 2);
+        assertThat(add(bigMax, bigOne, 38, 2)).isNull();
+        assertThat(subtract(bigMax, Decimal.fromBigDecimal(new BigDecimal("-2"), 38, 2), 38, 2))
+                .isNull();
+
+        // a target scale different from the operands' scale must rescale via BigDecimal,
+        // not reuse the compact unscaled value under a new scale
+        Decimal d10 = Decimal.fromUnscaledLong(10, 5, 0);
+        Decimal d15 = Decimal.fromUnscaledLong(15, 5, 0);
+        assertThat(add(d10, d15, 5, 2))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("25.00"), 5, 2));
+        assertThat(subtract(d10, d15, 5, 2))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("-5.00"), 5, 2));
     }
 
     @Test

@@ -131,7 +131,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         snapshot = getattr(self, '_snapshot', None)
         if snapshot is None:
             snapshot = TimeTravelUtil.resolve_snapshot(self._table)
-        mode = self._table.options.scalar_index_search_mode()
+        mode = self._table.options.scalar_prefilter_search_mode()
         scalar_files = list(files.values())
         coverage = DataEvolutionGlobalIndexCoverage(self._table, snapshot, self._partition_filter, scalar_files)
         raw_ranges = coverage.unindexed_ranges(self._table.fields, self._filter, mode)

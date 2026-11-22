@@ -212,7 +212,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             ('f11', pa.date32()),
         ])
         stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': 'full' if stats_enabled else 'none'}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
         self.rest_catalog.create_table('default.test_full_data_types', schema, False)
         table = self.rest_catalog.get_table('default.test_full_data_types')
@@ -259,7 +259,6 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             manifest_files[0].file_name,
             lambda row: file_scanner._filter_manifest_entry(row),
             drop_stats=False)
-        # Python write does not produce value stats
         if stats_enabled:
             self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
             min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,

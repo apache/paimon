@@ -97,6 +97,7 @@ Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` rec
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
   For TINYINT, SMALLINT, INTEGER, and BIGINT, overflows are ignored by default.
+  For DECIMAL, a precision overflow makes the aggregated value NULL by default.
   Set `fields.<field-name>.sum.fail-on-overflow` to `true` to throw an exception on overflow.
 
 ### product

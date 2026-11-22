@@ -1566,6 +1566,35 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testVectorFieldWithSpaces() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        options.put(VECTOR_FILE_FORMAT.key(), "json");
+        options.put(VECTOR_FIELD.key(), "v1, v2");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "v1", DataTypes.VECTOR(6, DataTypes.FLOAT())),
+                        new DataField(2, "v2", DataTypes.VECTOR(6, DataTypes.FLOAT())));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testVectorStoreContainsNonVectorColumn() {
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), String.valueOf(-1));

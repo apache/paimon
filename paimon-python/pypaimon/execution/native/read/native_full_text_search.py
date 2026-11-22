@@ -23,7 +23,7 @@ from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.file_store_table import FileStoreTable
-from pypaimon.execution.native.read.native_search_plan import _result
+from pypaimon.execution.native.read.native_search_plan import _native_prefilter_options, _result
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 
@@ -45,7 +45,9 @@ def _native_full_text_builder(builder, require_limit=True):
         raise NotImplementedError('Primary-key full-text search only supports the FAST full-text index search mode')
     if require_limit and (builder._limit is None or builder._limit <= 0):
         raise ValueError('Limit must be positive, set via with_limit()')
-    native = _native_table(table).new_full_text_search_builder()
+    options = _native_prefilter_options(table, {}) if builder._filter is not None else {}
+    search_table = table.copy_without_time_travel(options) if options else table
+    native = _native_table(search_table).new_full_text_search_builder()
     if builder._field_name is not None and builder._query is not None:
         native.with_query(builder._field_name, builder._query)
     if builder._limit is not None:

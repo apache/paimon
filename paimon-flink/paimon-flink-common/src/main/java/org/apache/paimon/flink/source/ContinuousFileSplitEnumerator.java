@@ -204,7 +204,9 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> splits, int subtaskId) {
         LOG.debug("File Source Enumerator adds splits back: {}", splits);
+        readersAwaitingSplit.remove(subtaskId);
         splitAssigner.addSplitsBack(subtaskId, splits);
+        consumerProgressCalculator.resetReaderProgress(subtaskId);
     }
 
     @Override
@@ -217,6 +219,7 @@ public class ContinuousFileSplitEnumerator
                 checkpointId,
                 readersAwaitingSplit,
                 subtask -> splitAssigner.getNextSnapshotId(subtask).orElse(nextSnapshotId),
+                splits,
                 context.currentParallelism());
 
         LOG.debug("Source Checkpoint is {}", checkpoint);
@@ -314,7 +317,7 @@ public class ContinuousFileSplitEnumerator
             List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
             if (!splits.isEmpty()) {
                 assignment.put(task, splits);
-                consumerProgressCalculator.updateAssignInformation(task, splits.get(0));
+                consumerProgressCalculator.updateAssignInformation(task, splits);
             }
         }
 

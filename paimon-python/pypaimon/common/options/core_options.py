@@ -423,8 +423,8 @@ class CoreOptions:
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
-        .default_value("none")
-        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+        .default_value("truncate(16)")
+        .with_description("Metadata statistics mode: none, counts, full or truncate(N).")
     )
 
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
@@ -976,8 +976,18 @@ class CoreOptions:
     SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description("Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                          "setting also serves as a fallback for scalar prefilters.")
+    )
+
+    SCALAR_INDEX_PREFILTER_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.prefilter.search-mode")
+        .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description("Search mode for scalar index queries.")
+        .with_description("Search mode for scalar prefilters in vector and full-text search. If unset, "
+                          "use an explicit scalar-index.search-mode, then an explicit "
+                          "global-index.search-mode, then fast.")
     )
 
     VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
@@ -1451,9 +1461,6 @@ class CoreOptions:
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
 
-    def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
-
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
@@ -1816,7 +1823,18 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def scalar_index_search_mode(self):
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST)
+
+    def scalar_scan_search_mode(self):
         return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def scalar_prefilter_search_mode(self):
+        option = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE
+        if self.options.to_map().get(option.key()) is not None:
+            return self.options.get(option)
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, option.default_value())
 
     def vector_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
@@ -1824,11 +1842,11 @@ class CoreOptions:
     def full_text_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
 
-    def _family_index_search_mode(self, option):
+    def _family_index_search_mode(self, option, default=None):
         if self.options.contains(option):
-            return self.options.get(option)
+            return self.options.get(option, default)
         global_mode = self.global_index_search_mode()
-        return global_mode if global_mode is not None else self.options.get(option)
+        return global_mode if global_mode is not None else self.options.get(option, default)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

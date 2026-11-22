@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.globalindex.GlobalIndexResult
+import org.apache.paimon.{CoreOptions, Snapshot}
+import org.apache.paimon.globalindex.{DataEvolutionBatchScan, GlobalIndexResult}
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, VectorSearch}
 import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
@@ -28,7 +28,7 @@ import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, Paim
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.source.{FullTextSearchBuilder, InnerTableScan, Split, VectorSearchBuilder}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -45,15 +45,17 @@ abstract class PaimonBaseScan(table: InnerTable)
   with PaimonSupportsRuntimeFiltering
   with SQLConfHelper {
 
+  import PaimonBaseScan._
+
   private[spark] lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
 
   protected def getInputSplits: Array[Split] = {
-    val scan = readBuilder
-      .newScan()
-      .withGlobalIndexResult(evalGlobalIndexSearch())
-      .asInstanceOf[InnerTableScan]
+    val baseScan = readBuilder.newScan().asInstanceOf[InnerTableScan]
+    val scan = evalGlobalIndexSearch()
+      .map(search => withSearchResult(baseScan, search.result, search.snapshot))
+      .getOrElse(baseScan)
       .withMetricRegistry(paimonMetricsRegistry)
 
     val plan = scan.plan()
@@ -71,7 +73,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     }
   }
 
-  private def evalGlobalIndexSearch(): GlobalIndexResult = {
+  private def evalGlobalIndexSearch(): Option[SearchResult] = {
     val globalSearchCount =
       Seq(pushedVectorSearch, pushedHybridSearch, pushedFullTextSearch).count(_.isDefined)
     if (globalSearchCount > 1) {
@@ -81,31 +83,19 @@ abstract class PaimonBaseScan(table: InnerTable)
     if (globalSearchCount > 0) {
       PaimonBaseScan.checkIncrementalSearch(table)
     }
-    if (pushedVectorSearch.isDefined) {
-      return evalVectorSearch()
-    }
-    if (pushedHybridSearch.isDefined) {
-      return evalHybridSearch()
-    }
-    if (pushedFullTextSearch.isDefined) {
-      return evalFullTextSearch()
-    }
-    null
+    pushedVectorSearch
+      .map(
+        search =>
+          evalVectorSearchWithSnapshot(table, search, pushedPartitionFilters, pushedDataFilters))
+      .orElse(pushedHybridSearch.map(_ => evalHybridSearch()))
+      .orElse(pushedFullTextSearch.map(_ => evalFullTextSearch()))
   }
 
   override def filterAttributes(): Array[NamedReference] = {
     if (postponeMergeOnRead.enabled) Array.empty else super.filterAttributes()
   }
 
-  private def evalVectorSearch(): GlobalIndexResult = {
-    PaimonBaseScan.evalVectorSearch(
-      table,
-      pushedVectorSearch.get,
-      pushedPartitionFilters,
-      pushedDataFilters)
-  }
-
-  private def evalHybridSearch(): GlobalIndexResult = {
+  private def evalHybridSearch(): SearchResult = {
     val hybridSearch = pushedHybridSearch.get
     val hybridSearchBuilder =
       if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
@@ -123,10 +113,22 @@ abstract class PaimonBaseScan(table: InnerTable)
     if (pushedDataFilters.nonEmpty) {
       builder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
-    builder.executeLocal()
+    val routeResults = builder.routeBuilders().asScala.map {
+      route =>
+        val search =
+          if (route.route().isVector()) {
+            readVectorSearch(route.vectorSearchBuilder())
+          } else {
+            readFullTextSearch(route.fullTextSearchBuilder())
+          }
+        (builder.toRouteResult(route, search.result), search.snapshot)
+    }
+    val snapshots = routeResults.flatMap { case (_, snapshot) => Option(snapshot) }
+    require(snapshots.map(_.id()).distinct.size <= 1, "Hybrid search routes must use one snapshot.")
+    SearchResult(builder.rank(routeResults.map(_._1).asJava), snapshots.headOption.orNull)
   }
 
-  private def evalFullTextSearch(): GlobalIndexResult = {
+  private def evalFullTextSearch(): SearchResult = {
     val fullTextSearch = pushedFullTextSearch.get
     val ftBuilder = table
       .newFullTextSearchBuilder()
@@ -138,7 +140,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     if (pushedDataFilters.nonEmpty) {
       ftBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
-    ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
+    readFullTextSearch(ftBuilder)
   }
 
   override def toBatch: Batch = {
@@ -220,11 +222,34 @@ object PaimonBaseScan {
     )
   }
 
+  private case class SearchResult(result: GlobalIndexResult, snapshot: Snapshot)
+
+  private[spark] def withSearchResult(
+      scan: InnerTableScan,
+      result: GlobalIndexResult,
+      snapshot: Snapshot): InnerTableScan = scan match {
+    case dataEvolution: DataEvolutionBatchScan if snapshot != null =>
+      dataEvolution.withGlobalIndexResult(result, snapshot)
+    case _ => scan.withGlobalIndexResult(result)
+  }
+
   private[spark] def evalVectorSearch(
       table: InnerTable,
       vectorSearch: VectorSearch,
       pushedPartitionFilters: Seq[PartitionPredicate],
       pushedDataFilters: Seq[Predicate]): GlobalIndexResult = {
+    evalVectorSearchWithSnapshot(
+      table,
+      vectorSearch,
+      pushedPartitionFilters,
+      pushedDataFilters).result
+  }
+
+  private def evalVectorSearchWithSnapshot(
+      table: InnerTable,
+      vectorSearch: VectorSearch,
+      pushedPartitionFilters: Seq[PartitionPredicate],
+      pushedDataFilters: Seq[Predicate]): SearchResult = {
     val vectorSearchBuilder =
       if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
         new SparkVectorSearchBuilderImpl(table)
@@ -247,6 +272,18 @@ object PaimonBaseScan {
     if (pushedDataFilters.nonEmpty) {
       vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
-    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+    readVectorSearch(vectorBuilder)
+  }
+
+  private def readVectorSearch(builder: VectorSearchBuilder): SearchResult = {
+    val reader = builder.newVectorRead()
+    val plan = builder.newVectorScan().scan()
+    SearchResult(reader.read(plan), plan.snapshot())
+  }
+
+  private def readFullTextSearch(builder: FullTextSearchBuilder): SearchResult = {
+    val reader = builder.newFullTextRead()
+    val plan = builder.newFullTextScan().scan()
+    SearchResult(reader.read(plan), plan.snapshot())
   }
 }

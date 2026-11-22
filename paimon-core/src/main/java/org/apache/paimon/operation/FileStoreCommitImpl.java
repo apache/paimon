@@ -749,6 +749,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
         }
 
+        dropPartitions(partitionFilter, commitIdentifier);
+    }
+
+    @Override
+    public void dropPartitions(PartitionPredicate partitionFilter, long commitIdentifier) {
         tryOverwritePartition(
                 partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
     }
@@ -1492,6 +1497,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
                 throw exception.get();
             }
+        }
+        if (latestSnapshot != null) {
+            conflictDetection.checkRetainedGlobalIndexes(
+                    latestSnapshot, deltaFiles, indexFiles, commitKind);
         }
 
         Snapshot newSnapshot;

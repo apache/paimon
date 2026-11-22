@@ -108,6 +108,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private final DVMetaCache dvMetaCache;
 
     private ScanMode scanMode = ScanMode.ALL;
+    @Nullable private Snapshot specifiedSnapshot;
     private boolean hasNonPartitionFilter;
     @Nullable private RowRangeIndex rowRangeIndex;
     private RecordComparator lazyPartitionComparator;
@@ -191,13 +192,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    @Nullable
+    public Snapshot specifiedSnapshot() {
+        return specifiedSnapshot;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
-        scan.withSnapshot(snapshotId);
-        return this;
+        return withSnapshot(snapshotManager.snapshot(snapshotId));
     }
 
     @Override
     public SnapshotReader withSnapshot(Snapshot snapshot) {
+        specifiedSnapshot = snapshot;
         scan.withSnapshot(snapshot);
         return this;
     }

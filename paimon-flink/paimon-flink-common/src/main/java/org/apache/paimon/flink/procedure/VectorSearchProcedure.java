@@ -187,7 +187,8 @@ public class VectorSearchProcedure extends ProcedureBase {
         if (parsedProjection.readProjection != null) {
             readBuilder.withProjection(parsedProjection.readProjection);
         }
-        TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        TableScan.Plan readPlan =
+                ProcedureUtil.planSearchResult(readBuilder, result, vectorPlan.snapshot());
         return readRows(readBuilder, readPlan, parsedProjection);
     }
 

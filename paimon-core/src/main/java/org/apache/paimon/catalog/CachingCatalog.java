@@ -220,8 +220,12 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        super.dropTable(identifier, ignoreIfNotExists);
-        invalidateTable(identifier);
+        try {
+            super.dropTable(identifier, ignoreIfNotExists);
+        } finally {
+            // a failed drop may already have removed the table
+            invalidateTable(identifier);
+        }
 
         // clear all branch tables of this table
         for (Identifier i : tableCache.asMap().keySet()) {

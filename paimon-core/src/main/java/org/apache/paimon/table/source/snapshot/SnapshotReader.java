@@ -73,6 +73,12 @@ public interface SnapshotReader {
     @Nullable
     IndexFileHandler indexFileHandler();
 
+    /** Snapshot explicitly selected for this reader, if available before planning. */
+    @Nullable
+    default Snapshot specifiedSnapshot() {
+        return null;
+    }
+
     SnapshotReader withSnapshot(long snapshotId);
 
     SnapshotReader withSnapshot(Snapshot snapshot);

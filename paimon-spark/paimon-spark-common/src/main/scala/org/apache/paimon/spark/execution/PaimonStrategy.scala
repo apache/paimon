@@ -24,8 +24,7 @@ import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlo
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
-import org.apache.paimon.spark.PaimonBaseScan
+import org.apache.paimon.spark.{PaimonBaseScan, PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
@@ -585,10 +584,10 @@ case class LateralVectorSearchExec(
     primaryKeyResults.foreach(results => return searchPrimaryKeyRows(queries, results, context))
     val rowIdToMatches = createRowIdToMatches(queries, globalIndexResults)
     val batchGlobalIndexResult = createBatchGlobalIndexResult(globalIndexResults)
-    val scan = context.readBuilder
-      .newScan()
-      .withGlobalIndexResult(batchGlobalIndexResult)
-      .asInstanceOf[InnerTableScan]
+    val scan = PaimonBaseScan.withSearchResult(
+      context.readBuilder.newScan().asInstanceOf[InnerTableScan],
+      batchGlobalIndexResult,
+      context.vectorPlan.snapshot())
     val read = context.readBuilder.newRead()
 
     scan.plan().splits().asScala.iterator.flatMap {

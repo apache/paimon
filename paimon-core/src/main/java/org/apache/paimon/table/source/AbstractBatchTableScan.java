@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
@@ -27,7 +28,9 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalDiffStartingScanner;
+import org.apache.paimon.table.source.snapshot.ReadPlanStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -108,6 +111,23 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     public InnerTableScan withTopN(TopN topN) {
         this.topN = topN;
         return this;
+    }
+
+    /** Selects the snapshot for a single-snapshot scan before planning its data splits. */
+    @Nullable
+    public Snapshot prepareSnapshot() {
+        StartingScanner scanner = startingScanner();
+        if (!(scanner instanceof ReadPlanStartingScanner)) {
+            return null;
+        }
+
+        SnapshotReader configured = ((ReadPlanStartingScanner) scanner).prepareRead(snapshotReader);
+        return configured == null ? null : configured.specifiedSnapshot();
+    }
+
+    /** Uses an already resolved snapshot for a full batch read. */
+    public void withStartingSnapshot(Snapshot snapshot) {
+        startingScanner = new FullStartingScanner(snapshotReader.snapshotManager(), snapshot);
     }
 
     @Override

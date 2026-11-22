@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from copy import copy
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -121,13 +122,15 @@ class AbstractVectorSearchBuilderImpl:
 
     def with_option(self, key, value):
         # type: (str, str) -> VectorSearchBuilder
-        self._options[key] = value
-        return self
+        return self.with_options({key: value})
 
     def with_options(self, options):
         # type: (dict) -> VectorSearchBuilder
         if options is not None:
             self._options.update(options)
+            prefilter_key = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE.key()
+            if self._options.get(prefilter_key) is None:
+                self._options.pop(prefilter_key, None)
         return self
 
     def with_filter(self, predicate):

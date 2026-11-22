@@ -1,0 +1,142 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Median file durations from CI runs 43561549522, 44858799654 and 44874539862.
+# A zero uses the test-count estimate for that execution mode.
+# Path relative to pypaimon/tests	Native seconds	Python seconds
+batch_vector_lookup_test.py	5.9	5.1
+blob_table_test.py	21.8	20.3
+concurrent_import_test.py	9.7	9.3
+consumer_manager_test.py	8.0	8.0
+daft/daft_catalog_rest_test.py	13.7	10.2
+daft/daft_on_ray_e2e_test.py	8.6	8.7
+daft/daft_pk_distributed_write_test.py	10.1	8.7
+data_file_creation_time_test.py	11.5	11.3
+deletion_vector_path_test.py	18.4	8.9
+jindo_file_system_test.py	4.0	0
+lerobot_aggregate_test.py	13.1	11.2
+manifest/manifest_manager_test.py	23.3	24.6
+manifest/manifest_sidecar_test.py	5.5	5.6
+mp4_test.py	0	4.1
+multimodal_lance_auth_test.py	6.7	6.5
+multimodal_lerobot_test.py	4.1	0
+multimodal_table_test.py	4.2	4.1
+native_authorized_update_test.py	14.9	14.7
+native_blob_update_test.py	11.4	0
+native_blob_write_test.py	15.2	0
+native_branch_write_test.py	6.2	0
+native_calendar_mask_test.py	5.3	0
+native_cast_completion_test.py	13.3	0
+native_commit_partition_spec_test.py	9.7	9.1
+native_commit_test.py	4.4	0
+native_data_directory_test.py	4.4	0
+native_decimal_cast_test.py	4.8	0
+native_decimal_integer_input_test.py	28.0	0
+native_decimal_predicate_test.py	4.1	0
+native_dv_merge_engine_write_test.py	7.1	0
+native_full_startup_test.py	21.4	0
+native_full_text_search_test.py	64.1	0
+native_generic_index_build_test.py	4.3	0
+native_historical_update_test.py	12.6	4.7
+native_hybrid_search_test.py	8.4	0
+native_iterator_test.py	5.3	0
+native_merge_incremental_test.py	5.7	0
+native_nested_predicate_test.py	14.2	0
+native_nested_update_test.py	5.6	0
+native_nullable_primary_key_test.py	11.9	0
+native_overwrite_indexes_test.py	4.8	4.1
+native_parallel_index_build_test.py	8.0	0
+native_parquet_vector_update_test.py	5.1	0
+native_partition_filter_test.py	6.3	0
+native_pk_full_text_search_test.py	32.9	0
+native_plan_incremental_test.py	5.7	0
+native_plan_resolved_schema_test.py	5.2	0
+native_plan_rest_test.py	67.6	0
+native_predicate_delete_test.py	34.7	0
+native_query_auth_test.py	6.3	0
+native_read_path_completion_test.py	5.1	0
+native_read_snapshot_test.py	4.3	0
+native_schema_cast_test.py	5.7	0
+native_schema_evolution_cast_test.py	22.6	0
+native_search_plan_test.py	13.0	0
+native_sequence_test.py	9.7	0
+native_shard_update_test.py	4.2	0
+native_sorted_index_build_test.py	40.1	0
+native_stream_query_auth_test.py	4.0	0
+native_torch_variant_test.py	49.6	36.7
+native_transform_filter_test.py	16.8	0
+native_update_binary_text_test.py	50.8	0
+native_update_container_casts_test.py	19.0	0
+native_update_encoded_inputs_test.py	82.5	0
+native_update_map_pairs_test.py	30.6	0
+native_update_source_nullability_test.py	4.2	0
+native_update_test.py	17.6	0
+native_upsert_encoded_keys_test.py	8.1	6.5
+native_upsert_key_normalization_test.py	18.5	0
+native_upsert_selected_values_test.py	10.1	0
+native_upsert_temporal_row_keys_test.py	7.7	0
+native_vector_index_build_test.py	10.0	0
+native_vector_search_test.py	17.6	0
+native_write_test.py	4.6	0
+parquet_page_index_test.py	6.7	5.5
+query_auth_filter_test.py	10.9	6.2
+ray_compute_columns_test.py	14.8	12.1
+ray_data_evolution_merge_into_test.py	129.9	128.6
+ray_data_test.py	6.9	7.0
+ray_full_text_search_test.py	8.3	8.0
+ray_integration_test.py	7.7	7.9
+ray_native_row_id_recovery_test.py	45.9	0
+ray_primary_key_vector_search_test.py	8.6	7.3
+ray_read_by_row_id_test.py	31.8	30.8
+ray_repartition_test.py	44.0	45.9
+ray_search_order_test.py	16.3	16.4
+ray_search_result_metadata_test.py	5.2	4.7
+ray_search_result_test.py	8.7	8.4
+ray_update_by_row_id_compaction_test.py	57.0	56.0
+ray_update_by_row_id_test.py	22.9	22.6
+ray_vector_filter_exactness_test.py	7.8	6.9
+ray_vector_index_build_test.py	6.2	5.6
+ray_vector_refinement_test.py	6.5	5.8
+ray_vector_result_conversion_test.py	5.9	5.4
+ray_vector_search_test.py	39.3	38.4
+reader_append_only_test.py	9.9	9.5
+rest/rest_base_test.py	4.3	0
+rest/rest_branch_test.py	20.9	15.7
+rest/rest_branch_transport_test.py	13.0	12.6
+rest/rest_catalog_commit_snapshot_test.py	11.2	8.4
+rest/rest_catalog_test.py	23.3	16.9
+rest/rest_create_partitions_test.py	17.1	12.6
+rest/rest_format_table_test.py	37.6	28.0
+rest/rest_iceberg_table_test.py	11.2	8.5
+rest/rest_list_partitions_fallback_test.py	11.3	8.4
+rest/rest_object_table_test.py	16.5	12.2
+rest/rest_permission_test.py	18.1	13.1
+rest/rest_read_write_test.py	124.9	90.7
+rest/rest_simple_test.py	25.2	20.6
+rest/rest_tag_test.py	21.7	16.6
+rest/rest_version_test.py	38.3	37.2
+s3_delete_compatibility_test.py	5.5	4.7
+search_training_test.py	10.9	9.9
+shard_table_updator_test.py	58.6	67.2
+table_update_test.py	4.3	4.6
+test_sequence_field_write.py	5.8	0
+torch_named_nested_projection_test.py	4.3	0
+torch_named_projection_test.py	17.6	11.9
+vector_filter_exactness_test.py	4.6	0
+write/append_row_kind_test.py	4.0	0
+write/append_writer_lifecycle_test.py	8.3	4.1
+write/direct_writer_execution_test.py	4.4	0
+write/update_execution_protocol_test.py	9.9	10.1
