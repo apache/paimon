@@ -84,6 +84,24 @@ public class FlinkConnectorOptions {
                                     + "This eliminates data transfer overhead when the source already "
                                     + "provides suitable data distribution (e.g., Kafka partitions).");
 
+    public static final ConfigOption<Boolean> SINK_STRIPED_BUCKET_WRITE_ENABLED =
+            ConfigOptions.key("sink.striped-bucket-write.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a fixed-bucket table stripes each bucket's writes across multiple "
+                                    + "writer subtasks so that write parallelism can exceed the bucket count "
+                                    + "without rescaling the table.");
+
+    public static final ConfigOption<Integer> SINK_STRIPED_BUCKET_WRITE_WRITERS_PER_BUCKET =
+            ConfigOptions.key("sink.striped-bucket-write.writers-per-bucket")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Sets how many writer subtasks write each bucket. Set to -1 to let every "
+                                    + "writer subtask write every bucket. Only takes effect when "
+                                    + "'sink.striped-bucket-write.enabled' is true.");
+
     public static final ConfigOption<CompactionBucketDistributionStrategy>
             COMPACTION_BUCKET_DISTRIBUTION_STRATEGY =
                     ConfigOptions.key("compaction.bucket-distribution-strategy")
@@ -198,7 +216,11 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, flink sink will use managed memory for merge tree; otherwise, "
-                                    + "it will create an independent memory allocator.");
+                                    + "it will create an independent memory allocator. "
+                                    + "This option selects the allocator and declares the managed memory weight. "
+                                    + "For append-only table, rows are buffered in managed memory only when "
+                                    + "'write-buffer-for-append' is also set to true; otherwise rows are written "
+                                    + "directly to the file format writers and the managed memory stays unused.");
 
     public static final ConfigOption<Boolean> SCAN_REMOVE_NORMALIZE =
             key("scan.remove-normalize")

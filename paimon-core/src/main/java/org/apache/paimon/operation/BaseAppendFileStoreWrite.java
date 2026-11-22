@@ -340,8 +340,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             collectedExceptions = e;
         } finally {
             try {
-                rewriter.close();
-                sorter.close();
+                IOUtils.closeAll(rewriter, sorter::close);
             } catch (Exception e) {
                 collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
             }

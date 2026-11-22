@@ -56,6 +56,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -82,6 +83,7 @@ import java.util.function.Function;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getCausalChain;
 import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getRootCause;
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -3013,6 +3015,12 @@ class FormatTableCommitTest {
         try {
             assertThat(fileIO.awaitDeletesStarted()).isTrue();
             commitThread.interrupt();
+            // Only the caller clears its flag, by observing the interrupt. Releasing earlier lets
+            // the deletes finish first, and a caller with completed results keeps going.
+            waitUtil(
+                    () -> !commitThread.isInterrupted(),
+                    Duration.ofSeconds(10),
+                    Duration.ofMillis(1));
             fileIO.releaseDeletes();
             commitThread.join(TimeUnit.SECONDS.toMillis(10));
         } finally {

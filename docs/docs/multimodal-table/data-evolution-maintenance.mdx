@@ -268,6 +268,7 @@ materialization procedure instead.
 | Logical delete | Hides IDs without shifting the remaining rows. |
 | Ordinary Data Evolution compaction | Preserves IDs, but may change file-group boundaries. |
 | Deletion-vector materialization | Assigns new IDs to surviving rows in the rewritten ranges. |
+| `sort_data_evolution` | Assigns new IDs to surviving rows in sort order. Their `_SEQUENCE_NUMBER` becomes the sort commit's snapshot ID. |
 | Explicit `reassign_row_id` maintenance | Changes IDs by remapping file metadata. |
 | Overwrite or partition removal | Removes the replaced rows from the current table state; do not assume their IDs remain usable. |
 

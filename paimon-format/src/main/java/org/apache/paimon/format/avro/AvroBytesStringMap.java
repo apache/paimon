@@ -40,6 +40,7 @@ public class AvroBytesStringMap implements InternalMap {
     private final byte[] bytes;
     // total bytes length
     private final int lengthInBytes;
+    private final boolean valueNullable;
     // offset of each string
     private final IntArrayList off;
     // length of each string
@@ -49,11 +50,16 @@ public class AvroBytesStringMap implements InternalMap {
     private BinaryArray valueArray;
 
     private AvroBytesStringMap(
-            byte[] bytes, int lengthInBytes, IntArrayList off, IntArrayList len) {
+            byte[] bytes,
+            int lengthInBytes,
+            IntArrayList off,
+            IntArrayList len,
+            boolean valueNullable) {
         this.bytes = bytes;
         this.lengthInBytes = lengthInBytes;
         this.off = off;
         this.len = len;
+        this.valueNullable = valueNullable;
     }
 
     public static AvroBytesStringMap create(BinaryDecoder decoder, boolean valueNullable)
@@ -100,7 +106,7 @@ public class AvroBytesStringMap implements InternalMap {
             chunkLength = decoder.mapNext();
         }
 
-        return new AvroBytesStringMap(bytes, lengthInBytes, off, len);
+        return new AvroBytesStringMap(bytes, lengthInBytes, off, len, valueNullable);
     }
 
     private static byte[] ensure(byte[] bytes, int lengthInBytes, int need) {
@@ -116,6 +122,10 @@ public class AvroBytesStringMap implements InternalMap {
         byte[] newBytes = new byte[cap];
         System.arraycopy(bytes, 0, newBytes, 0, lengthInBytes);
         return newBytes;
+    }
+
+    boolean valueNullable() {
+        return valueNullable;
     }
 
     public byte[] bytes() {

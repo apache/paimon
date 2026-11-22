@@ -20,13 +20,45 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.table.FormatTable
 
+import org.apache.spark.sql.connector.read.Statistics
+import org.apache.spark.sql.types.StructType
+
+import java.util.OptionalLong
+
 case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
 
-  override def build(): PaimonFormatTableScan =
-    PaimonFormatTableScan(
-      table,
-      requiredSchema,
-      pushedPartitionFilters,
-      pushedDataFilters,
-      pushedLimit)
+  private var columnPruningApplied = false
+
+  override def pruneColumns(requiredSchema: StructType): Unit = {
+    super.pruneColumns(requiredSchema)
+    columnPruningApplied = true
+  }
+
+  override def build(): PaimonFormatTableScan = {
+    // Spark calls pruneColumns before building a query scan, even when it needs every column.
+    // A fresh scan built for relation statistics should not list every catalog-managed partition.
+    if (
+      !columnPruningApplied && table.partitionManager() != null &&
+      pushedPartitionFilters.isEmpty && pushedDataFilters.isEmpty && pushedLimit.isEmpty
+    ) {
+      new PaimonFormatTableScan(
+        table,
+        requiredSchema,
+        pushedPartitionFilters,
+        pushedDataFilters,
+        pushedLimit) {
+        override def estimateStatistics: Statistics = new Statistics {
+          override def sizeInBytes(): OptionalLong = OptionalLong.empty()
+          override def numRows(): OptionalLong = OptionalLong.empty()
+        }
+      }
+    } else {
+      PaimonFormatTableScan(
+        table,
+        requiredSchema,
+        pushedPartitionFilters,
+        pushedDataFilters,
+        pushedLimit)
+    }
+  }
 }

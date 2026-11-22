@@ -55,6 +55,12 @@ public class ConstantGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return result;
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
             FieldRef fieldRef, Object literal) {
         return result;

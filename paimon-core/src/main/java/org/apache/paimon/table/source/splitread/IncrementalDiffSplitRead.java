@@ -29,6 +29,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReadBatchSizer;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -96,18 +97,20 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
         IncrementalSplit split = (IncrementalSplit) s;
         RecordReader<KeyValue> reader =
                 readDiff(
-                        mergeRead.createMergeReader(
-                                split.partition(),
-                                split.bucket(),
-                                split.beforeFiles(),
-                                split.beforeDeletionFiles(),
-                                forceKeepDelete),
-                        mergeRead.createMergeReader(
-                                split.partition(),
-                                split.bucket(),
-                                split.afterFiles(),
-                                split.afterDeletionFiles(),
-                                forceKeepDelete),
+                        () ->
+                                mergeRead.createMergeReader(
+                                        split.partition(),
+                                        split.bucket(),
+                                        split.beforeFiles(),
+                                        split.beforeDeletionFiles(),
+                                        forceKeepDelete),
+                        () ->
+                                mergeRead.createMergeReader(
+                                        split.partition(),
+                                        split.bucket(),
+                                        split.afterFiles(),
+                                        split.afterDeletionFiles(),
+                                        forceKeepDelete),
                         mergeRead.keyComparator(),
                         mergeRead.createUdsComparator(),
                         mergeRead.mergeSorter(),
@@ -121,8 +124,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     private static RecordReader<KeyValue> readDiff(
-            RecordReader<KeyValue> beforeReader,
-            RecordReader<KeyValue> afterReader,
+            ReaderSupplier<KeyValue> beforeReader,
+            ReaderSupplier<KeyValue> afterReader,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeSorter sorter,
@@ -130,8 +133,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         return sorter.mergeSortNoSpill(
                 Arrays.asList(
-                        () -> wrapLevelToReader(beforeReader, BEFORE_LEVEL),
-                        () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
+                        () -> wrapLevelToReader(beforeReader.get(), BEFORE_LEVEL),
+                        () -> wrapLevelToReader(afterReader.get(), AFTER_LEVEL)),
                 keyComparator,
                 userDefinedSeqComparator,
                 new DiffMerger(keepDelete, InternalSerializers.create(sorter.valueType())));

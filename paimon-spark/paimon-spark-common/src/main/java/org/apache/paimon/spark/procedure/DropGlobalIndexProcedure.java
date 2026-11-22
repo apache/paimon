@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
@@ -156,10 +157,9 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                 entry ->
                                         entry.indexFile().indexType().equals(indexType)
                                                 && entry.indexFile().globalIndexMeta() != null
-                                                && entry.indexFile()
-                                                        .globalIndexMeta()
-                                                        .getIndexedFieldIds()
-                                                        .equals(indexFieldIds)
+                                                && CentroidIndexMeta.matchesIndexFields(
+                                                        entry.indexFile().globalIndexMeta(),
+                                                        indexFieldIds)
                                                 && (partitionPredicate == null
                                                         || partitionPredicate.test(
                                                                 entry.partition()));

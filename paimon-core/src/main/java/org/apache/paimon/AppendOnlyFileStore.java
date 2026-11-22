@@ -157,7 +157,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     schema,
                     manifestFileFactory(),
                     options.scanManifestParallelism(),
-                    options.deletionVectorsEnabled());
+                    options.deletionVectorsEnabled(),
+                    tableName);
         }
 
         return new AppendOnlyFileStoreScan(
@@ -171,7 +172,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options.fileIndexReadEnabled(),
                 options.fileIndexReadIgnoreUnknownType(),
                 options.deletionVectorsEnabled(),
-                options.dataEvolutionEnabled());
+                options.dataEvolutionEnabled(),
+                tableName);
     }
 
     @Override

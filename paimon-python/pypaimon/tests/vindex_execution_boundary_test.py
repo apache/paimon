@@ -42,6 +42,12 @@ def _reader(reader_type=VindexVectorGlobalIndexReader):
     return reader_type(SimpleNamespace(), '/indexes', [GlobalIndexIOMeta('index', 1)], {'option': 'value'})
 
 
+def test_centroid_files_require_the_java_reader():
+    files = [GlobalIndexIOMeta("router", 100, b"PAIMCENT" + bytes(20))]
+    with pytest.raises(NotImplementedError, match="Java reader"):
+        VindexVectorGlobalIndexReader(SimpleNamespace(), '/indexes', files)
+
+
 def test_constructing_and_closing_public_reader_does_not_import_an_execution_backend():
     script = r"""
 import importlib.abc

@@ -91,6 +91,25 @@ class PrimaryKeySearchRankerTest {
         assertThat(fused).extracting(PrimaryKeySearchPosition::score).containsExactly(2F, 1F, 0F);
     }
 
+    @Test
+    void testWeightedScoreHandlesFiniteScoresWithOverflowingRange() {
+        List<PrimaryKeySearchPosition> ranked =
+                PrimaryKeySearchRanker.weightedScore(
+                        Collections.singletonList(
+                                new PrimaryKeySearchRanker.Ranking(
+                                        Arrays.asList(
+                                                position("a", 0, -Float.MAX_VALUE),
+                                                position("b", 0, 0F),
+                                                position("c", 0, Float.MAX_VALUE)),
+                                        4D)),
+                        2);
+
+        assertThat(ranked)
+                .extracting(PrimaryKeySearchPosition::dataFileName)
+                .containsExactly("c", "b");
+        assertThat(ranked).extracting(PrimaryKeySearchPosition::score).containsExactly(4F, 2F);
+    }
+
     private static PrimaryKeySearchPosition position(
             String dataFileName, long rowPosition, float score) {
         return new PrimaryKeySearchPosition(

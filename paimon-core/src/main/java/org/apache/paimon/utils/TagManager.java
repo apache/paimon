@@ -53,6 +53,7 @@ import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Manager for {@code Tag}. */
 public class TagManager {
@@ -201,7 +202,11 @@ public class TagManager {
         checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", targetTagName);
 
         try {
-            fileIO.rename(tagPath(tagName), tagPath(targetTagName));
+            checkState(
+                    fileIO.rename(tagPath(tagName), tagPath(targetTagName)),
+                    "Failed to rename tag '%s' to '%s'.",
+                    tagName,
+                    targetTagName);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

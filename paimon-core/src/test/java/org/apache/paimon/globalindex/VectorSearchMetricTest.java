@@ -18,6 +18,10 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.FloatType;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +29,40 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 /** Tests for {@link VectorSearchMetric}. */
 class VectorSearchMetricTest {
+
+    @Test
+    void testMaxSimResetsNegativeScoresAndValidatesEmbeddingLists() {
+        ArrayType column = new ArrayType(new ArrayType(new FloatType()));
+        MaxSimScorer scorer = new MaxSimScorer(column, new float[][] {{Float.MAX_VALUE}, {1}});
+        GenericArray negative = new GenericArray(new float[] {-Float.MAX_VALUE});
+        GenericArray positive = new GenericArray(new float[] {Float.MIN_VALUE});
+        assertThat(scorer.score(new GenericArray(new Object[] {positive, positive}))).isEqualTo(2f);
+        assertThat(scorer.score(new GenericArray(new Object[] {null, negative}))).isEqualTo(-2f);
+        assertThat(scorer.score(new GenericArray(new Object[0])))
+                .isEqualTo(Float.NEGATIVE_INFINITY);
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new MaxSimScorer(column, new float[0][]));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new MaxSimScorer(column, new float[][] {{1}, {1, 2}}));
+        assertThatIllegalArgumentException()
+                .isThrownBy(
+                        () ->
+                                scorer.score(
+                                        new GenericArray(
+                                                new Object[] {
+                                                    new GenericArray(new float[] {Float.NaN})
+                                                })));
+    }
+
+    @Test
+    void testMaxSimKeepsQueryCoordinatesAndNormTogether() {
+        float[][] queries = {{1f, 0f}};
+        MaxSimScorer scorer =
+                new MaxSimScorer(new ArrayType(new ArrayType(new FloatType())), queries);
+        queries[0][0] = 3f;
+        GenericArray row = new GenericArray(new Object[] {new GenericArray(new float[] {1f, 0f})});
+        assertThat(scorer.score(row)).isEqualTo(1f);
+    }
 
     @Test
     void testNormalizeAndSupportedMetrics() {

@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -64,6 +65,26 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class GlobalIndexBuilderUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderUtils.class);
+
+    /** Validates composite and multivector indexes before planning any shards to build. */
+    public static void validateIndexFields(String type, List<DataField> fields, Options options) {
+        if (fields.size() > 1) {
+            try {
+                GlobalIndexer.create(type, fields, options);
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                type,
+                                fields.stream().map(DataField::name).collect(Collectors.toList())),
+                        e);
+            }
+        } else if (fields.size() == 1
+                && CoreOptions.isVectorIndexType(type)
+                && VectorIndexUtils.isMultiVector(fields.get(0).type())) {
+            GlobalIndexer.create(type, fields, options);
+        }
+    }
 
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
@@ -157,7 +178,9 @@ public class GlobalIndexBuilderUtils {
             if (meta.indexFieldId() != indexFieldId) {
                 continue;
             }
-            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)) {
+            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)
+                    && !(extraFieldIds == null
+                            && CentroidIndexMeta.hasScalarIndexes(meta.indexMeta()))) {
                 continue;
             }
             entries.add(entry);
@@ -237,18 +260,24 @@ public class GlobalIndexBuilderUtils {
             }
         }
 
-        Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
+        return groupSplitsByRange(partitionSplitRanges);
+    }
+
+    /** Group planned splits into maximal contiguous row-ID ranges within each partition. */
+    public static <T extends Split> Map<BinaryRow, Map<Range, List<T>>> groupSplitsByRange(
+            Map<BinaryRow, List<Pair<Range, T>>> partitionSplitRanges) {
+        Map<BinaryRow, Map<Range, List<T>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, T>>> partitionEntry :
                 partitionSplitRanges.entrySet()) {
-            List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
+            List<Pair<Range, T>> splitRanges = partitionEntry.getValue();
             splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
+                    Comparator.comparingLong((Pair<Range, T> e) -> e.getKey().from)
                             .thenComparingLong(e -> e.getKey().to));
 
-            Map<Range, List<Split>> partitionRanges = new LinkedHashMap<>();
+            Map<Range, List<T>> partitionRanges = new LinkedHashMap<>();
             Range current = null;
-            List<Split> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, Split> entry : splitRanges) {
+            List<T> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, T> entry : splitRanges) {
                 Range splitRange = entry.getKey();
                 if (current == null) {
                     current = splitRange;

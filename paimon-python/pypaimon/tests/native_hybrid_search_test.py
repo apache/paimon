@@ -130,6 +130,21 @@ def test_partial_coverage_and_scalar_modes_apply_to_each_route(rest_catalog, mod
     assert indexes._ids(table) == list(range(12))
 
 
+def test_prefilter_mode_includes_uncovered_rows_in_hybrid_search(rest_catalog):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'vector-index.search-mode': 'fast', 'full-text-index.search-mode': 'fast',
+                             'scalar-index.search-mode': 'fast', 'scalar-index.prefilter.search-mode': 'full'},
+                   indexed=False)
+    table.create_global_index('label', index_type='btree')
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    table.create_global_index('content', index_type='full-text')
+    table.create_global_index('embedding', index_type='ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+
+    predicate = table.new_read_builder().new_predicate_builder().equal('label', 'keep')
+    assert set(_compare(table, predicate=predicate)) == {1, 5, 7, 9, 11}
+
+
 @pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
 @pytest.mark.parametrize('refine', [False, True])
 def test_candidate_refinement_uses_java_semantics_in_both_routes(rest_catalog, index_type, refine):

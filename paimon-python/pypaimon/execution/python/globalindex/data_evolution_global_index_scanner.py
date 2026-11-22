@@ -83,7 +83,6 @@ class DataEvolutionGlobalIndexScanner:
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
         index_metas = {}
-        extra_index_metas = {}
         for index_file in index_files:
             global_index_meta = index_file.global_index_meta
             if global_index_meta is None:
@@ -108,8 +107,6 @@ class DataEvolutionGlobalIndexScanner:
             if group is None:
                 group = _IndexMetaFileGroup(index_field_id, field_ids)
                 index_metas[index_field_id] = group
-                for extra_field_id in field_ids[1:]:
-                    extra_index_metas.setdefault(extra_field_id, []).append(group)
             elif group.field_ids != tuple(field_ids):
                 raise ValueError(
                     "Primary field %s owns multiple indexes with different "
@@ -124,27 +121,10 @@ class DataEvolutionGlobalIndexScanner:
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
             from pypaimon.execution.python.globalindex.union_global_index_reader import UnionGlobalIndexReader
 
-            groups = []
             group = index_metas.get(field.id)
-            if group is not None:
-                groups.append(group)
-
-            extra_groups = extra_index_metas.get(field.id)
-            if extra_groups:
-                groups.extend(
-                    extra_group
-                    for extra_group in extra_groups
-                    if extra_group not in groups
-                )
-            if not groups:
+            if group is None:
                 return []
-            # Like Java, union every reader for the field. Missing coverage
-            # belongs to raw fallback, not to the matches returned by an index.
-            readers = []
-            for group in groups:
-                readers.extend(
-                    _create_readers(
-                        file_io, index_path, group.metas, field, executor, options))
+            readers = _create_readers(file_io, index_path, group.metas, field, executor, options)
             return [UnionGlobalIndexReader(readers)]
 
         return GlobalIndexEvaluator(fields, readers_function)
@@ -202,14 +182,7 @@ class DataEvolutionGlobalIndexScanner:
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
                 return False
-            if global_index_meta.index_field_id in filter_field_ids:
-                return True
-            if global_index_meta.extra_field_ids is not None:
-                return any(
-                    field_id in filter_field_ids
-                    for field_id in global_index_meta.extra_field_ids
-                )
-            return False
+            return global_index_meta.index_field_id in filter_field_ids
 
         if snapshot is None:
             snapshot = _resolve_snapshot(table, None)

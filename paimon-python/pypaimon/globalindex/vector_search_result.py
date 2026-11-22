@@ -17,8 +17,9 @@
 
 """Vector search global index result."""
 
+import math
 from abc import abstractmethod
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -26,6 +27,16 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 # Type alias for score getter function
 ScoreGetter = Callable[[int], Optional[float]]
+
+
+def vector_score_order(row: Tuple[int, Optional[float]]) -> Tuple[bool, float, int]:
+    """Best first: higher scores, then smaller row IDs. NaNs follow all numbers."""
+    row_id, score = row
+    if score is None:
+        score = 0.0  # Same missing-score fallback as ScoredGlobalIndexResult.top_k.
+    if math.isnan(score):
+        return True, 0.0, row_id
+    return False, -score, row_id
 
 
 class ScoredGlobalIndexResult(GlobalIndexResult):

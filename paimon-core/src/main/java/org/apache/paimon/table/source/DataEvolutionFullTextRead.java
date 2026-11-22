@@ -180,8 +180,9 @@ public class DataEvolutionFullTextRead implements FullTextRead {
      *       otherwise. When every index covering the filter columns declines the predicate, the
      *       rows are excluded in {@code fast} and otherwise decided by reading their filter
      *       columns.
-     *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
-     *       excluded in {@code fast}, otherwise decided by reading their filter columns.
+     *   <li>Rows whose filter columns are not covered follow {@code
+     *       scalar-index.prefilter.search-mode}: excluded in {@code fast}, otherwise decided by
+     *       reading their filter columns.
      * </ul>
      *
      * <p>Either way the rows stay in the existing full-text index and are handed to it as an
@@ -210,13 +211,14 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         }
 
         RoaringNavigableMap64 unindexed = new RoaringNavigableMap64();
+        GlobalIndexSearchMode prefilterMode = table.coreOptions().scalarPrefilterSearchMode();
         for (Range range :
                 new DataEvolutionGlobalIndexCoverage(
                                 table,
                                 planSnapshot,
                                 partitionFilter,
                                 scalarIndexFiles,
-                                table.coreOptions().scalarIndexSearchMode())
+                                prefilterMode)
                         .unindexedRanges(table.rowType(), filter)) {
             unindexed.addRange(range);
         }
@@ -233,9 +235,10 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 RoaringNavigableMap64 fromIndex =
                         RoaringNavigableMap64.and(
                                 evaluation.get().result().results(), decidedByIndex);
-                if (!FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())
+                if (!FilteredRowIdReader.isExact(
+                                table.rowType(), filter, evaluation.get(), scalarIndexFiles)
                         && !fromIndex.isEmpty()) {
-                    if (table.coreOptions().globalIndexFilterRefineFromData()) {
+                    if (FilteredRowIdReader.shouldRefine(table, filter)) {
                         fromIndex =
                                 new FilteredRowIdReader(
                                                 table, planSnapshot, partitionFilter, filter)
@@ -247,8 +250,9 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 }
                 matched.or(fromIndex);
             } else {
-                warnUnindexedFilter();
-                if (table.coreOptions().scalarIndexSearchMode() != GlobalIndexSearchMode.FAST) {
+                if (prefilterMode == GlobalIndexSearchMode.FAST) {
+                    warnUnindexedFilter();
+                } else {
                     // No scalar index could evaluate the filter: decide these rows from the data,
                     // like rows whose filter columns have no index.
                     unindexed.or(decidedByIndex);
@@ -279,15 +283,13 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     }
 
     private void warnUnindexedFilter() {
-        if (table.coreOptions().scalarIndexSearchMode() == GlobalIndexSearchMode.FAST) {
-            LOG.warn(
-                    "Full-text search on table {} has a row filter {} that no scalar global index "
-                            + "can evaluate; indexed rows are excluded from the result because "
-                            + "scalar-index.search-mode is fast. Build a scalar index on the "
-                            + "filtered columns or use search mode full.",
-                    table.name(),
-                    filter);
-        }
+        LOG.warn(
+                "Full-text search on table {} has a row filter {} that no scalar global index "
+                        + "can evaluate. The fast scalar prefilter excludes these rows. Build a "
+                        + "scalar index on the filtered columns or set "
+                        + "scalar-index.prefilter.search-mode to full.",
+                table.name(),
+                filter);
     }
 
     ScoredGlobalIndexResult evalQuery(

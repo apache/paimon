@@ -1320,6 +1320,7 @@ public class FlinkCatalog extends AbstractCatalog {
                                         .orElse(Collections.emptyList()))
                         .partitionKeys(getPartitionKeys(catalogTable));
         Map<String, String> columnComments = getColumnComments(catalogTable);
+        Set<String> vectorFields = CoreOptions.vectorField(options, rowType.getFieldNames());
         rowType.getFields()
                 .forEach(
                         field ->
@@ -1330,7 +1331,8 @@ public class FlinkCatalog extends AbstractCatalog {
                                                 field.getType(),
                                                 options,
                                                 blobFileFields,
-                                                blobInlineFields),
+                                                blobInlineFields,
+                                                vectorFields),
                                         columnComments.get(field.getName()),
                                         null,
                                         generationExpressions.get(field.getName())));
@@ -1350,14 +1352,14 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.flink.table.types.logical.LogicalType logicalType,
             Map<String, String> options,
             Set<String> blobFileFields,
-            Set<String> blobInlineFields) {
+            Set<String> blobInlineFields,
+            Set<String> vectorFields) {
         if (blobInlineFields.contains(fieldName)) {
             return toBlobType(logicalType, false);
         }
         if (blobFileFields.contains(fieldName)) {
             return toBlobType(logicalType, true);
         }
-        Set<String> vectorFields = CoreOptions.vectorField(options);
         if (vectorFields.contains(fieldName)) {
             return toVectorType(fieldName, logicalType, options);
         }

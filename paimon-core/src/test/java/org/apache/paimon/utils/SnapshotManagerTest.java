@@ -74,6 +74,75 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testFromPathRetriesMissingAndIncompleteFile() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        Snapshot snapshot = createSnapshotWithMillis(1, 1000);
+        Mockito.when(fileIO.readFileUtf8(path))
+                .thenThrow(new FileNotFoundException(path.toString()))
+                .thenReturn("", snapshot.toJson());
+
+        assertThat(SnapshotManager.fromPath(fileIO, path)).isEqualTo(snapshot);
+        Mockito.verify(fileIO, Mockito.times(3)).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathFailsWhenFileNotFoundAfterRetries() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        FileNotFoundException failure = new FileNotFoundException(path.toString());
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Snapshot file " + path + " does not exist.")
+                .hasCause(failure);
+        Mockito.verify(fileIO, Mockito.times(3)).readFileUtf8(path);
+    }
+
+    @Test
+    public void testTryFromPathDoesNotRetryMissingFile() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        FileNotFoundException failure = new FileNotFoundException(path.toString());
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path)).isSameAs(failure);
+        Mockito.verify(fileIO).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathDoesNotRetryOtherIOException() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        IOException failure = new IOException("Read failure");
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                .hasMessageContaining("Fails to read snapshot from path " + path)
+                .hasCause(failure);
+        Mockito.verify(fileIO).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathRestoresInterruptedStatus() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        Mockito.when(fileIO.readFileUtf8(path))
+                .thenThrow(new FileNotFoundException(path.toString()));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            Mockito.verify(fileIO).readFileUtf8(path);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     public void testSnapshotPath() {
         SnapshotManager snapshotManager =
                 newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
@@ -93,6 +162,7 @@ public class SnapshotManagerTest {
 
         assertThat(snapshotManager.snapshotsWithId(Collections.singletonList(1L)).hasNext())
                 .isFalse();
+        Mockito.verify(fileIO).readFileUtf8(snapshotManager.snapshotPath(1L));
     }
 
     @Test

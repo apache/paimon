@@ -35,7 +35,13 @@ public class CreateTagProcedure extends CreateOrReplaceTagBaseProcedure {
 
     @Override
     void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
-        if (snapshotId == null) {
+        if (timeRetained == null) {
+            if (snapshotId == null) {
+                table.createTag(tagName);
+            } else {
+                table.createTag(tagName, snapshotId);
+            }
+        } else if (snapshotId == null) {
             table.createTag(tagName, timeRetained);
         } else {
             table.createTag(tagName, snapshotId, timeRetained);
