@@ -916,24 +916,35 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         byte[] newSource =
                 new DataEvolutionIndexSourceMeta(snapshotId, evolved.schema().id()).serialize();
 
-        assertThat(schema.isCompatible(indexFileWithSource(changedField, oldSource))).isFalse();
-        assertThat(schema.isCompatible(indexFileWithSource(unchangedField, oldSource))).isTrue();
-        assertThat(schema.isCompatible(indexFileWithSource(changedField, newSource))).isTrue();
-        assertThat(schema.isCompatible(indexFileWithSource(changedField, oldSource))).isFalse();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, oldSource)))
+                .isFalse();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", unchangedField, oldSource)))
+                .isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, newSource)))
+                .isTrue();
+        assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, oldSource)))
+                .isFalse();
+        for (String indexType : Arrays.asList("full-text", "ivf-pq")) {
+            assertThat(schema.isCompatible(indexFileWithSource(indexType, changedField, oldSource)))
+                    .as("index type %s", indexType)
+                    .isTrue();
+        }
 
         byte[] legacy =
                 ByteBuffer.allocate(16).putInt(0x44454958).putInt(1).putLong(snapshotId).array();
         byte[] unknown = new DataEvolutionIndexSourceMeta(snapshotId).serialize();
         for (byte[] source : Arrays.asList(null, legacy, unknown)) {
-            assertThat(schema.isCompatible(indexFileWithSource(changedField, source))).isTrue();
-            assertThat(schema.isCompatible(indexFileWithSource(Integer.MAX_VALUE, source)))
+            assertThat(schema.isCompatible(indexFileWithSource("btree", changedField, source)))
+                    .isTrue();
+            assertThat(schema.isCompatible(indexFileWithSource("btree", Integer.MAX_VALUE, source)))
                     .isFalse();
         }
     }
 
-    private static IndexFileMeta indexFileWithSource(int fieldId, byte[] sourceMeta) {
+    private static IndexFileMeta indexFileWithSource(
+            String indexType, int fieldId, byte[] sourceMeta) {
         return new IndexFileMeta(
-                "btree",
+                indexType,
                 "index",
                 1,
                 1,

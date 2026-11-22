@@ -34,7 +34,6 @@ import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexReader;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
-import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
@@ -47,7 +46,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -1604,48 +1602,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFullTextSearchFallsBackAfterIndexedTypeChanges() throws Exception {
-        Identifier name = identifier("evolved_full_text");
-        catalog.createTable(
-                name,
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column(TEXT_FIELD_NAME, DataTypes.VARCHAR(32))
-                        .option(CoreOptions.BUCKET.key(), "-1")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .build(),
-                false);
-        FileStoreTable table = getTable(name);
-        String[] documents = {"Apache Paimon", "other document"};
-        writeDocuments(table, documents);
-        buildAndCommitIndexWithFields(
-                table,
-                documents,
-                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
-                new DataEvolutionIndexSourceMeta(
-                                table.latestSnapshot().get().id(), table.schema().id())
-                        .serialize());
-        catalog.alterTable(
-                name, SchemaChange.updateColumnType(TEXT_FIELD_NAME, DataTypes.VARCHAR(64)), false);
-
-        for (String mode : Arrays.asList("full", "detail")) {
-            FullTextSearchBuilder builder =
-                    getTable(name)
-                            .copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), mode))
-                            .newFullTextSearchBuilder()
-                            .withQuery(TEXT_FIELD_NAME, matchQuery("Paimon"))
-                            .withLimit(2);
-            assertThat(builder.newFullTextScan().scan().splits())
-                    .singleElement()
-                    .isInstanceOf(RawFullTextSearchSplit.class);
-            assertThat(builder.executeLocal().results()).containsExactly(0L);
-        }
-    }
-
-    @Test
     public void testFullTextSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -1773,15 +1729,6 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     private void buildAndCommitIndexWithFields(
             FileStoreTable table, String[] documents, List<DataField> indexFields)
             throws Exception {
-        buildAndCommitIndexWithFields(table, documents, indexFields, null);
-    }
-
-    private void buildAndCommitIndexWithFields(
-            FileStoreTable table,
-            String[] documents,
-            List<DataField> indexFields,
-            @Nullable byte[] sourceMeta)
-            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
@@ -1807,7 +1754,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        sourceMeta);
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

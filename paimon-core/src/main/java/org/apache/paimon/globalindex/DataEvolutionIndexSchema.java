@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -25,7 +26,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
 import java.io.FileNotFoundException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +33,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.index.DataEvolutionIndexSourceMeta.UNKNOWN_SCHEMA_ID;
 
-/** Checks index encoding compatibility with the table schema used for a Data Evolution scan. */
+/** Checks scalar index key compatibility with the table schema used for a Data Evolution scan. */
 public final class DataEvolutionIndexSchema {
 
     private final FileStoreTable table;
@@ -48,18 +48,15 @@ public final class DataEvolutionIndexSchema {
 
     public boolean isCompatible(IndexFileMeta file) {
         GlobalIndexMeta meta = file.globalIndexMeta();
-        return meta != null && isCompatible(meta, meta.getIndexedFieldIds());
-    }
-
-    public boolean isPrimaryFieldCompatible(IndexFileMeta file) {
-        GlobalIndexMeta meta = file.globalIndexMeta();
-        return meta != null && isCompatible(meta, Collections.singletonList(meta.indexFieldId()));
-    }
-
-    private boolean isCompatible(GlobalIndexMeta meta, List<Integer> fieldIds) {
+        if (meta == null) {
+            return false;
+        }
+        List<Integer> fieldIds = meta.getIndexedFieldIds();
         long sourceSchemaId = UNKNOWN_SCHEMA_ID;
         byte[] sourceMeta = meta.sourceMeta();
         if (table.coreOptions().dataEvolutionEnabled()
+                && !"full-text".equals(file.indexType())
+                && !CoreOptions.isVectorIndexType(file.indexType())
                 && DataEvolutionIndexSourceMeta.isDataEvolutionMeta(sourceMeta)) {
             try {
                 sourceSchemaId =

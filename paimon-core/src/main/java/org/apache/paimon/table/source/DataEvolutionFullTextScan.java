@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
-import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -116,7 +115,6 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         @Nullable
         Snapshot snapshot =
                 pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
-        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
@@ -137,17 +135,8 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                         .collect(Collectors.toList());
         List<IndexFileMeta> fullTextIndexFiles = new ArrayList<>();
         List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
-        String fallbackIndexType = null;
         for (IndexFileMeta indexFile : allIndexFiles) {
             boolean fullText = isFullTextIndexFile(indexFile, textColumnIds);
-            if (!schema.isCompatible(indexFile)) {
-                if (fullText
-                        && (fallbackIndexType == null
-                                || indexFile.indexType().compareTo(fallbackIndexType) < 0)) {
-                    fallbackIndexType = indexFile.indexType();
-                }
-                continue;
-            }
             if (fullText) {
                 fullTextIndexFiles.add(indexFile);
             }
@@ -177,7 +166,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                                     Collections.singletonList(selection.fileRange))));
         }
 
-        if (!fullTextIndexFiles.isEmpty() || fallbackIndexType != null) {
+        if (!fullTextIndexFiles.isEmpty()) {
             List<Range> rawRowRanges =
                     new DataEvolutionGlobalIndexCoverage(
                                     table,
@@ -187,10 +176,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                                     table.coreOptions().fullTextIndexSearchMode())
                             .unindexedRanges(textColumnIds, null);
             if (!rawRowRanges.isEmpty()) {
-                splits.add(
-                        new RawFullTextSearchSplit(
-                                rawRowRanges,
-                                fullTextIndexFiles.isEmpty() ? fallbackIndexType : null));
+                splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }
         }
 
