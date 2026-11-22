@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -152,9 +153,11 @@ public class PartitionPredicateTest {
         GenericRow upper = GenericRow.of(4, 8);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
         for (int i = 0; i < 17; i++) {
-            assertThat(predicate.test(10, lower, upper, noNulls)).isFalse();
+            assertThat(predicate.test(10, lower, upper, noNulls, 64 - i)).isFalse();
         }
         assertThat(predicate.test(10, lower, GenericRow.of(19, 8), noNulls)).isTrue();
+        assertThat(predicate.test(10, GenericRow.of(3, 5), GenericRow.of(4, 100), noNulls))
+                .isFalse();
         assertThat(predicate.test(10, lower, GenericRow.of(4, null), noNulls)).isTrue();
         assertThat(predicate.test(10, GenericRow.of(1, null), upper, noNulls)).isTrue();
         // Day 1 no longer matches, but the null partition could match event 100.
@@ -187,23 +190,31 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testRangeIndexDefersSorting() throws Exception {
+    public void testRangeIndexRequiresEnoughRemainingManifests() throws Exception {
         Object[] first = {1};
         Object[] second = {2};
         Object[] third = {3};
         Object[][] partitions = {third, first, second};
-        PartitionRangeIndex index = new PartitionRangeIndex(0, DataTypes.INT(), 1, 3);
+        PartitionRangeIndex index =
+                new PartitionRangeIndex(
+                        partitions,
+                        new RowDataToObjectArrayConverter(RowType.of(DataTypes.INT())),
+                        0,
+                        1,
+                        3);
 
         for (int i = 0; i < 16; i++) {
-            assertThat(index.sortedPartitions(partitions)).isNull();
+            assertThat(index.sortedPartitions(6)).isNull();
         }
-        Object[][] sorted = index.sortedPartitions(partitions);
+        assertThat(index.sortedPartitions(5)).isNull();
+        assertThat(index.sortedPartitions(0)).isNull();
+        Object[][] sorted = index.sortedPartitions(6);
         assertThat(Arrays.asList(sorted)).containsExactly(first, second, third);
-        assertThat(index.sortedPartitions(partitions)).isSameAs(sorted);
+        assertThat(index.sortedPartitions(0)).isSameAs(sorted);
         assertThat(Arrays.asList(partitions)).containsExactly(third, first, second);
 
         PartitionRangeIndex restored = InstantiationUtil.clone(index);
-        assertThat(restored.sortedPartitions(partitions)).isNull();
+        assertThat(restored.sortedPartitions(6)).isNull();
     }
 
     @Test
@@ -217,6 +228,7 @@ public class PartitionPredicateTest {
                 PartitionPredicate.fromMultiple(
                         DataTypes.ROW(DataTypes.INT(), DataTypes.INT()), partitions);
         BinaryArray noNulls = BinaryArray.fromLongArray(new Long[] {0L, 0L});
+        int remainingManifests = 2 * 40 * 7;
         for (int day = 0; day < 40; day++) {
             for (int event = 0; event < 7; event++) {
                 int firstDay = day;
@@ -234,11 +246,12 @@ public class PartitionPredicateTest {
                                         5,
                                         createPart(day, event),
                                         createPart(day + 2, event + 1),
-                                        noNulls))
+                                        noNulls,
+                                        --remainingManifests))
                         .isEqualTo(expected);
 
                 BinaryRow point = createPart(day, event);
-                assertThat(predicate.test(5, point, point, noNulls))
+                assertThat(predicate.test(5, point, point, noNulls, --remainingManifests))
                         .isEqualTo(partitions.contains(point));
             }
         }
