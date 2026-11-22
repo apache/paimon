@@ -3189,8 +3189,19 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .withDescription(
+                            "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                                    + "setting also serves as a fallback for scalar prefilters.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
+            key("scalar-index.prefilter.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription("Search mode for scalar index queries.");
+                    .withDescription(
+                            "Search mode for scalar prefilters in vector and full-text search. If "
+                                    + "unset, use an explicit scalar-index.search-mode, then an "
+                                    + "explicit global-index.search-mode, then fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -5083,7 +5094,20 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST);
+    }
+
+    public GlobalIndexSearchMode scalarScanSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarPrefilterSearchMode() {
+        return options.getOptional(SCALAR_INDEX_PREFILTER_SEARCH_MODE)
+                .orElseGet(
+                        () ->
+                                indexSearchMode(
+                                        SCALAR_INDEX_SEARCH_MODE,
+                                        SCALAR_INDEX_PREFILTER_SEARCH_MODE.defaultValue()));
     }
 
     public boolean globalIndexFilterRefineFromData() {
@@ -5100,11 +5124,14 @@ public class CoreOptions implements Serializable {
 
     private GlobalIndexSearchMode indexSearchMode(
             ConfigOption<GlobalIndexSearchMode> familySearchMode) {
-        if (options.contains(familySearchMode)) {
-            return options.get(familySearchMode);
-        }
-        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
-                .orElseGet(() -> options.get(familySearchMode));
+        return indexSearchMode(familySearchMode, familySearchMode.defaultValue());
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode,
+            GlobalIndexSearchMode defaultMode) {
+        return options.getOptional(familySearchMode)
+                .orElseGet(() -> options.getOptional(GLOBAL_INDEX_SEARCH_MODE).orElse(defaultMode));
     }
 
     public Integer globalIndexThreadNum() {

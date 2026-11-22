@@ -15,12 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from importlib import import_module
 import io
+import sys
 import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from unittest import mock
+
+from pytest import MonkeyPatch
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vindex_input import (
@@ -213,9 +217,12 @@ class VindexInputTest(unittest.TestCase):
             native.close.side_effect = error
         module = mock.Mock()
         module.VectorIndexReader.side_effect = open_reader
-        with mock.patch.dict("sys.modules", {"paimon_vindex": module}), mock.patch(
-                'pypaimon.execution.native.read.vindex_reader._native_reader_type',
-                return_value=None):
+        # Restore only the mock SDK entry. Keep either backend imported by the
+        # reader cached so subsequent tests can patch the same module.
+        native_reader = import_module('pypaimon.execution.native.read.vindex_reader')
+        with MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setitem(sys.modules, "paimon_vindex", module)
+            monkeypatch.setattr(native_reader, '_native_reader_type', lambda: None)
             reader = VindexVectorGlobalIndexReader(
                 io_, "s3://bucket", [GlobalIndexIOMeta(file_name="index", file_size=2)])
             if phase in ("constructor", "initialize"):

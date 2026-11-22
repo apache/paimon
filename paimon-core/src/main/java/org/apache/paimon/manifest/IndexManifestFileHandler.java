@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -250,6 +251,12 @@ public class IndexManifestFileHandler {
             validateOverlaps(retainedIndexFiles, addedIndexFiles, true);
         }
 
+        private List<Integer> overlapFieldIds(GlobalIndexMeta meta) {
+            return CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                    ? Collections.singletonList(meta.indexFieldId())
+                    : meta.getIndexedFieldIds();
+        }
+
         private void validateOverlaps(
                 Iterable<IndexManifestEntry> retainedIndexFiles,
                 List<IndexManifestEntry> addedIndexFiles,
@@ -264,8 +271,7 @@ public class IndexManifestFileHandler {
                 TreeRangeMap<Long, IndexManifestEntry> ranges =
                         additions
                                 .computeIfAbsent(entry.partition(), p -> new HashMap<>())
-                                .computeIfAbsent(
-                                        meta.getIndexedFieldIds(), f -> TreeRangeMap.create());
+                                .computeIfAbsent(overlapFieldIds(meta), f -> TreeRangeMap.create());
                 Range<Long> range = Range.closed(meta.rowRangeStart(), meta.rowRangeEnd());
                 Map.Entry<Range<Long>, IndexManifestEntry> previous =
                         ranges.getEntry(meta.rowRangeStart());
@@ -287,7 +293,7 @@ public class IndexManifestFileHandler {
                     continue;
                 }
                 TreeRangeMap<Long, IndexManifestEntry> ranges =
-                        partition.get(retainedMeta.getIndexedFieldIds());
+                        partition.get(overlapFieldIds(retainedMeta));
                 if (ranges == null) {
                     continue;
                 }

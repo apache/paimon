@@ -20,8 +20,10 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.spark.globalindex.CentroidGlobalIndexTopoBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilderUtils;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
@@ -31,8 +33,12 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -45,9 +51,12 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -68,7 +77,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
-                ProcedureParameter.optional("options", DataTypes.StringType)
+                ProcedureParameter.optional("options", DataTypes.StringType),
+                ProcedureParameter.optional("extra_fields", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -106,6 +116,37 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         return new Options(tableOptions, parsedOptions);
     }
 
+    private static List<DataField> parseExtraFields(
+            String json, RowType rowType, DataField vectorField) throws IOException {
+        JsonNode fields =
+                JsonSerdeUtil.OBJECT_MAPPER_INSTANCE
+                        .reader()
+                        .with(
+                                DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY,
+                                DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                        .readTree(json);
+        checkArgument(
+                fields != null && fields.isObject(),
+                "extra_fields must be a JSON object mapping column names to index types.");
+        List<DataField> extraFields = new ArrayList<>();
+        Iterator<Map.Entry<String, JsonNode>> entries = fields.fields();
+        while (entries.hasNext()) {
+            Map.Entry<String, JsonNode> entry = entries.next();
+            String name = entry.getKey();
+            checkArgument(
+                    rowType.containsField(name) && !name.equals(vectorField.name()),
+                    "Invalid extra field '%s'. Specify a separate column in the table.",
+                    name);
+            checkArgument(
+                    BitmapGlobalIndexerFactory.IDENTIFIER.equals(entry.getValue().textValue()),
+                    "Unsupported index type %s for extra field '%s'. Supported type: bitmap.",
+                    entry.getValue(),
+                    name);
+            extraFields.add(rowType.getField(name));
+        }
+        return extraFields;
+    }
+
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
@@ -116,6 +157,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         ? null
                         : args.getString(3);
         String optionString = args.isNullAt(4) ? null : args.getString(4);
+        String extraFieldsJson =
+                args.numFields() <= 5 || args.isNullAt(5) ? null : args.getString(5);
 
         LOG.info(
                 "Starting to build index for table {} with partitions: {}", tableIdent, partitions);
@@ -167,20 +210,25 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 indexColumns.stream()
                                         .map(rowType::getField)
                                         .collect(Collectors.toList());
-                        RowType projectedRowType = rowType.project(indexColumns);
-                        RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
-
                         Options userOptions = createUserOptions(table, optionString);
-
                         GlobalIndexBuilderUtils.validateIndexFields(
                                 indexType, indexFields, userOptions);
-
                         GlobalIndexTopologyBuilder topoBuilder =
                                 GlobalIndexTopologyBuilderUtils.createTopoBuilder(
                                         indexType,
                                         GlobalIndexer.resolveOptions(
                                                 indexType, indexFields, userOptions));
+                        if (extraFieldsJson != null) {
+                            checkArgument(
+                                    topoBuilder instanceof CentroidGlobalIndexTopoBuilder
+                                            && indexFields.size() == 1,
+                                    "extra_fields requires centroid sharding and one vector column in index_column.");
+                            indexFields.addAll(
+                                    parseExtraFields(extraFieldsJson, rowType, indexFields.get(0)));
+                        }
 
+                        RowType projectedRowType = new RowType(rowType.isNullable(), indexFields);
+                        RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
                         List<CommitMessage> indexResults =
                                 topoBuilder.buildIndex(
                                         spark(),

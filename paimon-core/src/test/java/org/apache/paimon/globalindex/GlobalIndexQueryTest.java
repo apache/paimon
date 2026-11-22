@@ -31,12 +31,15 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.types.DataField;
@@ -648,6 +651,43 @@ class GlobalIndexQueryTest {
     }
 
     @Test
+    void testManifestFilterMatchesOnlyLeadingFields() {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.rowType()).thenReturn(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        int firstId = rowType.getFields().get(0).id();
+        int secondId = rowType.getFields().get(1).id();
+        IndexManifestEntry composite =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        indexFile("btree", "composite", 0, 99, firstId, new int[] {secondId}));
+        IndexManifestEntry dedicated =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        indexFile("bitmap", "dedicated", 0, 99, secondId, null));
+
+        Predicate suffix = builder.equal(1, 7);
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, suffix)
+                                .test(composite))
+                .isFalse();
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, suffix)
+                                .test(dedicated))
+                .isTrue();
+        Predicate prefix = PredicateBuilder.and(builder.equal(0, 1), suffix);
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.indexFileFilter(table, null, prefix)
+                                .test(composite))
+                .isTrue();
+    }
+
+    @Test
     void testGroupsPreserveIndexTypesRangesAndExtraFields() {
         IndexFileMeta first = indexFile("es-index", "first", 0, 99, 10, new int[] {20});
         IndexFileMeta sameRange = indexFile("es-index", "same-range", 0, 99, 10, new int[] {20});
@@ -659,9 +699,11 @@ class GlobalIndexQueryTest {
                         Arrays.asList(first, sameRange, tail, primary, bitmap));
         assertThat(groups).containsOnlyKeys(10, 20);
         assertThat(groups.get(10)).hasSize(1);
-        assertThat(groups.get(20)).hasSize(2);
+        assertThat(groups.get(20)).hasSize(1);
         IndexMetaFileGroup extra = groups.get(10).get(0);
-        assertThat(groups.get(20).get(1)).isSameAs(extra);
+        assertThat(extra.extraFields(RowType.of(new DataField(20, "extra", DataTypes.INT()))))
+                .extracting(DataField::id)
+                .containsExactly(20);
         assertThat(extra.metas().get("es-index"))
                 .containsOnlyKeys(new Range(0, 99), new Range(100, 199));
         assertThat(extra.metas().get("es-index").get(new Range(0, 99)))
@@ -678,7 +720,7 @@ class GlobalIndexQueryTest {
                                 indexFile("btree", "composite", 0, 99, 10, new int[] {20}),
                                 indexFile("btree", "single", 100, 199, 10, null)));
         assertThat(groups.get(10)).hasSize(2);
-        assertThat(groups.get(20)).hasSize(1);
+        assertThat(groups).doesNotContainKey(20);
     }
 
     @Test

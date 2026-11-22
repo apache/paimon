@@ -26,6 +26,7 @@ import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
+import org.apache.paimon.globalindex.CentroidShardFilterReader;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer.TrainingBatch;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -513,6 +514,34 @@ class CentroidVectorGlobalIndexTest {
                                 Collections.singletonMap("centroid.nprobe", "0"));
                 assertThatThrownBy(() -> fresh.visitVectorSearch(invalid).get())
                         .hasRootCauseInstanceOf(IllegalArgumentException.class);
+            }
+
+            try (GlobalIndexReader pruning =
+                    indexer.createReader(fileReader, metas, rowCount, null, executor)) {
+                int expectedCentroid = centroidByRow[200];
+                ((CentroidShardFilterReader) pruning)
+                        .withShardFilter(
+                                centroid -> {
+                                    RoaringNavigableMap64 matches = new RoaringNavigableMap64();
+                                    if (centroid == expectedCentroid) {
+                                        matches.add(101L * 200);
+                                    }
+                                    return matches;
+                                });
+                opened.clear();
+                BatchVectorSearch query =
+                        new BatchVectorSearch(
+                                queries, 1, "v", Collections.singletonMap("centroid.nprobe", "4"));
+                assertThat(pruning.visitBatchVectorSearch(query).get(30, TimeUnit.SECONDS))
+                        .allSatisfy(
+                                result ->
+                                        assertThat(result.get().results())
+                                                .containsExactly(101L * 200));
+                assertThat(opened).hasSize(2);
+                for (GlobalIndexIOMeta file : metas.subList(1, metas.size())) {
+                    assertThat(opened.containsKey(file.filePath()))
+                            .isEqualTo(((CentroidIndexFile) file).centroid() == expectedCentroid);
+                }
             }
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();

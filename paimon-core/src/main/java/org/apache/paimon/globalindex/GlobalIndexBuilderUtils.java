@@ -178,7 +178,9 @@ public class GlobalIndexBuilderUtils {
             if (meta.indexFieldId() != indexFieldId) {
                 continue;
             }
-            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)) {
+            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)
+                    && !(extraFieldIds == null
+                            && CentroidIndexMeta.hasScalarIndexes(meta.indexMeta()))) {
                 continue;
             }
             entries.add(entry);

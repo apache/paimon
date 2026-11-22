@@ -1577,6 +1577,13 @@ public class VectorSearchBuilderTest extends TableTestBase {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         assertThat(ids).isEmpty();
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE.key(), "full");
+        searchBuilder.withOptions(options);
+        vectorPlan = searchBuilder.newVectorScan().scan();
+        assertThat(searchBuilder.newVectorRead().read(vectorPlan).results()).containsExactly(8L);
     }
 
     @Test
