@@ -154,8 +154,8 @@ index manifest). The descriptor starts with a 14-byte header.
 | Byte offset | Size in bytes | Field |
 | --- | --- | --- |
 | 0 | 8 | ASCII marker `PAIMCENT` |
-| 8 | 1 | ASCII role `R`, `S`, or `B` |
-| 9 | 1 | Numeric format version `1` |
+| 8 | 1 | Numeric format version `1` |
+| 9 | 1 | ASCII role `R`, `S`, or `B` |
 | 10 | 4 | Outer `nlist` for `R`, or zero-based centroid ID for `S` and `B`, stored as a big-endian `int32` |
 
 The value ranges from `0` to `2,147,483,647`. The role also determines the payload starting at byte 14.

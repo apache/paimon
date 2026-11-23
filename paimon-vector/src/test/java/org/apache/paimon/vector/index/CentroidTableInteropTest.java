@@ -81,7 +81,7 @@ class CentroidTableInteropTest {
         assertThat(metric(emptyRouter)).isEqualTo("l2");
         IndexFileMeta emptyShard =
                 files.stream()
-                        .filter(file -> descriptor(file)[8] == 'S' && file.rowCount() == 0)
+                        .filter(file -> descriptor(file)[9] == 'S' && file.rowCount() == 0)
                         .findFirst()
                         .get();
         assertThat(descriptor(emptyShard)).hasSize(14);
@@ -128,7 +128,7 @@ class CentroidTableInteropTest {
                 .isEqualTo(metricCode);
         List<IndexFileMeta> populated =
                 files.stream()
-                        .filter(file -> descriptor(file)[8] == 'S' && file.rowCount() > 0)
+                        .filter(file -> descriptor(file)[9] == 'S' && file.rowCount() > 0)
                         .collect(Collectors.toList());
         assertThat(populated)
                 .isNotEmpty()

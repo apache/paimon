@@ -54,7 +54,7 @@ class CentroidIndexMetaTest {
                                 .lowerCase()
                                 .decode(
                                         "5041494d43454e54" // PAIMCENT
-                                                + "5301" // Shard role and version
+                                                + "0153" // Version and shard role
                                                 + "00000004" // Centroid ID
                                                 + "2a")); // Payload
     }
@@ -86,11 +86,11 @@ class CentroidIndexMetaTest {
         byte[] meta = CentroidIndexMeta.shard(new ResultEntry("f", 1, new byte[] {42}), 3).meta();
         assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, Arrays.copyOf(meta, 13)))
                 .hasMessageContaining("Truncated");
-        meta[9] = 2;
+        meta[8] = 2;
         assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, meta))
                 .hasMessageContaining("version");
-        meta[9] = 1;
-        meta[8] = 2;
+        meta[8] = 1;
+        meta[9] = 2;
         assertThatThrownBy(() -> CentroidIndexMeta.file(path, 10, 1, meta))
                 .hasMessageContaining("role");
     }
@@ -106,7 +106,7 @@ class CentroidIndexMetaTest {
         assertThat(decoded.routingModel()).isFalse();
         assertThat(decoded.centroid()).isEqualTo(4);
         assertThat(decoded.metadata()).containsExactly(9);
-        assertThat(bitmap.meta()[9]).isEqualTo((byte) 1);
+        assertThat(bitmap.meta()[8]).isEqualTo((byte) 1);
 
         ResultEntry emptyRouter = CentroidIndexMeta.router(new ResultEntry("router", 0, null), 0);
         GlobalIndexMeta meta = new GlobalIndexMeta(0, 9, 1, new int[] {2}, emptyRouter.meta());

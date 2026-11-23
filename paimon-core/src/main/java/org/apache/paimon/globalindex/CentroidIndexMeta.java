@@ -83,9 +83,9 @@ public final class CentroidIndexMeta {
 
     private static byte role(byte[] meta) {
         checkArgument(meta.length >= HEADER_SIZE, "Truncated centroid metadata.");
-        byte version = meta[MAGIC.length + 1];
+        byte version = meta[MAGIC.length];
         checkArgument(version == VERSION, "Unsupported centroid metadata version: %s.", version);
-        byte role = meta[MAGIC.length];
+        byte role = meta[MAGIC.length + 1];
         checkArgument(
                 role == ROUTER || role == SHARD || role == BITMAP, "Invalid centroid file role.");
         return role;
@@ -109,7 +109,7 @@ public final class CentroidIndexMeta {
         ByteBuffer out =
                 ByteBuffer.allocate(
                         Math.addExact(HEADER_SIZE, payload == null ? 0 : payload.length));
-        out.put(MAGIC).put(role).put(VERSION).putInt(countOrId);
+        out.put(MAGIC).put(VERSION).put(role).putInt(countOrId);
         if (payload != null) {
             out.put(payload);
         }

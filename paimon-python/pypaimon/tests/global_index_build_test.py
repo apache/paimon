@@ -263,7 +263,7 @@ class GlobalIndexBuildTest(
             (b'S', 1, 0, struct.pack('>i', 1)),
             (b'B', 1, 0, b''),
         ):
-            header = struct.pack('>8scBi', b'PAIMCENT', role, 1, number)
+            header = struct.pack('>8sBci', b'PAIMCENT', 1, role, number)
             centroid_files.append(entry(role.decode('ascii'), rows, header + payload, [status_id]))
 
         commit = table.new_batch_write_builder().new_commit()
