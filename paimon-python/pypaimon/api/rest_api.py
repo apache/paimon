@@ -88,9 +88,9 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
-        client_user_agent = self._configured_user_agent(options.to_map())
+        client_options = options.to_map()
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
-        self._set_user_agent(base_headers, client_user_agent)
+        self._set_user_agent(base_headers, self._configured_user_agent(client_options))
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
@@ -112,14 +112,12 @@ class RESTApi:
             base_headers.update(
                 RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
             )
-            override_user_agent = self._configured_user_agent(config_response.overrides or {})
-            default_user_agent = self._configured_user_agent(config_response.defaults or {})
-            if override_user_agent is not None:
-                configured_user_agent = override_user_agent
-            elif client_user_agent is not None:
-                configured_user_agent = client_user_agent
-            else:
-                configured_user_agent = default_user_agent
+            configured_user_agent = self._configured_user_agent(
+                options.to_map(),
+                config_response.defaults or {},
+                client_options,
+                config_response.overrides or {},
+            )
             self._set_user_agent(base_headers, configured_user_agent)
 
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
@@ -127,11 +125,15 @@ class RESTApi:
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
     @classmethod
-    def _configured_user_agent(cls, options: Dict[str, str]) -> Optional[str]:
+    def _configured_user_agent(cls, effective_options: Dict[str, str], *key_layers: Dict[str, str]) -> Optional[str]:
         user_agent_value = None
-        for key, value in options.items():
-            if key.lower() == (cls.HEADER_PREFIX + "User-Agent").lower() and value is not None:
-                user_agent_value = str(value)
+        # Resolve casing ties in precedence order, using only options that survived the merge.
+        for layer in key_layers or (effective_options,):
+            for key in layer:
+                if key.startswith(cls.HEADER_PREFIX) and key[len(cls.HEADER_PREFIX):].lower() == "user-agent":
+                    value = effective_options.get(key)
+                    if value is not None:
+                        user_agent_value = str(value)
         return user_agent_value
 
     @staticmethod

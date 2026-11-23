@@ -105,6 +105,20 @@ class UserAgentTest(unittest.TestCase):
                               overrides={"header.User-Agent": None})
         self.assertEqual("client/1", self.prepared_user_agent(api))
 
+    def test_same_key_none_override_clears_default_user_agent(self):
+        api = self.create_api(defaults={"header.User-Agent": "default/1"},
+                              overrides={"header.User-Agent": None})
+        expected = "pypaimon/2.3.0(python-requests/{})".format(requests.__version__)
+        self.assertEqual(expected, self.prepared_user_agent(api))
+        with patch("pypaimon.common.user_agent.identity", return_value="pypaimon/2.3.0"):
+            restored = RESTApi(api.options, config_required=False)
+        self.assertEqual(expected, self.prepared_user_agent(restored))
+
+    def test_server_override_requires_literal_header_prefix(self):
+        api = self.create_api({"header.User-Agent": "client/1"},
+                              overrides={"Header.User-Agent": "alias/1"})
+        self.assertEqual("client/1", self.prepared_user_agent(api))
+
 
 if __name__ == "__main__":
     unittest.main()
