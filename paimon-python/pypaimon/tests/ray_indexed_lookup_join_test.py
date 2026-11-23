@@ -405,3 +405,85 @@ def test_ray_pandas_source(lookup, ray_cluster, empty):
     assert Counter(tuple(row.values()) for row in result.take_all()) == (
         Counter() if empty else Counter({(1, "a"): 2, (1, "b"): 2}))
     assert result.schema().names == ["col00", "value"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_ray_sparse_pandas_payload_across_blocks(lookup, ray_cluster, reverse):
+    import pandas as pd
+    table, options = lookup
+    table.create_global_index("col0", "btree")
+    blocks = [
+        pd.DataFrame({"col00": [1], "label": ["x"]}),
+        pd.DataFrame({"col00": [2], "label": [None]}),
+    ]
+    source = ray_cluster.data.from_pandas(blocks[::-1] if reverse else blocks)
+    result = indexed_lookup_join(source, "default.A", options,
+                                 source_on="col00", lookup_on="col0", batch_size=1)
+    assert Counter(tuple(row.values()) for row in result.take_all()) == Counter({
+        (1, "x", "a"): 1, (1, "x", "b"): 1, (2, None, "c"): 1})
+
+
+@pytest.mark.parametrize("kind", ["btree", "bitmap"])
+@pytest.mark.parametrize("shards, key, expected", [(8, 1, 8), (80, 2, 0)])
+@pytest.mark.parametrize("cache_bytes", [128, 32 * 1024 * 1024], ids=["eviction", "resident"])
+def test_repeated_lookup_reuses_index_blocks(lookup, kind, shards, key, expected, cache_bytes, monkeypatch):
+    import importlib
+    from pypaimon.common.file_io import pread
+    from pypaimon.utils.file_type import FileType
+    module = importlib.import_module("pypaimon.ray.indexed_lookup_join")
+    monkeypatch.setattr(module, "_INDEX_CACHE_BYTES", cache_bytes)
+    table, options = lookup
+    catalog = CatalogFactory.create(options)
+    catalog.create_table("default.cached", Schema.from_pyarrow_schema(
+        SCHEMA, partition_keys=["value"], options=table.options.options.to_map()), False)
+    table = catalog.get_table("default.cached")
+    write_rows(table, [{"col0": value, "value": str(partition)}
+                       for partition in range(shards) for value in [1, 3]])
+    table.create_global_index("col0", kind)
+    actor = worker(table)
+    source = pa.table({"col00": [key], "label": ["source"]})
+    original = table.file_io.new_input_stream
+    opened = []
+    reads = []
+
+    def count_open(path):
+        stream = original(path)
+        if FileType.classify(path) == FileType.GLOBAL_INDEX:
+            opened.append(path)
+
+            def read_at(size, offset):
+                reads.append((path, offset, size))
+                return pread(stream, size, offset)
+
+            return SimpleNamespace(read_at=read_at, close=stream.close)
+        return stream
+
+    try:
+        with patch.object(table.file_io, "new_input_stream", count_open):
+            for _ in range(30):
+                assert sum(batch.num_rows for batch in actor(source)) == expected
+        if cache_bytes == 128:
+            assert len(opened) > shards
+        else:
+            assert len(opened) == shards, (len(opened), shards)
+            assert len(reads) == shards, (len(reads), shards)
+        assert actor.scanner.table.file_io._cache._current_size <= cache_bytes
+    finally:
+        actor.close()
+
+
+@pytest.mark.parametrize("source", [
+    pa.table({"col00": pa.array([None]), "label": ["x"]}),
+    pa.table({"col00": pa.array([1], type=pa.int32()), "label": ["x"]}),
+    pa.table({"col00": [1], "label": [42]}),
+])
+def test_null_payload_normalization_does_not_coerce_keys_or_other_types(lookup, source):
+    table, _ = lookup
+    table.create_global_index("col0", "btree")
+    actor = worker(table)
+    try:
+        with patch.object(actor.scanner, "scan", side_effect=AssertionError("invalid schema reached index")):
+            with pytest.raises(ValueError, match="schema or key type"):
+                list(actor(source))
+    finally:
+        actor.close()

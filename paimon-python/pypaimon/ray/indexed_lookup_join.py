@@ -30,6 +30,7 @@ from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 
 
 _MAX_OPEN_INDEX_FILES = 16
+_INDEX_CACHE_BYTES = 32 * 1024 * 1024
 
 
 def _prepare_lookup(table, key):
@@ -93,8 +94,14 @@ class _LookupIndex:
             is_supported_scalar_index,
         )
         from pypaimon.index.index_file_handler import IndexFileHandler
+        from pypaimon.filesystem.caching_file_io import CachingFileIO, LocalMemoryCacheManager
+        from pypaimon.utils.file_type import FileType
 
-        self.table = table
+        # Cache only this scanner's reads, including externally named index files.
+        # Scoped scanners still close remote streams after each bounded group.
+        self.table = table._copy_with_snapshot(table._read_snapshot)
+        self.table.file_io = CachingFileIO(
+            table.file_io, LocalMemoryCacheManager(_INDEX_CACHE_BYTES, 64 * 1024), set(FileType))
         field_id = table.field_dict[key].id
         self.files = [entry.index_file for entry in IndexFileHandler(table).scan(
             table._read_snapshot, lambda entry: is_supported_scalar_index(entry.index_file)
@@ -139,7 +146,18 @@ class _LookupBatch:
 
     def __call__(self, batch):
         if batch.schema != self.source_schema:
-            raise ValueError("Source schema or key type changed during indexed_lookup_join")
+            if (batch.schema.names != self.source_schema.names
+                    or batch.schema.field(self.source_on).type != self.source_schema.field(self.source_on).type):
+                raise ValueError("Source schema or key type changed during indexed_lookup_join")
+            try:
+                # Arrow's default unification promotes only null payload types,
+                # including when schema inference saw the all-null block first.
+                self.source_schema = pa.unify_schemas([self.source_schema, batch.schema])
+            except (pa.ArrowInvalid, pa.ArrowTypeError) as error:
+                raise ValueError("Source schema or key type changed during indexed_lookup_join") from error
+            batch = batch.cast(self.source_schema)
+            self.output_schema = _output_schema(
+                self.source_schema, self.table, self.source_on, self.lookup_on, self.projection)
         keys = pc.unique(pc.drop_null(batch[self.source_on])).to_pylist()
         if not keys:
             yield self.output_schema.empty_table()

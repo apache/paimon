@@ -40,6 +40,9 @@ converted to Arrow before checking key types. Schema inference may read source
 batches, but lookup execution starts only when the returned Dataset is consumed.
 Empty pandas sources need explicit key dtypes, such as `pd.Series(dtype="Int64")`;
 an empty `object` column does not establish an integer or string key type.
+All-null payload fields are normalized to a compatible Arrow payload type,
+including when the all-null block comes first. Join-key types must still match
+exactly, and incompatible non-null payload types are rejected.
 
 ```python
 from pypaimon.ray import indexed_lookup_join
@@ -76,6 +79,8 @@ files available until execution finishes. Actor workers reuse the table and
 FileIO, deduplicate lookup requests within each batch, and join the matches
 back to the original source rows. Workers cache index metadata and scan at most
 16 index files at a time, closing their readers before opening the next group.
+Each actor reuses a 32 MiB LRU cache of 64 KiB index blocks across groups and
+batches, so closing a reader does not discard cached footer or index data.
 `batch_size` bounds source rows per lookup;
 `output_batch_size` (default 4096) bounds emitted batches. A hot key can still
 require many matching lookup rows in memory, so choose this path for selective
