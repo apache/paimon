@@ -371,6 +371,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
                 msg.compactIncrement().compactAfter().forEach(collector);
+                msg.compactIncrement().changelogFiles().forEach(collector);
                 msg.compactIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
