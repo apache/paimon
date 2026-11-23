@@ -526,10 +526,10 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         session.udf.register(
           "ctas_interrupt_input",
           (id: Long) => {
-            // Before Spark 4.0 (SPARK-44818), a kill that arrives before Task.run records the
-            // task thread only marks the TaskContext and never interrupts the thread. Poll the
-            // mark as well, otherwise the cancelled task keeps a local[2] slot and can starve
-            // the later cases.
+            // Before Spark 4.0 (SPARK-44818), a kill that lands after the executor's kill check
+            // but before Task.run records the task thread only marks the TaskContext: the thread
+            // is never interrupted and the task keeps running. Poll the mark as well, otherwise
+            // the cancelled task keeps a local[2] slot and can starve the later cases.
             val context = TaskContext.get()
             val deadline = System.currentTimeMillis() + 30000
             while (System.currentTimeMillis() < deadline) {
