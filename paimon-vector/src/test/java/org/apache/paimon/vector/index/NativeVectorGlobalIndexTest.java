@@ -52,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -544,6 +545,16 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
+    public void testMetaSerializationIsEmptyMap() throws IOException {
+        VectorIndexMeta meta = new VectorIndexMeta();
+        byte[] serialized = meta.serialize();
+        VectorIndexMeta deserialized = VectorIndexMeta.deserialize(serialized);
+
+        assertThat(new String(serialized, StandardCharsets.UTF_8)).isEqualTo("{}");
+        assertThat(new String(deserialized.serialize(), StandardCharsets.UTF_8)).isEqualTo("{}");
+    }
+
+    @Test
     public void testVectorSearchParameterParsing() {
         Map<String, String> parameters = new HashMap<>();
         parameters.put("ivf.nprobe", "24");
@@ -860,7 +871,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        assertThat(results).singleElement().satisfies(entry -> assertThat(entry.meta()).isNull());
+        assertThat(results)
+                .singleElement()
+                .satisfies(entry -> assertThat(entry.meta()).containsExactly('{', '}'));
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);

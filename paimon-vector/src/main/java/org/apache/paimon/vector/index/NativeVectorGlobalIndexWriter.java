@@ -404,7 +404,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            byte[] descriptor = null;
+            byte[] descriptor = centroidShard ? null : new VectorIndexMeta().serialize();
             if (header != null) {
                 try (VectorIndexReader reader =
                         new VectorIndexReader(
