@@ -1528,6 +1528,8 @@ object MergeIntoPaimonDataEvolutionTable {
               case _: FallbackReadFileStoreTable => None
               case source: FileStoreTable
                   if source.primaryKeys().isEmpty && identity(source) != identity(target) &&
+                    !source.coreOptions().scanIgnoreLostFile() &&
+                    !source.coreOptions().scanIgnoreCorruptFile() &&
                     Set(
                       CoreOptions.StartupMode.LATEST_FULL,
                       CoreOptions.StartupMode.LATEST,

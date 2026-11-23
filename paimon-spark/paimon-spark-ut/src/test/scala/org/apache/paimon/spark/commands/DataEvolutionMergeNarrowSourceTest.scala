@@ -231,6 +231,20 @@ class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with Adapti
     }
   }
 
+  test("pin narrow source falls back when reads can skip source files") {
+    for (option <- Seq("scan.ignore-lost-files", "scan.ignore-corrupt-files")) {
+      withTables() {
+        sql(s"ALTER TABLE source SET TBLPROPERTIES ('$option'='true')")
+        sql("INSERT INTO source VALUES (1,10,'source')")
+        val plan = sql("SELECT * FROM source").queryExecution.analyzed
+        assert(
+          MergeIntoPaimonDataEvolutionTable
+            .pinNarrowSource(plan, createRelationV2("target"))
+            .isEmpty)
+      }
+    }
+  }
+
   for (rename <- Seq(true, false)) {
     test(s"pin narrow source falls back after a schema-only change: rename=$rename") {
       withTables() {
