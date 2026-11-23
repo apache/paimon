@@ -946,6 +946,11 @@ public class CDCSourceSplitReaderTest {
         }
 
         @Override
+        public boolean isTableAvailable(Identifier identifier) {
+            return true;
+        }
+
+        @Override
         public @Nullable TableSchema getTableSchema(
                 Identifier identifier, @Nullable Long schemaId) {
             return TableSchema.create(1L, SCHEMA);

@@ -206,7 +206,16 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                     convertPaimonSchemaToFlinkCDCSchema(getTableSchema(identifier, schemaId)));
         }
 
+        public boolean isTableAvailable(Identifier identifier) {
+            return getTable(identifier, true) != null;
+        }
+
         private FileStoreTable getTable(Identifier identifier) {
+            return getTable(identifier, false);
+        }
+
+        @Nullable
+        private FileStoreTable getTable(Identifier identifier, boolean ignoreUnavailable) {
             if (tableMap.containsKey(identifier)) {
                 return tableMap.get(identifier);
             }
@@ -215,11 +224,18 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             try {
                 table = catalog.getTable(identifier);
             } catch (Catalog.TableNotExistException e) {
+                if (ignoreUnavailable) {
+                    return null;
+                }
                 throw new RuntimeException(e);
             }
 
-            // As the table should have just been checked by the enumerator, it is supposed to exist
-            // and be a FileStoreTable.
+            if (ignoreUnavailable && !(table instanceof FileStoreTable)) {
+                return null;
+            }
+
+            // Cache only available tables so a newly discovered table can be loaded after an
+            // earlier lookup found it missing.
             tableMap.put(identifier, (FileStoreTable) table);
             return (FileStoreTable) table;
         }

@@ -46,6 +46,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CDCSource.TableManager}. */
 public class CDCSourceTableManagerTest {
@@ -81,6 +82,39 @@ public class CDCSourceTableManagerTest {
     public void afterEach() throws Exception {
         ioManager.close();
         catalog.close();
+    }
+
+    @Test
+    public void testMissingTableIsNotCached() throws Exception {
+        CDCSource.TableManager tableManager = createTableManager(1, 1, 1);
+        catalog.dropTable(IDENTIFIER, false);
+        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isFalse();
+        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isFalse();
+
+        catalog.createTable(
+                IDENTIFIER, Schema.newBuilder().column("v0", DataTypes.BIGINT()).build(), false);
+        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isTrue();
+        assertThat(tableManager.getTableSchema(IDENTIFIER, 0L).id()).isZero();
+    }
+
+    @Test
+    public void testAvailabilityPropagatesCatalogErrors() {
+        Catalog failingCatalog =
+                new DelegateCatalog(catalog) {
+                    @Override
+                    public CatalogLoader catalogLoader() {
+                        return wrapped.catalogLoader();
+                    }
+
+                    @Override
+                    public Table getTable(Identifier identifier) {
+                        throw new IllegalStateException("catalog unavailable");
+                    }
+                };
+        CDCSource.TableManager tableManager = createTableManager(failingCatalog, 1, 1, 1);
+        assertThatThrownBy(() -> tableManager.isTableAvailable(IDENTIFIER))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("catalog unavailable");
     }
 
     @Test
