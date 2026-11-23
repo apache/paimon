@@ -49,8 +49,10 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.ScoreRecordIterator;
+import org.apache.paimon.reader.ScoreRecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -127,6 +129,38 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
         assertThat(collect(table.copy(tags).newReadBuilder()))
                 .containsExactly(row(2, null, "new"), row(2, null, "new"));
         assertThat(collect(table.newReadBuilder())).hasSize(3);
+
+        ReadBuilder builder =
+                diff(table, "1,2")
+                        .withReadType(
+                                SpecialFields.rowTypeWithRowId(table.rowType())
+                                        .project(Arrays.asList("f0", SpecialFields.ROW_ID.name())));
+        IndexedSplit split = (IndexedSplit) builder.newScan().plan().splits().get(0);
+        DataSplit data = split.dataSplit();
+        Path expectedPath = new Path(data.bucketPath(), data.dataFiles().get(0).fileName());
+        try (RecordReader<InternalRow> reader = builder.newRead().createReader(split)) {
+            assertThat(reader).isInstanceOf(ScoreRecordReader.class);
+            int rowId = builder.readType().getFieldIndex(SpecialFields.ROW_ID.name());
+            RecordReader.RecordIterator<Integer> selected =
+                    reader.readBatch()
+                            .filter(row -> row.getLong(rowId) == 2)
+                            .transform(row -> row.getInt(0));
+            try {
+                assertThat(selected)
+                        .isInstanceOf(FileRecordIterator.class)
+                        .isInstanceOf(ScoreRecordIterator.class);
+                FileRecordIterator<Integer> file = (FileRecordIterator<Integer>) selected;
+                ScoreRecordIterator<Integer> score = (ScoreRecordIterator<Integer>) selected;
+                assertThat(selected.next()).isEqualTo(2);
+                assertThat(file.filePath()).isEqualTo(expectedPath);
+                assertThat(file.returnedPosition()).isEqualTo(1L);
+                assertThat(score.returnedRowId()).isEqualTo(2L);
+                assertThat(score.returnedScore()).isNaN();
+                assertThat(selected.next()).isNull();
+            } finally {
+                selected.releaseBatch();
+            }
+        }
     }
 
     @Test
@@ -527,7 +561,11 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
         options.put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b");
         options.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 b");
         table = table.copy(options);
-        assertThat(diff(table, "2,5").newScan().plan().splits()).hasSize(2);
+        List<Split> splits = diff(table, "2,5").newScan().plan().splits();
+        assertThat(splits).hasSize(2);
+        assertThat(splits)
+                .anySatisfy(split -> assertThat(split.mergedRowCount()).isEmpty())
+                .anySatisfy(split -> assertThat(split.mergedRowCount()).hasValue(1));
         assertThat(collect(diff(table, "2,5").withLimit(1))).containsExactly(row(1, "b", "new"));
     }
 
