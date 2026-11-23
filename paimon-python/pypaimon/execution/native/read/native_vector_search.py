@@ -17,6 +17,8 @@
 
 """Local vector search through the Rust core Scan -> Plan -> Read path."""
 
+from importlib import import_module
+
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vindex_options import is_multi_vector_type
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -27,8 +29,9 @@ from pypaimon.execution.native.read.native_search_plan import _native_prefilter_
 
 
 def _has_vector_layout_api():
-    from pypaimon_rust.datafusion import VectorSearchBuilder
-    return hasattr(VectorSearchBuilder, 'with_multi_vector')
+    sdk = import_module('pypaimon_rust.datafusion')
+    # Check optional exports without invoking module-level attribute resolution.
+    return hasattr(vars(sdk).get('VectorSearchBuilder'), 'with_multi_vector')
 
 
 def _filesystem_vector_search_supported(table):

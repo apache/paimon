@@ -157,10 +157,14 @@ class _FilesystemVectorRead(_SearchRead):
                 return self._native_reader
         return self._python_reader()
 
+
+class _FilesystemSingleVectorRead(_FilesystemVectorRead):
     def read(self, splits):
         splits = list(splits)
         return self._reader_for(splits=splits).read(splits)
 
+
+class _FilesystemBatchVectorRead(_FilesystemVectorRead):
     def read_batch(self, splits):
         splits = list(splits)
         return self._reader_for(splits=splits).read_batch(splits)
@@ -204,7 +208,8 @@ def create_vector_read(builder, batch=False):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_read
     if _filesystem_vector_layout_dispatch(builder):
-        return _FilesystemVectorRead(partial(native_vector_read, builder, batch), python_factory)
+        reader_type = _FilesystemBatchVectorRead if batch else _FilesystemSingleVectorRead
+        return reader_type(partial(native_vector_read, builder, batch), python_factory)
     native = native_vector_read(builder, batch)
     if native is None:
         return python_factory()

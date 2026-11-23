@@ -102,12 +102,14 @@ def test_centroid_shards_and_bitmap_filter(catalog):
     ])
     options = {'centroid.nprobe': 2, 'global-index.filter.refine-from-data': False}
     single = _single(table, [0, 0], 2).with_filter(predicate).with_options(options)
+    assert not hasattr(single.new_vector_search_read(), 'read_batch')
     assert _ids(table, single.execute_local()) == [1, 2]
     batch = (table.new_batch_vector_search_builder().with_vector_column('embedding').with_limit(1)
              .with_query_vectors([[0, 0], [21, 0]]).with_filter(predicate).with_options(options))
     plan = pickle.loads(pickle.dumps(batch.new_vector_search_scan().scan()))
     assert [_ids(table, result) for result in batch.execute_batch_local()] == [[1], [2]]
     reader = batch.new_batch_vector_search_read()
+    assert not hasattr(reader, 'read')
     assert [_ids(table, result) for result in reader.read_batch_plan(plan)] == [[1], [2]]
     assert [_ids(table, result) for result in reader.read_batch(iter(plan.splits()))] == [[1], [2]]
 
