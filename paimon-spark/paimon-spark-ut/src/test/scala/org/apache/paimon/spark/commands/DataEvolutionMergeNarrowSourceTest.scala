@@ -34,10 +34,12 @@ import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
 import org.apache.spark.storage.RDDBlockId
 
+import java.io.FileNotFoundException
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
+import scala.util.{Failure, Success, Try}
 
 class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
@@ -169,6 +171,45 @@ class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with Adapti
         dataset.unpersist(blocking = true)
       }
       assert(spark.sparkContext.getPersistentRDDs.keySet == persistedBefore)
+    }
+  }
+
+  test("pin narrow source preserves snapshot contents when rollback reuses the ID") {
+    withTables() {
+      sql("INSERT INTO source VALUES (1,100,'matched')")
+      val previous = loadTable("source").snapshotManager().latestSnapshotId()
+      sql("INSERT INTO source VALUES (4,400,'old')")
+      val original = loadTable("source").snapshotManager().latestSnapshot()
+      val plan = sql("SELECT * FROM source").queryExecution.analyzed
+      val pinned = MergeIntoPaimonDataEvolutionTable
+        .pinNarrowSource(plan, createRelationV2("target"))
+        .get
+      checkAnswer(createDataset(spark, pinned), Seq(Row(1, 100, "matched"), Row(4, 400, "old")))
+
+      loadTable("source").rollbackTo(previous)
+      spark.catalog.refreshTable("source")
+      sql("INSERT INTO source VALUES (4,499,'replacement')")
+      val replacement = loadTable("source").snapshotManager().latestSnapshot()
+      assert(replacement.id() == original.id())
+      assert(replacement.schemaId() == original.schemaId())
+      assert(replacement.deltaManifestList() != original.deltaManifestList())
+      checkAnswer(
+        sql("SELECT * FROM source"),
+        Seq(Row(1, 100, "matched"), Row(4, 499, "replacement")))
+      assert(fileTable(pinned).snapshotManager().snapshot(original.id()) == original)
+      // The old files may have been deleted by rollback, but the reread must never
+      // substitute the replacement contents, even though the IDs and schemas match.
+      Try(createDataset(spark, pinned).collect().toSet) match {
+        case Success(rows) => assert(rows == Set(Row(1, 100, "matched"), Row(4, 400, "old")))
+        case Failure(error) =>
+          assert(
+            Iterator
+              .iterate[Throwable](error)(_.getCause)
+              .takeWhile(_ != null)
+              .exists(_.isInstanceOf[FileNotFoundException]),
+            s"Expected old snapshot files to be unavailable, got $error"
+          )
+      }
     }
   }
 

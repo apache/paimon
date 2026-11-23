@@ -24,11 +24,13 @@ import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.fs.Path
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -1546,11 +1548,16 @@ object MergeIntoPaimonDataEvolutionTable {
                       options.put(
                         CoreOptions.SCAN_MODE.key(),
                         CoreOptions.StartupMode.FROM_SNAPSHOT.toString)
-                      val pinned = copied.copy(options)
                       // A schema-only change is newer than the data snapshot's read schema.
-                      if (pinned.schema().id() != source.schema().id()) {
+                      if (snapshot.schemaId() != source.schema().id()) {
                         None
                       } else {
+                        // Rollback can reuse a snapshot ID. Keep the resolved snapshot private to
+                        // this MERGE so both scans plan from the same manifest lists.
+                        val pinned = copied.copyWithoutTimeTravel(options)
+                        val cache = Caffeine.newBuilder().build[Path, Snapshot]()
+                        cache.put(pinned.snapshotManager().snapshotPath(snapshot.id()), snapshot)
+                        pinned.setSnapshotCache(cache)
                         Some(
                           SparkShimLoader.shim.copyDataSourceV2Relation(
                             relation,
