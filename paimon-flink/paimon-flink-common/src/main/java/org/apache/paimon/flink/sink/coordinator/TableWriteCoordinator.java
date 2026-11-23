@@ -25,12 +25,16 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -57,6 +61,7 @@ public class TableWriteCoordinator {
     private final FileStoreTable table;
     private final Map<String, Long> latestCommittedIdentifiers;
     private final FileStoreScan scan;
+    @Nullable private final ScanMetrics scanMetrics;
     private final IndexFileHandler indexFileHandler;
     private final int pageSize;
     private final boolean prefetchManifests;
@@ -65,10 +70,19 @@ public class TableWriteCoordinator {
     private volatile Snapshot snapshot;
 
     public TableWriteCoordinator(FileStoreTable table) {
+        this(table, null);
+    }
+
+    public TableWriteCoordinator(FileStoreTable table, @Nullable MetricRegistry metricRegistry) {
         this.table = table;
         checkNotNull(table.getManifestCache());
         this.latestCommittedIdentifiers = new ConcurrentHashMap<>();
+        this.scanMetrics =
+                metricRegistry == null ? null : new ScanMetrics(metricRegistry, table.name());
         this.scan = table.store().newScan();
+        if (scanMetrics != null) {
+            scan.withMetrics(scanMetrics);
+        }
         if (table.coreOptions().manifestDeleteFileDropStats()) {
             scan.dropStats();
         }
@@ -107,6 +121,9 @@ public class TableWriteCoordinator {
             // used so the shared request `scan`'s bucket/partition state never narrows the
             // warm-up.
             FileStoreScan prefetchScan = table.store().newScan().withSnapshot(snapshot);
+            if (scanMetrics != null) {
+                prefetchScan.withMetrics(scanMetrics);
+            }
             if (table.coreOptions().manifestDeleteFileDropStats()) {
                 prefetchScan.dropStats();
             }

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -32,17 +33,26 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
+import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.metrics.MetricRegistry;
 import org.apache.flink.runtime.metrics.groups.InternalOperatorCoordinatorMetricGroup;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.runtime.metrics.groups.InternalSplitEnumeratorMetricGroup;
 import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.metrics.groups.JobManagerOperatorMetricGroup;
@@ -52,6 +62,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -148,6 +160,88 @@ public class FileStoreSourceMetricsTest {
     }
 
     @Test
+    public void monitorSourceScanMetricsTest() throws Exception {
+        writeOnce(table);
+        MetricListener metrics = new MetricListener();
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false);
+        try (SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(readerContext(metrics))) {
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isZero();
+            assertThat(scanGauge(metrics, "lastScannedManifests").getValue()).isZero();
+            assertThat(scanDuration(metrics).getCount()).isZero();
+
+            TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+            reader.start();
+            reader.pollNext(output);
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isEqualTo(1L);
+            assertThat(scanGauge(metrics, "lastScannedManifests").getValue()).isEqualTo(1L);
+            assertThat(scanGauge(metrics, "lastScanResultedTableFiles").getValue()).isEqualTo(1L);
+            assertThat(scanGauge(metrics, "lastScanDuration").getValue())
+                    .isGreaterThanOrEqualTo(0L);
+            assertThat(scanDuration(metrics).getCount()).isEqualTo(1);
+
+            writeAgain(table);
+            reader.pollNext(output);
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, "lastScannedManifests").getValue()).isEqualTo(1L);
+            assertThat(scanGauge(metrics, "lastScanResultedTableFiles").getValue()).isEqualTo(1L);
+            assertThat(scanDuration(metrics).getCount()).isEqualTo(2);
+            assertThat(output.getEmittedRecords()).hasSize(2);
+        }
+    }
+
+    @Test
+    public void boundedMonitorSourceScanMetricsTest() throws Exception {
+        writeOnce(table);
+        writeAgain(table);
+        MetricListener metrics = new MetricListener();
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, true);
+        try (SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(readerContext(metrics))) {
+            reader.start();
+            TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+            assertThat(reader.pollNext(output)).isEqualTo(InputStatus.END_OF_INPUT);
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, "lastScannedManifests").getValue()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, "lastScanResultedTableFiles").getValue()).isEqualTo(2L);
+            assertThat(scanDuration(metrics).getCount()).isEqualTo(1);
+            assertThat(output.getEmittedRecords()).isNotEmpty();
+        }
+    }
+
+    @Test
+    public void restoredMonitorSourceScanMetricsTest() throws Exception {
+        writeOnce(table);
+        List<SimpleSourceSplit> checkpoint;
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false);
+        try (SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(readerContext(new MetricListener()))) {
+            reader.start();
+            reader.pollNext(new TestingReaderOutput<>());
+            checkpoint = reader.snapshotState(1L);
+        }
+
+        writeAgain(table);
+        MetricListener metrics = new MetricListener();
+        MonitorSource restoredSource = new MonitorSource(table.newReadBuilder(), 10, false, false);
+        try (SourceReader<Split, SimpleSourceSplit> reader =
+                restoredSource.createReader(readerContext(metrics))) {
+            reader.addSplits(checkpoint);
+            reader.start();
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isZero();
+            assertThat(scanDuration(metrics).getCount()).isZero();
+
+            TestingReaderOutput<Split> output = new TestingReaderOutput<>();
+            reader.pollNext(output);
+            assertThat(scanGauge(metrics, "lastScannedSnapshotId").getValue()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, "lastScannedManifests").getValue()).isEqualTo(1L);
+            assertThat(scanGauge(metrics, "lastScanResultedTableFiles").getValue()).isEqualTo(1L);
+            assertThat(scanDuration(metrics).getCount()).isEqualTo(1);
+            assertThat(output.getEmittedRecords()).hasSize(1);
+        }
+    }
+
+    @Test
     public void continuousFileStoreFixBucketEnumeratorMetricsTest() throws Exception {
         writeOnce(fixBucketTable);
 
@@ -235,6 +329,22 @@ public class FileStoreSourceMetricsTest {
                 assertThat(restoredUnassignedSplits.getValue()).isZero();
             }
         }
+    }
+
+    private TestingReaderContext readerContext(MetricListener metrics) {
+        return new TestingReaderContext(
+                new Configuration(),
+                InternalSourceReaderMetricGroup.mock(metrics.getMetricGroup()));
+    }
+
+    private Gauge<Long> scanGauge(MetricListener metrics, String name) {
+        return metrics.<Long>getGauge("paimon", "table", table.name(), "scan", name)
+                .orElseThrow(AssertionError::new);
+    }
+
+    private Histogram scanDuration(MetricListener metrics) {
+        return metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                .orElseThrow(AssertionError::new);
     }
 
     private void writeOnce(FileStoreTable table) throws Exception {

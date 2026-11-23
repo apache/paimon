@@ -46,13 +46,13 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
-import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -116,7 +116,7 @@ public class IndexQuerySourceTest extends DataEvolutionTestBase {
                 .when(output)
                 .collect(any(Split.class));
         try (SourceReader<Split, SimpleSourceSplit> reader =
-                transformation.getSource().createReader(mock(SourceReaderContext.class))) {
+                transformation.getSource().createReader(new TestingReaderContext())) {
             assertThat(reader.pollNext(output)).isEqualTo(InputStatus.END_OF_INPUT);
         }
         assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);

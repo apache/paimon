@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -44,6 +45,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SegmentsCache;
 
+import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
 import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
@@ -103,7 +105,9 @@ class TableWriteCoordinatorTest extends TableTestBase {
         FileStoreScan scan = spy(store.newScan());
         doReturn(scan).when(store).newScan();
         doReturn(store).when(table).store();
-        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        MetricListener metrics = new MetricListener();
+        TableWriteCoordinator coordinator =
+                new TableWriteCoordinator(table, new FlinkMetricRegistry(metrics.getMetricGroup()));
         OperatorID operatorID = new OperatorID();
         TaskOperatorEventGateway gateway = mock(TaskOperatorEventGateway.class);
         when(gateway.sendRequestToCoordinator(eq(operatorID), any()))
@@ -135,6 +139,12 @@ class TableWriteCoordinatorTest extends TableTestBase {
             assertThat(restored.totalBuckets()).isNull();
         }
         verify(scan, times(scanDataFileMetas ? 1 : 0)).plan();
+        assertThat(
+                        metrics.getHistogram(
+                                        "paimon", "table", table.name(), "scan", "scanDuration")
+                                .orElseThrow(AssertionError::new)
+                                .getCount())
+                .isEqualTo(scanDataFileMetas ? 1 : 0);
         verify(gateway, atLeast(2)).sendRequestToCoordinator(eq(operatorID), any());
     }
 

@@ -52,7 +52,7 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
 :::info
 
 1. Please refer to [System Scope](https://nightlies.apache.org/flink/flink-docs-master/docs/ops/metrics/#system-scope) to understand Flink `scope`
-2. Scan metrics are only supported by Flink versions >= 1.18
+2. Scan metrics in the JobManager source enumerator scope are supported by Flink versions >= 1.18.
 
 :::
 
@@ -66,9 +66,24 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
     </thead>
     <tbody>
         <tr>
-            <td>Scan Metrics</td>
+            <td>Scan Metrics (Enumerator)</td>
             <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
-            <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
+            <td>&lt;source_operator_name&gt;.coordinator.enumerator.paimon.table.&lt;table_name&gt;.scan</td>
+        </tr>
+        <tr>
+            <td>Scan Metrics (Monitor)</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;monitor_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.scan</td>
+        </tr>
+        <tr>
+            <td>Scan Metrics (Sink Writer)</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.scan</td>
+        </tr>
+        <tr>
+            <td>Scan Metrics (Sink Coordinator)</td>
+            <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
+            <td>&lt;writer_operator_name&gt;.coordinator.paimon.table.&lt;table_name&gt;.scan</td>
         </tr>
         <tr>
             <td>Lookup Metrics</td>
@@ -113,6 +128,24 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
     </tbody>
 </table>
 
+When dedicated split generation uses a `Monitor` operator, scan metrics are reported by that operator on
+the TaskManager. This includes streaming queries with `consumer-id` and `consumer.mode = 'exactly-once'`
+when `source.checkpoint-align.enabled` is disabled. The `last*` gauges describe the last completed scan
+and start at zero after a restart, until the next scan completes.
+
+Sink scan metrics measure manifest scans used to initialize or recover writers. With
+`sink.writer-coordinator.enabled = false`, scans are reported by each writer subtask on the TaskManager.
+With writer coordination enabled, use the JobManager sink coordinator metrics for the actual scans;
+writer subtasks delegate recovery to the coordinator and their local scan metrics are not updated.
+The coordinator reports both manifest prefetch scans and scans for individual partition/bucket requests
+in the same metric group, including prefetch during startup and metadata refresh.
+
+For sink scans, `lastScanDuration` and `scanDuration` measure metadata planning in milliseconds:
+reading manifest lists and manifests, filtering entries, and merging file metadata. They exclude
+index restoration, coordinator RPC waits, and data writes. Measurements update when a scan completes;
+the `last*` gauges describe the latest scan, and `scanDuration` records the durations of recent scans.
+When initialization skips data file metadata scanning, no scan duration sample is recorded.
+
 ## Choose Metrics for a Task
 
 Use these groups to identify the operation to investigate. For tuning options, follow the related guide.
@@ -142,12 +175,12 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
         <tr>
             <td>lastScanDuration</td>
             <td>Gauge</td>
-            <td>The time it took to complete the last scan.</td>
+            <td>The time it took to complete the last scan, in milliseconds.</td>
         </tr>
         <tr>
             <td>scanDuration</td>
             <td>Histogram</td>
-            <td>Distributions of the time taken by the last few scans.</td>
+            <td>Distributions of the time taken by the last few scans, in milliseconds.</td>
         </tr>
         <tr>
             <td>lastScannedSnapshotId</td>
@@ -623,7 +656,8 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
 
 :::info
 
-Please note that if you specified `consumer-id` in your streaming query, the level of source metrics should turn into the reader operator, which is behind the `Monitor` operator.
+When a query uses separate `Monitor` and `Reader` operators, the source reader metrics above are reported
+by the downstream `Reader` operator. Scan metrics are reported by the `Monitor` operator.
 
 :::
 
