@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalog.WithPaimonCatalog
 import org.apache.paimon.spark.commands.FixedBucketExpression
 import org.apache.paimon.utils.ExceptionUtils
 
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, TaskContext, TaskKilledException}
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted, SparkListenerTaskStart}
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCapability, TableCatalog}
@@ -526,9 +526,21 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         session.udf.register(
           "ctas_interrupt_input",
           (id: Long) => {
-            Thread.sleep(30000)
+            // Before Spark 4.0 (SPARK-44818), a kill that arrives before Task.run records the
+            // task thread only marks the TaskContext and never interrupts the thread. Poll the
+            // mark as well, otherwise the cancelled task keeps a local[2] slot and can starve
+            // the later cases.
+            val context = TaskContext.get()
+            val deadline = System.currentTimeMillis() + 30000
+            while (System.currentTimeMillis() < deadline) {
+              if (context.isInterrupted()) {
+                throw new TaskKilledException("ctas_interrupt_input was cancelled")
+              }
+              Thread.sleep(20)
+            }
             id.toInt
-          })
+          }
+        )
         val driver = new Thread("interrupted-ctas-driver") {
           override def run(): Unit = {
             SparkSession.setActiveSession(session)
