@@ -101,14 +101,15 @@ class RTreeGlobalIndexTest {
         output =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(base, prefix + "-" + UUID.randomUUID() + ".index")
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return io.newOutputStream(new Path(base, fileName), false);
+                        return io.newOutputStream(new Path(filePath), false);
                     }
                 };
         input = file -> io.newInputStream(file.filePath());
@@ -1001,12 +1002,13 @@ class RTreeGlobalIndexTest {
         GlobalIndexFileWriter failing =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return "failed.index";
+                    public String newFilePath(String prefix) {
+                        return new Path(base, "failed.index").toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String name) throws IOException {
+                    public PositionOutputStream newOutputStream(String filePath)
+                            throws IOException {
                         throw new IOException("injected write failure");
                     }
                 };
@@ -1224,7 +1226,7 @@ class RTreeGlobalIndexTest {
     private List<GlobalIndexIOMeta> metas(List<ResultEntry> entries) throws IOException {
         List<GlobalIndexIOMeta> files = new ArrayList<>();
         for (ResultEntry entry : entries) {
-            Path path = new Path(base, entry.fileName());
+            Path path = new Path(entry.filePath());
             files.add(
                     new GlobalIndexIOMeta(
                             path, io.getFileSize(path), entry.rowCount(), entry.meta()));

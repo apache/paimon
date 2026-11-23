@@ -305,10 +305,10 @@ class CentroidVectorGlobalIndexTest {
                 assertThatThrownBy(trainer::finishTraining)
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("finished");
-                String name = files.newFileName("routing");
+                String filePath = files.newFilePath("routing");
                 byte[] payload = model.serialize();
-                ResultEntry router = indexer.writeRoutingModel(files, name, payload);
-                Path modelPath = new Path(directory, name);
+                ResultEntry router = indexer.writeRoutingModel(files, filePath, payload);
+                Path modelPath = new Path(filePath);
                 try (SeekableInputStream in = io.newInputStream(modelPath)) {
                     assertThat(VectorTrainingModelIO.read(in, io.getFileSize(modelPath)))
                             .containsExactly(payload);
@@ -321,7 +321,7 @@ class CentroidVectorGlobalIndexTest {
                             .extracting("tempVectorFile", "spillBuffer")
                             .containsOnlyNulls();
                     ResultEntry result = empty.finish().get(0);
-                    Path path = new Path(directory, result.fileName());
+                    Path path = new Path(result.filePath());
                     emptyMeta = toIOMeta(io, directory, CentroidIndexMeta.shard(result, 0));
                     assertThat(io.getFileSize(path)).isEqualTo(8);
                 } finally {
@@ -339,7 +339,7 @@ class CentroidVectorGlobalIndexTest {
                             }
                         }
                         ResultEntry result = writer.finish().get(0);
-                        Path path = new Path(directory, result.fileName());
+                        Path path = new Path(result.filePath());
                         if (result.rowCount() > 0) {
                             try (SeekableInputStream in = io.newInputStream(path);
                                     VectorIndexReader local =
@@ -599,8 +599,9 @@ class CentroidVectorGlobalIndexTest {
         NativeCentroidVectorGlobalIndexer indexer =
                 new NativeCentroidVectorGlobalIndexer(
                         new ArrayType(new FloatType()), options, "ivf-flat", 1.0);
+        GlobalIndexFileWriter files = fileWriter(io, directory);
         ResultEntry model =
-                indexer.writeRoutingModel(fileWriter(io, directory), "router", new byte[0]);
+                indexer.writeRoutingModel(files, files.newFilePath("router"), new byte[0]);
         assertThat(model.meta()).isEqualTo(metric.getBytes(StandardCharsets.UTF_8));
         GlobalIndexIOMeta router = toIOMeta(io, directory, CentroidIndexMeta.router(model, 0));
         assertThat(router.fileSize()).isZero();
@@ -977,7 +978,9 @@ class CentroidVectorGlobalIndexTest {
         try (VectorTrainingModel model =
                 indexer.trainGlobalModel(
                         64, Collections.singletonList(new TrainingBatch(sample, 64)).iterator())) {
-            ResultEntry routing = indexer.writeRoutingModel(files, "router", model.serialize());
+            ResultEntry routing =
+                    indexer.writeRoutingModel(
+                            files, files.newFilePath("router"), model.serialize());
             metas.add(toIOMeta(io, directory, CentroidIndexMeta.router(routing, model.nlist())));
             NativeCentroidVectorGlobalIndexer smallIndexer = jointIndexer(type, 0);
             Random random = new Random(42);
@@ -1022,20 +1025,21 @@ class CentroidVectorGlobalIndexTest {
 
     private static GlobalIndexIOMeta toIOMeta(FileIO io, Path directory, ResultEntry entry)
             throws java.io.IOException {
-        Path path = new Path(directory, entry.fileName());
+        Path path = new Path(entry.filePath());
         return CentroidIndexMeta.file(path, io.getFileSize(path), entry.rowCount(), entry.meta());
     }
 
     private static GlobalIndexFileWriter fileWriter(FileIO io, Path directory) {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID() + ".index";
+            public String newFilePath(String prefix) {
+                return new Path(directory, prefix + "-" + UUID.randomUUID() + ".index").toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String name) throws java.io.IOException {
-                return io.newOutputStream(new Path(directory, name), false);
+            public PositionOutputStream newOutputStream(String filePath)
+                    throws java.io.IOException {
+                return io.newOutputStream(new Path(filePath), false);
             }
         };
     }

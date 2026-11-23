@@ -223,19 +223,16 @@ class GlobalIndexBuilderUtilsTest {
     void testRowCountPerIndexFile() throws IOException {
         List<ResultEntry> entries =
                 Arrays.asList(
-                        new ResultEntry("first", 2, null), new ResultEntry("second", 1, null));
+                        new ResultEntry(
+                                indexPathFactory.newPathFromName("first").toString(), 2, null),
+                        new ResultEntry(
+                                indexPathFactory.newPathFromName("second").toString(), 1, null));
         for (ResultEntry entry : entries) {
-            fileIO.newOutputStream(indexPathFactory.toPath(entry.fileName()), false).close();
+            fileIO.newOutputStream(new Path(entry.filePath()), false).close();
         }
         List<IndexFileMeta> metas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
-                        fileIO,
-                        indexPathFactory,
-                        coreOptions,
-                        new Range(100, 102),
-                        1,
-                        "test-type",
-                        entries);
+                        fileIO, coreOptions, new Range(100, 102), 1, "test-type", entries);
         assertThat(metas).extracting(IndexFileMeta::rowCount).containsExactly(2L, 1L);
         assertThat(metas)
                 .extracting(file -> file.globalIndexMeta().rowRange())

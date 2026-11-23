@@ -101,7 +101,7 @@ public class LazyFilteredBitmapIndexReaderTest {
             writer.writeColumn(dataField, new Options(), tags);
             result = writer.finish();
         }
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
         assertThat(result.meta()).hasSize(Long.BYTES);
@@ -152,7 +152,7 @@ public class LazyFilteredBitmapIndexReaderTest {
             result = writer.finish();
         }
         assertThat(result.meta()).isNull();
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.rowCount(), null);
         RowType rowType = RowType.of(dataField);

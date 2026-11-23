@@ -360,23 +360,30 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             BuildContext context, CentroidVectorGlobalIndexer indexer, byte[] payload, int nlist)
             throws IOException {
         GlobalIndexFileReadWrite io = context.io();
-        String modelFile =
+        String modelFileName =
                 "vector-"
                         + context.indexType
                         + "-global-index-training-model-"
                         + UUID.randomUUID()
                         + ".index";
+        String modelFilePath =
+                context.table
+                        .store()
+                        .pathFactory()
+                        .globalIndexFileFactory()
+                        .newPathFromName(modelFileName)
+                        .toString();
         IndexFileMeta modelMeta =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                                 context.table.fileIO(),
-                                context.table.store().pathFactory().globalIndexFileFactory(),
                                 context.table.coreOptions(),
                                 context.rowRange,
                                 context.indexFields,
                                 context.indexType,
                                 Collections.singletonList(
                                         CentroidIndexMeta.router(
-                                                indexer.writeRoutingModel(io, modelFile, payload),
+                                                indexer.writeRoutingModel(
+                                                        io, modelFilePath, payload),
                                                 nlist)),
                                 context.sourceMeta())
                         .get(0);
@@ -769,7 +776,6 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             List<IndexFileMeta> files =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                             table.fileIO(),
-                            table.store().pathFactory().globalIndexFileFactory(),
                             table.coreOptions(),
                             rowRange,
                             indexFields,

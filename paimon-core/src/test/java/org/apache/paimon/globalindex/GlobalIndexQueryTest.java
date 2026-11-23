@@ -137,7 +137,7 @@ class GlobalIndexQueryTest {
             files.add(
                     new IndexFileMeta(
                             "ivf-pq",
-                            file.fileName(),
+                            new Path(file.filePath()).getName(),
                             100,
                             file.rowCount(),
                             new GlobalIndexMeta(0, 2, 0, null, file.meta()),

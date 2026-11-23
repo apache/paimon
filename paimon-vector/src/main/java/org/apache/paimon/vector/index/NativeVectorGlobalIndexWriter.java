@@ -310,11 +310,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 if (!centroidShard) {
                     return Collections.emptyList();
                 }
-                String name = fileWriter.newFileName(fileNamePrefix());
-                try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
+                String filePath = fileWriter.newFilePath(fileNamePrefix());
+                try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                     out.write(new byte[] {'P', 'C', 'E', 'M', 'P', 'T', 'Y', '1'});
                 }
-                return Collections.singletonList(new ResultEntry(name, 0, null));
+                return Collections.singletonList(new ResultEntry(filePath, 0, null));
             }
             flushWriteBuffer();
             writeChannel.close();

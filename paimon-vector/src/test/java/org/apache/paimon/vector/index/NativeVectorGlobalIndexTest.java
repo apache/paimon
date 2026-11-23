@@ -183,8 +183,8 @@ public class NativeVectorGlobalIndexTest {
                     42);
             files = writer.finish();
         }
-        GlobalIndexIOMeta meta = toIOMetas(files, indexPath).get(0);
-        try (SeekableInputStream in = createFileReader(indexPath).getInputStream(meta);
+        GlobalIndexIOMeta meta = toIOMetas(files).get(0);
+        try (SeekableInputStream in = createFileReader().getInputStream(meta);
                 VectorIndexReader reader =
                         new VectorIndexReader(
                                 new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
@@ -196,7 +196,7 @@ public class NativeVectorGlobalIndexTest {
         try (GlobalIndexReader reader =
                 new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
                         .createReader(
-                                createFileReader(indexPath),
+                                createFileReader(),
                                 Collections.singletonList(meta),
                                 rowId + 1,
                                 null,
@@ -263,11 +263,7 @@ public class NativeVectorGlobalIndexTest {
             try (GlobalIndexReader reader =
                     new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
                             .createReader(
-                                    createFileReader(indexPath),
-                                    toIOMetas(files, indexPath),
-                                    8,
-                                    null,
-                                    executor)) {
+                                    createFileReader(), toIOMetas(files), 8, null, executor)) {
                 for (float queryScale : new float[] {1e-30f, 1e30f, 1f}) {
                     float[] query = {queryScale, 0f};
                     ScoredGlobalIndexResult result =
@@ -310,12 +306,7 @@ public class NativeVectorGlobalIndexTest {
         List<Integer> widths = new ArrayList<>();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(
-                        createFileReader(indexPath),
-                        toIOMetas(files, indexPath),
-                        type,
-                        executor,
-                        "ivf-flat",
-                        64) {
+                        createFileReader(), toIOMetas(files), type, executor, "ivf-flat", 64) {
                     @Override
                     VectorSearchResult searchVector(
                             float[] vector, VectorSearchParams params, byte[] filter) {
@@ -376,11 +367,7 @@ public class NativeVectorGlobalIndexTest {
             try (GlobalIndexReader reader =
                     new NativeVectorGlobalIndexer(type, nativeOptions, kind)
                             .createReader(
-                                    createFileReader(indexPath),
-                                    toIOMetas(files, indexPath),
-                                    24,
-                                    null,
-                                    executor)) {
+                                    createFileReader(), toIOMetas(files), 24, null, executor)) {
                 Optional<ScoredGlobalIndexResult> hits =
                         reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
                 assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
