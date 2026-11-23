@@ -102,9 +102,7 @@ public class RESTCatalogOptions {
             ConfigOptions.key("dlf.oss-endpoint")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription(
-                            "REST Catalog client override for fs.oss.endpoint, taking precedence "
-                                    + "over both client and REST token endpoint settings.");
+                    .withDescription("REST Catalog DLF OSS endpoint.");
 
     public static final ConfigOption<String> DLF_SIGNING_ALGORITHM =
             ConfigOptions.key("dlf.signing-algorithm")
@@ -116,20 +114,12 @@ public class RESTCatalogOptions {
                                     + "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
-    /**
-     * Legacy JindoCache switch, retained for compatibility. Remote cache endpoint routing does not
-     * use this option.
-     *
-     * @deprecated The JindoCache integration is deprecated. Use the REST cache policy instead.
-     */
-    @Deprecated
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
             ConfigOptions.key("io-cache.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Deprecated: enables only the legacy JindoCache integration in JindoFileIO. "
-                                    + "This option does not control REST cache endpoint routing.");
+                            "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
 
     public static final ConfigOption<String> IO_CACHE_ORIGIN_ENDPOINT =
             ConfigOptions.key("io-cache.origin.endpoint")
@@ -151,19 +141,14 @@ public class RESTCatalogOptions {
                     .stringType()
                     .defaultValue("bucket,manifest,index")
                     .withDescription(
-                            "Comma-separated list of path substrings allowed to use the cache endpoint. "
-                                    + "Use * to allow all paths. A path must match both io-cache.whitelist "
-                                    + "and io-cache.whitelist-path to use the cache endpoint. "
-                                    + "REST cache endpoint routing defaults to * when this option is absent; "
-                                    + "the deprecated JindoCache integration retains its original default.");
+                            "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
 
     public static final ConfigOption<String> IO_CACHE_POLICY =
             ConfigOptions.key("io-cache.policy")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The file I/O cache policy. Explicit client settings override the REST token policy. "
-                                    + "Combined with: meta,read,write. "
+                            "The table-level cache policy provided by the REST server, combined with: meta,read,write."
                                     + "`meta`: meta cache is enabled for visiting files; "
                                     + "`read`: cache is enabled when reading files; "
                                     + "`write`: data is also cached when writing files; "
