@@ -30,8 +30,11 @@ Retain a dataset snapshot with a tag or work on a separate table history with a 
 ## Table Rollback
 
 Use `paimon table rollback` to restore a previous table state. For filesystem
-catalogs, rollback removes snapshots and tags newer than the target. Before
-rolling back, inspect the available targets with
+catalogs, stop writers to the table before inspecting the rollback target and
+keep them stopped until the rollback finishes. The operation removes newer
+snapshots and tags that point to them.
+
+Inspect the available targets with
 `paimon table list-snapshots mydb.users` or `paimon tag list mydb.users`.
 
 Choose exactly one target. For `--timestamp`, use Unix epoch milliseconds.
