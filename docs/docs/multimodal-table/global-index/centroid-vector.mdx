@@ -156,15 +156,15 @@ index manifest). The descriptor starts with a 14-byte header.
 | 0 | 8 | ASCII marker `PAIMCENT` |
 | 8 | 1 | ASCII role `R`, `S`, or `B` |
 | 9 | 1 | Numeric format version `1` |
-| 10 | 4 | Nonnegative 32-bit big-endian value interpreted by role |
+| 10 | 4 | Outer `nlist` for `R`, or zero-based centroid ID for `S` and `B`, stored as a big-endian `int32` |
 
-The role determines the header value and the contents of the remaining bytes.
+The value ranges from `0` to `2,147,483,647`. The role also determines the payload starting at byte 14.
 
-| Role | Header value | Remaining bytes |
-| --- | --- | --- |
-| `R` (router) | Outer centroid count | Build-time distance metric in UTF-8 |
-| `S` (vector shard) | Zero-based centroid ID | The actual local IVF list count as a 32-bit big-endian integer for populated L2 IVF-FLAT and IVF-PQ shards. Other shards end at the header. |
-| `B` (Bitmap) | Zero-based centroid ID | Big-endian 64-bit start offsets of the second and subsequent Bitmap sections, measured from the start of the Bitmap file. |
+| Role | Payload |
+| --- | --- |
+| `R` (router) | Build-time distance metric in UTF-8 |
+| `S` (vector shard) | The actual local IVF list count as a 32-bit big-endian integer for populated L2 IVF-FLAT and IVF-PQ shards. Other shards end at the header. |
+| `B` (Bitmap) | Big-endian 64-bit start offsets of the second and subsequent Bitmap sections, measured from the start of the Bitmap file. |
 
 The router and its shards share the manifest row-ID range `[_ROW_RANGE_START, _ROW_RANGE_END]`.
 Each shard stores row IDs relative to `_ROW_RANGE_START`. During a query, Paimon translates
