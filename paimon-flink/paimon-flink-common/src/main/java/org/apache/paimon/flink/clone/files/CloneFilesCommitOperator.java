@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.clone.files;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -35,6 +36,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,7 +89,13 @@ public class CloneFilesCommitOperator extends AbstractStreamOperator<Long>
                                     listEntry.getKey(), 0, listEntry.getValue()));
                 }
 
-                Table table = catalog.getTable(entry.getKey());
+                // only the partitions which receive files are replaced
+                Table table =
+                        catalog.getTable(entry.getKey())
+                                .copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
+                                                "true"));
                 try (BatchTableCommit commit =
                         table.newBatchWriteBuilder().withOverwrite().newCommit()) {
                     commit.commit(commitMessages);
