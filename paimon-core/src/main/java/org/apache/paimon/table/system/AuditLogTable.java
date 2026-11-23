@@ -350,6 +350,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return null;
         }
 
+        @Override
+        @Nullable
+        public Snapshot specifiedSnapshot() {
+            return wrapped.specifiedSnapshot();
+        }
+
         public SnapshotReader withSnapshot(long snapshotId) {
             wrapped.withSnapshot(snapshotId);
             return this;
@@ -657,6 +663,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public StreamDataTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(streamScan::withFilter);
             return this;
+        }
+
+        @Override
+        public boolean readRetainedChangelog() {
+            return streamScan.readRetainedChangelog();
         }
 
         @Override

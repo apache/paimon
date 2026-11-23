@@ -74,6 +74,75 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testFromPathRetriesMissingAndIncompleteFile() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        Snapshot snapshot = createSnapshotWithMillis(1, 1000);
+        Mockito.when(fileIO.readFileUtf8(path))
+                .thenThrow(new FileNotFoundException(path.toString()))
+                .thenReturn("", snapshot.toJson());
+
+        assertThat(SnapshotManager.fromPath(fileIO, path)).isEqualTo(snapshot);
+        Mockito.verify(fileIO, Mockito.times(3)).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathFailsWhenFileNotFoundAfterRetries() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        FileNotFoundException failure = new FileNotFoundException(path.toString());
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Snapshot file " + path + " does not exist.")
+                .hasCause(failure);
+        Mockito.verify(fileIO, Mockito.times(3)).readFileUtf8(path);
+    }
+
+    @Test
+    public void testTryFromPathDoesNotRetryMissingFile() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        FileNotFoundException failure = new FileNotFoundException(path.toString());
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path)).isSameAs(failure);
+        Mockito.verify(fileIO).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathDoesNotRetryOtherIOException() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        IOException failure = new IOException("Read failure");
+        Mockito.when(fileIO.readFileUtf8(path)).thenThrow(failure);
+
+        assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                .hasMessageContaining("Fails to read snapshot from path " + path)
+                .hasCause(failure);
+        Mockito.verify(fileIO).readFileUtf8(path);
+    }
+
+    @Test
+    public void testFromPathRestoresInterruptedStatus() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Path path = new Path(tempDir.toString(), "snapshot-1");
+        Mockito.when(fileIO.readFileUtf8(path))
+                .thenThrow(new FileNotFoundException(path.toString()));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> SnapshotManager.fromPath(fileIO, path))
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            Mockito.verify(fileIO).readFileUtf8(path);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     public void testSnapshotPath() {
         SnapshotManager snapshotManager =
                 newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
@@ -93,6 +162,7 @@ public class SnapshotManagerTest {
 
         assertThat(snapshotManager.snapshotsWithId(Collections.singletonList(1L)).hasNext())
                 .isFalse();
+        Mockito.verify(fileIO).readFileUtf8(snapshotManager.snapshotPath(1L));
     }
 
     @Test
@@ -922,6 +992,60 @@ public class SnapshotManagerTest {
 
         // smaller than the smallest watermark returns null
         assertThat(snapshotManager.earlierOrEqualWatermark(50)).isNull();
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkWithRepeatedWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // a plateau of identical watermarks: snapshots 1, 2, 3 all carry 1000. Repeated
+        // watermarks are normal because the commit watermark takes the maximum.
+        Map<Long, Long> watermarks = watermarkMap(0, 500, 1, 1000, 2, 1000, 3, 1000, 4, 2000);
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // upper bound: the last snapshot of the plateau, not the binary-search midpoint
+        assertThat(snapshotManager.earlierOrEqualWatermark(1000).id()).isEqualTo(3);
+        // a value inside the gap still resolves to the end of the previous plateau
+        assertThat(snapshotManager.earlierOrEqualWatermark(1999).id()).isEqualTo(3);
+        // non-repeated watermarks are unaffected
+        assertThat(snapshotManager.earlierOrEqualWatermark(2000).id()).isEqualTo(4);
+        assertThat(snapshotManager.earlierOrEqualWatermark(500).id()).isEqualTo(0);
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkWithPlateauAtTheLatestSnapshot() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // the plateau ends at the latest snapshot, so the right walk must stop there
+        Map<Long, Long> watermarks = watermarkMap(0, 500, 1, 1000, 2, 1000, 3, 1000);
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualWatermark(1000).id()).isEqualTo(3);
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkWithRepeatedWatermarksAndNullWatermarks()
+            throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // snapshots 2 and 4 carry no watermark and sit inside a plateau of 1000s
+        Map<Long, Long> watermarks = watermarkMap(0, 500, 1, 1000, 3, 1000, 5, 1000, 6, 2000);
+        for (long i = 0; i < 7; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // null-watermark snapshots must not shadow the real end of the plateau
+        assertThat(snapshotManager.earlierOrEqualWatermark(1000).id()).isEqualTo(5);
     }
 
     @Test

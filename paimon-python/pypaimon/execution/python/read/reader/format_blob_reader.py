@@ -24,7 +24,7 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, pread, supports_pread
 from pypaimon.execution.python.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -378,9 +378,16 @@ class FormatBlobReader(RecordBatchReader):
         self._input_stream = self._file_io.new_input_stream(self.file_path)
         f = self._input_stream
 
-        # Seek to header: last 5 bytes
-        f.seek(self._file_size - 5)
-        header = f.read(5)
+        def read_range(offset, length):
+            if supports_pread(f):
+                return pread(f, length, offset)
+            f.seek(offset)
+            return f.read(length)
+
+        # Footer/index reads do not benefit from sequential payload read-ahead.
+        if self._file_size < 5:
+            raise IOError("Invalid blob file: cannot read header")
+        header = read_range(self._file_size - 5, 5)
 
         if len(header) != 5:
             raise IOError("Invalid blob file: cannot read header")
@@ -392,9 +399,12 @@ class FormatBlobReader(RecordBatchReader):
         if version != 1:
             raise IOError(f"Unsupported blob file version: {version}")
 
+        # Reject a corrupt footer before passing a negative offset to FileIO.
+        if index_length > self._file_size - 5:
+            raise IOError("Invalid blob file: index length exceeds file size")
+
         # Read index data
-        f.seek(self._file_size - 5 - index_length)
-        index_bytes = f.read(index_length)
+        index_bytes = read_range(self._file_size - 5 - index_length, index_length)
 
         if len(index_bytes) != index_length:
             raise IOError("Invalid blob file: cannot read index")

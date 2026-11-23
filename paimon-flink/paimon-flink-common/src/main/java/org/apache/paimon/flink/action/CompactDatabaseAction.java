@@ -314,7 +314,9 @@ public class CompactDatabaseAction extends ActionBase {
         if (table.coreOptions().dataEvolutionEnabled()) {
             Preconditions.checkArgument(
                     !isStreaming, "Data evolution table compact only supports batch mode yet.");
-            new DataEvolutionTableCompact(env, fullName, table).build();
+            DataEvolutionTableCompact builder = new DataEvolutionTableCompact(env, fullName, table);
+            builder.withPartitionIdleTime(partitionIdleTime);
+            builder.build();
             return;
         }
 

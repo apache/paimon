@@ -68,10 +68,12 @@ case class CreatePaimonSQLFunctionCommand(
     val sessionCatalog = sparkSession.sessionState.catalog
     val conf = sparkSession.sessionState.conf
 
-    val inputParam = inputParamText.map(UserDefinedFunction.parseRoutineParam(_, parser))
-    val returnType = parseReturnTypeText(returnTypeText, isTableFunc, parser)
+    val inputParam =
+      inputParamText.map(org.apache.spark.sql.paimon.shims.SQLFunctionCompat.parseParams(_, parser))
+    val returnType = org.apache.spark.sql.paimon.shims.SQLFunctionCompat
+      .parseReturn(returnTypeText, isTableFunc, parser)
 
-    val function = SQLFunction(
+    val function = org.apache.spark.sql.paimon.shims.SQLFunctionCompat.create(
       name,
       inputParam,
       returnType.getOrElse(if (isTableFunc) Right(null) else Left(null)),

@@ -72,6 +72,7 @@ import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
@@ -144,6 +145,8 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("partition_idle_time", StringType),
                 ProcedureParameter.optional("buckets", StringType),
+                ProcedureParameter.optional(
+                        "options_map", DataTypes.createMapType(StringType, StringType)),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -184,6 +187,7 @@ public class CompactProcedure extends BaseProcedure {
         Duration partitionIdleTime =
                 blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
         String buckets = blank(args, 8) ? null : args.getString(8);
+        MapData optionsMap = args.isNullAt(9) ? null : args.getMap(9);
         if (OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -235,6 +239,13 @@ public class CompactProcedure extends BaseProcedure {
                     ProcedureUtils.putIfNotEmpty(
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
+                    if (optionsMap != null) {
+                        for (int i = 0; i < optionsMap.numElements(); i++) {
+                            dynamicOptions.put(
+                                    optionsMap.keyArray().getUTF8String(i).toString(),
+                                    optionsMap.valueArray().getUTF8String(i).toString());
+                        }
+                    }
                     table = table.copy(dynamicOptions);
                     if (coreOptions.clusteringIncrementalEnabled()
                             && (!OrderType.NONE.name().equals(sortType))) {
@@ -670,7 +681,7 @@ public class CompactProcedure extends BaseProcedure {
         AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
         Set<String> completedNormalFiles = new HashSet<>();
         Set<String> completedVectorFiles = new HashSet<>();
-        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+        Function<Snapshot, DataEvolutionRewriteExecutor.PlanResult> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
                     if (coordinator == null
@@ -695,8 +706,14 @@ public class CompactProcedure extends BaseProcedure {
                                 .withCompletedVectorFiles(completedVectorFiles);
                         coordinatorRef.set(coordinator);
                     }
-                    return filterIdlePartitions(
-                            coordinator.plan(), table, partitionPredicate, partitionIdleTime);
+                    List<DataEvolutionCompactTask> tasks =
+                            filterIdlePartitions(
+                                    coordinator.plan(),
+                                    table,
+                                    partitionPredicate,
+                                    partitionIdleTime);
+                    return new DataEvolutionRewriteExecutor.PlanResult(
+                            tasks, coordinator.isScanFinished());
                 };
         boolean trackNormalFiles = table.coreOptions().dataEvolutionCompactionSplitLargeFiles();
         boolean trackVectorFiles = table.coreOptions().vectorCompactionEnabled();

@@ -31,6 +31,7 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.read.read_builder import ReadBuilder
 
 if sys.version_info[:2] == (3, 6):
@@ -138,6 +139,26 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def test_py_write_bucketed_append_sequence(self):
+        # Six one-row commits to one bucket; testReadPythonBucketedAppendOrder
+        # compacts them with a Java write and checks the append order.
+        table_name = 'default.bucketed_append_order_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([('id', pa.int32()), ('seq', pa.int32())])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, options={'bucket': '1', 'bucket-key': 'id'}), False)
+        table = self.catalog.get_table(table_name)
+        for seq in range(6):
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pydict(
+                    {'id': [1], 'seq': [seq]}, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
     @parameterized.expand([
         (type_name, order, grouping)
         for type_name in ('float', 'double')
@@ -186,6 +207,59 @@ class JavaPyReadWriteTest(unittest.TestCase):
             finally:
                 writer.close()
                 commit.close()
+
+    def test_py_write_column_default_values(self):
+        # Java testReadPythonColumnDefaultValues opens a writer on this schema,
+        # which casts every default, and checks the values it fills in.
+        table_name = 'default.column_defaults_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            pa.schema([
+                ('id', pa.int32()),
+                ('t', pa.time32('ms')),
+                ('ts', pa.timestamp('ms')),
+                ('ts_year', pa.timestamp('ms')),
+                ('ts_ltz', pa.timestamp('ms', tz='UTC')),
+                ('dec_zero', pa.decimal128(10, 2)),
+                ('dec_overflow', pa.decimal128(10, 2)),
+                ('ts_epoch', pa.timestamp('ms')),
+                ('s', pa.string()),
+                ('dec_arabic', pa.decimal128(10, 2)),
+            ]), options={'file.format': 'parquet'}), False)
+
+        # Each of these makes the Java writer fail to initialize.
+        rejected = [
+            ('t', '12:30+01:00'),
+            ('ts', '２０２４-０１-０１ ００:００:００'),
+            ('ts_ltz', '２０２４-０１-０１ ００:００:００'),
+            ('ts', '+999999999-12-31 24:00:00'),
+            ('dec_zero', '1e2147483648'),
+            ('dec_zero', '1e-2147483648'),
+            ('dec_zero', '1e-2147483646'),
+            ('s', "'"),
+            # JDK 8 Character.digit rejects this supplementary digit and this
+            # Sinhala digit, so the Java writer cannot cast them.
+            ('dec_arabic', '𝟙'),
+            ('dec_arabic', '෧'),
+        ]
+        for column, value in rejected:
+            with self.subTest(column=column, value=value):
+                with self.assertRaisesRegex(RuntimeError, 'Unsupported default value'):
+                    self.catalog.alter_table(table_name, [
+                        SchemaChange.update_column_default_value([column], value)])
+        self.assertEqual(0, self.catalog.get_table(table_name).table_schema.id)
+
+        self.catalog.alter_table(table_name, [
+            SchemaChange.update_column_default_value(['t'], '12:30+01'),
+            SchemaChange.update_column_default_value(['ts'], '2024-02-31 24:00:00'),
+            SchemaChange.update_column_default_value(['ts_year'], '+12345-01-01'),
+            SchemaChange.update_column_default_value(['ts_ltz'], '2024-01-01T24:00'),
+            SchemaChange.update_column_default_value(['dec_zero'], '0e-2147483645'),
+            SchemaChange.update_column_default_value(['dec_overflow'], '12345678901'),
+            SchemaChange.update_column_default_value(['ts_epoch'], '1700000000000'),
+            SchemaChange.update_column_default_value(['s'], "''"),
+            SchemaChange.update_column_default_value(['dec_arabic'], '١.٢'),
+        ])
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
@@ -335,7 +409,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         result = table_read.to_pandas(table_scan.plan().splits())
         print(f"Format: {file_format}, Result:\n{result}")
-        self.assertEqual(initial_data.to_dict(), result.to_dict())
+        # Primary-key scans across partitions and buckets have no global row order.
+        self.assertEqual(initial_data.to_dict(), result.sort_values('id').reset_index(drop=True).to_dict())
 
         from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2

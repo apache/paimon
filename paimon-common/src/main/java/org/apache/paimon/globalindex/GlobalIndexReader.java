@@ -48,6 +48,12 @@ public interface GlobalIndexReader
     }
 
     @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitBBoxIntersects(
+            FieldRef fieldRef, double minX, double minY, double maxX, double maxY) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitNotStartsWith(
             FieldRef fieldRef, Object literal) {
         return CompletableFuture.completedFuture(Optional.empty());

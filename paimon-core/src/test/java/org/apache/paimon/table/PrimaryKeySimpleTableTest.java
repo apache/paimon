@@ -25,8 +25,10 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
@@ -94,7 +96,9 @@ import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -116,6 +120,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -157,6 +162,85 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    private static Stream<Arguments> mergeMapTimestampTypes() {
+        Map<DataType, Object> timestamps = new HashMap<>();
+        timestamps.put(DataTypes.STRING(), BinaryString.fromString("100"));
+        timestamps.put(DataTypes.BIGINT(), Long.MAX_VALUE);
+        timestamps.put(DataTypes.TIMESTAMP(9), Timestamp.fromEpochMillis(0, 1));
+        timestamps.put(
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9), Timestamp.fromEpochMillis(0, 1));
+        return timestamps.entrySet().stream()
+                .flatMap(
+                        entry ->
+                                Stream.of(
+                                        Arguments.of(
+                                                false, false, entry.getKey(), entry.getValue()),
+                                        Arguments.of(false, true, entry.getKey(), entry.getValue()),
+                                        Arguments.of(true, false, entry.getKey(), entry.getValue()),
+                                        Arguments.of(
+                                                true, true, entry.getKey(), entry.getValue())));
+    }
+
+    @ParameterizedTest
+    @MethodSource("mergeMapTimestampTypes")
+    public void testMergeMapOverwriteOnEqualTs(
+            boolean partialUpdate, boolean overwrite, DataType tsType, Object ts) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.MAP(
+                                    DataTypes.STRING(),
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(4, "v", DataTypes.STRING()),
+                                            DataTypes.FIELD(5, "ts", tsType))),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"pt", "a", "attrs", "seq"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(MERGE_ENGINE, partialUpdate ? PARTIAL_UPDATE : AGGREGATE);
+                            conf.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 3);
+                            conf.set("fields.attrs.aggregate-function", "merge_map_with_keytime");
+                            conf.set(
+                                    "fields.attrs." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS,
+                                    String.valueOf(overwrite));
+                            if (partialUpdate) {
+                                conf.set("fields.seq.sequence-group", "attrs");
+                            } else {
+                                conf.set("fields.seq.aggregate-function", "max");
+                            }
+                        },
+                        rowType);
+        Function<String, GenericMap> attrs =
+                value ->
+                        new GenericMap(
+                                Collections.singletonMap(
+                                        BinaryString.fromString("k"),
+                                        GenericRow.of(BinaryString.fromString(value), ts)));
+        Function<InternalRow, String> value =
+                row -> row.getMap(2).valueArray().getRow(0, 2).getString(0).toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-old"), 1L));
+            write.write(GenericRow.of(1, 1, attrs.apply("buffer-new"), 2L));
+            commit.commit(0, write.prepareCommit(false, 0));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(overwrite ? "buffer-new" : "buffer-old");
+            write.write(GenericRow.of(1, 1, attrs.apply("file-new"), 3L));
+            commit.commit(1, write.prepareCommit(false, 1));
+            String expected = overwrite ? "file-new" : "buffer-old";
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(2, write.prepareCommit(true, 2));
+            assertThat(getResult(table.newRead(), table.newScan().plan().splits(), value))
+                    .containsExactly(expected);
+        }
+    }
 
     @Test
     public void testNullablePrimaryKey() throws Exception {
@@ -1788,6 +1872,52 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 row -> internalRowToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), projectToString2);
         assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
+    }
+
+    @Test
+    public void testAggregationRemoveRecordOnDeleteThenInsert() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("aggregation.remove-record-on-delete", "true");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("fields.c.aggregate-function", "first_value");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+
+        write.write(GenericRow.of(1, 1, 10, 1));
+        commit.commit(0, write.prepareCommit(true, 0));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .containsExactly("+I[1, 1, 10, 1]");
+
+        // the delete removes the record, carrying the old image like a CDC delete
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 10, 1));
+        commit.commit(1, write.prepareCommit(true, 1));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .isEmpty();
+
+        // later inserts start a new aggregation, the deleted values must not survive
+        write.write(GenericRow.of(1, 1, 3, 7));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.write(GenericRow.of(1, 1, 4, 8));
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString))
+                .containsExactly("+I[1, 1, 7, 7]");
+
+        write.close();
+        commit.close();
     }
 
     @Test

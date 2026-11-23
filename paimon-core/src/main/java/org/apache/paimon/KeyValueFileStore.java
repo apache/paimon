@@ -34,7 +34,6 @@ import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -189,12 +188,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
         BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
-        if (!VectorIndexOptions.columns(writeOptions.toConfiguration()).isEmpty()
-                || writeOptions.fullTextIndexEnabled()
-                || writeOptions.fmIndexEnabled()
-                || !writeOptions.btreeIndexColumns().isEmpty()
-                || !writeOptions.bitmapIndexColumns().isEmpty()
-                || !writeOptions.multiValueIndexColumns().isEmpty()) {
+        if (writeOptions.primaryKeyIndexEnabled()) {
             primaryKeyIndexMaintainerFactory =
                     BucketedPrimaryKeyIndexMaintainer.Factory.create(
                             newIndexFileHandler(), newReaderFactoryBuilder(), schema);
@@ -246,7 +240,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.mergeEngine(),
                 options.changelogProducer(),
                 options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
-                options.fileIndexReadIgnoreUnknownType());
+                options.fileIndexReadIgnoreUnknownType(),
+                tableName);
     }
 
     @Override

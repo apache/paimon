@@ -87,6 +87,11 @@ public class CachingFileIO implements FileIO {
         this.cacheNamespace = cacheNamespace;
     }
 
+    /** The {@link FileIO} whose files are cached. */
+    public FileIO delegate() {
+        return delegate;
+    }
+
     /**
      * Wraps the given {@link FileIO} with caching if local cache is enabled in the catalog context.
      *
@@ -159,6 +164,11 @@ public class CachingFileIO implements FileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         return delegate.listStatus(path);
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listStatusIterative(Path path) throws IOException {
+        return delegate.listStatusIterative(path);
     }
 
     @Override

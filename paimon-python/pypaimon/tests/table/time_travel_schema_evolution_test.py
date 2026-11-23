@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.write.backend_dispatch import python_commit
+from pathlib import Path
+from unittest.mock import patch
+
 import pyarrow as pa
 import pytest
 
@@ -24,6 +26,7 @@ from pypaimon.read.datasource.split_provider import CatalogSplitProvider
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+from pypaimon.write.backend_dispatch import python_commit
 
 
 class TestTimeTravelSchemaEvolution:
@@ -125,6 +128,88 @@ class TestTimeTravelSchemaEvolution:
         read = provider.table().new_read_builder().new_read()
         assert sorted(read.to_arrow(provider.splits()).to_pylist(), key=lambda row: row['id']) == expected
 
+    def _write_divergent_branches(self, evolve_branch=True):
+        self._create_branched_table([DataField(0, 'id', AtomicType('INT'))], {'id': 1})
+        self.catalog.alter_table('test.t', [
+            SchemaChange.add_column('main_col', AtomicType('STRING'))])
+        if evolve_branch:
+            self.catalog.alter_table('test.t$branch_dev', [
+                SchemaChange.add_column('branch_col', AtomicType('STRING'))])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        assert main.table_schema.id == 1
+        assert dev.table_schema.id == (1 if evolve_branch else 0)
+        self._write(main, {'id': 2, 'main_col': 'historical value'})
+        self._write(dev, {'id': 2})
+        return main, dev
+
+    @staticmethod
+    def _expire_through(table, last_id):
+        snapshots = table.snapshot_manager()
+        for snapshot_id in range(1, last_id + 1):
+            table.file_io.delete(snapshots.get_snapshot_path(snapshot_id))
+        assert snapshots.try_get_earliest_snapshot().id == last_id + 1
+
+    @pytest.mark.parametrize('tag_only,evolve_branch', [
+        pytest.param(False, True, id='retained-snapshot'),
+        pytest.param(True, True, id='retained-tag'),
+        pytest.param(False, False, id='main-only-schema'),
+    ])
+    def test_fast_forward_rejects_conflicting_historical_schema(self, tag_only, evolve_branch):
+        main, dev = self._write_divergent_branches(evolve_branch)
+        if tag_only:
+            main.create_tag('historical', 2)
+        self._write(main, {'id': 3, 'main_col': 'main tip'})
+        self._write(dev, {'id': 3})
+
+        # Expire the first two branch snapshots. In the tag case, also expire their
+        # main counterparts so only the main tag still needs the old schema.
+        self._expire_through(dev, 2)
+        if tag_only:
+            self._expire_through(main, 2)
+
+        def main_metadata():
+            root = Path(main.table_path)
+            return {path: path.read_bytes() for directory in ('snapshot', 'schema', 'tag')
+                    for path in (root / directory).glob('*') if path.is_file()}
+
+        original = main_metadata()
+        with pytest.raises(RuntimeError, match=r'schema 1 .*retained'):
+            self.catalog.fast_forward('test.t', 'dev')
+
+        assert main_metadata() == original
+        selector = {'scan.tag-name': 'historical'} if tag_only else {'scan.snapshot-id': '2'}
+        history = self.catalog.get_table('test.t').copy(selector)
+        assert history.field_names == ['id', 'main_col']
+        assert sorted(self._read(history), key=lambda row: row['id']) == [
+            {'id': 1, 'main_col': None}, {'id': 2, 'main_col': 'historical value'}]
+
+    def test_fast_forward_preserves_file_schema_of_retained_snapshot(self):
+        main, dev = self._write_divergent_branches()
+        # Give both branches identical schema 2, including its creation time.
+        with patch('time.time', return_value=main.table_schema.time_millis / 1000):
+            for table, column in ((main, 'main_col'), (dev, 'branch_col')):
+                self.catalog.alter_table(table.identifier, [
+                    SchemaChange.rename_column(column, 'shared_col')])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        assert main.table_schema == dev.table_schema
+        self._write(main, {'id': 3, 'shared_col': 'main tip'})
+        for row_id in (3, 4):
+            self._write(dev, {'id': row_id, 'shared_col': 'branch tip'})
+        self._expire_through(main, 2)
+        self._expire_through(dev, 3)
+        retained = main.snapshot_manager().try_get_earliest_snapshot()
+        assert (retained.id, retained.schema_id) == (3, 2)
+
+        with pytest.raises(RuntimeError, match=r'schema 1 .*retained'):
+            self.catalog.fast_forward('test.t', 'dev')
+
+        history = self.catalog.get_table('test.t').copy({'scan.snapshot-id': '3'})
+        assert sorted(self._read(history), key=lambda row: row['id']) == [
+            {'id': 1, 'shared_col': None}, {'id': 2, 'shared_col': 'historical value'},
+            {'id': 3, 'shared_col': 'main tip'}]
+
     def test_branch_time_travel_preserves_bigint_values(self):
         main = self._create_branched_table([
             DataField(0, 'id', AtomicType('INT')),
@@ -161,6 +246,93 @@ class TestTimeTravelSchemaEvolution:
             {'id': 1, 'payload': 'base', 'source': None},
             {'id': 2, 'payload': 'main', 'source': 'web'},
         ]
+
+    def test_branch_copy_reads_latest_schema(self):
+        self._create_branched_table([
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'count', AtomicType('INT')),
+        ], {'id': 1, 'count': 1})
+        self.catalog.alter_table('test.t', [
+            SchemaChange.add_column('source', AtomicType('STRING'))])
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.update_column_type('count', AtomicType('BIGINT'))])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        assert main.table_schema.id == dev.table_schema.id
+        self._write(dev, {'id': 2, 'count': 3000000000})
+
+        switched = main.copy({'branch': 'dev'})
+        assert sorted(self._read(switched), key=lambda row: row['id']) == [
+            {'id': 1, 'count': 1}, {'id': 2, 'count': 3000000000}]
+        assert switched.copy({'branch': None}).fields == main.fields
+
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.add_column('quality', AtomicType('STRING'))])
+        latest = main.copy({'branch': 'dev'})
+        assert latest.field_names == ['id', 'count', 'quality']
+        assert self._read(latest.copy({'scan.tag-name': 'base'})) == [{'id': 1, 'count': 1}]
+        row = {'id': 3, 'count': 4000000000, 'quality': 'verified'}
+        self._write(latest, row)
+        assert row in self._read(self.catalog.get_table('test.t$branch_dev'))
+        assert self._read(main) == [{'id': 1, 'count': 1, 'source': None}]
+
+    def test_branch_copy_applies_dynamic_options_to_branch_defaults(self):
+        main = self._create_branched_table([DataField(0, 'id', AtomicType('INT'))], {'id': 1})
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.set_option('file.compression', 'zstd'),
+            SchemaChange.set_option('read.batch-size', '17'),
+            SchemaChange.set_option('read.parallelism', '3')])
+
+        configured = main.copy({'read.batch-size': '7', 'read.parallelism': None})
+        switched = configured.copy({'branch': 'dev'})
+        assert switched.table_schema.options['file.compression'] == 'zstd'
+        assert switched.table_schema.options['read.batch-size'] == '7'
+        assert 'read.parallelism' not in switched.table_schema.options
+        assert main.table_schema.options['file.compression'] == 'none'
+
+    @pytest.mark.parametrize('external', [False, True])
+    def test_branch_copy_loads_rest_branch_metadata(self, native_rest_catalog, external):
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.schema.schema_manager import SchemaManager
+
+        catalog = native_rest_catalog
+        name = 'default.branch_copy'
+        fields = [DataField(0, 'id', AtomicType('INT'))]
+        options = {}
+        if external:
+            path = (self.root / 'warehouse' / 'default' / 'branch_copy').as_uri()
+            SchemaManager(FileIO.get(path), path).create_table(Schema(fields=fields))
+            options['path'] = path
+        catalog.create_table(name, Schema(fields=fields, options=options), False)
+        main = catalog.get_table(name)
+        assert main.copy({'branch': 'dev'}).current_branch() == 'dev'
+        catalog.create_branch(name, 'dev')
+        catalog.alter_table(name + '$branch_dev', [
+            SchemaChange.add_column('quality', AtomicType('STRING'))])
+
+        direct = catalog.get_table(name + '$branch_dev')
+        switched = main.copy({'branch': 'dev'})
+        assert switched.fields == direct.fields
+        assert switched.table_schema.options['path'] == direct.table_schema.options['path']
+        assert switched.file_io is main.file_io
+        assert switched.catalog_environment.identifier == direct.identifier
+        assert switched.catalog_environment.uuid is None
+        assert switched.catalog_environment.rest_table_response == main.catalog_environment.rest_table_response
+
+    def test_branch_copy_rejects_relocated_rest_table(self, native_rest_catalog):
+        catalog = native_rest_catalog
+        name = 'default.relocated'
+        fields = [DataField(0, 'id', AtomicType('INT'))]
+        catalog.create_table(name, Schema(fields=fields), False)
+        catalog.create_branch(name, 'dev')
+        dev = catalog.get_table(name + '$branch_dev')
+
+        catalog.drop_table(name)
+        location = (self.root / 'replacement').as_uri()
+        catalog.create_table(name, Schema(fields=fields, options={'path': location}), False)
+        assert catalog.get_table(name).table_path == location
+        with pytest.raises(ValueError, match='different table location'):
+            dev.copy({'branch': 'main'})
 
     def test_commit_retry_refreshes_snapshot_schema(self, monkeypatch):
         original = self._create([DataField(0, 'id', AtomicType('INT'))])

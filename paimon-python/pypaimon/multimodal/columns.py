@@ -21,17 +21,21 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.table import (
     _cast_merge_on_columns, _normalize_merge_on, _target_schema,
-    _to_arrow_table, _validate_merge_on,
+    _to_arrow_table, _validate_merge_on, _validate_row_id_update_schema,
 )
+from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
+from pypaimon.write.row_input import normalize_row_ids
 from pypaimon.write.update_validation import _authorize_update
 
 
@@ -39,8 +43,10 @@ from pypaimon.write.update_validation import _authorize_update
 class ColumnUpdateResult:
     """Schema and data versions produced by a successful column operation.
 
-    ``updated_rows`` is available for ``add_columns`` and is ``None`` for
-    ``merge_columns``, whose MERGE executor does not return logical row counts.
+    ``updated_rows`` is available for ``add_columns``, ``compute_columns``,
+    and ``update_columns_by_row_id``
+    and is ``None`` for ``merge_columns``, whose MERGE executor does not return
+    logical row counts.
     """
 
     source_snapshot_id: Optional[int]
@@ -56,7 +62,8 @@ class ColumnUpdateError(RuntimeError):
     ``schema_changed=None`` means the schema request had an unknown outcome.
     ``commit_outcome`` is ``not_started``, ``unknown``, or ``committed``. Never
     retry blindly after an unknown outcome; inspect the table first. The
-    original failure is retained as ``__cause__``.
+    underlying error is retained as ``__cause__``. Ray preserves a worker
+    exception's type only if it can serialize and deserialize the exception.
     """
 
     def __init__(self, operation):
@@ -161,6 +168,22 @@ def _canonical_field(field):
     return field.with_type(PyarrowFieldParser.from_paimon_type(data_type))
 
 
+def _validate_batch_size(batch_size):
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer.")
+
+
+def _validate_inputs(raw, inputs, fn):
+    if not callable(fn) or inputs is None:
+        raise ValueError("A callable fn and explicit inputs are required for column computation.")
+    inputs = [inputs] if isinstance(inputs, str) else list(inputs)
+    _validate_names(inputs, "inputs")
+    missing = set(inputs).difference(raw.field_names)
+    if missing:
+        raise ValueError("Input columns do not exist: %s" % sorted(missing))
+    return inputs
+
+
 def _normalize_output(data, schema):
     if not isinstance(data, (pa.Table, pa.RecordBatch)):
         raise ValueError("Column function must return a pyarrow.Table or RecordBatch.")
@@ -172,12 +195,18 @@ def _normalize_output(data, schema):
         array = data[field.name]
         if not pa.types.is_null(array.type):
             source_type = _canonical_field(pa.field(field.name, array.type)).type
-            if source_type != field.type:
+            # Same-type casts can reject child NULLs hidden by a NULL parent.
+            if array.type != source_type:
+                array = array.cast(source_type)
+            # Read schemas relax nested nullability; restore it before comparing types.
+            source = pa.Table.from_arrays([array], names=[field.name])
+            array = normalize_arrow_write_nullability(source, pa.schema([field]))[field.name]
+            if array.type != field.type:
                 raise ValueError("Incompatible type for column %s: %s != %s"
                                  % (field.name, array.type, field.type))
         if not field.nullable and array.null_count:
             raise ValueError("Cannot write null to non-null column %s." % field.name)
-        arrays.append(array.cast(field.type))
+        arrays.append(array if array.type == field.type else array.cast(field.type))
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
@@ -216,12 +245,62 @@ def merge_columns(owner, data, *, on):
         return operation.finish(None, commit=commit, messages=messages)
 
 
-def add_columns(owner, schema, *, inputs, fn, batch_size):
+def update_columns_by_row_id(owner, data, *, columns):
+    if not isinstance(data, pa.Table):
+        raise ValueError("data must be a pyarrow.Table.")
+    raw = owner.raw_table
+    _validate_update(raw)
+    if not raw.options.data_evolution_enabled() or not raw.options.row_tracking_enabled():
+        raise ValueError("Row ID column updates require a Data Evolution table with row tracking.")
+    _validate_row_id_update_schema(owner)
+    row_id = SpecialFields.ROW_ID.name
+    if data.column_names.count(row_id) != 1:
+        raise ValueError("Input must contain exactly one _ROW_ID column.")
+    columns = [columns] if isinstance(columns, str) else list(columns)
+    _validate_names(columns, "Output")
+    missing = set(columns).difference(raw.field_names)
+    if missing:
+        raise ValueError("Output columns do not exist: %s" % sorted(missing))
+    if set(columns).intersection(raw.partition_keys):
+        raise ValueError("update_columns_by_row_id cannot update partition columns.")
+    if set(columns).intersection(raw.options.video_frame_fields()):
+        raise ValueError("Use replace_video() to update video-frame columns.")
+    for name in columns:
+        if data.column_names.count(name) != 1:
+            raise ValueError("Input must contain exactly one %s column." % name)
+    row_ids = normalize_row_ids(data[row_id])
+    if len(pc.unique(row_ids)) != data.num_rows:
+        raise ValueError("Input data contains duplicate _ROW_ID values.")
+    if data.num_rows and pc.min(row_ids).as_py() < 0:
+        raise ValueError("_ROW_ID values must be non-negative.")
+    target_schema = _target_schema(raw)
+    schema = pa.schema([target_schema.field(name) for name in columns])
+    source = _normalize_output(data.select(columns), schema).append_column(row_id, row_ids)
+    with _ColumnUpdate(owner, raw) as operation:
+        if source.num_rows == 0:
+            return operation.finish(0)
+        operation.phase = "validate"
+        table = raw._copy_with_snapshot(operation.snapshot)
+        read = table.new_read_builder().with_projection([row_id])
+        # Read only the requested row IDs, retaining deletion-vector filtering.
+        plan = read.new_scan().with_row_ranges(Range.to_ranges(row_ids.to_pylist())).plan_all()
+        visible = read.new_read().to_arrow(plan.splits())[row_id]
+        missing = pc.is_null(pc.index_in(row_ids, value_set=visible))
+        if pc.any(missing).as_py():
+            raise ValueError("Row IDs not found or deleted: %s" % row_ids.filter(missing).to_pylist())
+        operation.phase = "write"
+        builder = table.new_batch_write_builder()
+        commit = operation.keep(builder.new_commit())
+        messages = builder.new_update().with_update_type(columns).update_by_arrow_with_row_id(source)
+        return operation.finish(source.num_rows, commit=commit, messages=messages)
+
+
+def add_columns(owner, schema, *, inputs, fn, batch_size,
+                execution="local", concurrency=None, ray_remote_args=None):
     if not isinstance(schema, pa.Schema):
         raise ValueError("schema must be a pyarrow.Schema.")
     _validate_names(schema.names, "Schema")
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
-        raise ValueError("batch_size must be a positive integer.")
+    _validate_batch_size(batch_size)
     if any(not field.nullable for field in schema):
         raise ValueError("New columns must be nullable until backfill is complete.")
     fields = [_canonical_field(field) for field in schema]
@@ -233,39 +312,87 @@ def add_columns(owner, schema, *, inputs, fn, batch_size):
     if fn is None:
         if inputs is not None:
             raise ValueError("inputs requires fn.")
+        if execution == "ray":
+            raise ValueError("execution='ray' requires fn.")
     else:
-        if not callable(fn) or inputs is None:
-            raise ValueError("A callable fn and explicit inputs are required for backfill.")
-        inputs = [inputs] if isinstance(inputs, str) else list(inputs)
-        _validate_names(inputs, "inputs")
-        missing = set(inputs).difference(raw.field_names)
-        if missing:
-            raise ValueError("Input columns do not exist: %s" % sorted(missing))
+        inputs = _validate_inputs(raw, inputs, fn)
+    concurrency, ray_worker = _prepare_compute_worker(execution, concurrency, ray_remote_args)
     with _ColumnUpdate(owner, raw) as operation:
         operation.add_schema(fields)
         if fn is None:
             return operation.finish(0)
-        operation.phase = "compute"
-        table = operation.raw.copy_without_time_travel({
-            "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
-        })._copy_with_snapshot(operation.snapshot)
-        builder = table.new_batch_write_builder()
-        commit = operation.keep(builder.new_commit())
+        return _compute_columns(operation, pa.schema(fields), inputs, fn, batch_size,
+                                concurrency=concurrency, ray_worker=ray_worker)
+
+
+def compute_columns(owner, columns, *, inputs, fn, batch_size,
+                    execution="local", concurrency=None, ray_remote_args=None):
+    columns = [columns] if isinstance(columns, str) else list(columns)
+    _validate_names(columns, "Output")
+    _validate_batch_size(batch_size)
+    raw = owner.raw_table
+    _validate_update(raw)
+    missing = set(columns).difference(raw.field_names)
+    if missing:
+        raise ValueError("Output columns do not exist: %s" % sorted(missing))
+    if set(columns).intersection(raw.partition_keys):
+        raise ValueError("compute_columns cannot update partition columns.")
+    if set(columns).intersection(raw.options.video_frame_fields()):
+        raise ValueError("Use replace_video() to update video-frame columns.")
+    inputs = _validate_inputs(raw, inputs, fn)
+    target_schema = _target_schema(raw)
+    schema = pa.schema([target_schema.field(name) for name in columns])
+    concurrency, ray_worker = _prepare_compute_worker(execution, concurrency, ray_remote_args)
+    with _ColumnUpdate(owner, raw) as operation:
+        return _compute_columns(operation, schema, inputs, fn, batch_size,
+                                concurrency=concurrency, ray_worker=ray_worker)
+
+
+def _prepare_compute_worker(execution, concurrency, ray_remote_args):
+    if execution == "local":
+        if concurrency is not None or ray_remote_args is not None:
+            raise ValueError("Ray options require execution='ray'.")
+        return None, None
+    if execution == "ray":
+        from pypaimon.ray.compute_columns import create_ray_column_worker
+        return create_ray_column_worker(concurrency, ray_remote_args)
+    raise ValueError("execution must be 'local' or 'ray'.")
+
+
+def _compute_columns(operation, schema, inputs, fn, batch_size, *, concurrency, ray_worker):
+    operation.phase = "compute"
+    options = {
+        "blob-as-descriptor": "false", "read.batch-size": str(batch_size),
+    }
+    if ray_worker is not None:
+        options[CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()] = "full"
+    table = operation.raw.copy_without_time_travel(options)._copy_with_snapshot(operation.snapshot)
+    builder = table.new_batch_write_builder()
+    commit = operation.keep(builder.new_commit())
+    if ray_worker is None:
         update = builder.new_update().with_update_type(schema.names)
         update.with_read_projection(inputs)
         shard = operation.keep(update.new_shard_updator(0, 1))
-        updated_rows = 0
-        for batch in shard.arrow_reader():
-            for start in range(0, batch.num_rows, batch_size):
-                operation.phase = "compute"
-                piece = batch.slice(start, batch_size)
-                output = _normalize_output(fn(piece), pa.schema(fields))
-                if output.num_rows != piece.num_rows:
-                    raise ValueError("Column function must return one output row per input row, in input order.")
-                operation.phase = "write"
-                for output_batch in output.to_batches(max_chunksize=batch_size):
-                    shard.update_by_arrow_batch(output_batch)
-                updated_rows += output.num_rows
-        operation.phase = "write"
-        messages = shard.prepare_commit()
-        return operation.finish(updated_rows, commit=commit, messages=messages)
+        messages, updated_rows = _prepare_column_shard(shard, schema, fn, batch_size, operation)
+    else:
+        from pypaimon.ray.compute_columns import prepare_ray_column_update
+        messages, updated_rows = prepare_ray_column_update(
+            operation, table, builder.commit_user, inputs, schema, fn, batch_size, concurrency, ray_worker)
+    return operation.finish(updated_rows, commit=commit, messages=messages)
+
+
+def _prepare_column_shard(shard, schema, fn, batch_size, progress):
+    updated_rows = 0
+    for batch in shard.arrow_reader():
+        for start in range(0, batch.num_rows, batch_size):
+            progress.phase = "compute"
+            piece = batch.slice(start, batch_size)
+            output = _normalize_output(fn(piece), schema)
+            if output.num_rows != piece.num_rows:
+                raise ValueError("Column function must return one output row per input row, in input order.")
+            progress.phase = "write"
+            for output_batch in output.to_batches(max_chunksize=batch_size):
+                shard.update_by_arrow_batch(output_batch)
+            updated_rows += output.num_rows
+    progress.phase = "write"
+    return shard.prepare_commit(), updated_rows

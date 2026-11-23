@@ -21,8 +21,11 @@ Table commands for Paimon CLI.
 This module provides table-related commands for the CLI.
 """
 
+import argparse
+import json
 import sys
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 
 from pypaimon.common.json_util import JSON
 
@@ -56,10 +59,15 @@ def cmd_table_read(args):
     database_name, table_name = parts
     
     # Get table
+    snapshot_id = args.snapshot_id
+    target = f"table '{table_identifier}'"
     try:
         table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            target += f" at snapshot {snapshot_id}"
+            _, table = _resolve_snapshot_view(table, snapshot_id)
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to get {target}: {e}", file=sys.stderr)
         sys.exit(1)
     
     # Build read pipeline
@@ -114,39 +122,45 @@ def cmd_table_read(args):
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read
-    scan = read_builder.new_scan()
-    plan = scan.plan()
-    splits = plan.splits()
+    try:
+        scan = read_builder.new_scan()
+        plan = scan.plan()
+        splits = plan.splits()
     
-    read = read_builder.new_read()
+        read = read_builder.new_read()
 
-    # Read splits incrementally, stopping early when limit is reached
-    if limit:
-        import pandas as pd
-        collected_rows = 0
-        table_list = []
-        for split in splits:
-            if collected_rows >= limit:
-                break
-            partial_df = read.to_pandas([split])
-            collected_rows += len(partial_df)
-            table_list.append(partial_df)
-        df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
-        if len(df) > limit:
-            df = df.head(limit)
-    else:
-        df = read.to_pandas(splits)
+        # Read splits incrementally, stopping early when limit is reached
+        if limit:
+            import pandas as pd
+            collected_rows = 0
+            table_list = []
+            for split in splits:
+                if collected_rows >= limit:
+                    break
+                partial_df = read.to_pandas([split])
+                collected_rows += len(partial_df)
+                table_list.append(partial_df)
+            df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
+            if len(df) > limit:
+                df = df.head(limit)
+        else:
+            df = read.to_pandas(splits)
 
-    # Drop extra columns that were added only for where-clause filtering
-    if extra_where_columns:
-        df = df.drop(columns=extra_where_columns, errors='ignore')
+        # Drop extra columns that were added only for where-clause filtering
+        if extra_where_columns:
+            df = df.drop(columns=extra_where_columns, errors='ignore')
 
-    output_format = getattr(args, 'format', 'table')
-    if output_format == 'json':
-        import json
-        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
-    else:
-        print(df.to_string(index=False))
+        output_format = getattr(args, 'format', 'table')
+        if output_format == 'json':
+            import json
+            print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+        else:
+            print(df.to_string(index=False))
+    except Exception as e:
+        if snapshot_id is None:
+            raise
+        print(f"Error: Failed to query {target}: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_table_explain(args):
@@ -156,6 +170,9 @@ def cmd_table_explain(args):
     Prints the scan plan (snapshot, pushed-down predicate / projection /
     limit, partition / bucket / file-stats pruning funnel and split-
     level signals) without reading any data files.
+
+    Args:
+        args: Parsed command line arguments.
     """
     from pypaimon.cli.cli import load_catalog_config, create_catalog
 
@@ -170,10 +187,15 @@ def cmd_table_explain(args):
         sys.exit(1)
     database_name, table_name = parts
 
+    snapshot_id = args.snapshot_id
+    target = f"table '{table_identifier}'"
     try:
         table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            target += f" at snapshot {snapshot_id}"
+            _, table = _resolve_snapshot_view(table, snapshot_id)
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to get {target}: {e}", file=sys.stderr)
         sys.exit(1)
 
     read_builder = table.new_read_builder()
@@ -211,7 +233,7 @@ def cmd_table_explain(args):
     try:
         result = read_builder.explain(verbose=verbose)
     except Exception as e:
-        print(f"Error: Failed to explain table '{table_identifier}': {e}", file=sys.stderr)
+        print(f"Error: Failed to explain {target}: {e}", file=sys.stderr)
         sys.exit(1)
 
     output_format = getattr(args, 'format', 'table')
@@ -251,6 +273,8 @@ def cmd_table_full_text_search(args):
         args: Parsed command line arguments.
     """
     from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    from pypaimon.table.file_store_table import FileStoreTable
 
     config_path = args.config
     config = load_catalog_config(config_path)
@@ -274,6 +298,8 @@ def cmd_table_full_text_search(args):
     limit = args.limit
 
     try:
+        if isinstance(table, FileStoreTable):
+            table = table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(table))
         builder = table.new_full_text_search_builder()
         builder.with_query(args.column, args.query)
         builder.with_limit(limit)
@@ -323,35 +349,80 @@ def cmd_table_get(args):
     Args:
         args: Parsed command line arguments.
     """
-    from pypaimon.cli.cli import load_catalog_config, create_catalog
-    
-    # Load catalog configuration
-    config_path = args.config
-    config = load_catalog_config(config_path)
-    
-    # Create catalog
-    catalog = create_catalog(config)
-    
-    # Parse table identifier
-    table_identifier = args.table
-    parts = table_identifier.split('.')
-    if len(parts) != 2:
-        print(f"Error: Invalid table identifier '{table_identifier}'. "
-              f"Expected format: 'database.table'", file=sys.stderr)
-        sys.exit(1)
-    
-    database_name, table_name = parts
-    
-    # Get table
+    table = _open_schema_table(args)
+    schema_id = getattr(args, 'schema_id', None)
+    snapshot_id = getattr(args, 'snapshot_id', None)
     try:
-        table = catalog.get_table(f"{database_name}.{table_name}")
+        if snapshot_id is not None:
+            snapshot = table.snapshot_manager().get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot {snapshot_id} not found for table '{args.table}'.")
+            schema_id = snapshot.schema_id
+            if schema_id is None:
+                raise ValueError(f"Snapshot {snapshot_id} does not contain a schema ID.")
+        table_schema = table.table_schema if schema_id is None else table.schema_manager.get_schema(schema_id)
+        if table_schema is None:
+            raise ValueError(f"Schema {schema_id} not found for table '{args.table}'.")
+        
+        # Get table schema and convert to Schema, then output as JSON
+        schema = table_schema.to_schema()
+        if getattr(args, 'format', 'json') == 'json':
+            print(JSON.to_json(schema, indent=2))
+        else:
+            import pandas as pd
+            values = json.loads(JSON.to_json(schema))
+            rows = [[key, _snapshot_display_value(value)] for key, value in values.items()]
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
     except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        target = 'latest schema' if schema_id is None else f'schema {schema_id}'
+        if snapshot_id is not None:
+            target = f'schema for snapshot {snapshot_id}'
+        print(f"Error: Failed to get {target} for table '{args.table}': {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_table_list_schemas(args):
+    """
+    Execute the 'table list-schemas' command.
     
-    # Get table schema and convert to Schema, then output as JSON
-    schema = table.table_schema.to_schema()
-    print(JSON.to_json(schema, indent=2))
+    Lists available schemas in ascending schema-ID order without reading table data.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    table = _open_schema_table(args)
+    try:
+        manager = table.schema_manager
+        schemas = []
+        for schema_id in sorted(manager._list_versioned_files()):
+            schema = manager.get_schema(schema_id)
+            if schema is None:
+                continue
+            schemas.append(schema)
+            if args.limit is not None and len(schemas) >= args.limit:
+                break
+        
+        if args.format == 'json':
+            print(json.dumps([json.loads(JSON.to_json(s)) for s in schemas], ensure_ascii=False, indent=2))
+        elif not schemas:
+            print(f"No schemas found for table '{args.table}'.")
+        else:
+            import pandas as pd
+            rows = []
+            for s in schemas:
+                row = [str(s.id)]
+                for value in ([f.to_dict() for f in s.fields], s.partition_keys, s.primary_keys, s.options):
+                    row.append(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+                update_time = _snapshot_commit_time(s.time_millis) if s.time_millis is not None else '-'
+                row.extend([s.comment, update_time])
+                rows.append(row)
+            # Convert before Pandas can coerce nullable integers to floats.
+            rows = [[_snapshot_display_value(value) for value in row] for row in rows]
+            columns = ['schema_id', 'fields', 'partition_keys', 'primary_keys', 'options', 'comment', 'update_time']
+            print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list schemas for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_table_snapshot(args):
@@ -363,53 +434,333 @@ def cmd_table_snapshot(args):
     Args:
         args: Parsed command line arguments.
     """
-    from pypaimon.cli.cli import load_catalog_config, create_catalog
-    from pypaimon.table.file_store_table import FileStoreTable
-    
-    # Load catalog configuration
-    config_path = args.config
-    config = load_catalog_config(config_path)
-    
-    # Create catalog
-    catalog = create_catalog(config)
-    
-    # Parse table identifier
-    table_identifier = args.table
-    parts = table_identifier.split('.')
-    if len(parts) != 2:
-        print(f"Error: Invalid table identifier '{table_identifier}'. "
-              f"Expected format: 'database.table'", file=sys.stderr)
-        sys.exit(1)
-    
-    database_name, table_name = parts
-    
-    # Get table
+    manager = _open_snapshot_manager(args)
+    snapshot_id = getattr(args, 'snapshot_id', None)
     try:
-        table = catalog.get_table(f"{database_name}.{table_name}")
-    except Exception as e:
-        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Check if table is FileStoreTable
-    if not isinstance(table, FileStoreTable):
-        print(f"Error: Table '{table_identifier}' is not a FileStoreTable. "
-              f"Snapshot operation is not supported for this table type.", file=sys.stderr)
-        sys.exit(1)
-    
-    # Get latest snapshot
-    try:
-        snapshot_manager = table.snapshot_manager()
-        snapshot = snapshot_manager.get_latest_snapshot()
-        
+        snapshot = (
+            # Get latest snapshot
+            manager.get_latest_snapshot() if snapshot_id is None
+            else manager.get_snapshot_by_id(snapshot_id)
+        )
         if snapshot is None:
-            print(f"Error: No snapshot found for table '{table_identifier}'.", file=sys.stderr)
-            sys.exit(1)
+            if snapshot_id is None:
+                raise ValueError(f"No snapshot found for table '{args.table}'.")
+            raise ValueError(f"Snapshot {snapshot_id} not found for table '{args.table}'.")
         
-        # Output snapshot as JSON
-        print(JSON.to_json(snapshot, indent=2))
-        
+        if getattr(args, 'format', 'json') == 'json':
+            # Output snapshot as JSON
+            print(JSON.to_json(snapshot, indent=2))
+        else:
+            import pandas as pd
+            values = json.loads(JSON.to_json(snapshot))
+            rows = [[key, _snapshot_display_value(value)] for key, value in values.items()]
+            for row in rows:
+                if row[0] == 'timeMillis':
+                    row[1] += ' ({})'.format(_snapshot_commit_time(snapshot.time_millis))
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
     except Exception as e:
-        print(f"Error: Failed to get snapshot: {e}", file=sys.stderr)
+        target = 'latest snapshot' if snapshot_id is None else f'snapshot {snapshot_id}'
+        print(f"Error: Failed to get {target} for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_list_snapshots(args):
+    """
+    Execute the 'table list-snapshots' command.
+    
+    Lists retained snapshots in ascending snapshot-ID order without reading table data.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    manager = _open_snapshot_manager(args)
+    try:
+        snapshots = []
+        for snapshot_id in manager.list_snapshot_ids():
+            try:
+                snapshot = manager.get_snapshot_by_id(snapshot_id)
+            except FileNotFoundError:
+                # Expiration can remove a file between listing and opening it.
+                continue
+            if snapshot is None:
+                continue
+            snapshots.append(snapshot)
+            if args.limit is not None and len(snapshots) >= args.limit:
+                break
+        
+        if args.format == 'json':
+            # Preserve Snapshot's JSON field names, optional values and integers.
+            print(json.dumps([json.loads(JSON.to_json(s)) for s in snapshots], ensure_ascii=False, indent=2))
+        elif not snapshots:
+            print(f"No snapshots found for table '{args.table}'.")
+        else:
+            import pandas as pd
+            rows = [[s.id, s.schema_id, _snapshot_commit_time(s.time_millis),
+                     s.commit_kind, s.commit_user, s.total_record_count,
+                     s.delta_record_count, s.changelog_record_count] for s in snapshots]
+            # Convert before Pandas can coerce nullable integers to floats.
+            rows = [[_snapshot_display_value(value) for value in row] for row in rows]
+            columns = ['Snapshot ID', 'Schema ID', 'Commit Time (UTC)', 'Commit Kind',
+                       'Commit User', 'Total Records', 'Delta Records', 'Changelog Records']
+            print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list snapshots for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_list_manifests(args):
+    """
+    Execute the 'table list-manifests' command.
+    
+    Lists the base, delta and changelog manifests referenced by a snapshot.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    from pypaimon.utils.row_to_string import cast_row_to_string
+
+    table = _open_manifest_table(args)
+    try:
+        manager = table.snapshot_manager()
+        snapshot = (manager.get_latest_snapshot() if args.snapshot_id is None
+                    else manager.get_snapshot_by_id(args.snapshot_id))
+        if snapshot is None and args.snapshot_id is not None:
+            raise ValueError(f"Snapshot {args.snapshot_id} not found for table '{args.table}'.")
+
+        manifests = []
+        kinds = ('base', 'delta', 'changelog') if args.type == 'all' else (args.type,)
+        if snapshot is not None:
+            list_manager = ManifestListManager(table)
+            for kind in kinds:
+                list_name = getattr(snapshot, kind + '_manifest_list')
+                if not list_name:
+                    continue
+                list_size = getattr(snapshot, kind + '_manifest_list_size')
+                for meta in list_manager.read(list_name, list_size):
+                    manifests.append({
+                        'type': kind,
+                        'manifest_list': list_name,
+                        'file_name': meta.file_name,
+                        'file_size': meta.file_size,
+                        'num_added_files': meta.num_added_files,
+                        'num_deleted_files': meta.num_deleted_files,
+                        'schema_id': meta.schema_id,
+                        'min_partition_stats': cast_row_to_string(meta.partition_stats.min_values),
+                        'max_partition_stats': cast_row_to_string(meta.partition_stats.max_values),
+                        'min_row_id': meta.min_row_id,
+                        'max_row_id': meta.max_row_id,
+                    })
+                    if args.limit is not None and len(manifests) >= args.limit:
+                        break
+                if args.limit is not None and len(manifests) >= args.limit:
+                    break
+
+        snapshot_id = snapshot.id if snapshot is not None else None
+        if args.format == 'json':
+            print(json.dumps({'table': args.table, 'snapshot_id': snapshot_id, 'manifests': manifests},
+                             ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            print(f"Table: {args.table}\nSnapshot: {_snapshot_display_value(snapshot_id)}")
+            if not manifests:
+                print(f"No manifests found for table '{args.table}'.")
+                return
+            import pandas as pd
+            columns = ['file_name', 'file_size', 'num_added_files', 'num_deleted_files', 'schema_id',
+                       'min_partition_stats', 'max_partition_stats', 'min_row_id', 'max_row_id']
+            for kind in kinds:
+                group = [meta for meta in manifests if meta['type'] == kind]
+                if not group:
+                    continue
+                print('\n{} ({}):'.format(kind, group[0]['manifest_list']))
+                # Convert before Pandas can coerce nullable row IDs to floats.
+                rows = [[_snapshot_display_value(meta[column]) for column in columns] for meta in group]
+                print(pd.DataFrame(rows, columns=columns).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list manifests for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_manifest(args):
+    """
+    Execute the 'table manifest' command.
+    
+    Displays a manifest's original ADD/DELETE entries and complete metadata.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+
+    table = _open_manifest_table(args)
+    try:
+        name = args.file
+        if not name or name in ('.', '..') or any(char in name for char in ('/', '\\', '\x00')):
+            raise ValueError('--file must be a file name within the table manifest directory.')
+        manager = ManifestFileManager(table)
+        # Reading a single file preserves DELETE entries and their original order.
+        entries = manager.read(name, drop_stats=False)
+        result = {
+            'table': args.table,
+            'manifest_file': name,
+            'manifest_path': manager.manifest_path + '/' + name,
+            'entries': [_manifest_entry_to_dict(table, entry) for entry in entries],
+        }
+        result = _manifest_json_value(result)
+        if getattr(args, 'format', 'json') == 'json':
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            import pandas as pd
+            rows = [[key, _snapshot_display_value(value)] for key, value in result.items()]
+            print(pd.DataFrame(rows, columns=['Field', 'Value']).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to read manifest '{args.file}' for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_list_files(args):
+    """
+    Execute the 'table list-files' command.
+
+    Lists the live data files referenced by the latest or a specified snapshot.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.table.system.files_table import FilesTable
+
+    table = _open_schema_table(args)
+    try:
+        if not isinstance(table, FileStoreTable):
+            raise ValueError('File listing is not supported for this table type; expected a FileStoreTable.')
+        if table.options.query_auth_enabled:
+            raise NotImplementedError('Raw file metadata is not supported on a query-auth table.')
+        # Pin the resolved snapshot, including an empty table, before reading its live files.
+        snapshot, view = _resolve_snapshot_view(table, args.snapshot_id, for_query=False)
+        files = FilesTable(view)._build_arrow_table()
+        if args.bucket is not None:
+            import pyarrow.compute as pc
+            files = files.filter(pc.equal(files.column('bucket'), args.bucket))
+        if args.limit is not None:
+            files = files.slice(0, args.limit)
+        files = files.rename_columns(['delete_row_count' if name == 'deleteRowCount' else name
+                                      for name in files.column_names])
+        snapshot_id = snapshot.id if snapshot is not None else None
+        # Table.to_pylist is unavailable in the supported PyArrow 6 release.
+        columns = files.to_pydict()
+        rows = [dict(snapshot_id=snapshot_id, **dict(zip(columns, values))) for values in zip(*columns.values())]
+        if args.format == 'json':
+            result = _manifest_json_value({'table': args.table, 'snapshot_id': snapshot_id, 'files': rows})
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        elif not rows:
+            print(f"No files found for table '{args.table}' (snapshot {_snapshot_display_value(snapshot_id)}).")
+        else:
+            import pandas as pd
+            for row in rows:
+                if row['creation_time'] is not None:
+                    row['creation_time'] = row['creation_time'].isoformat()
+            # Convert before Pandas can coerce nullable integers to floats.
+            values = [[_snapshot_display_value(value) for value in row.values()] for row in rows]
+            print(pd.DataFrame(values, columns=['snapshot_id'] + files.column_names).to_string(index=False))
+    except Exception as e:
+        print(f"Error: Failed to list files for table '{args.table}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_file(args):
+    """
+    Execute the 'table file' command.
+
+    Displays a Parquet file's schema and footer metadata without reading data records.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    import errno
+    from os.path import basename, samefile
+
+    import pyarrow.fs as pafs
+    import pyarrow.parquet as pq
+
+    from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.table.system.files_table import _data_file_format
+    from pypaimon.table.system.system_table import SystemTable
+
+    table = _open_schema_table(args)
+    try:
+        base_table = table.base_table if isinstance(table, SystemTable) else table
+        if isinstance(base_table, FileStoreTable) and base_table.options.query_auth_enabled:
+            raise NotImplementedError('Raw file metadata is not supported on a query-auth table.')
+        status = None
+        missing = None
+        non_file_found = False
+        # Check both literal Paimon paths and encoded file URIs without guessing their meaning.
+        for path in dict.fromkeys(_table_file_paths(table, args.file)):
+            try:
+                candidate = table.file_io.get_file_status(path)
+            except OSError as e:
+                if not isinstance(e, FileNotFoundError) and e.errno != errno.ENAMETOOLONG:
+                    raise
+                missing = e
+                continue
+            if candidate.type != pafs.FileType.File:
+                non_file_found = True
+                continue
+            if status is not None and not samefile(status.path, candidate.path):
+                raise ValueError(
+                    f"Ambiguous --file: '{status.path}' and '{candidate.path}' both exist. "
+                    "Use a plain filesystem path without the 'file:' prefix.")
+            io_path, status = path, candidate
+        if status is None:
+            if non_file_found:
+                raise ValueError('--file must point to a regular file.')
+            raise missing
+        file_format = _data_file_format(basename(status.path)).lower()
+        if file_format != 'parquet':
+            raise ValueError('Unsupported file format. Only Parquet files are supported.')
+        with table.file_io.new_input_stream(io_path) as stream:
+            parquet_file = pq.ParquetFile(stream)
+            metadata = parquet_file.metadata.to_dict()
+            columns = []
+            for i in range(parquet_file.metadata.num_columns):
+                column = parquet_file.schema.column(i)
+                columns.append({
+                    'name': column.name,
+                    'path': column.path,
+                    'physical_type': column.physical_type,
+                    'logical_type': str(column.logical_type),
+                    'converted_type': column.converted_type,
+                    'max_definition_level': column.max_definition_level,
+                    'max_repetition_level': column.max_repetition_level,
+                    'length': column.length,
+                    'precision': column.precision,
+                    'scale': column.scale,
+                })
+            result = _manifest_json_value({
+                'table': args.table,
+                'file_path': args.file,
+                'file_format': file_format,
+                'file_size_in_bytes': status.size,
+                'schema': {'arrow': str(parquet_file.schema_arrow), 'parquet': columns},
+                'metadata': metadata,
+            })
+        if args.format == 'json':
+            print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            field_width = max(len(key) for key in result)
+            print(f'{"Field":<{field_width}}  Value')
+            for key, value in result.items():
+                if isinstance(value, (dict, list)):
+                    # Only LF separates indented JSON lines; Unicode separators may be string data.
+                    lines = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False).split('\n')
+                else:
+                    lines = _snapshot_display_value(value).split('\n')
+                for i, line in enumerate(lines or ['']):
+                    field = key if i == 0 else ''
+                    print(f'{field:<{field_width}}  {line}')
+    except Exception as e:
+        print(f"Error: Failed to inspect file '{args.file}' for table '{args.table}': {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -418,7 +769,7 @@ def cmd_table_rollback(args):
     Execute the 'table rollback' command.
 
     Rolls a table back to an earlier snapshot, tag, or timestamp using the
-    table's existing rollback API. Exactly one of --snapshot / --tag /
+    table's existing rollback API. Exactly one of --snapshot-id / --tag /
     --timestamp must be provided.
 
     Args:
@@ -450,9 +801,9 @@ def cmd_table_rollback(args):
         sys.exit(1)
 
     try:
-        if args.snapshot is not None:
-            table.rollback_to(args.snapshot)
-            target_desc = f"snapshot {args.snapshot}"
+        if args.snapshot_id is not None:
+            table.rollback_to(args.snapshot_id)
+            target_desc = f"snapshot {args.snapshot_id}"
         elif args.tag is not None:
             table.rollback_to(args.tag)
             target_desc = f"tag '{args.tag}'"
@@ -928,6 +1279,218 @@ def cmd_table_drop_partition(args):
         sys.exit(1)
 
 
+def _open_schema_table(args):
+    """Load a file-store table for the schema inspection commands."""
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2 or not all(parts):
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    
+    database_name, table_name = parts
+    
+    try:
+        # Load catalog configuration
+        config_path = args.config
+        config = load_catalog_config(config_path)
+        
+        # Create catalog
+        catalog = create_catalog(config)
+        
+        # Get table
+        table = catalog.get_table(f"{database_name}.{table_name}")
+        return table
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _resolve_snapshot_view(table, snapshot_id, *, for_query=True):
+    """Pin a file-store scan to one snapshot, using its schema when an ID was requested."""
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if not isinstance(table, FileStoreTable):
+        raise ValueError('Reading a snapshot requires a FileStoreTable.')
+    manager = table.snapshot_manager()
+    if snapshot_id is None:
+        snapshot = manager.get_latest_snapshot()
+        return snapshot, table._copy_with_snapshot(snapshot)
+
+    snapshot = manager.get_snapshot_by_id(snapshot_id)
+    if snapshot is None:
+        raise ValueError(f"Snapshot {snapshot_id} not found for table '{table.identifier.get_full_name()}'.")
+    dynamic_options = getattr(table, '_applied_dynamic_options', {})
+    layout_keys = {'partition.default-name', 'partition.legacy-name', 'data-file.path-directory'}
+    if snapshot.schema_id == table.table_schema.id and (not for_query or layout_keys.isdisjoint(dynamic_options)):
+        return snapshot, table._copy_with_snapshot(snapshot)
+    if snapshot.schema_id is None:
+        raise ValueError(f"Snapshot {snapshot.id} does not contain a schema ID.")
+
+    schema = table.schema_manager.get_schema(snapshot.schema_id)
+    if schema is None:
+        raise ValueError(f"Schema {snapshot.schema_id} not found for snapshot {snapshot.id}.")
+    options = table._exclude_current_schema_field_options(schema, table.options.options, set(dynamic_options))
+    if for_query:
+        # Use the snapshot's directory layout and honor explicit overrides of its merge options.
+        merge_keys = {'bucket', 'bucket-key', 'merge-engine', 'sequence.field', 'sequence.field.sort-order',
+                      'ignore-delete', 'changelog-producer', 'deletion-vectors.enabled',
+                      'deletion-vectors.merge-on-read'}
+        prefixes = ('fields.', 'aggregation.', 'partial-update.', 'deduplicate.', 'first-row.')
+        merge_keys.update(key for key in options.keys() | schema.options.keys() if key.startswith(prefixes))
+        for key in layout_keys | (merge_keys - dynamic_options.keys()):
+            if key in schema.options:
+                options[key] = schema.options[key]
+            else:
+                options.pop(key, None)
+    view = FileStoreTable(table.file_io, table.identifier, table.table_path,
+                          schema.copy(new_options=options), table.catalog_environment)
+    view._applied_dynamic_options = dict(dynamic_options)
+    return snapshot, view._copy_with_snapshot(snapshot)
+
+
+def _open_snapshot_manager(args):
+    """Load a file-store table for the snapshot inspection commands."""
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+    
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2 or not all(parts):
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        # Load catalog configuration
+        config = load_catalog_config(args.config)
+        
+        # Create catalog
+        catalog = create_catalog(config)
+        
+        # Get table
+        table = catalog.get_table(table_identifier)
+        
+        # Check if table is FileStoreTable
+        if not isinstance(table, FileStoreTable):
+            raise ValueError('Snapshot operation is not supported for this table type; '
+                             'expected a FileStoreTable.')
+        return table.snapshot_manager()
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _open_manifest_table(args):
+    """Load a file-store table for the manifest inspection commands."""
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    table = _open_schema_table(args)
+    if not isinstance(table, FileStoreTable):
+        print('Error: Manifest inspection is not supported for this table type; expected a FileStoreTable.',
+              file=sys.stderr)
+        sys.exit(1)
+    return table
+
+
+def _manifest_entry_to_dict(table, entry):
+    """Keep all stored file metadata and add the resolved data-file path and format."""
+    from dataclasses import fields
+    from pypaimon.table.system.files_table import _data_file_format, _metadata_file_path
+
+    meta = entry.file
+    file = {field.name: getattr(meta, field.name) for field in fields(meta)}
+    if table.primary_keys and meta.schema_id != table.table_schema.id:
+        schema = table.schema_manager.get_schema(meta.schema_id)
+        key_names = [name for name in schema.primary_keys if name not in schema.partition_keys]
+        # Key types cannot change, but the reader uses the latest key names.
+        # Restore the names recorded by this file's schema after a rename.
+        for name in ('min_key', 'max_key', 'key_stats'):
+            file[name] = _manifest_json_value(file[name], key_names)
+    file['file_path'] = _metadata_file_path(table, entry)
+    file['file_format'] = _data_file_format(meta.file_name)
+    file['file_source'] = {0: 'APPEND', 1: 'COMPACT'}.get(meta.file_source, meta.file_source)
+    return {
+        'kind': {0: 'ADD', 1: 'DELETE'}.get(entry.kind, entry.kind),
+        'partition': entry.partition,
+        'bucket': entry.bucket,
+        'total_buckets': entry.total_buckets,
+        'file': file,
+    }
+
+
+def _manifest_json_value(value, field_names=None):
+    """Render decoded metadata without losing integers, decimal precision or binary values."""
+    import base64
+    import math
+    from datetime import date, time
+    from decimal import Decimal
+    from pypaimon.data.timestamp import Timestamp
+    from pypaimon.manifest.schema.simple_stats import SimpleStats
+    from pypaimon.table.row.internal_row import InternalRow
+
+    if isinstance(value, InternalRow):
+        names = [field.name for field in value.fields] if field_names is None else field_names
+        # Empty stats can retain schema fields even when the stored row has no values.
+        return {name: _manifest_json_value(value.get_field(i)) for i, name in enumerate(names[:len(value)])}
+    if isinstance(value, SimpleStats):
+        counts = value.null_counts
+        names = [field.name for field in value.min_values.fields] if field_names is None else field_names
+        return {
+            'min_values': _manifest_json_value(value.min_values, names),
+            'max_values': _manifest_json_value(value.max_values, names),
+            'null_counts': None if counts is None else {
+                name: counts[i] if i < len(counts) else None for i, name in enumerate(names)
+            },
+        }
+    if isinstance(value, dict):
+        return {key: _manifest_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_manifest_json_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {'encoding': 'base64', 'data': base64.b64encode(value).decode('ascii')}
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Timestamp):
+        return value.to_local_date_time().isoformat()
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, float) and not math.isfinite(value):
+        return 'NaN' if math.isnan(value) else ('Infinity' if value > 0 else '-Infinity')
+    return value
+
+
+def _table_file_paths(table, path):
+    """Yield the FileIO paths a CLI file argument can refer to."""
+    from pathlib import Path
+
+    from pypaimon.utils.path import to_file_io_path
+
+    def file_uri(value):
+        scheme, separator, rest = str(value).partition(':')
+        return 'file:' + rest if separator and scheme.lower() == 'file' else None
+
+    uri = file_uri(path) or path
+    literal = to_file_io_path(uri)
+    yield literal
+    if literal == uri:
+        return
+
+    table_uri = file_uri(getattr(table, 'table_path', None))
+    if table_uri and '%' in table_uri:
+        # Metadata paths have a URI-encoded table root and literal partition directories.
+        logical_root = Path(to_file_io_path(table_uri))
+        logical_file = Path(literal)
+        if logical_root in logical_file.parents:
+            physical_root = Path(table.file_io.to_filesystem_path(table_uri))
+            yield str(physical_root / logical_file.relative_to(logical_root))
+    yield uri
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -943,6 +1506,12 @@ def add_table_subcommands(table_parser):
         'table',
         help='Table identifier in format: database.table'
     )
+    read_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Read the table at this snapshot ID using its schema'
+    )
+    # Preserve --s as an abbreviation for --select alongside --snapshot-id.
+    read_parser.add_argument('--s', dest='select', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     read_parser.add_argument(
         '--select', '-s',
         type=str,
@@ -982,6 +1551,11 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     explain_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Explain the table scan at this snapshot ID using its schema'
+    )
+    explain_parser.add_argument('--s', dest='select', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    explain_parser.add_argument(
         '--select', '-s',
         type=str,
         default=None,
@@ -1020,15 +1594,125 @@ def add_table_subcommands(table_parser):
         'table',
         help='Table identifier in format: database.table'
     )
+    schema_target = get_parser.add_mutually_exclusive_group()
+    schema_target.add_argument('--schema-id', type=_non_negative_int, default=None,
+                               help='Schema ID to inspect (default: the latest schema)')
+    schema_target.add_argument('--snapshot-id', type=_positive_int, default=None,
+                               help='Inspect the schema referenced by this snapshot')
+    get_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
     get_parser.set_defaults(func=cmd_table_get)
+
+    # table list-schemas command
+    list_schemas_parser = table_subparsers.add_parser(
+        'list-schemas', help='List available schemas in ascending schema-ID order'
+    )
+    list_schemas_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_schemas_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of schemas to display, starting with the oldest (default: all)'
+    )
+    list_schemas_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    list_schemas_parser.set_defaults(func=cmd_table_list_schemas)
     
     # table snapshot command
-    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest snapshot of a table')
+    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest or a specific snapshot of a table')
     snapshot_parser.add_argument(
         'table',
         help='Table identifier in format: database.table'
     )
+    snapshot_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    snapshot_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
     snapshot_parser.set_defaults(func=cmd_table_snapshot)
+
+    # table list-snapshots command
+    list_snapshots_parser = table_subparsers.add_parser(
+        'list-snapshots', help='List available snapshots in ascending snapshot-ID order'
+    )
+    list_snapshots_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_snapshots_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of snapshots to display, starting with the oldest (default: all)'
+    )
+    list_snapshots_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_snapshots_parser.set_defaults(func=cmd_table_list_snapshots)
+
+    # table list-manifests command
+    list_manifests_parser = table_subparsers.add_parser(
+        'list-manifests', help='List the manifests referenced by a snapshot'
+    )
+    list_manifests_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_manifests_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    list_manifests_parser.add_argument(
+        '--type', choices=['all', 'base', 'delta', 'changelog'], default='all',
+        help='Manifest list type (default: all)'
+    )
+    list_manifests_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of manifests across all selected lists (default: all)'
+    )
+    list_manifests_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_manifests_parser.set_defaults(func=cmd_table_list_manifests)
+
+    # table manifest command
+    manifest_parser = table_subparsers.add_parser(
+        'manifest', help='Inspect a manifest and its original ADD/DELETE entries'
+    )
+    manifest_parser.add_argument('table', help='Table identifier in format: database.table')
+    manifest_parser.add_argument('--file', required=True, help='Manifest file name within the table manifest directory')
+    manifest_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    manifest_parser.set_defaults(func=cmd_table_manifest)
+
+    # table list-files command
+    list_files_parser = table_subparsers.add_parser('list-files', help='List the live data files of a snapshot')
+    list_files_parser.add_argument('table', help='Table identifier in format: database.table')
+    list_files_parser.add_argument(
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to inspect (default: the latest snapshot)'
+    )
+    list_files_parser.add_argument('--bucket', type=int, default=None, help='Only display files in this bucket')
+    list_files_parser.add_argument(
+        '--limit', '-l', type=_positive_int, default=None,
+        help='Maximum number of live files to display after filtering (default: all)'
+    )
+    list_files_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='table',
+        help='Output format: table (default) or json'
+    )
+    list_files_parser.set_defaults(func=cmd_table_list_files)
+
+    # table file command
+    file_parser = table_subparsers.add_parser('file', help="Inspect a Parquet file's schema and footer metadata")
+    file_parser.add_argument('table', help='Table identifier in format: database.table (provides FileIO context)')
+    file_parser.add_argument('--file', required=True, help='Actual Parquet file path or filesystem URI')
+    file_parser.add_argument(
+        '--format', '-f', choices=['table', 'json'], default='json',
+        help='Output format: json (default) or table'
+    )
+    file_parser.set_defaults(func=cmd_table_file)
 
     # table rollback command
     rollback_parser = table_subparsers.add_parser(
@@ -1039,9 +1723,10 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     rollback_target = rollback_parser.add_mutually_exclusive_group(required=True)
+    # Keep the prefixes unambiguous for scripts using --snapshot or --snap.
     rollback_target.add_argument(
-        '--snapshot', type=int, default=None,
-        help='Snapshot ID to roll back to'
+        '--snapshot-id', type=_positive_int, default=None,
+        help='Snapshot ID to roll back to (also accepts --snapshot and --snap)'
     )
     rollback_target.add_argument(
         '--tag', type=str, default=None,
@@ -1242,3 +1927,39 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+
+def _non_negative_int(value):
+    """Argparse type for schema IDs, including the initial schema ID zero."""
+    try:
+        number = int(value)
+        if number >= 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('must be a non-negative integer')
+
+
+def _positive_int(value):
+    """Argparse type for snapshot IDs and result limits."""
+    try:
+        number = int(value)
+        if number > 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('must be a positive integer')
+
+
+def _snapshot_commit_time(time_millis):
+    # Keep millisecond precision and make the display independent of local TZ.
+    instant = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=time_millis)
+    return instant.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def _snapshot_display_value(value):
+    if value is None:
+        return '-'
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)

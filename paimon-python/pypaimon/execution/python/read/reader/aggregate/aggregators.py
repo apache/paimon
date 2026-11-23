@@ -75,15 +75,40 @@ NAME_HLL_SKETCH = "hll_sketch"
 NAME_RBM32 = "rbm32"
 
 
-# Integer range limits used for overflow checking.
-_BYTE_MIN = -128
-_BYTE_MAX = 127
-_SHORT_MIN = -32768
-_SHORT_MAX = 32767
-_INT_MIN = -(1 << 31)
-_INT_MAX = (1 << 31) - 1
-_LONG_MIN = -(1 << 63)
-_LONG_MAX = (1 << 63) - 1
+# Two's-complement widths. Java casts the wide result back to the field
+# type when fail-on-overflow is false.
+_INTEGER_BITS = {
+    "TINYINT": 8,
+    "SMALLINT": 16,
+    "INT": 32,
+    "INTEGER": 32,
+    "BIGINT": 64,
+}
+
+
+def _finish_integer(value, base_type, fail_on_overflow, message):
+    """Return ``value`` in the signed range of ``base_type``.
+
+    Matches Java: overflow raises when fail-on-overflow is set, and
+    otherwise wraps by discarding the high bits.
+    """
+    bits = _INTEGER_BITS[base_type]
+    limit = 1 << (bits - 1)
+    if value < -limit or value > limit - 1:
+        if fail_on_overflow:
+            raise ArithmeticError(message)
+        span = limit << 1
+        value %= span
+        if value >= limit:
+            value -= span
+    return value
+
+
+def _div_toward_zero(left, right):
+    """Integer division that truncates toward zero, like Java ``/``."""
+    if (left >= 0) == (right >= 0):
+        return abs(left) // abs(right)
+    return -(abs(left) // abs(right))
 
 # Base SQL type names treated as numeric for sum/product-style
 # aggregators. NUMERIC / DEC are SQL synonyms accepted by the parser;
@@ -102,6 +127,21 @@ _INT_TYPES = frozenset({"INT", "INTEGER"})
 
 # SQL type names treated as floating-point.
 _FLOAT_TYPES = frozenset({"FLOAT", "DOUBLE"})
+
+# Atomic element types whose runtime values are hashable and whose equality
+# matches a list scan, so distinct collect can use a set. ARRAY and MAP
+# elements are list/dict and are not hashable. ROW stays on the list path:
+# GenericRow equality ignores field descriptors while its hash includes them.
+_COLLECT_SET_DEDUPE_TYPES = frozenset({
+    "CHAR", "VARCHAR", "STRING",
+    "BOOLEAN",
+    "BINARY", "VARBINARY", "BYTES",
+    "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+    "FLOAT", "DOUBLE",
+    "DECIMAL", "NUMERIC", "DEC",
+    "DATE", "TIME",
+    "TIMESTAMP", "TIMESTAMP_LTZ",
+})
 
 
 def _atomic_base_name(field_type: DataType):
@@ -386,12 +426,14 @@ class FieldSumAgg(FieldAggregator):
     """
     Numeric sum aggregator.
 
-    Returns the non-null operand if either side is ``None``. Performs
-    overflow checking for integral types and preserves decimal
-    precision and scale for DECIMAL values.
+    Returns the non-null operand if either side is ``None``. Integral
+    overflow follows ``fields.<field>.sum.fail-on-overflow``: the default
+    wraps in two's complement, and ``true`` raises ``ArithmeticError``.
+    DECIMAL keeps its precision and scale.
     """
-    def __init__(self, name: str, field_type: DataType):
+    def __init__(self, name: str, field_type: DataType, fail_on_overflow: bool = False):
         super().__init__(name, field_type)
+        self._fail_on_overflow = fail_on_overflow
         self._base_type = _atomic_base_name(field_type)
         if self._base_type in _DECIMAL_TYPES:
             self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
@@ -415,35 +457,31 @@ class FieldSumAgg(FieldAggregator):
 
         elif self._base_type == "TINYINT":
             value = accumulator + input_field
-            if value < _BYTE_MIN or value > _BYTE_MAX:
-                raise ArithmeticError(
-                    "byte overflow: {} + {} = {}".format(accumulator, input_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "byte overflow: {} + {} = {}".format(accumulator, input_field, value),
+            )
 
         elif self._base_type == "SMALLINT":
             value = accumulator + input_field
-            if value < _SHORT_MIN or value > _SHORT_MAX:
-                raise ArithmeticError(
-                    "short overflow: {} + {} = {}".format(accumulator, input_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "short overflow: {} + {} = {}".format(accumulator, input_field, value),
+            )
 
         elif self._base_type in _INT_TYPES:
             value = accumulator + input_field
-            if value < _INT_MIN or value > _INT_MAX:
-                raise ArithmeticError(
-                    "int overflow: {} + {}".format(accumulator, input_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "int overflow: {} + {}".format(accumulator, input_field),
+            )
 
         elif self._base_type == "BIGINT":
             value = accumulator + input_field
-            if value < _LONG_MIN or value > _LONG_MAX:
-                raise ArithmeticError(
-                    "long overflow: {} + {}".format(accumulator, input_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "long overflow: {} + {}".format(accumulator, input_field),
+            )
 
         elif self._base_type in _FLOAT_TYPES:
             return accumulator + input_field
@@ -468,35 +506,31 @@ class FieldSumAgg(FieldAggregator):
 
         elif self._base_type == "TINYINT":
             value = accumulator - retract_field
-            if value < _BYTE_MIN or value > _BYTE_MAX:
-                raise ArithmeticError(
-                    "byte overflow: {} - {} = {}".format(accumulator, retract_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "byte overflow: {} - {} = {}".format(accumulator, retract_field, value),
+            )
 
         elif self._base_type == "SMALLINT":
             value = accumulator - retract_field
-            if value < _SHORT_MIN or value > _SHORT_MAX:
-                raise ArithmeticError(
-                    "short overflow: {} - {} = {}".format(accumulator, retract_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "short overflow: {} - {} = {}".format(accumulator, retract_field, value),
+            )
 
         elif self._base_type in _INT_TYPES:
             value = accumulator - retract_field
-            if value < _INT_MIN or value > _INT_MAX:
-                raise ArithmeticError(
-                    "int overflow: {} - {}".format(accumulator, retract_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "int overflow: {} - {}".format(accumulator, retract_field),
+            )
 
         elif self._base_type == "BIGINT":
             value = accumulator - retract_field
-            if value < _LONG_MIN or value > _LONG_MAX:
-                raise ArithmeticError(
-                    "long overflow: {} - {}".format(accumulator,  retract_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "long overflow: {} - {}".format(accumulator, retract_field),
+            )
 
         elif self._base_type in _FLOAT_TYPES:
             return accumulator - retract_field
@@ -514,27 +548,31 @@ class FieldSumAgg(FieldAggregator):
 
         elif self._base_type == "TINYINT":
             result = -value
-            if result < _BYTE_MIN or result > _BYTE_MAX:
-                raise ArithmeticError("byte overflow: -{} = {}".format(value, result))
-            return result
+            return _finish_integer(
+                result, self._base_type, self._fail_on_overflow,
+                "byte overflow: -{} = {}".format(value, result),
+            )
 
         elif self._base_type == "SMALLINT":
             result = -value
-            if result < _SHORT_MIN or result > _SHORT_MAX:
-                raise ArithmeticError("short overflow: -{} = {}".format(value, result))
-            return result
+            return _finish_integer(
+                result, self._base_type, self._fail_on_overflow,
+                "short overflow: -{} = {}".format(value, result),
+            )
 
         elif self._base_type in _INT_TYPES:
             result = -value
-            if result < _INT_MIN or result > _INT_MAX:
-                raise ArithmeticError("int overflow: -{}".format(value))
-            return result
+            return _finish_integer(
+                result, self._base_type, self._fail_on_overflow,
+                "int overflow: -{}".format(value),
+            )
 
         elif self._base_type == "BIGINT":
             result = -value
-            if result < _LONG_MIN or result > _LONG_MAX:
-                raise ArithmeticError("long overflow: -{}".format(value))
-            return result
+            return _finish_integer(
+                result, self._base_type, self._fail_on_overflow,
+                "long overflow: -{}".format(value),
+            )
 
         elif self._base_type in _FLOAT_TYPES:
             return -value
@@ -550,9 +588,11 @@ class FieldProductAgg(FieldAggregator):
 
     Null values are ignored and the non-null operand is returned.
     Otherwise, returns the product of accumulator and input value.
+    Integral overflow follows ``fields.<field>.product.fail-on-overflow``.
     """
-    def __init__(self, name: str, field_type: DataType):
+    def __init__(self, name: str, field_type: DataType, fail_on_overflow: bool = False):
         super().__init__(name, field_type)
+        self._fail_on_overflow = fail_on_overflow
         self._base_type = _atomic_base_name(field_type)
         if self._base_type in _DECIMAL_TYPES:
             self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
@@ -576,35 +616,31 @@ class FieldProductAgg(FieldAggregator):
 
         elif self._base_type == "TINYINT":
             value = accumulator * input_field
-            if value < _BYTE_MIN or value > _BYTE_MAX:
-                raise ArithmeticError(
-                    "byte overflow: {} * {} = {}".format(accumulator, input_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "byte overflow: {} * {} = {}".format(accumulator, input_field, value),
+            )
 
         elif self._base_type == "SMALLINT":
             value = accumulator * input_field
-            if value < _SHORT_MIN or value > _SHORT_MAX:
-                raise ArithmeticError(
-                    "short overflow: {} * {} = {}".format(accumulator, input_field, value)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "short overflow: {} * {} = {}".format(accumulator, input_field, value),
+            )
 
         elif self._base_type in _INT_TYPES:
             value = accumulator * input_field
-            if value < _INT_MIN or value > _INT_MAX:
-                raise ArithmeticError(
-                    "int overflow: {} * {}".format(accumulator, input_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "int overflow: {} * {}".format(accumulator, input_field),
+            )
 
         elif self._base_type == "BIGINT":
             value = accumulator * input_field
-            if value < _LONG_MIN or value > _LONG_MAX:
-                raise ArithmeticError(
-                    "long overflow: {} * {}".format(accumulator, input_field)
-                )
-            return value
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "long overflow: {} * {}".format(accumulator, input_field),
+            )
 
         elif self._base_type in _FLOAT_TYPES:
             return accumulator * input_field
@@ -628,42 +664,32 @@ class FieldProductAgg(FieldAggregator):
             return None if value is None else value.to_big_decimal()
 
         elif self._base_type == "TINYINT":
-            value = int(accumulator / retract_field)
-            if value > _BYTE_MAX or value < _BYTE_MIN:
-                raise ArithmeticError(
-                    "byte overflow: {} / {} = {}".format(accumulator, retract_field, value)
-                )
-            return value
+            value = _div_toward_zero(accumulator, retract_field)
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "byte overflow: {} / {} = {}".format(accumulator, retract_field, value),
+            )
 
         elif self._base_type == "SMALLINT":
-            value = int(accumulator / retract_field)
-            if value > _SHORT_MAX or value < _SHORT_MIN:
-                raise ArithmeticError(
-                    "short overflow: {} / {} = {}".format(accumulator, retract_field, value)
-                )
-            return value
+            value = _div_toward_zero(accumulator, retract_field)
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "short overflow: {} / {} = {}".format(accumulator, retract_field, value),
+            )
 
         elif self._base_type in _INT_TYPES:
-            if accumulator == _INT_MIN and retract_field == -1:
-                raise ArithmeticError(
-                    "int overflow: {} / {}".format(accumulator, retract_field)
-                )
-            return int(accumulator / retract_field)
+            value = _div_toward_zero(accumulator, retract_field)
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "int overflow: {} / {}".format(accumulator, retract_field),
+            )
 
         elif self._base_type == "BIGINT":
-            if accumulator == _LONG_MIN and retract_field == -1:
-                raise ArithmeticError(
-                    "long overflow: {} / {}".format(accumulator, retract_field)
-                )
-
-            # Java integer division truncates toward zero, while Python's "//"
-            # floors toward negative infinity. Divide absolute values first, then
-            # restore the sign to match Java semantics without converting through
-            # float (which would lose precision for BIGINT values).
-            if (accumulator >= 0) == (retract_field >= 0):
-                return abs(accumulator) // abs(retract_field)
-            else:
-                return -(abs(accumulator) // abs(retract_field))
+            value = _div_toward_zero(accumulator, retract_field)
+            return _finish_integer(
+                value, self._base_type, self._fail_on_overflow,
+                "long overflow: {} / {}".format(accumulator, retract_field),
+            )
 
         elif self._base_type in _FLOAT_TYPES:
             if retract_field == 0.0:
@@ -801,28 +827,43 @@ class FieldCollectAgg(FieldAggregator):
             )
 
         self.distinct = options.field_collect_distinct(field_name)
+        self.count_limit = options.field_collect_agg_count_limit(field_name)
+        element_base = _atomic_base_name(field_type.element)
+        self._set_dedupe = (
+            self.distinct and element_base in _COLLECT_SET_DEDUPE_TYPES
+        )
 
     def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
-        # we don't need to actually do the reverse here for this agg
-        # because accumulator has been distinct, just let accumulator be accumulator will speed up
-        # distinct process
-        return self.agg(accumulator, input_field)
+        # Reverse traversal supplies the newer partial result as
+        # ``accumulator`` and the older value as ``input_field``. Aggregate
+        # older before newer so count-limit matches forward ``agg``.
+        return self.agg(input_field, accumulator)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None and input_field is None:
             return None
 
-        if (accumulator is None or input_field is None) and not self.distinct:
-            return input_field if accumulator is None else accumulator
+        # No truncation needed, so keep the input array as it is.
+        limit = abs(self.count_limit)
+        if input_field is None and not self.distinct and len(accumulator) <= limit:
+            return accumulator
+        if accumulator is None and not self.distinct and len(input_field) <= limit:
+            return input_field
 
-        if self.distinct:
-            result = []
-            self._collect(result, accumulator)
-            self._collect(result, input_field)
-
+        result = []
+        # One set covers both sides, so a value already kept from the
+        # accumulator is not collected again from the input.
+        seen = set() if self._set_dedupe else None
+        if self.count_limit >= 0:
+            self._collect(result, accumulator, seen)
+            self._collect(result, input_field, seen)
             return result
-        else:
-            return list(accumulator) + list(input_field)
+
+        # A negative limit keeps the last elements in aggregation order.
+        self._collect(result, input_field, seen)
+        self._collect(result, accumulator, seen)
+        result.reverse()
+        return result
 
     def retract(self, accumulator: Any, retract_field: Any) -> Any:
         if accumulator is None:
@@ -841,12 +882,29 @@ class FieldCollectAgg(FieldAggregator):
 
         return result
 
-    def _collect(self, result: List[Any], data: List[Any]):
+    def _collect(self, result: List[Any], data: List[Any], seen: Optional[set]):
         if data is None:
             return
-        for element in data:
-            if element not in result:
-                result.append(element)
+
+        limit = abs(self.count_limit)
+        if self.count_limit < 0:
+            indices = range(len(data) - 1, -1, -1)
+        else:
+            indices = range(len(data))
+
+        for i in indices:
+            if len(result) >= limit:
+                break
+            element = data[i]
+            if self.distinct:
+                if seen is not None:
+                    if element in seen:
+                        continue
+                elif element in result:
+                    continue
+            result.append(element)
+            if seen is not None:
+                seen.add(element)
 
 
 class FieldNestedUpdateAgg(FieldAggregator):
@@ -1214,6 +1272,7 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
             )
 
         self._resolve_ts_field_index(field_type.value, options, field_name)
+        self.overwrite_on_equal_ts = options.field_merge_map_overwrite_on_equal_ts(field_name)
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
@@ -1280,7 +1339,8 @@ class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
                 continue
 
             existing_ts = self._get_ts_field(existing_row)
-            if existing_ts is None or new_ts > existing_ts:
+            if (existing_ts is None or new_ts > existing_ts
+                    or (self.overwrite_on_equal_ts and new_ts == existing_ts)):
                 result_map[key] = new_row
 
     def _get_ts_field(self, input_row: Any) -> Any:
@@ -1528,7 +1588,14 @@ def _build_no_type_check(cls, identifier: str):
 def _build_numeric(cls, identifier: str):
     def _factory(field_type, field_name, options):
         _check_numeric(identifier, field_type)
-        return cls(identifier, field_type)
+        # Callers may omit options. Both Java flags default to false.
+        if options is None:
+            fail_on_overflow = False
+        elif identifier == NAME_SUM:
+            fail_on_overflow = options.field_sum_fail_on_overflow(field_name)
+        else:
+            fail_on_overflow = options.field_product_fail_on_overflow(field_name)
+        return cls(identifier, field_type, fail_on_overflow)
     return _factory
 
 

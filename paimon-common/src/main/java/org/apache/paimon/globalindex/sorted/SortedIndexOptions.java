@@ -24,6 +24,14 @@ import org.apache.paimon.options.ConfigOptions;
 /** Options for sorted global index build. */
 public class SortedIndexOptions {
 
+    public static final ConfigOption<Boolean> SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED =
+            ConfigOptions.key("sorted-index.null-bitmap-shuffle.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable adaptive bitmap compression of null row IDs during Flink/Spark"
+                                    + " sorted index shuffle. When false, use the original shuffle path.");
+
     public static final ConfigOption<Long> SORTED_INDEX_RECORDS_PER_FILE =
             ConfigOptions.key("sorted-index.records-per-file")
                     .longType()

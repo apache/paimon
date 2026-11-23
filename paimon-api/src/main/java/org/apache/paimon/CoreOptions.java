@@ -100,6 +100,8 @@ public class CoreOptions implements Serializable {
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
 
+    public static final String MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts";
+
     public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
 
     public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
@@ -282,6 +284,18 @@ public class CoreOptions implements Serializable {
     @ExcludeFromDocumentation("Avoid using deprecated options")
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
+
+    public static final ConfigOption<Boolean> LAKE_STREAM_ENABLED =
+            key("lakestream.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable lake-stream mode. When enabled, regular writes are "
+                                    + "routed to the Lakestream Store. The Lakestream Store's tiering "
+                                    + "service asynchronously writes data to Paimon. Reads from the "
+                                    + "original table name access only Paimon, while reads from the "
+                                    + "'$rt'-suffixed table name combine Paimon and Lakestream Store "
+                                    + "data.");
 
     public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
             key("chain-table.enabled")
@@ -1012,15 +1026,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable the REST catalog's server-side table commit lease capability. "
-                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+                                    + "Writers acquire a lease only when rest.commit.retry-acquire-lock is enabled.");
 
-    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
-            key("rest.commit.acquire-lock")
+    public static final ConfigOption<Boolean> REST_COMMIT_RETRY_ACQUIRE_LOCK =
+            key("rest.commit.retry-acquire-lock")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether this writer acquires a REST commit lease for each publication "
-                                    + "attempt. Can be set dynamically for a writer and requires "
+                            "Whether this writer acquires a REST commit lease when retrying a conflicting publication. "
+                                    + "The first attempt is optimistic for retryable operations. Rollback as latest and "
+                                    + "manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires "
                                     + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
@@ -1062,7 +1077,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(200)
                     .withDescription(
                             "The size amplification is defined as the amount (in percentage) of additional storage "
-                                    + "needed to store a single byte of data in the merge tree for changelog mode table.");
+                                    + "needed to store a single byte of data in the merge tree for changelog mode table. "
+                                    + "For incremental data-evolution compaction, this limits fully superseded "
+                                    + "file bytes relative to files still supplying current columns. "
+                                    + "Files with row-level fallbacks count as live.");
 
     public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
             key("compaction.force-up-level-0")
@@ -1078,7 +1096,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
-                                    + "into this candidate set.");
+                                    + "into this candidate set. Also applies to newest-first column-file "
+                                    + "version selection in incremental data-evolution compaction.");
 
     public static final ConfigOption<Integer> COMPACT_OFFPEAK_START_HOUR =
             key("compaction.offpeak.start.hour")
@@ -1257,7 +1276,11 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to remove the whole row in aggregation engine when -D records are received.");
+                            "Whether to remove the whole row in aggregation engine when -D records are received. "
+                                    + "Records after a -D start a new aggregate only if the -D is merged together "
+                                    + "with the older records of the same key. If the -D and later records are "
+                                    + "merged without them first, for example when written in the same commit, "
+                                    + "the older aggregate is kept.");
 
     @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
@@ -2745,6 +2768,21 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED =
+            key("data-evolution.data-file-dv-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to prune a contiguous deletion span from data file reads. "
+                                    + "When the deletions of a Parquet data file form one "
+                                    + "contiguous span of physical rows covering at least half "
+                                    + "of the file, the scan skips that span and reads the "
+                                    + "remaining rows as ranges. This applies only when the "
+                                    + "scan has no other row-range or file-index selection; "
+                                    + "scattered deletions also keep the regular read path. "
+                                    + "The deletion vector is still applied on top, so results "
+                                    + "never change.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED =
             key("data-evolution.merged-read.stats-pushdown.enabled")
                     .booleanType()
@@ -2775,6 +2813,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE =
+            key("data-evolution.merge-into.join-reuse")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to reuse a disk-persisted match result between deterministic "
+                                    + "UPDATE and INSERT actions on data evolution tables without "
+                                    + "DELETE actions or dedicated BLOB/VECTOR columns. This replaces "
+                                    + "the two action joins with a full outer join and trades repeated "
+                                    + "target scans for shuffle and executor-local disk storage. "
+                                    + "Requires Spark adaptive query execution and adaptive partition "
+                                    + "coalescing; otherwise the original join path is used.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
             key("data-evolution.compaction.split-large-files")
                     .booleanType()
@@ -2788,6 +2839,21 @@ public class CoreOptions implements Serializable {
                                     + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED =
+            key("data-evolution.compaction.incremental.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Compact a newest-first prefix of column-file versions within "
+                                    + "one row-ID range, writing only their columns and retaining "
+                                    + "older files. Applies to normal, BLOB and VECTOR files when their "
+                                    + "compaction is enabled. Uses compaction.min.file-num for normal/VECTOR "
+                                    + "files and the existing two-file trigger for BLOB files, plus "
+                                    + "compaction.size-ratio and compaction.max-size-amplification-percent. "
+                                    + "Nested ROW columns are projected by written leaf field IDs. "
+                                    + "Partial normal rewrites keep their complete row-ID range. Eligible "
+                                    + "oversized normal files select all normal versions for splitting.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
             key("data-evolution.compaction.discard-conflicting-tasks")
@@ -3022,6 +3088,14 @@ public class CoreOptions implements Serializable {
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
                                     + "When false, the write fails when the descriptor is read.");
 
+    public static final ConfigOption<Boolean> BLOB_TRANSFER_METRICS_ENABLED =
+            key("blob-transfer-metrics.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Collect additional Blob copy duration, failed-copy payload bytes and "
+                                    + "terminal HTTP 503 metrics when a metric registry is provided.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -3127,8 +3201,19 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .withDescription(
+                            "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                                    + "setting also serves as a fallback for scalar prefilters.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
+            key("scalar-index.prefilter.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription("Search mode for scalar index queries.");
+                    .withDescription(
+                            "Search mode for scalar prefilters in vector and full-text search. If "
+                                    + "unset, use an explicit scalar-index.search-mode, then an "
+                                    + "explicit global-index.search-mode, then fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -3141,6 +3226,18 @@ public class CoreOptions implements Serializable {
                     .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
+
+    public static final ConfigOption<Integer> VECTOR_INDEX_POST_FILTER_CANDIDATES_FACTOR =
+            key("vector-index.post-filter.candidates-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Positive multiplier of the original Top-K for a single ANN query "
+                                    + "when scalar indexes cannot evaluate a DE vector search filter. "
+                                    + "The candidate count is at least the reranking limit and capped by "
+                                    + "the shard size and integer limit. Candidates are checked against "
+                                    + "the pinned data; fewer than Top-K matches are returned without retry "
+                                    + "or raw scoring of indexed ranges.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
             key("global-index.filter.refine-from-data")
@@ -4024,8 +4121,8 @@ public class CoreOptions implements Serializable {
         return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
-    public boolean restCommitAcquireLock() {
-        return options.get(REST_COMMIT_ACQUIRE_LOCK);
+    public boolean restCommitRetryAcquireLock() {
+        return options.get(REST_COMMIT_RETRY_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {
@@ -4453,6 +4550,7 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
+                .map(String::trim)
                 .map(
                         x ->
                                 PartitionMarkDoneAction.valueOf(
@@ -4651,6 +4749,10 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
     }
 
+    public boolean dataEvolutionCompactionIncrementalEnabled() {
+        return options.get(DATA_EVOLUTION_COMPACTION_INCREMENTAL_ENABLED);
+    }
+
     public double dataEvolutionCompactionLargeFileRatio() {
         double ratio = options.get(DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO);
         checkArgument(
@@ -4768,12 +4870,20 @@ public class CoreOptions implements Serializable {
         return maxSelectionRatio;
     }
 
+    public boolean dataEvolutionDataFileDvPushdownEnabled() {
+        return options.get(DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED);
+    }
+
     public boolean dataEvolutionMergeIntoFilePruning() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
     }
 
     public boolean dataEvolutionMergeIntoSourcePersist() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean dataEvolutionMergeIntoJoinReuse() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_JOIN_REUSE);
     }
 
     public boolean blobCompactionEnabled() {
@@ -4996,7 +5106,20 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST);
+    }
+
+    public GlobalIndexSearchMode scalarScanSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarPrefilterSearchMode() {
+        return options.getOptional(SCALAR_INDEX_PREFILTER_SEARCH_MODE)
+                .orElseGet(
+                        () ->
+                                indexSearchMode(
+                                        SCALAR_INDEX_SEARCH_MODE,
+                                        SCALAR_INDEX_PREFILTER_SEARCH_MODE.defaultValue()));
     }
 
     public boolean globalIndexFilterRefineFromData() {
@@ -5013,11 +5136,14 @@ public class CoreOptions implements Serializable {
 
     private GlobalIndexSearchMode indexSearchMode(
             ConfigOption<GlobalIndexSearchMode> familySearchMode) {
-        if (options.contains(familySearchMode)) {
-            return options.get(familySearchMode);
-        }
-        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
-                .orElseGet(() -> options.get(familySearchMode));
+        return indexSearchMode(familySearchMode, familySearchMode.defaultValue());
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode,
+            GlobalIndexSearchMode defaultMode) {
+        return options.getOptional(familySearchMode)
+                .orElseGet(() -> options.getOptional(GLOBAL_INDEX_SEARCH_MODE).orElse(defaultMode));
     }
 
     public Integer globalIndexThreadNum() {
@@ -5048,6 +5174,12 @@ public class CoreOptions implements Serializable {
         return options.contains(VECTOR_FILE_FORMAT);
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(List)}.
+     */
+    @Deprecated
     public Set<String> vectorField() {
         String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
@@ -5056,12 +5188,61 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(Map, List)}.
+     */
+    @Deprecated
     public static Set<String> vectorField(Map<String, String> options) {
         String vectorFields = options.getOrDefault(CoreOptions.VECTOR_FIELD.key(), null);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
             return Collections.emptySet();
         }
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public Set<String> vectorField(List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD), fieldNames));
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public static Set<String> vectorField(Map<String, String> options, List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD.key()), fieldNames));
+    }
+
+    /**
+     * Rewrites a {@link #VECTOR_FIELD} value as the field names it resolves to, so that adding a
+     * field later cannot change which fields the stored value refers to. A value that names unknown
+     * fields, or that would refer to other fields once rewritten, is returned unchanged.
+     */
+    public static String normalizeVectorField(String vectorFields, List<String> fieldNames) {
+        List<String> names = resolveVectorFields(vectorFields, fieldNames);
+        String normalized = String.join(",", names);
+        return fieldNames.containsAll(names)
+                        && resolveVectorFields(normalized, fieldNames).equals(names)
+                ? normalized
+                : vectorFields;
+    }
+
+    /**
+     * Uses a name exactly as written when a field has that name, which keeps existing tables with
+     * spaces in field names working, and its trimmed form otherwise.
+     */
+    private static List<String> resolveVectorFields(
+            @Nullable String vectorFields, List<String> fieldNames) {
+        List<String> fields = new ArrayList<>();
+        if (vectorFields == null) {
+            return fields;
+        }
+        for (String field : vectorFields.trim().split(",")) {
+            String name = fieldNames.contains(field) ? field : field.trim();
+            if (!name.isEmpty()) {
+                fields.add(name);
+            }
+        }
+        return fields;
     }
 
     public long vectorTargetFileSize() {
@@ -5098,6 +5279,19 @@ public class CoreOptions implements Serializable {
 
     public boolean fmIndexEnabled() {
         return !fmIndexColumns().isEmpty();
+    }
+
+    /**
+     * Whether any source-backed primary-key index (vector, full-text, FM, BTree, bitmap,
+     * multivalue) is configured.
+     */
+    public boolean primaryKeyIndexEnabled() {
+        return !VectorIndexOptions.columns(options).isEmpty()
+                || fullTextIndexEnabled()
+                || fmIndexEnabled()
+                || !btreeIndexColumns().isEmpty()
+                || !bitmapIndexColumns().isEmpty()
+                || !multiValueIndexColumns().isEmpty();
     }
 
     public List<String> btreeIndexColumns() {
@@ -5141,7 +5335,8 @@ public class CoreOptions implements Serializable {
     }
 
     public static boolean isVectorIndexType(String type) {
-        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
+        return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm", "rtree")
+                .contains(type);
     }
 
     public List<String> globalIndexColumns(String type) {
@@ -6060,6 +6255,17 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
                         .stringType()
                         .noDefaultValue());
+    }
+
+    public boolean fieldMergeMapOverwriteOnEqualTs(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_OVERWRITE_ON_EQUAL_TS)
+                        .booleanType()
+                        .defaultValue(false)
+                        .withDescription(
+                                "For merge_map_with_keytime, overwrite the accumulated ROW with "
+                                        + "the input ROW when their timestamps are equal. "
+                                        + "This follows merge order, not wall-clock arrival order."));
     }
 
     public MapStorageLayout mapStorageLayout(String fieldName) {

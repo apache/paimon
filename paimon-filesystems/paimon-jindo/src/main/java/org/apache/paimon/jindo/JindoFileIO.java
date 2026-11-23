@@ -24,6 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
@@ -39,6 +41,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -73,6 +77,18 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
 
+    private static final ConfigOption<Duration> IO_STATS_INTERVAL =
+            ConfigOptions.key("jindo.io-stats.interval")
+                    .durationType()
+                    .defaultValue(Duration.ZERO)
+                    .withDescription(
+                            "Interval of logging Jindo stream and memory statistics while Jindo "
+                                    + "streams are in use, e.g. 1 min. Stream counts cover the "
+                                    + "class loader of paimon-jindo, which is the whole JVM unless "
+                                    + "jobs bundle their own copy. The shortest interval set in "
+                                    + "it is used. 0 (the default) disables it, and streams of "
+                                    + "this FileIO are not counted.");
+
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
@@ -92,6 +108,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private Duration ioStatsInterval = IO_STATS_INTERVAL.defaultValue();
     private transient BlobPresigner blobPresigner;
 
     public JindoFileIO() {}
@@ -109,6 +126,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     public void configure(CatalogContext context) {
         super.configure(context);
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
+        ioStatsInterval = context.options().get(IO_STATS_INTERVAL);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -206,7 +224,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             return super.newTwoPhaseOutputStream(path, overwrite);
         }
         return new JindoTwoPhaseOutputStream(
-                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()), hadoopPath, path);
+                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()),
+                hadoopPath,
+                path,
+                ioStatsInterval());
     }
 
     @Override
@@ -293,11 +314,22 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                 };
 
         if (allowCache) {
-            return CACHE.computeIfAbsent(
-                    new CacheKey(options, scheme, authority), key -> supplier.get());
+            Pair<JindoHadoopSystem, String> pair =
+                    CACHE.computeIfAbsent(
+                            new CacheKey(options, scheme, authority), key -> supplier.get());
+            // cached file systems are never closed, so the reporter may call into them
+            JindoIOStats.registerNativeMetrics(pair.getKey(), path);
+            return pair;
         } else {
             return supplier.get();
         }
+    }
+
+    @Nullable
+    @Override
+    protected Duration ioStatsInterval() {
+        // FileIOs deserialized from older versions have no interval
+        return ioStatsInterval;
     }
 
     @Override

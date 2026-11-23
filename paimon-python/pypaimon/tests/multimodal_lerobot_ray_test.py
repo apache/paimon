@@ -40,7 +40,7 @@ from pypaimon.multimodal.lerobot.ray_loader import (
 
 def _counted_prepare_group(trace_path, *args):
     from pypaimon.multimodal.lerobot import source as source_module
-    from pypaimon.multimodal.lerobot.ray_loader import _prepare_group
+    from pypaimon.multimodal.lerobot.ray_loader import _prepare_merged_source
 
     original = source_module._read_remote_parquet
 
@@ -51,7 +51,7 @@ def _counted_prepare_group(trace_path, *args):
 
     source_module._read_remote_parquet = counted
     try:
-        return _prepare_group(*args)
+        return _prepare_merged_source(*args)
     finally:
         source_module._read_remote_parquet = original
 
@@ -227,7 +227,7 @@ class LeRobotRayImportTest(unittest.TestCase):
             return _counted_prepare_group(str(trace_path), *args)
 
         with patch(
-                "pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                "pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source",
                 counted_prepare):
             for data_files in (1, 4):
                 with self.subTest(data_files=data_files):
@@ -252,7 +252,7 @@ class LeRobotRayImportTest(unittest.TestCase):
 
     def _import_serial(self):
         # FileIO sources use the native Parquet reader, not the LeRobot class.
-        with patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset", return_value=None):
+        with patch("pypaimon.multimodal.lerobot.aggregate._import_lerobot_dataset", return_value=None):
             self.conn.load_from_lerobot("serial", self.source.as_uri(),
                                         batch_size=1, parallelism=1)
 
@@ -271,7 +271,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         self._import_serial()
         self.conn.load_from_lerobot("parallel", source or self.source, parallelism=2,
                                     batch_size=1, tag_name="imported")
-        for suffix in ("", "__episodes", "__tasks", "__info"):
+        for suffix in ("_frames", "_episodes", "_datasets"):
             def read(name, tag=None):
                 table = self.conn.catalog.get_table("default." + name)
                 if tag:
@@ -281,22 +281,27 @@ class LeRobotRayImportTest(unittest.TestCase):
 
             left = read("serial" + suffix)
             right = read("parallel" + suffix, "imported")
-            if not suffix:
+            if suffix == "_frames":
                 from pypaimon.table.row.blob import Blob
                 left, right = left.sort_by("index"), right.sort_by("index")
-                file_io = self.conn.get_table("parallel").raw_table.file_io
+                file_io = self.conn.get_table("parallel_frames").raw_table.file_io
                 for original, imported in zip(left["camera"], right["camera"]):
                     self.assertEqual(
                         Blob.from_descriptor_bytes(original.as_py(), file_io=file_io).to_data(),
                         Blob.from_descriptor_bytes(imported.as_py(), file_io=file_io).to_data())
-                left, right = left.drop(["camera"]), right.drop(["camera"])
+                left, right = left.drop(["camera", "dataset_id"]), right.drop(
+                    ["camera", "dataset_id"])
             else:
                 left = left.sort_by(left.column_names[0])
                 right = right.sort_by(right.column_names[0])
+                field = "id" if suffix == "_datasets" else "dataset_id"
+                left, right = left.drop([field]), right.drop([field])
             self.assertTrue(left.equals(right), suffix)
-        # One data snapshot plus the initial BTree snapshot, regardless of task count.
-        table = self.conn.get_table("parallel").raw_table
-        self.assertEqual(2, table.snapshot_manager().get_latest_snapshot().id)
+        # Parallel import publishes the same number of snapshots as serial import.
+        table = self.conn.get_table("parallel_frames").raw_table
+        serial = self.conn.get_table("serial_frames").raw_table
+        self.assertEqual(serial.snapshot_manager().get_latest_snapshot().id,
+                         table.snapshot_manager().get_latest_snapshot().id)
 
     @unittest.skipUnless(
         importlib.util.find_spec("av")
@@ -309,8 +314,8 @@ class LeRobotRayImportTest(unittest.TestCase):
         self.conn.load_from_lerobot("videos", self.source, parallelism=2, batch_size=1)
         self._import_serial()
         from pypaimon.multimodal.lerobot import PaimonLeRobotDataset
-        first = PaimonLeRobotDataset(self.conn.get_table("videos"), video_backend="pyav", return_uint8=True)
-        second = PaimonLeRobotDataset(self.conn.get_table("serial"), video_backend="pyav", return_uint8=True)
+        first = PaimonLeRobotDataset(self.conn.get_table("videos_frames"), video_backend="pyav", return_uint8=True)
+        second = PaimonLeRobotDataset(self.conn.get_table("serial_frames"), video_backend="pyav", return_uint8=True)
         try:
             for i in (7, 0, 3, 4, 1, 6, 2, 5):
                 self.assertTrue(np.array_equal(first[i]["camera"], second[i]["camera"]))
@@ -337,8 +342,9 @@ class LeRobotRayImportTest(unittest.TestCase):
 
             def get(self, ref, **kwargs):
                 result = ray.get(ref, **kwargs)
-                if isinstance(result, list) and result and hasattr(result[0], "new_files"):
-                    table = connection.get_table("broken").raw_table
+                prepared = result[0] if isinstance(result, tuple) else result
+                if prepared and hasattr(prepared[0], "new_files"):
+                    table = connection.get_table("broken_frames").raw_table
                     files_before_failure.extend(_bucket_files(table))
                     received.touch()
                 return result
@@ -350,11 +356,12 @@ class LeRobotRayImportTest(unittest.TestCase):
                     if time.monotonic() > deadline:
                         raise TimeoutError("Successful task result was not received.")
                     time.sleep(0.01)
-            return _prepare_group(*args)
+            from pypaimon.multimodal.lerobot.ray_loader import _prepare_merged_source
+            return _prepare_merged_source(*args)
 
         with patch("pypaimon.multimodal.lerobot.ray_loader._require_ray",
                    return_value=MarkingRay()), \
-                patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source",
                       prepare), \
                 patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
                       wraps=_abort_messages) as abort:
@@ -364,7 +371,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         self.assertTrue(files_before_failure)
         abort.assert_called_once()
         self.assertTrue(abort.call_args[0][1])
-        table = self.conn.get_table("broken").raw_table
+        table = self.conn.get_table("broken_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertFalse(table.tag_manager().tag_exists("imported"))
         self.assertEqual([], _bucket_files(table))
@@ -378,24 +385,23 @@ class LeRobotRayImportTest(unittest.TestCase):
                 trace = self.root / (table_name + ".json")
 
                 def prepare(*args):
-                    from pypaimon.multimodal.lerobot.ray_loader import _prepare_group
+                    from pypaimon.multimodal.lerobot.ray_loader import _prepare_merged_source
                     from pypaimon.write.table_write import BatchTableWrite
+                    from pypaimon.write.write_dispatch import NativeBatchTableWrite
 
-                    original_close = BatchTableWrite.close
+                    def failing_close(original):
+                        def fail_close(write):
+                            original(write)
+                            trace.write_text(json.dumps(
+                                [path.name for path in _bucket_files(args[0])]))
+                            raise error_type("injected writer close")
+                        return fail_close
 
-                    def fail_close(write):
-                        original_close(write)
-                        trace.write_text(json.dumps(
-                            [path.name for path in _bucket_files(args[0])]))
-                        raise error_type("injected writer close")
+                    with patch.object(BatchTableWrite, 'close', failing_close(BatchTableWrite.close)), \
+                            patch.object(NativeBatchTableWrite, 'close', failing_close(NativeBatchTableWrite.close)):
+                        return _prepare_merged_source(*args)
 
-                    BatchTableWrite.close = fail_close
-                    try:
-                        return _prepare_group(*args)
-                    finally:
-                        BatchTableWrite.close = original_close
-
-                with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source",
                            prepare):
                     with self.assertRaisesRegex(BaseException, "injected writer close"):
                         self.conn.load_from_lerobot(
@@ -404,7 +410,7 @@ class LeRobotRayImportTest(unittest.TestCase):
                 self.assertTrue(any(name.endswith(".parquet") for name in before), before)
                 self.assertFalse(any(".vector." in name for name in before), before)
                 self.assertTrue(any(name.endswith(".blob") for name in before), before)
-                table = self.conn.get_table(table_name).raw_table
+                table = self.conn.get_table(table_name + "_frames").raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
                 self.assertEqual([], _bucket_files(table))
 
@@ -429,7 +435,7 @@ class LeRobotRayImportTest(unittest.TestCase):
             with self.assertRaisesRegex(KeyboardInterrupt, "interrupted result delivery"):
                 self.conn.load_from_lerobot("interrupted", self.source, parallelism=2)
         self.assertTrue(delivered)
-        table = self.conn.get_table("interrupted").raw_table
+        table = self.conn.get_table("interrupted_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual([], _bucket_files(table))
 
@@ -451,13 +457,13 @@ class LeRobotRayImportTest(unittest.TestCase):
                 raise KeyboardInterrupt("interrupted source close")
 
             with patch.object(ray_loader, "_resolved_source", interrupted_source):
-                return ray_loader._prepare_group(*args)
+                return ray_loader._prepare_merged_source(*args)
 
-        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare):
+        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source", prepare):
             with self.assertRaisesRegex(BaseException, "interrupted source close"):
                 self.conn.load_from_lerobot("source_close", self.source, parallelism=2)
         self.assertTrue(json.loads(trace.read_text()))
-        table = self.conn.get_table("source_close").raw_table
+        table = self.conn.get_table("source_close_frames").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual([], _bucket_files(table))
 
@@ -466,17 +472,17 @@ class LeRobotRayImportTest(unittest.TestCase):
         for parallelism in (1, 2):
             with self.subTest(parallelism=parallelism):
                 name = "invalid_commit_%d" % parallelism
-                with patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset",
+                with patch("pypaimon.multimodal.lerobot.aggregate._import_lerobot_dataset",
                            return_value=None), \
                         patch("pypaimon.multimodal.lerobot.loader._prepare_dataset") as prepare, \
-                        patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group") as group:
+                        patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source") as group:
                     with self.assertRaises(ValueError):
                         self.conn.load_from_lerobot(
                             name, self.source.as_uri(), parallelism=parallelism,
                             options={"commit.max-retries": "typo"})
                     prepare.assert_not_called()
                     group.assert_not_called()
-                table = self.conn.get_table(name).raw_table
+                table = self.conn.get_table(name + "_frames").raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
                 self.assertEqual([], _bucket_files(table))
 
@@ -523,7 +529,7 @@ class LeRobotRayImportTest(unittest.TestCase):
         try:
             with patch("pypaimon.multimodal.lerobot.ray_loader._require_ray",
                        return_value=TrackingRay()), \
-                    patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                    patch("pypaimon.multimodal.lerobot.ray_loader._prepare_merged_source",
                           prepare), \
                     patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
                           wraps=_abort_messages) as abort:

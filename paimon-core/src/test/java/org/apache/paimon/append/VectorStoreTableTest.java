@@ -84,6 +84,78 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
     private final AtomicInteger uniqueIdGen = new AtomicInteger(0);
     private final Map<Integer, InternalRow> rowsWritten = new HashMap<>();
 
+    @ParameterizedTest
+    @ValueSource(strings = {"json", "parquet"})
+    public void testVectorRowIdsAfterNormalOnlyFiles(String format) throws Exception {
+        catalog.createTable(
+                identifier(),
+                vectorSchema(format).option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1").build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages = new ArrayList<>();
+        try (BatchTableWrite normalWrite =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Collections.singletonList("id")));
+                BatchTableWrite vectorWrite = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            normalWrite.write(GenericRow.of(0));
+            normalWrite.write(GenericRow.of(1));
+            vectorWrite.write(GenericRow.of(2, vector(22)));
+            vectorWrite.write(GenericRow.of(3, vector(33)));
+            messages.addAll(normalWrite.prepareCommit());
+            messages.addAll(vectorWrite.prepareCommit());
+            commit.commit(messages);
+        }
+        List<InternalRow> rows = read(getTableDefault());
+        rows.sort(Comparator.comparingInt(row -> row.getInt(0)));
+        assertThat(rows).extracting(row -> row.getInt(0)).containsExactly(0, 1, 2, 3);
+        assertThat(rows)
+                .extracting(row -> row.isNullAt(1) ? null : row.getVector(1).toFloatArray()[0])
+                .containsExactly(null, null, 22F, 33F);
+    }
+
+    @Test
+    public void testVectorFieldNameWithLeadingSpace() throws Exception {
+        // Existing tables may name a vector field " embedding_v2" and list it as "embedding,
+        // embedding_v2", so the exact name must win over its trimmed form.
+        Schema schema =
+                vectorSchema("json")
+                        .column(" embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.VECTOR_FIELD.key(), "embedding, embedding_v2")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        write(getTableDefault(), GenericRow.of(0, vector(1), vector(2)));
+
+        List<InternalRow> rows = read(getTableDefault());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getVector(2).toFloatArray()[0]).isEqualTo(2F);
+    }
+
+    @Test
+    public void testVectorFieldWithSpacesAfterAddingSimilarColumn() throws Exception {
+        Schema schema =
+                vectorSchema("json")
+                        .column("embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.VECTOR_FIELD.key(), "embedding, embedding_v2")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        assertThat(getTableDefault().options())
+                .containsEntry(CoreOptions.VECTOR_FIELD.key(), "embedding,embedding_v2");
+
+        // A new string field named " embedding_v2" must not become one of the vector fields.
+        catalog.alterTable(
+                identifier(), SchemaChange.addColumn(" embedding_v2", DataTypes.STRING()), false);
+        write(
+                getTableDefault(),
+                GenericRow.of(0, vector(1), vector(2), BinaryString.fromString("text")));
+
+        List<InternalRow> rows = read(getTableDefault());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(3).toString()).isEqualTo("text");
+    }
+
     @Test
     public void testPartialUpdateOfSharedVectorFile() throws Exception {
         Schema schema =

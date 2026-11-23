@@ -19,12 +19,16 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.utils.Range;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Range;
+import org.apache.paimon.shade.guava30.com.google.common.collect.TreeRangeMap;
 
 import javax.annotation.Nullable;
 
@@ -241,31 +245,65 @@ public class IndexManifestFileHandler {
         private void validateRetainedIndexFiles(
                 Iterable<IndexManifestEntry> retainedIndexFiles,
                 List<IndexManifestEntry> addedIndexFiles) {
-            for (IndexManifestEntry retained : retainedIndexFiles) {
-                GlobalIndexMeta retainedMeta = retained.indexFile().globalIndexMeta();
-                if (retainedMeta == null) {
+            // File-local (primary-key) row IDs can overlap other file-local IDs. A
+            // table-wide row range must be checked against either kind.
+            validateOverlaps(retainedIndexFiles, addedIndexFiles, false);
+            validateOverlaps(retainedIndexFiles, addedIndexFiles, true);
+        }
+
+        private List<Integer> overlapFieldIds(GlobalIndexMeta meta) {
+            return CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                    ? Collections.singletonList(meta.indexFieldId())
+                    : meta.getIndexedFieldIds();
+        }
+
+        private void validateOverlaps(
+                Iterable<IndexManifestEntry> retainedIndexFiles,
+                List<IndexManifestEntry> addedIndexFiles,
+                boolean fileLocalAdditions) {
+            Map<BinaryRow, Map<List<Integer>, TreeRangeMap<Long, IndexManifestEntry>>> additions =
+                    new HashMap<>();
+            for (IndexManifestEntry entry : addedIndexFiles) {
+                GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                if (meta == null || fileLocal(meta) != fileLocalAdditions) {
                     continue;
                 }
-                List<Integer> retainedFieldIds = retainedMeta.getIndexedFieldIds();
-
-                for (IndexManifestEntry added : addedIndexFiles) {
+                TreeRangeMap<Long, IndexManifestEntry> ranges =
+                        additions
+                                .computeIfAbsent(entry.partition(), p -> new HashMap<>())
+                                .computeIfAbsent(overlapFieldIds(meta), f -> TreeRangeMap.create());
+                Range<Long> range = Range.closed(meta.rowRangeStart(), meta.rowRangeEnd());
+                Map.Entry<Range<Long>, IndexManifestEntry> previous =
+                        ranges.getEntry(meta.rowRangeStart());
+                // One representative per covered range suffices, including for sibling shards.
+                if (previous == null || !previous.getKey().encloses(range)) {
+                    ranges.put(range, entry);
+                }
+            }
+            if (additions.isEmpty()) {
+                return;
+            }
+            for (IndexManifestEntry retained : retainedIndexFiles) {
+                Map<List<Integer>, TreeRangeMap<Long, IndexManifestEntry>> partition =
+                        additions.get(retained.partition());
+                GlobalIndexMeta retainedMeta = retained.indexFile().globalIndexMeta();
+                if (partition == null
+                        || retainedMeta == null
+                        || (fileLocalAdditions && fileLocal(retainedMeta))) {
+                    continue;
+                }
+                TreeRangeMap<Long, IndexManifestEntry> ranges =
+                        partition.get(overlapFieldIds(retainedMeta));
+                if (ranges == null) {
+                    continue;
+                }
+                Range<Long> range =
+                        Range.closed(retainedMeta.rowRangeStart(), retainedMeta.rowRangeEnd());
+                IndexManifestEntry added =
+                        Iterables.getFirst(
+                                ranges.subRangeMap(range).asMapOfRanges().values(), null);
+                if (added != null) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
-                    if (addedMeta == null
-                            || (retainedMeta.sourceMeta() != null
-                                    && addedMeta.sourceMeta() != null
-                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                                            retainedMeta.sourceMeta())
-                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                                            addedMeta.sourceMeta()))
-                            || !Range.intersect(
-                                    retainedMeta.rowRangeStart(),
-                                    retainedMeta.rowRangeEnd(),
-                                    addedMeta.rowRangeStart(),
-                                    addedMeta.rowRangeEnd())
-                            || !retainedFieldIds.equals(addedMeta.getIndexedFieldIds())) {
-                        continue;
-                    }
-
                     throw new IllegalStateException(
                             String.format(
                                     "Trying to add global index file %s of type %s for index field %s"
@@ -281,6 +319,11 @@ public class IndexManifestFileHandler {
                                     retainedMeta.rowRangeEnd()));
                 }
             }
+        }
+
+        private static boolean fileLocal(GlobalIndexMeta meta) {
+            return meta.sourceMeta() != null
+                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(meta.sourceMeta());
         }
     }
 

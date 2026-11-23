@@ -132,12 +132,18 @@ public class BinlogTable extends AuditLogTable {
                             .toArray(InternalRow.FieldGetter[]::new);
 
             if (dataSplit.isStreaming()) {
+                RowType serializerType = wrappedReadType;
+                if (offset > 0) {
+                    List<DataField> fields = new ArrayList<>(wrappedReadType.getFields());
+                    fields.add(0, SpecialFields.SEQUENCE_NUMBER);
+                    serializerType = wrappedReadType.copy(fields);
+                }
                 return new PackChangelogReader(
                         dataRead.createReader(split),
                         (row1, row2) ->
                                 new AuditLogRow(
                                         readProjection, convertToArray(row1, row2, fieldGetters)),
-                        this.wrappedReadType);
+                        serializerType);
             } else {
                 return dataRead.createReader(split)
                         .transform(

@@ -211,8 +211,10 @@ public class MultiTablesStoreCompactOperator
     @Override
     public void close() throws Exception {
         super.close();
-        for (StoreSinkWrite write : writes.values()) {
-            write.close();
+        if (writes != null) {
+            for (StoreSinkWrite write : writes.values()) {
+                write.close();
+            }
         }
         if (catalog != null) {
             catalog.close();

@@ -17,6 +17,7 @@
 
 import os
 from abc import ABC, abstractmethod
+from copy import copy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -246,6 +247,9 @@ class SplitRead(ABC):
         else:
             return predicate_for_physical_fields(self.predicate, self.table.fields)
 
+    def _assigns_row_id(self) -> bool:
+        return any(f.name == SpecialFields.ROW_ID.name for f in self.read_fields)
+
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()
                 and self.predicate is not None
@@ -275,7 +279,11 @@ class SplitRead(ABC):
         ) = self._get_fields_and_predicate(file.schema_id, read_fields)
         if (file.file_name in self.deletion_file_readers
                 or (for_merge_read and self.row_ranges is not None)
-                or physical_row_ranges is not None):
+                or physical_row_ranges is not None
+                # A shard range and _ROW_ID values are counted on the rows the
+                # format reader returns, so it must not filter them either.
+                or shard_range is not None
+                or self._assigns_row_id()):
             # DVs and indexed PK ranges refer to physical file positions.
             # Filtering or skipping row groups here would renumber those rows.
             # Apply the residual predicate after position selection and merging.
@@ -1073,6 +1081,10 @@ class RawFileSplitRead(SplitRead):
                      or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
+                     # file_reader_supplier does not push the predicate into
+                     # shard reads or reads that assign _ROW_ID.
+                     or isinstance(self.split, SlicedSplit)
+                     or self._assigns_row_id()
                      # Vortex drops a filter it cannot convert, and its floating
                      # point order differs from PyArrow's, so its scans need the
                      # row filter to give exact results.
@@ -1734,9 +1746,11 @@ class DataEvolutionSplitRead(SplitRead):
                     ): r]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 else:
-                    # Create concatenated reader for multiple files
+                    # Lazy readers must keep this bunch's projection after
+                    # self.read_fields is restored to the full projection.
+                    bunch_reader = copy(self)
                     suppliers = [
-                        partial(self._create_file_reader, file=file,
+                        partial(bunch_reader._create_file_reader, file=file,
                                 read_fields=read_field_names,
                                 deletion_vector=deletion_vector) for file in bunch.files()
                     ]

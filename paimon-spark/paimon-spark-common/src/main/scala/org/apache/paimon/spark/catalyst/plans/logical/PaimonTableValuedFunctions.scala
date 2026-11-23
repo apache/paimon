@@ -32,12 +32,13 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeSet, CreateArray, CreateMap, CreateNamedStruct, Expression, ExpressionInfo, ExprId, Literal, OuterReference}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeSet, CreateArray, CreateMap, CreateNamedStruct, Expression, ExpressionInfo, ExprId, Literal, OuterReference, Unevaluable}
 import org.apache.spark.sql.catalyst.plans.{Inner, JoinType}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LeafNode, LogicalPlan, Project, SubqueryAlias, UnaryNode}
-import org.apache.spark.sql.catalyst.util.MapData
+import org.apache.spark.sql.catalyst.util.{ArrayData, MapData}
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.{ArrayType, DataType, DoubleType, FloatType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -46,6 +47,17 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 object PaimonTableValuedFunctions {
+
+  private[spark] def readQueryVector(values: ArrayData, elementType: DataType): Array[Float] = {
+    require(
+      elementType == FloatType || elementType == DoubleType,
+      "Query vectors require FLOAT or DOUBLE coordinates.")
+    Array.tabulate(values.numElements()) {
+      i =>
+        require(!values.isNullAt(i), "Query coordinates cannot be null")
+        if (elementType == FloatType) values.getFloat(i) else values.getDouble(i).toFloat
+    }
+  }
 
   private case class DynamicVectorSearchExtraction(
       relation: DynamicVectorSearchRelation,
@@ -473,7 +485,7 @@ case class IncrementalToAutoTag(override val args: Seq[Expression])
  * Usage: vector_search(table_name, column_name, query_vector, limit[, options])
  *   - table_name: the Paimon table to search
  *   - column_name: the vector column name
- *   - query_vector: array of floats representing the query vector
+ *   - query_vector: a single vector, or a matrix of query vectors for a multivector column
  *   - limit: the number of top results to return
  *   - options: optional options as a map or semicolon-separated key-value string
  *
@@ -503,7 +515,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
         s"Column $columnName does not exist in table ${innerTable.name()}"
       )
     }
-    val queryVector = extractQueryVector(argsWithoutTable(1))
+    val query = argsWithoutTable(1)
     val limit = parsePositiveLimit(argsWithoutTable(2).eval())
     val options: Map[String, String] =
       if (argsWithoutTable.size == 4) {
@@ -511,14 +523,31 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
-    new VectorSearch(queryVector, limit, columnName, options.asJava)
+    query.dataType match {
+      case ArrayType(ArrayType(elementType, _), _)
+          if elementType == FloatType || elementType == DoubleType =>
+        require(
+          query.deterministic && !query.exists(_.isInstanceOf[Unevaluable]),
+          "Query matrix must be a deterministic expression that Spark can evaluate during analysis."
+        )
+        val rows = query.eval().asInstanceOf[ArrayData]
+        require(rows != null, "Query matrix cannot be null")
+        val vectors = Array.tabulate(rows.numElements()) {
+          i =>
+            require(!rows.isNullAt(i), "Query vectors cannot be null")
+            readQueryVector(rows.getArray(i), elementType)
+        }
+        VectorSearch.multiVector(vectors, limit, columnName, options.asJava)
+      case ArrayType(_: ArrayType, _) =>
+        throw new IllegalArgumentException("A query matrix requires FLOAT or DOUBLE coordinates.")
+      case _ => new VectorSearch(extractQueryVector(query), limit, columnName, options.asJava)
+    }
   }
 
   def extractQueryVector(expr: Expression): Array[Float] = {
     expr match {
-      case Literal(arrayData, _) if arrayData != null =>
-        val arr = arrayData.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
-        arr.toFloatArray()
+      case Literal(values: ArrayData, ArrayType(elementType, _)) =>
+        readQueryVector(values, elementType)
       case CreateArray(elements, _) if elements != null =>
         elements.map {
           case Literal(v: Float, _) => v
@@ -629,10 +658,20 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
+    val query = argsWithoutTable(1)
+    query.dataType match {
+      case ArrayType(FloatType | DoubleType, _) =>
+      case ArrayType(_: ArrayType, _) =>
+        throw new UnsupportedOperationException(
+          "LATERAL vector_search requires a single query vector per outer row.")
+      case _ =>
+        throw new IllegalArgumentException(
+          "LATERAL vector_search requires an array of FLOAT or DOUBLE.")
+    }
     DynamicVectorSearchRelation(
       innerTable,
       columnName,
-      argsWithoutTable(1),
+      query,
       limit,
       options,
       toAttributes(SparkTypeUtils.fromPaimonRowType(innerTable.rowType())))

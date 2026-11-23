@@ -18,15 +18,36 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.{Identifier => PaimonIdentifier}
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalog.WithPaimonCatalog
+import org.apache.paimon.spark.commands.FixedBucketExpression
+import org.apache.paimon.utils.ExceptionUtils
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.CommandResultExec
+import org.apache.spark.SparkConf
+import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted, SparkListenerTaskStart}
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCapability, TableCatalog}
+import org.apache.spark.sql.execution.{CommandResultExec, QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
-import org.apache.spark.sql.execution.datasources.v2.{AppendDataExec, AppendDataExecV1}
+import org.apache.spark.sql.execution.datasources.v2.{AppendDataExec, AppendDataExecV1, V2TableWriteExec}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+import org.apache.spark.sql.paimon.Utils
+import org.apache.spark.sql.util.QueryExecutionListener
+
+import java.util.UUID
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.AtomicReference
+
+import scala.collection.JavaConverters._
 
 class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
+      .set("spark.sql.catalog.spark_catalog.warehouse", tempDBDir.getCanonicalPath)
+  }
 
   test("V2 write primary key table") {
 
@@ -63,7 +84,7 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         val node2 = nodes(1)
         assert(
           node2.isInstanceOf[ShuffleExchangeLike] &&
-            node2.toString.contains("org.apache.paimon.spark.catalog.functions.BucketFunction"),
+            hasBucketFunction(node2),
           s"Expected ShuffleExchangeLike with BucketFunction, but got: $node2"
         )
 
@@ -113,7 +134,7 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         val node2 = nodes(1)
         assert(
           node2.isInstanceOf[ShuffleExchangeLike] &&
-            node2.toString.contains("org.apache.paimon.spark.catalog.functions.BucketFunction"),
+            hasBucketFunction(node2),
           s"Expected ShuffleExchangeLike with BucketFunction, but got: $node2"
         )
       }
@@ -155,5 +176,452 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         )
       }
     }
+  }
+
+  for (enabled <- Seq(false, true); primaryKey <- Seq(false, true); adaptive <- Seq(false, true)) {
+    test(
+      s"Table-as-select bucket distribution: v2=$enabled, primaryKey=$primaryKey, adaptive=$adaptive") {
+      withSparkSQLConf(
+        "spark.paimon.write.use-v2-write" -> enabled.toString,
+        "spark.sql.shuffle.partitions" -> "4",
+        "spark.sql.adaptive.enabled" -> adaptive.toString) {
+        val key = if (primaryKey) "'primary-key' = 'id'" else "'bucket-key' = 'id'"
+        val definition = s"USING paimon TBLPROPERTIES ($key, 'bucket'='1', 'file.format'='avro')"
+        val query = "SELECT CAST(id AS INT) AS id FROM range(0, 40, 1, 4)"
+        withTable("t1") {
+          sql(s"CREATE TABLE t1 $definition AS $query")
+          assertSingleBucketFile()
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+
+          sql(s"REPLACE TABLE t1 $definition AS $query")
+          assertSingleBucketFile()
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+
+          sql(s"CREATE OR REPLACE TABLE t1 $definition AS $query")
+          assertSingleBucketFile()
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+        }
+        withTable("t1") {
+          sql(s"CREATE OR REPLACE TABLE t1 $definition AS $query")
+          assertSingleBucketFile()
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+        }
+      }
+    }
+  }
+
+  test("Table-as-select bucket distribution with SparkGenericCatalog") {
+    val session = spark
+    val tableName = s"spark_catalog.$dbName0.generic_ctas"
+    val definition =
+      "USING paimon TBLPROPERTIES ('primary-key'='id', 'bucket'='1', 'file.format'='avro')"
+    val query = "SELECT CAST(id AS INT) AS id FROM range(0, 40, 1, 4)"
+    for (adaptive <- Seq(false, true)) {
+      withSparkSQLConf("spark.sql.adaptive.enabled" -> adaptive.toString) {
+        try {
+          for (command <- Seq("CREATE TABLE", "REPLACE TABLE", "CREATE OR REPLACE TABLE")) {
+            session.sql(s"$command $tableName $definition AS $query")
+            val table = session.sessionState.catalogManager
+              .catalog("spark_catalog")
+              .asInstanceOf[TableCatalog]
+              .loadTable(Identifier.of(Array(dbName0), "generic_ctas"))
+            assert(table.capabilities().contains(TableCapability.BATCH_WRITE))
+            checkAnswer(
+              session.sql(s"SELECT COUNT(*) FROM spark_catalog.$dbName0.`generic_ctas$$files`"),
+              Row(1L))
+            checkAnswer(session.sql(s"SELECT * FROM $tableName"), (0 until 40).map(Row(_)))
+          }
+        } finally {
+          session.sql(s"DROP TABLE IF EXISTS $tableName")
+        }
+      }
+    }
+  }
+
+  for (catalog <- Seq("paimon", "spark_catalog"); mode <- Seq("append", "overwrite")) {
+    test(s"New-table saveAsTable honors the write option: catalog=$catalog, mode=$mode") {
+      val tableName = s"save_as_table_${catalog}_$mode"
+      val target = s"$catalog.$dbName0.$tableName"
+      for (sessionEnabled <- Seq(true, false); enabled <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> sessionEnabled.toString) {
+          withTable(target) {
+            val modes = captureWriteModes {
+              spark
+                .range(0, 40, 1, 4)
+                .selectExpr("CAST(id AS INT) AS id")
+                .write
+                .format("paimon")
+                .option("bucket-key", "id")
+                .option("bucket", "1")
+                .option("file.format", "avro")
+                .option(
+                  if (enabled) "WRITE.USE-V2-WRITE" else "write.use-v2-write",
+                  enabled.toString)
+                .mode(mode)
+                .saveAsTable(target)
+            }
+            assert(!enabled || modes.nonEmpty, "Expected to observe the V2 writer")
+            assert(modes.forall(_ == enabled), s"Expected V2=$enabled but observed $modes")
+            checkAnswer(sql(s"SELECT * FROM $target"), (0 until 40).map(Row(_)))
+            assert(persistentWriteOption(catalog, tableName) == null)
+            val loaded = spark.sessionState.catalogManager
+              .catalog(catalog)
+              .asInstanceOf[TableCatalog]
+              .loadTable(Identifier.of(Array(dbName0), tableName))
+            assert(loaded.capabilities().contains(TableCapability.BATCH_WRITE) == sessionEnabled)
+          }
+        }
+      }
+    }
+  }
+
+  for (catalog <- Seq("paimon", "spark_catalog")) {
+    test(s"DataFrameWriterV2 write option overrides persistent and session switches: $catalog") {
+      val tableName = s"writer_v2_ctas_$catalog"
+      val target = s"$catalog.$dbName0.$tableName"
+      for (enabled <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> (!enabled).toString) {
+          withTable(target) {
+            val modes = captureWriteModes {
+              spark
+                .range(0, 40, 1, 4)
+                .selectExpr("CAST(id AS INT) AS id")
+                .writeTo(target)
+                .using("paimon")
+                .tableProperty("bucket-key", "id")
+                .tableProperty("bucket", "1")
+                .tableProperty("write.use-v2-write", (!enabled).toString)
+                .option("write.use-v2-write", enabled.toString)
+                .create()
+            }
+            assert(!enabled || modes.nonEmpty, "Expected to observe the V2 writer")
+            assert(modes.forall(_ == enabled), s"Observed writers: $modes")
+            checkAnswer(sql(s"SELECT * FROM $target"), (0 until 40).map(Row(_)))
+            assert(persistentWriteOption(catalog, tableName) == (!enabled).toString)
+          }
+        }
+      }
+    }
+
+    test(s"Invalid CTAS write option cleans up and allows retry: $catalog") {
+      val target = s"$catalog.$dbName0.invalid_writer_option_ctas_$catalog"
+      withTable(target) {
+        val error = intercept[Exception] {
+          spark
+            .range(0, 2)
+            .selectExpr("CAST(id AS INT) AS id")
+            .write
+            .format("paimon")
+            .option("write.use-v2-write", "typo")
+            .saveAsTable(target)
+        }
+        assert(ExceptionUtils.findThrowableWithMessage(error, "typo").isPresent)
+        val tableCatalog = spark.sessionState.catalogManager
+          .catalog(catalog)
+          .asInstanceOf[TableCatalog]
+        assert(
+          !tableCatalog.tableExists(
+            Identifier.of(Array(dbName0), s"invalid_writer_option_ctas_$catalog")))
+        val modes = captureWriteModes {
+          spark
+            .range(0, 2)
+            .selectExpr("CAST(id AS INT) AS id")
+            .write
+            .format("paimon")
+            .option("write.use-v2-write", "false")
+            .saveAsTable(target)
+        }
+        assert(modes.forall(!_))
+        checkAnswer(sql(s"SELECT * FROM $target"), Seq(Row(0), Row(1)))
+      }
+    }
+  }
+
+  test("New-table saveAsTable cannot enable V2 for an unsupported table") {
+    withTable("unsupported_ctas") {
+      val modes = captureWriteModes {
+        spark
+          .range(0, 40, 1, 4)
+          .selectExpr("CAST(id AS INT) AS id")
+          .write
+          .format("paimon")
+          .option("primary-key", "id")
+          .option("bucket", "-1")
+          .option("write.use-v2-write", "true")
+          .saveAsTable("unsupported_ctas")
+      }
+      assert(modes.forall(!_))
+      val table = spark.sessionState.catalogManager.currentCatalog
+        .asInstanceOf[TableCatalog]
+        .loadTable(Identifier.of(Array(dbName0), "unsupported_ctas"))
+      assert(table.capabilities().contains(TableCapability.V1_BATCH_WRITE))
+      checkAnswer(sql("SELECT * FROM unsupported_ctas"), (0 until 40).map(Row(_)))
+    }
+  }
+
+  for (adaptive <- Seq(false, true)) {
+    test(
+      s"GenericCatalog prepares table-as-select writes with an omitted provider: AQE=$adaptive") {
+      val target = s"spark_catalog.$dbName0.default_provider_ctas"
+      withSparkSQLConf(
+        "spark.sql.sources.default" -> "paimon",
+        "spark.sql.legacy.createHiveTableByDefault" -> "false",
+        "spark.sql.adaptive.enabled" -> adaptive.toString,
+        "spark.paimon.write.use-v2-write" -> "true"
+      ) {
+        withTable(target) {
+          for (operation <- Seq("create", "replace", "createOrReplace")) {
+            val writer = spark
+              .range(0, 40, 1, 4)
+              .selectExpr("CAST(id AS INT) AS id")
+              .writeTo(target)
+              .tableProperty("bucket-key", "id")
+              .tableProperty("bucket", "1")
+              .tableProperty("file.format", "avro")
+            operation match {
+              case "create" => writer.create()
+              case "replace" => writer.replace()
+              case "createOrReplace" => writer.createOrReplace()
+            }
+            checkAnswer(sql(s"SELECT * FROM $target"), (0 until 40).map(Row(_)))
+            checkAnswer(
+              sql(s"SELECT COUNT(*) FROM spark_catalog.$dbName0.`default_provider_ctas$$files`"),
+              Row(1L))
+          }
+        }
+      }
+    }
+  }
+
+  test("Table-as-select write failure drops the newly created table") {
+    withTable("t1") {
+      val error = intercept[Exception] {
+        sql("""
+              |CREATE TABLE t1 USING paimon
+              |TBLPROPERTIES ('primary-key'='id', 'bucket'='1', 'file.format'='avro') AS
+              |SELECT CAST(IF(id = 20, raise_error('expected CTAS failure'), id) AS INT) AS id
+              |FROM range(0, 40, 1, 4)
+              |""".stripMargin)
+      }
+      assert(
+        ExceptionUtils.findThrowableWithMessage(error, "expected CTAS failure").isPresent,
+        ExceptionUtils.stringifyException(error))
+      assert(!spark.catalog.tableExists("t1"))
+    }
+  }
+
+  for (tableOption <- Seq(false, true); genericCatalog <- Seq(false, true)) {
+    test(
+      s"CTAS option failure cleans up and allows retry: tableOption=$tableOption, staged=$genericCatalog") {
+      assume(org.apache.spark.SPARK_VERSION < "3.5")
+      val catalogName = if (genericCatalog) "spark_catalog" else "paimon"
+      val catalog =
+        spark.sessionState.catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
+      val ident = Identifier.of(Array(dbName0), "invalid_option_ctas")
+      val target = s"$catalogName.$dbName0.invalid_option_ctas"
+      val properties = "'bucket-key'='id', 'bucket'='1', 'file.format'='avro'"
+      val invalidOption = if (tableOption) ", 'write.use-v2-write'='typo'" else ""
+      val sessionOptions =
+        if (tableOption) Seq.empty[(String, String)]
+        else Seq("spark.paimon.write.use-v2-write" -> "typo")
+      val query = "SELECT CAST(id AS INT) AS id FROM range(0, 40, 1, 4)"
+      try {
+        val error = intercept[Exception] {
+          withSparkSQLConf(sessionOptions: _*) {
+            sql(
+              s"CREATE TABLE $target USING paimon TBLPROPERTIES ($properties$invalidOption) AS $query")
+              .collect()
+          }
+        }
+        assert(
+          ExceptionUtils.findThrowableWithMessage(error, "typo").isPresent,
+          ExceptionUtils.stringifyException(error))
+        assert(!catalog.tableExists(ident), "Invalid write options left the CTAS table registered")
+
+        withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+          sql(
+            s"CREATE TABLE IF NOT EXISTS $target USING paimon TBLPROPERTIES ($properties) AS $query")
+            .collect()
+          checkAnswer(sql(s"SELECT * FROM $target"), (0 until 40).map(Row(_)))
+        }
+      } finally {
+        if (catalog.tableExists(ident)) {
+          catalog.dropTable(ident)
+        }
+      }
+    }
+  }
+
+  for (enabled <- Seq(false, true)) {
+    test(s"Bucket write retains adaptive shuffle coalescing: v2=$enabled") {
+      withSparkSQLConf(
+        "spark.paimon.write.use-v2-write" -> enabled.toString,
+        "spark.sql.adaptive.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+        "spark.sql.adaptive.coalescePartitions.minPartitionNum" -> "1",
+        "spark.sql.shuffle.partitions" -> "200"
+      ) {
+        withTable("t1") {
+          sql("""
+                |CREATE TABLE t1 (id INT) USING paimon
+                |TBLPROPERTIES ('bucket-key'='id', 'bucket'='1', 'file.format'='avro')
+                |""".stripMargin)
+          val group = UUID.randomUUID().toString
+          val stageTasks = new ConcurrentLinkedQueue[Int]()
+          val listener = new SparkListener {
+            override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
+              if (event.properties.getProperty("spark.jobGroup.id") == group) {
+                stageTasks.add(event.stageInfo.numTasks)
+              }
+            }
+          }
+          spark.sparkContext.addSparkListener(listener)
+          try {
+            spark.sparkContext.setJobGroup(group, group)
+            sql("INSERT INTO t1 SELECT CAST(id AS INT) FROM range(0, 40, 1, 4)").collect()
+            Utils.waitUntilEventEmpty(spark)
+          } finally {
+            spark.sparkContext.clearJobGroup()
+            spark.sparkContext.removeSparkListener(listener)
+          }
+          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+          assertSingleBucketFile()
+          assert(stageTasks.asScala.toSeq == Seq(4, 1), s"Submitted stage tasks: $stageTasks")
+        }
+      }
+    }
+  }
+
+  for (enabled <- Seq(false, true); genericCatalog <- Seq(false, true)) {
+    test(s"Interrupted CTAS cleans up its table: v2=$enabled, staged=$genericCatalog") {
+      // Spark 3.5+ already uses native distribution preparation and native failure cleanup.
+      assume(org.apache.spark.SPARK_VERSION < "3.5")
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> enabled.toString) {
+        val session = spark
+        val catalogName = if (genericCatalog) "spark_catalog" else "paimon"
+        val catalog = session.sessionState.catalogManager
+          .catalog(catalogName)
+          .asInstanceOf[TableCatalog]
+        val ident = Identifier.of(Array(dbName0), "interrupted_ctas")
+        val target = s"$catalogName.$dbName0.interrupted_ctas"
+        val group = UUID.randomUUID().toString
+        val taskStarted = new CountDownLatch(1)
+        val finished = new CountDownLatch(1)
+        val failure = new AtomicReference[Throwable]()
+        val listener = new SparkListener {
+          private val stages = scala.collection.mutable.Set.empty[Int]
+
+          override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
+            if (event.properties.getProperty("spark.jobGroup.id") == group) {
+              stages.add(event.stageInfo.stageId)
+            }
+          }
+
+          override def onTaskStart(event: SparkListenerTaskStart): Unit = {
+            if (stages.contains(event.stageId)) {
+              taskStarted.countDown()
+            }
+          }
+        }
+        session.udf.register(
+          "ctas_interrupt_input",
+          (id: Long) => {
+            Thread.sleep(30000)
+            id.toInt
+          })
+        val driver = new Thread("interrupted-ctas-driver") {
+          override def run(): Unit = {
+            SparkSession.setActiveSession(session)
+            session.sparkContext.setJobGroup(group, group, interruptOnCancel = true)
+            try {
+              session
+                .sql(s"""
+                        |CREATE TABLE $target USING paimon
+                        |TBLPROPERTIES ('bucket-key'='id', 'bucket'='1', 'file.format'='avro') AS
+                        |SELECT ctas_interrupt_input(id) AS id FROM range(0, 40, 1, 4)
+                        |""".stripMargin)
+                .collect()
+            } catch {
+              case error: Throwable => failure.set(error)
+            } finally {
+              session.sparkContext.clearJobGroup()
+              SparkSession.clearActiveSession()
+              finished.countDown()
+            }
+          }
+        }
+        driver.setDaemon(true)
+        session.sparkContext.addSparkListener(listener)
+        try {
+          driver.start()
+          assert(taskStarted.await(30, TimeUnit.SECONDS), "CTAS did not start its input tasks")
+          assert(catalog.tableExists(ident), "CTAS must create the table before interruption")
+          driver.interrupt()
+          assert(finished.await(30, TimeUnit.SECONDS), "Interrupted CTAS did not finish")
+          assert(
+            failure.get().isInstanceOf[InterruptedException],
+            s"Expected the original InterruptedException, got ${failure.get()}")
+          // Assert before cancelling executor tasks: job cancellation must not mask the failure.
+          assert(!catalog.tableExists(ident), "Interrupted CTAS left its table registered")
+        } finally {
+          driver.interrupt()
+          session.sparkContext.cancelJobGroup(group)
+          driver.join(10000)
+          session.sparkContext.removeSparkListener(listener)
+          session.sql("DROP TEMPORARY FUNCTION IF EXISTS ctas_interrupt_input")
+          if (catalog.tableExists(ident)) {
+            catalog.dropTable(ident)
+          }
+        }
+      }
+    }
+  }
+
+  private def persistentWriteOption(catalog: String, tableName: String): String = {
+    spark.sessionState.catalogManager
+      .catalog(catalog)
+      .asInstanceOf[WithPaimonCatalog]
+      .paimonCatalog()
+      .getTable(PaimonIdentifier.create(dbName0, tableName))
+      .options()
+      .get("write.use-v2-write")
+  }
+
+  private def captureWriteModes(f: => Unit): Seq[Boolean] = {
+    val modes = new ConcurrentLinkedQueue[Boolean]()
+    val listener = new QueryExecutionListener {
+      override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+        val plan = qe.executedPlan match {
+          case result: CommandResultExec => result.commandPhysicalPlan
+          case other => other
+        }
+        collect(plan) {
+          case _: AppendDataExecV1 => false
+          case _: AppendDataExec => true
+          // Native CTAS writes directly, without an AppendData node.
+          case write: V2TableWriteExec if write.commitProgress.isDefined => true
+        }.foreach(modes.add)
+      }
+
+      override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {}
+    }
+    Utils.waitUntilEventEmpty(spark)
+    spark.listenerManager.register(listener)
+    try {
+      f
+      Utils.waitUntilEventEmpty(spark)
+      modes.asScala.toList
+    } finally {
+      spark.listenerManager.unregister(listener)
+    }
+  }
+
+  private def assertSingleBucketFile(): Unit = {
+    checkAnswer(sql("SELECT COUNT(*) FROM `t1$files`"), Row(1L))
+  }
+
+  private def hasBucketFunction(plan: SparkPlan): Boolean = {
+    plan.toString.contains("org.apache.paimon.spark.catalog.functions.BucketFunction") ||
+    plan.expressions.exists(_.collect { case _: FixedBucketExpression => true }.nonEmpty)
   }
 }

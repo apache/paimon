@@ -203,7 +203,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     @Override
     public void close() throws Exception {
         super.close();
-        write.close();
+        if (write != null) {
+            write.close();
+        }
     }
 
     @VisibleForTesting

@@ -55,6 +55,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
     private final BlobFetchMetricReporter blobFetchMetricReporter;
+    private final boolean transferMetricsEnabled;
     private final CRC32 crc32;
     private final byte[] copyBuffer;
     private final ReusingBlobRefStreamProvider reuseSource;
@@ -79,6 +80,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFetchMetricReporter = blobFetchMetricReporter;
+        this.transferMetricsEnabled = transferMetricsEnabled(blobFetchMetricReporter);
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
         this.reuseSource = new ReusingBlobRefStreamProvider();
@@ -193,7 +195,11 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         long blobPosition = out.getPos();
         if (source.reused()) {
             try {
-                copyExactly(source.stream(), source.length());
+                if (transferMetricsEnabled) {
+                    copyWithMetrics(source.stream(), source.length());
+                } else {
+                    copyExactly(source.stream(), source.length());
+                }
             } catch (IOException | RuntimeException e) {
                 blobFetchMetricReporter.recordFetchFailure(e);
                 // Source is at an unknown position now; drop it so the next blob reopens.
@@ -202,10 +208,14 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             }
         } else {
             try (SeekableInputStream stream = source.stream()) {
-                int bytesRead = stream.read(copyBuffer);
-                while (bytesRead >= 0) {
-                    write(copyBuffer, bytesRead);
-                    bytesRead = stream.read(copyBuffer);
+                if (transferMetricsEnabled) {
+                    copyWithMetrics(stream, -1L);
+                } else {
+                    int bytesRead = stream.read(copyBuffer);
+                    while (bytesRead >= 0) {
+                        write(copyBuffer, bytesRead);
+                        bytesRead = stream.read(copyBuffer);
+                    }
                 }
             } catch (IOException | RuntimeException e) {
                 blobFetchMetricReporter.recordFetchFailure(e);
@@ -235,6 +245,62 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             }
             write(copyBuffer, bytesRead);
             remaining -= bytesRead;
+        }
+    }
+
+    private static boolean transferMetricsEnabled(BlobFetchMetricReporter reporter) {
+        try {
+            return reporter.isTransferMetricsEnabled();
+        } catch (RuntimeException ignored) {
+            // Optional telemetry must not prevent a Blob from being written.
+            return false;
+        }
+    }
+
+    /** Opt-in accounting around the payload-copy loop only. */
+    private void copyWithMetrics(SeekableInputStream stream, long length) throws IOException {
+        long started = System.nanoTime();
+        long readBytes = 0;
+        long writtenBytes = 0;
+        long remaining = length;
+        boolean completed = false;
+        try {
+            while (length < 0 || remaining > 0) {
+                int toRead =
+                        length < 0
+                                ? copyBuffer.length
+                                : (int) Math.min(copyBuffer.length, remaining);
+                int bytesRead =
+                        length < 0 ? stream.read(copyBuffer) : stream.read(copyBuffer, 0, toRead);
+                if (bytesRead < 0) {
+                    if (length >= 0) {
+                        throw new EOFException(
+                                String.format(
+                                        "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                                + "bytes but source ended %d bytes early.",
+                                        blobFieldName, length, remaining));
+                    }
+                    break;
+                }
+                if (bytesRead == 0 && length >= 0) {
+                    throw new IOException(
+                            "Source returned 0 bytes while copying BLOB payload for field "
+                                    + blobFieldName);
+                }
+                readBytes += bytesRead;
+                write(copyBuffer, bytesRead);
+                writtenBytes += bytesRead;
+                remaining -= bytesRead;
+            }
+            completed = true;
+        } finally {
+            long durationNanos = Math.max(0L, System.nanoTime() - started);
+            try {
+                blobFetchMetricReporter.recordTransfer(
+                        readBytes, writtenBytes, durationNanos, completed);
+            } catch (RuntimeException ignored) {
+                // Do not replace a business exception or fail a successful copy for telemetry.
+            }
         }
     }
 

@@ -166,9 +166,23 @@ public class SparkTypeUtils {
 
         private static final PaimonToSparkTypeVisitor INSTANCE = new PaimonToSparkTypeVisitor();
 
+        private static DataType characterType(Class<? extends DataType> type, int length) {
+            try {
+                try {
+                    return type.getConstructor(int.class).newInstance(length);
+                } catch (NoSuchMethodException e) {
+                    // Spark 4.2 adds an optional collation identifier to the constructor.
+                    return type.getConstructor(int.class, scala.Option.class)
+                            .newInstance(length, scala.Option.empty());
+                }
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalArgumentException("Cannot construct Spark character type", e);
+            }
+        }
+
         @Override
         public DataType visit(CharType charType) {
-            return new org.apache.spark.sql.types.CharType(charType.getLength());
+            return characterType(org.apache.spark.sql.types.CharType.class, charType.getLength());
         }
 
         @Override
@@ -176,7 +190,8 @@ public class SparkTypeUtils {
             if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
                 return DataTypes.StringType;
             } else {
-                return new org.apache.spark.sql.types.VarcharType(varCharType.getLength());
+                return characterType(
+                        org.apache.spark.sql.types.VarcharType.class, varCharType.getLength());
             }
         }
 

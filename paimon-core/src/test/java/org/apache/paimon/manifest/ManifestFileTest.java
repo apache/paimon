@@ -1771,7 +1771,8 @@ public class ManifestFileTest {
                         false,
                         false,
                         false,
-                        false);
+                        false,
+                        "test_table");
         scan.withRowRanges(Collections.singletonList(new Range(100, 100)));
         fileIO.reset();
         List<ManifestEntry> result = new ArrayList<>();
@@ -1830,7 +1831,8 @@ public class ManifestFileTest {
                         false,
                         false,
                         false,
-                        false);
+                        false,
+                        "test_table");
         scan.withBucket(1);
         io.reset();
         assertThat(scan.readManifest(meta)).containsExactlyElementsOf(entries.subList(1000, 2000));
@@ -1895,7 +1897,8 @@ public class ManifestFileTest {
                         false,
                         false,
                         false,
-                        false);
+                        false,
+                        "test_table");
         io.reset();
         List<ManifestEntry> actual = scan.readManifest(meta);
         assertThat(actual).containsExactlyElementsOf(entries.subList(0, 1000));

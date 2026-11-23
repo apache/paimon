@@ -365,10 +365,11 @@ class RayRangeJoinTest(unittest.TestCase):
                                 len(rjmod._bounded_ranges(wide, wide, 4)))
 
     def test_split_key_range_reads_stats(self):
-        # With default metadata.stats-mode=none, the planner falls back to the footer.
+        # Without manifest stats the planner falls back to the footer.
         loc = pa.schema([("k", pa.int64()), ("row_id", pa.int64())])
         self._table("default.rj_stats", loc, [
-            pa.Table.from_pydict({"k": [10, 20, 15], "row_id": [1, 2, 3]}, schema=loc)])
+            pa.Table.from_pydict({"k": [10, 20, 15], "row_id": [1, 2, 3]}, schema=loc)],
+            options={"metadata.stats-mode": "none"})
         ranged, _ = rjmod._plan_ranged_splits(
             "default.rj_stats", self.catalog_options, None, "k")
         self.assertTrue(ranged)
@@ -423,7 +424,8 @@ class RayRangeJoinTest(unittest.TestCase):
     def test_footer_failure_degrades_to_unknown(self):
         schema = pa.schema([("k", pa.int64())])
         self._table("default.rj_footer_failure", schema, [
-            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)])
+            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)],
+            options={"metadata.stats-mode": "none"})
 
         with self.assertLogs(rjmod._LOG, level="WARNING"):
             with mock.patch("pyarrow.parquet.read_metadata",

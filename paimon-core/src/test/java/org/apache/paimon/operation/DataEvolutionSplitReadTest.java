@@ -535,6 +535,307 @@ class DataEvolutionSplitReadTest {
                         + ".");
     }
 
+    @Test
+    public void testContiguousDeletionLiveSelection() {
+        DataFileMeta file = createFile("file1.parquet", 0L, 100, 1);
+        Range range = new Range(0L, 99L);
+
+        // prefix deletion [0, 50): live suffix
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(50L, 100L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 50), range, 0.25d));
+        // in-file prefix plus positions outside the file: only in-file positions count
+        BitmapDeletionVector mixed = deletionVector(0, 50);
+        for (int position = 200; position < 250; position++) {
+            mixed.delete(position);
+        }
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(50L, 100L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(file, mixed, range, 0.25d));
+        // suffix deletion [70, 100): live prefix (30 deleted >= 25% ratio)
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(0L, 70L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(70, 100), range, 0.25d));
+        // middle deletion [20, 50): two live runs (30 deleted >= 25% ratio)
+        assertEquals(
+                RoaringBitmap32.or(
+                        RoaringBitmap32.bitmapOfRange(0L, 20L),
+                        RoaringBitmap32.bitmapOfRange(50L, 100L)),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(20, 50), range, 0.25d));
+        // ratio boundary: exactly 25% deleted is accepted
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(25L, 100L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 25), range, 0.25d));
+        // fully deleted file yields an empty selection
+        assertEquals(
+                new RoaringBitmap32(),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 100), range, 0.25d));
+        // Bitmap64 behaves identically
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(50L, 100L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file,
+                        Bitmap64DeletionVector.fromBitmapDeletionVector(deletionVector(0, 50)),
+                        range,
+                        0.25d));
+        // null range means file-local positions
+        assertEquals(
+                RoaringBitmap32.bitmapOfRange(50L, 100L),
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 50), null, 0.25d));
+    }
+
+    @Test
+    public void testContiguousDeletionLiveSelectionRejections() {
+        DataFileMeta file = createFile("file1.parquet", 0L, 100, 1);
+        Range range = new Range(0L, 99L);
+
+        // hole inside the span: positions [20, 80) except 50 (59 deleted, span is 60)
+        BitmapDeletionVector withHole = deletionVector(20, 50);
+        for (int position = 51; position < 80; position++) {
+            withHole.delete(position);
+        }
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, withHole, range, 0.25d));
+        // scattered deletions: 50 even positions, span is 99
+        BitmapDeletionVector scattered = new BitmapDeletionVector();
+        for (int position = 0; position < 100; position += 2) {
+            scattered.delete(position);
+        }
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, scattered, range, 0.25d));
+        // below the minimum deleted ratio
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 10), range, 0.25d));
+        // empty deletion vector
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, new BitmapDeletionVector(), range, 0.25d));
+        // all positions outside the file
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(100, 150), range, 0.25d));
+        // non-anchor file of a merged group: DV frame is not file-local
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        file, deletionVector(0, 50), new Range(5L, 104L), 0.25d));
+        // null deletion vector
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(file, null, range, 0.25d));
+        // small-file rounding: 1 of 3 rows deleted must not pass a 50% ratio
+        DataFileMeta tinyFile = createFile("tiny.parquet", 0L, 3, 1);
+        assertNull(
+                DataEvolutionSplitRead.contiguousDeletionLiveSelection(
+                        tinyFile, deletionVector(0, 1), new Range(0L, 2L), 0.5d));
+    }
+
+    @Test
+    public void testDataFileDvPushdownPreservesResults() throws Exception {
+        int rowCount = 10_000;
+
+        // Contiguous deletion of the first 8_000 rows.
+        BitmapDeletionVector contiguous = deletionVector(0, 8_000);
+        List<Integer> expectedContiguous = new ArrayList<>();
+        for (int i = 8_000; i < rowCount; i++) {
+            expectedContiguous.add(1000 + i);
+        }
+
+        // Scattered deletion of 8_000 rows: every position not a multiple of 5.
+        BitmapDeletionVector scattered = new BitmapDeletionVector();
+        for (int position = 0; position < rowCount; position++) {
+            if (position % 5 != 0) {
+                scattered.delete(position);
+            }
+        }
+        List<Integer> expectedScattered = new ArrayList<>();
+        for (int position = 0; position < rowCount; position += 5) {
+            expectedScattered.add(1000 + position);
+        }
+
+        // A fully deleted contiguous file.
+        BitmapDeletionVector fullyDeleted = deletionVector(0, rowCount);
+
+        // The pushdown must never change results: identical output enabled and disabled.
+        long baselineContiguousBytes = 0L;
+        long baselineScatteredBytes = 0L;
+        for (boolean pushdownEnabled : new boolean[] {false, true}) {
+            ScanOutcome contiguousOutcome =
+                    scanWithDeletionVector(
+                            rowCount, contiguous, pushdownEnabled, "contiguous", true);
+            ScanOutcome scatteredOutcome =
+                    scanWithDeletionVector(rowCount, scattered, pushdownEnabled, "scattered", true);
+            ScanOutcome fullyDeletedOutcome =
+                    scanWithDeletionVector(
+                            rowCount, fullyDeleted, pushdownEnabled, "fully-deleted", true);
+
+            assertEquals(expectedContiguous, contiguousOutcome.f0);
+            assertEquals(expectedScattered, scatteredOutcome.f0);
+            // Fully deleted: no rows either way, and zero bytes for BOTH settings — with the
+            // default file-index read enabled, the pre-existing deletion-vector intersection
+            // skips such files before the pushdown (FileIndexEvaluator.intersectDeletionVector).
+            // The loop below disables file-index reading to pin the pushdown's own skip.
+            assertEquals(Collections.emptyList(), fullyDeletedOutcome.f0);
+            assertEquals(0L, fullyDeletedOutcome.bytesRead);
+
+            if (pushdownEnabled) {
+                // The contiguous span is pruned: strictly fewer bytes than the fallback read.
+                // (The magnitude of the reduction is covered by the benchmark, not here.)
+                assertTrue(
+                        contiguousOutcome.bytesRead < baselineContiguousBytes,
+                        "pushdown read "
+                                + contiguousOutcome.bytesRead
+                                + " bytes, baseline read "
+                                + baselineContiguousBytes);
+                // Scattered deletions keep the regular path: identical read volume.
+                assertEquals(baselineScatteredBytes, scatteredOutcome.bytesRead);
+            } else {
+                baselineContiguousBytes = contiguousOutcome.bytesRead;
+                baselineScatteredBytes = scatteredOutcome.bytesRead;
+            }
+        }
+
+        // With file-index reading disabled, only the pushdown can skip a fully deleted
+        // contiguous file: the pushdown-off run must actually read (and filter out) the data
+        // file, while the pushdown-on run skips the data file read entirely.
+        for (boolean pushdownEnabled : new boolean[] {false, true}) {
+            ScanOutcome outcome =
+                    scanWithDeletionVector(
+                            rowCount,
+                            fullyDeleted,
+                            pushdownEnabled,
+                            "fully-deleted-no-index",
+                            false);
+            assertEquals(Collections.emptyList(), outcome.f0);
+            if (pushdownEnabled) {
+                assertEquals(0L, outcome.bytesRead);
+            } else {
+                assertTrue(outcome.bytesRead > 0);
+            }
+        }
+    }
+
+    private ScanOutcome scanWithDeletionVector(
+            int rowCount,
+            BitmapDeletionVector deletionVector,
+            boolean pushdownEnabled,
+            String tag,
+            boolean fileIndexReadEnabled)
+            throws Exception {
+        Path tableRoot =
+                new Path(
+                        tempDir.toUri().toString(),
+                        "dv-pushdown-" + (pushdownEnabled ? "on" : "off") + "-" + tag);
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        if (pushdownEnabled) {
+            options.set(CoreOptions.DATA_EVOLUTION_DATA_FILE_DV_PUSHDOWN_ENABLED, true);
+        }
+        if (!fileIndexReadEnabled) {
+            options.set(CoreOptions.FILE_INDEX_READ_ENABLED, false);
+        }
+        CoreOptions coreOptions = new CoreOptions(options);
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        tableRoot,
+                        RowType.of(),
+                        coreOptions.partitionDefaultName(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.ARRAY(DataTypes.INT()))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        Path bucketPath = pathFactory.bucketPath(EMPTY_ROW, 0);
+        String fileName = "data-0.parquet";
+        Path filePath = new Path(bucketPath, fileName);
+        CountingFileIO fileIO = new CountingFileIO(new LocalFileIO(), filePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        RowType rowType = tableSchema.logicalRowType();
+
+        fileIO.mkdirs(bucketPath);
+        Options parquetOptions = new Options();
+        parquetOptions.set("parquet.block.size", "65536");
+        parquetOptions.set("parquet.page.size", "4096");
+        parquetOptions.set("parquet.writer.version", "v2");
+        writeNestedParquetFile(fileIO, filePath, rowType, rowCount, parquetOptions);
+
+        DataFileMeta dataFile =
+                createFile(fileName, fileIO.getFileStatus(filePath).getLen(), 0L, rowCount, 1);
+        Path dvPath = new Path(bucketPath, fileName + ".dv");
+        long dvSize;
+        try (PositionOutputStream out = fileIO.newOutputStream(dvPath, false);
+                DataOutputStream dataOutput = new DataOutputStream(out)) {
+            dvSize = deletionVector.serializeTo(dataOutput);
+        }
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath(bucketPath.toString())
+                        .withDataFiles(Collections.singletonList(dataFile))
+                        .withDataDeletionFiles(
+                                Collections.singletonList(
+                                        new DeletionFile(
+                                                dvPath.toString(),
+                                                0,
+                                                dvSize,
+                                                deletionVector.getCardinality())))
+                        .rawConvertible(false)
+                        .build();
+
+        DataEvolutionSplitRead splitRead =
+                new DataEvolutionSplitRead(
+                        fileIO, schemaManager, tableSchema, rowType, coreOptions, pathFactory);
+        List<Integer> f0 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = splitRead.createReader(split)) {
+            reader.forEachRemaining(row -> f0.add(row.getInt(0)));
+        }
+        return new ScanOutcome(f0, fileIO.bytesRead());
+    }
+
+    private static final class ScanOutcome {
+
+        private final List<Integer> f0;
+        private final long bytesRead;
+
+        private ScanOutcome(List<Integer> f0, long bytesRead) {
+            this.f0 = f0;
+            this.bytesRead = bytesRead;
+        }
+    }
+
+    private static BitmapDeletionVector deletionVector(int fromInclusive, int toExclusive) {
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        for (int position = fromInclusive; position < toExclusive; position++) {
+            deletionVector.delete(position);
+        }
+        return deletionVector;
+    }
+
     private static final class CountingFileIO extends LocalFileIO {
 
         private final LocalFileIO fileIO;

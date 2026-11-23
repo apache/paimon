@@ -43,6 +43,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -80,6 +81,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
@@ -606,14 +608,16 @@ public class JdbcCatalog extends AbstractCatalog {
                         // concurrent createView / renameView / createTable targeting the same
                         // identifier (tables and views are stored in separate JDBC tables
                         // without a shared uniqueness constraint).
+                        Table table;
                         try {
-                            getTable(fromTable);
+                            table = getTable(fromTable);
                         } catch (TableNotExistException e) {
                             if (ignoreIfNotExists) {
                                 return null;
                             }
                             throw new TableNotExistException(fromTable);
                         }
+                        checkNotLakeStreamTable(table, fromTable, "renameTable");
 
                         requireDatabaseExistsForWrite(toTable);
 

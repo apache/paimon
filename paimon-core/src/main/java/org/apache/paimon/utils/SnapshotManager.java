@@ -497,12 +497,12 @@ public class SnapshotManager implements Serializable {
             } else {
                 if (commitWatermark > watermark) {
                     latest = pos - 1; // Search in the left half
-                } else if (commitWatermark < watermark) {
+                } else {
+                    // Upper bound: an exact match is a candidate, but a later snapshot may carry
+                    // the same watermark. Watermarks repeat because the commit watermark takes the
+                    // maximum, so stopping here would return the middle of such a run.
                     earliest = mid + 1; // Search in the right half
                     finalSnapshot = snapshot;
-                } else {
-                    finalSnapshot = snapshot; // Found the exact match
-                    break;
                 }
             }
         }
@@ -844,18 +844,31 @@ public class SnapshotManager implements Serializable {
     }
 
     public static Snapshot fromPath(FileIO fileIO, Path path) {
-        try {
-            return tryFromPath(fileIO, path);
-        } catch (FileNotFoundException e) {
-            String errorMessage =
-                    String.format(
-                            "Snapshot file %s does not exist. "
-                                    + "It might have been expired by other jobs operating on this table. "
-                                    + "In this case, you can avoid concurrent modification issues by configuring "
-                                    + "write-only = true and use a dedicated compaction job, or configuring "
-                                    + "different expiration thresholds for different jobs.",
-                            path);
-            throw new RuntimeException(errorMessage, e);
+        int retryNumber = 0;
+        while (true) {
+            try {
+                return tryFromPath(fileIO, path);
+            } catch (FileNotFoundException e) {
+                if (++retryNumber < SNAPSHOT_EXISTS_MAX_ATTEMPTS) {
+                    // Catalog metadata may become visible before the snapshot file is published.
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(ie);
+                    }
+                    continue;
+                }
+                String errorMessage =
+                        String.format(
+                                "Snapshot file %s does not exist. "
+                                        + "It might have been expired by other jobs operating on this table. "
+                                        + "In this case, you can avoid concurrent modification issues by configuring "
+                                        + "write-only = true and use a dedicated compaction job, or configuring "
+                                        + "different expiration thresholds for different jobs.",
+                                path);
+                throw new RuntimeException(errorMessage, e);
+            }
         }
     }
 

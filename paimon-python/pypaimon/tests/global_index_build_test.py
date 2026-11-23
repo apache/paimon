@@ -227,6 +227,13 @@ class GlobalIndexBuildTest(
         'file.format': 'parquet',
     }
 
+    def test_centroid_sharding_requires_spark(self):
+        schema = pa.schema([('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options={**self.table_options, 'ivf-pq.sharding': 'centroid'})
+        with self.assertRaisesRegex(NotImplementedError, "built with Spark"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
+        GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.sharding': 'range'})
+
     def test_native_vector_build_preserves_field_option_formats(self):
         schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
         configurations = {
@@ -453,6 +460,24 @@ class GlobalIndexBuildTest(
                 rows = read.new_read().to_arrow(read.new_scan().plan().splits())
                 self.assertEqual([2], rows.column('id').to_pylist())
                 self.assertEqual(0, table.create_global_index('name', index_type=kind))
+
+    def test_scalar_scan_includes_unindexed_rows_by_default(self):
+        schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        table = self._create_table(pa_schema=schema)
+        self._write_arrow(table, pa.table({'id': [1], 'name': ['match']}, schema=schema))
+        self.assertEqual(1, table.create_global_index('name'))
+        self._write_arrow(table, pa.table({'id': [2], 'name': ['match']}, schema=schema))
+
+        for options, expected in [
+            ({}, [1, 2]),
+            ({'global-index.search-mode': 'fast'}, [1]),
+            ({'global-index.search-mode': 'fast', 'scalar-index.search-mode': 'full'}, [1, 2]),
+        ]:
+            with self.subTest(options=options):
+                builder = table.copy(options).new_read_builder()
+                builder.with_filter(builder.new_predicate_builder().equal('name', 'match'))
+                result = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+                self.assertEqual(expected, sorted(result.column('id').to_pylist()))
 
     def test_create_btree_global_index_from_python(self):
         table = self._create_table()

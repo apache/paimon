@@ -29,7 +29,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
-import java.util.{HashMap => JHashMap, Map => JMap}
+import java.util.{Collections, HashMap => JHashMap, Map => JMap}
 import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
@@ -52,21 +52,6 @@ object OptionUtils extends SQLConfHelper with Logging {
     conf.getConfString(s"$PAIMON_OPTION_PREFIX${option.key()}", option.defaultValue().toString)
   }
 
-  private def getSparkVersionSpecificDefault(option: ConfigOption[_]): String = {
-    val sparkVersion = org.apache.spark.SPARK_VERSION
-
-    option.key() match {
-      case key if key == SparkConnectorOptions.USE_V2_WRITE.key() =>
-        if (sparkVersion >= "3.4") {
-          "false"
-        } else {
-          option.defaultValue().toString
-        }
-      case _ =>
-        option.defaultValue().toString
-    }
-  }
-
   private def requiredSparkConfsCheckEnabled(sparkSession: SparkSession): Boolean = {
     sparkSession.sessionState.conf
       .getConfString(
@@ -86,24 +71,12 @@ object OptionUtils extends SQLConfHelper with Logging {
     }
   }
 
-  def useV2Write(): Boolean = {
-    val defaultValue = getSparkVersionSpecificDefault(SparkConnectorOptions.USE_V2_WRITE)
-    val configuredValue = conf
-      .getConfString(
-        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.USE_V2_WRITE.key()}",
-        defaultValue
-      )
+  def useV2Write(options: JMap[String, String] = Collections.emptyMap()): Boolean = {
+    // Catalog and source loading already merge session and operation options into table options.
+    // Reading the session flag again as a veto would discard more specific overrides.
+    Option(options.get(SparkConnectorOptions.USE_V2_WRITE.key()))
+      .getOrElse(getOptionString(SparkConnectorOptions.USE_V2_WRITE))
       .toBoolean
-
-    val sparkVersion = org.apache.spark.SPARK_VERSION
-    val isVersionSupported = sparkVersion >= "3.4"
-
-    if (configuredValue && !isVersionSupported) {
-      logWarning(
-        "DataSourceV2 write is not supported in Spark versions prior to 3.4. Falling back to DataSourceV1.")
-    }
-
-    configuredValue && isVersionSupported
   }
 
   def writeMergeSchemaEnabled(): Boolean = {

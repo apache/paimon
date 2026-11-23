@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import Callable, List, Optional
@@ -41,15 +42,39 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType
 from pypaimon.table.row.generic_row import (GenericRow,
                                             GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.utils.numeric_utils import java_float_compare
 
 
 _MANIFEST_FIELD_NAMES = (
     '_VERSION', '_KIND', '_PARTITION', '_BUCKET', '_TOTAL_BUCKETS', '_FILE')
 _MANIFEST_PREFIX_TYPES = ('int', 'int', 'bytes', 'int', 'int')
+
+
+def _floating_partition_bounds(values):
+    """Return the min and max of non-null partition values in Java floating-point order."""
+    minimum = maximum = None
+    for value in values:
+        if value is None:
+            continue
+        value = float(value)
+        if minimum is None:
+            minimum = maximum = value
+            continue
+        compared_to_minimum = java_float_compare(value, minimum)
+        if compared_to_minimum < 0:
+            minimum = value
+        elif compared_to_minimum > 0 and java_float_compare(value, maximum) > 0:
+            maximum = value
+    if minimum is None:
+        return None, None
+    # Store a fixed NaN representation regardless of input order.
+    return (math.nan if math.isnan(minimum) else minimum,
+            math.nan if math.isnan(maximum) else maximum)
 
 
 def _read_manifest_records(buffer, early_entry_filter, partition_filter,
@@ -488,12 +513,15 @@ class ManifestFileManager:
 
         partition_columns = list(zip(*(entry.partition.values for entry in entries))) if entries else []
         partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
-        partition_min_stats = [
-            min((v for v in col if v is not None), default=None) for col in partition_columns
-        ]
-        partition_max_stats = [
-            max((v for v in col if v is not None), default=None) for col in partition_columns
-        ]
+        partition_min_stats, partition_max_stats = [], []
+        for field, col in zip(self.partition_keys_fields, partition_columns):
+            if isinstance(field.type, AtomicType) and field.type.type.upper() in ('FLOAT', 'REAL', 'DOUBLE'):
+                minimum, maximum = _floating_partition_bounds(col)
+            else:
+                minimum = min((v for v in col if v is not None), default=None)
+                maximum = max((v for v in col if v is not None), default=None)
+            partition_min_stats.append(minimum)
+            partition_max_stats.append(maximum)
 
         min_row_id = None
         max_row_id = None

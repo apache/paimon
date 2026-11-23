@@ -463,6 +463,10 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return options;
     }
 
+    protected boolean readRetainedChangelog() {
+        return options.changelogLifecycleDecoupled();
+    }
+
     protected StartingScanner createStartingScanner(boolean isStreaming) {
         SnapshotManager snapshotManager = snapshotReader.snapshotManager();
         ChangelogManager changelogManager = snapshotReader.changelogManager();
@@ -490,7 +494,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         snapshotManager,
                         changelogManager,
                         consumer.get().nextSnapshot(),
-                        options.changelogLifecycleDecoupled());
+                        readRetainedChangelog());
             }
         }
 
@@ -539,7 +543,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                                 snapshotManager,
                                 changelogManager,
                                 startupMillis,
-                                options.changelogLifecycleDecoupled())
+                                readRetainedChangelog())
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
             case FROM_FILE_CREATION_TIME:
                 Long fileCreationTimeMills = options.scanFileCreationTimeMills();
@@ -550,7 +554,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         snapshotManager,
                         changelogManager,
                         creationTimeMills,
-                        options.changelogLifecycleDecoupled(),
+                        readRetainedChangelog(),
                         isStreaming);
 
             case FROM_SNAPSHOT:
@@ -560,7 +564,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                                     snapshotManager,
                                     changelogManager,
                                     options.scanSnapshotId(),
-                                    options.changelogLifecycleDecoupled())
+                                    readRetainedChangelog())
                             : new StaticFromSnapshotStartingScanner(
                                     snapshotManager, options.scanSnapshotId());
                 } else if (options.scanWatermark() != null) {
@@ -598,12 +602,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
             long creationMillis,
             boolean changelogDecoupled,
             boolean isStreaming) {
+        // Batch reads need full snapshots; only streaming reads can start from changelog metadata.
         Long startingSnapshotPrevId =
                 TimeTravelUtil.earlierThanTimeMills(
                         snapshotManager,
                         changelogManager,
                         creationMillis,
-                        changelogDecoupled,
+                        isStreaming && changelogDecoupled,
                         true);
         final StartingScanner scanner;
         Optional<Long> startingSnapshotId =
@@ -612,7 +617,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         .filter(
                                 id ->
                                         snapshotManager.snapshotExists(id)
-                                                || changelogManager.longLivedChangelogExists(id));
+                                                || (isStreaming
+                                                        && changelogManager
+                                                                .longLivedChangelogExists(id)));
         if (startingSnapshotId.isPresent()) {
             scanner =
                     isStreaming

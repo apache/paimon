@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -28,6 +29,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
@@ -72,6 +74,9 @@ import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -966,6 +971,85 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
         assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
         assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 0));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        assertThatThrownBy(
+                        () ->
+                                fieldSumAgg.agg(
+                                        negMax, Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0)))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalRetractOverflow() {
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 0));
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal negOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0);
+        assertThatThrownBy(() -> fieldSumAgg.retract(max, negOne))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowNonCompact() {
+        // precision 38 exceeds the compact fast path, so the BigDecimal path is exercised
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(38, 2));
+        Decimal max =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("999999999999999999999999999999999999.99"), 38, 2);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 38, 2);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("-999999999999999999999999999999999999.99"), 38, 2);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowWithScale() {
+        // compact fast path with a non-zero scale: the bound stays 10^precision
+        FieldSumAgg fieldSumAgg = createSumWithOverflowCheck(new DecimalType(5, 2));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("999.99"), 5, 2);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("0.01"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.agg(max, one)).isInstanceOf(ArithmeticException.class);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-999.99"), 5, 2);
+        assertThatThrownBy(() -> fieldSumAgg.retract(negMax, one))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumDecimalOverflowDisabled() {
+        // by default (fail-on-overflow = false) the aggregated value becomes NULL
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(5, 0));
+        Decimal max = Decimal.fromBigDecimal(new BigDecimal("99999"), 5, 0);
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1"), 5, 0);
+        Decimal negMax = Decimal.fromBigDecimal(new BigDecimal("-99999"), 5, 0);
+        Decimal negOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 5, 0);
+        assertThat(fieldSumAgg.agg(max, one)).isNull();
+        assertThat(fieldSumAgg.agg(negMax, negOne)).isNull();
+        assertThat(fieldSumAgg.retract(max, negOne)).isNull();
+        assertThat(fieldSumAgg.retract(negOne, max)).isNull();
+
+        // non-compact path behaves the same
+        FieldSumAgg nonCompact = new FieldSumAggFactory().create(new DecimalType(38, 2));
+        Decimal bigMax =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("999999999999999999999999999999999999.99"), 38, 2);
+        Decimal bigNegOne = Decimal.fromBigDecimal(new BigDecimal("-1"), 38, 2);
+        assertThat(nonCompact.agg(bigMax, Decimal.fromBigDecimal(new BigDecimal("1"), 38, 2)))
+                .isNull();
+        assertThat(nonCompact.retract(bigMax, bigNegOne)).isNull();
     }
 
     private static Decimal toDecimal(int i) {
@@ -2140,6 +2224,47 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCollectAggDistinctNestedMapsInBinaryForm() {
+        // The write buffer stores rows in binary form, so the inputs reach the aggregator as
+        // binary arrays. Maps with the same entries in another order are one value and must not
+        // take a count-limit slot.
+        DataType elementType = DataTypes.ARRAY(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        ArrayType arrayType = DataTypes.ARRAY(elementType);
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                arrayType,
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.distinct", "true",
+                                                "fields.fieldName.count-limit", "2")),
+                                "fieldName");
+        Map<Object, Object> a = new LinkedHashMap<>();
+        a.put(1, 10);
+        a.put(2, 20);
+        Map<Object, Object> b = new LinkedHashMap<>();
+        b.put(2, 20);
+        b.put(1, 10);
+        Map<Object, Object> c = Collections.singletonMap(3, 30);
+        InternalArraySerializer serializer = new InternalArraySerializer(elementType);
+        Object accumulator = null;
+        for (Map<Object, Object> map : Arrays.asList(a, b, c)) {
+            GenericArray element = new GenericArray(new Object[] {new GenericMap(map)});
+            BinaryArray input =
+                    serializer.toBinaryArray(new GenericArray(new Object[] {element})).copy();
+            accumulator = agg.agg(accumulator, input);
+        }
+        InternalArray result = (InternalArray) accumulator;
+        assertThat(result.size()).isEqualTo(2);
+        InternalMap first = result.getArray(0).getMap(0);
+        assertThat(first.size()).isEqualTo(2);
+        assertThat(first.keyArray().getInt(0)).isEqualTo(1);
+        InternalMap last = result.getArray(1).getMap(0);
+        assertThat(last.size()).isEqualTo(1);
+        assertThat(last.keyArray().getInt(0)).isEqualTo(3);
+    }
+
+    @Test
     public void testFieldCollectAggWithCountLimit() {
         DataType[] elementTypes = {DataTypes.INT(), RowType.of(DataTypes.INT())};
         for (DataType elementType : elementTypes) {
@@ -3079,25 +3204,43 @@ public class FieldAggregatorTest {
         return result;
     }
 
-    @Test
-    public void testFieldMergeMapWithKeyTimeAgg() {
+    private static Stream<Arguments> mergeMapTimestampValues() {
+        return Stream.of(
+                Arguments.of(DataTypes.STRING(), "100", "110"),
+                Arguments.of(DataTypes.TINYINT(), (byte) 100, (byte) 110),
+                Arguments.of(DataTypes.SMALLINT(), (short) 100, (short) 110),
+                Arguments.of(DataTypes.INT(), 9, 100),
+                Arguments.of(DataTypes.BIGINT(), Long.MAX_VALUE - 1, Long.MAX_VALUE),
+                Arguments.of(DataTypes.DATE(), -1, 0),
+                Arguments.of(DataTypes.TIME(3), 86_399_998, 86_399_999),
+                Arguments.of(
+                        DataTypes.TIMESTAMP(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)),
+                Arguments.of(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        Timestamp.fromEpochMillis(0, 1),
+                        Timestamp.fromEpochMillis(0, 2)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("mergeMapTimestampValues")
+    public void testFieldMergeMapWithKeyTimeAgg(DataType tsType, Object older, Object newer) {
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+                                DataTypes.FIELD(1, "dbsync_ts", tsType)));
+        FieldAggregator agg =
+                new FieldMergeMapWithKeyTimeAggFactory()
+                        .create(mapType, new CoreOptions(new HashMap<>()), "f");
 
         GenericMap map1 =
-                createTestMap(
-                        createEntry("key1", "A", "17682882903686900100"),
-                        createEntry("key2", "B", "17682882903686900100"));
+                createTestMap(createEntry("key1", "A", older), createEntry("key2", "B", newer));
         GenericMap map2 =
-                createTestMap(
-                        createEntry("key1", "A1", "17682882903686900200"),
-                        createEntry("key3", "C", "17682882903686900200"));
-        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+                createTestMap(createEntry("key1", "A1", newer), createEntry("key3", "C", newer));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", older));
 
         Object acc = agg.agg(null, map1);
         assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
@@ -3118,37 +3261,69 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsNonStringTsField() {
-        // The merge path reads the ts field via InternalRow#getString, so a non-string ts field
-        // (declared BIGINT/TIMESTAMP/INT, which is natural for a "ts" field) is accepted at DDL
-        // today and only throws ClassCastException at the first merge/compaction, naming neither
-        // the field nor the function. Validate it is a string type at factory creation.
-        MapType mapType =
-                DataTypes.MAP(
-                        DataTypes.STRING(),
-                        DataTypes.ROW(
-                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
-                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.BIGINT())));
-        assertThatThrownBy(
-                        () ->
-                                new FieldMergeMapWithKeyTimeAggFactory()
-                                        .create(mapType, new CoreOptions(new HashMap<>()), "f"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be a string type");
-    }
-
-    @Test
-    public void testFieldMergeMapWithKeyTimeAggFactoryAcceptsStringTsField() {
+    public void testFieldMergeMapWithKeyTimeOverwriteOnEqualTs() {
         MapType mapType =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        assertThat(
-                        new FieldMergeMapWithKeyTimeAggFactory()
-                                .create(mapType, new CoreOptions(new HashMap<>()), "f"))
-                .isNotNull();
+        GenericMap oldMap = createTestMap(createEntry("k", "old", "100"));
+        GenericMap newMap = createTestMap(createEntry("k", "new", "100"));
+        for (String setting : Arrays.asList(null, "false", "true")) {
+            Map<String, String> options = new HashMap<>();
+            if (setting != null) {
+                options.put("fields.f." + CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS, setting);
+            }
+            FieldAggregator agg =
+                    new FieldMergeMapWithKeyTimeAggFactory()
+                            .create(mapType, new CoreOptions(options), "f");
+            boolean overwrite = Boolean.parseBoolean(setting);
+            assertTestMap(
+                    agg.agg(oldMap, newMap), createExpectedEntry("k", overwrite ? "new" : "old"));
+            assertTestMap(
+                    agg.aggReversed(oldMap, newMap),
+                    createExpectedEntry("k", overwrite ? "old" : "new"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "older", "090"))),
+                    createExpectedEntry("k", "old"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "newer", "110"))),
+                    createExpectedEntry("k", "newer"));
+            assertTestMap(
+                    agg.agg(oldMap, createTestMap(createEntry("k", "no-time", null))),
+                    createExpectedEntry("k", "old"));
+            assertThat(agg.agg(oldMap, null)).isSameAs(oldMap);
+            assertThat(
+                            ((InternalMap)
+                                            agg.agg(
+                                                    oldMap,
+                                                    new GenericMap(
+                                                            Collections.singletonMap(
+                                                                    BinaryString.fromString("k"),
+                                                                    null))))
+                                    .size())
+                    .isZero();
+        }
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsUnsupportedTsField() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.DOUBLE())));
+        assertThatThrownBy(
+                        () ->
+                                new FieldMergeMapWithKeyTimeAggFactory()
+                                        .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Timestamp field 'dbsync_ts' for field 'f' must be CHAR/VARCHAR/STRING, "
+                                + "TINYINT/SMALLINT/INT/BIGINT or DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ "
+                                + "but was 'DOUBLE'.");
     }
 
     /**
@@ -3232,12 +3407,12 @@ public class FieldAggregatorTest {
         return row.getString(0).toString();
     }
 
-    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, Object ts) {
         return new AbstractMap.SimpleEntry<>(
                 BinaryString.fromString(key),
                 GenericRow.of(
                         value == null ? null : BinaryString.fromString(value),
-                        ts == null ? null : BinaryString.fromString(ts)));
+                        ts instanceof String ? BinaryString.fromString((String) ts) : ts));
     }
 
     private Map.Entry<String, String> createExpectedEntry(String key, String value) {

@@ -24,8 +24,9 @@ import numpy as np
 import pytest
 
 from pypaimon.multimodal.lerobot.indexed_torchcodec import (
-    _IndexedTorchCodecDecoder, _boxes, _runs, _timeline)
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+    _IndexedTorchCodecDecoder)
+from pypaimon.multimodal.mp4 import _boxes, _runs, _timeline, ContainerFrameIndex
+from pypaimon.tests.video_frame_index_utils import FrameIndex
 
 
 @pytest.fixture(params=[False, True])
@@ -54,7 +55,10 @@ def mp4(request):
 def indexed_source(payload):
     source = io.BytesIO(payload)
     source.video_length = len(payload)
-    source.video_keyframe_index = VideoKeyframeIndex.inspect(source, len(payload))
+    try:
+        source.video_keyframe_index = ContainerFrameIndex(source, len(payload))
+    except ValueError:
+        source.video_keyframe_index = None
     source.seek(0)
     calls = []
 
@@ -158,7 +162,7 @@ def test_bytes_only_decoder_falls_back_to_exact(mp4):
 def test_unsupported_timeline_falls_back_to_exact(mp4):
     VideoDecoder = require_torchcodec()
     source, unused = indexed_source(mp4)
-    with patch("pypaimon.multimodal.lerobot.indexed_torchcodec._timeline",
+    with patch("pypaimon.multimodal.lerobot.indexed_torchcodec._SharedTimeline",
                side_effect=ValueError("unsupported edit")):
         decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
     try:
@@ -272,18 +276,22 @@ def test_fragmented_and_audio_first_video(fragmented, audio_first):
         decoder.close()
 
 
-def test_multiple_video_tracks_preserve_exact_selection():
+@pytest.mark.parametrize("backend", [None, "torchcodec"])
+@pytest.mark.parametrize("packed", [False, True])
+def test_multiple_video_tracks_preserve_exact_selection(tmp_path, backend, packed):
     av = pytest.importorskip("av")
     VideoDecoder = require_torchcodec()
     output = io.BytesIO()
     with av.open(output, "w", format="mp4") as container:
         streams = [container.add_stream("libx264", rate=30) for _ in range(2)]
         for i, stream in enumerate(streams):
-            stream.width, stream.height = 32 * (i + 1), 32 * (i + 1)
+            stream.width, stream.height = 32, 32
+            stream.disposition = 0 if i == 0 else 1
             stream.pix_fmt = "yuv420p"
         for i in range(12):
-            for stream in streams:
-                pixels = np.full((stream.height, stream.width, 3), i * 16, dtype=np.uint8)
+            for track, stream in enumerate(streams):
+                pixels = np.zeros((32, 32, 3), dtype=np.uint8)
+                pixels[:, :, track * 2] = 255
                 frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
                 for packet in stream.encode(frame):
                     container.mux(packet)
@@ -292,14 +300,40 @@ def test_multiple_video_tracks_preserve_exact_selection():
                 container.mux(packet)
     payload = output.getvalue()
     source, unused = indexed_source(payload)
-    decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    collator = None
+    if packed:
+        import pyarrow as pa
+        import pypaimon.multimodal as pm
+        from pypaimon.multimodal.video import VideoFrameCollator
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+        path = tmp_path / "two-tracks.mp4"
+        path.write_bytes(payload)
+        connection = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+        table = connection.create_table("frames", schema=pa.schema([
+            ("frame_index", pa.int64()), ("video", pa.large_binary())]),
+            options={"video-frame-field": "video"})
+        table.add_video(str(path), pa.table({"frame_index": list(range(12))}))
+        row = table.scan().to_arrow().to_pylist()[0]
+        descriptor = VideoFrameDescriptor.deserialize(row["video"])
+        assert descriptor.uri.endswith(".video")
+        collator = VideoFrameCollator(
+            table.raw_table, video_column="video",
+            decoder_factory=lambda stream: _open_video_decoder(stream, backend=backend),
+            decode_fn=lambda *args: None)
+        decoder = collator._decoder(descriptor.payload_descriptor)
+    else:
+        decoder = _open_video_decoder(source, backend=backend)
     try:
-        assert not decoder._indexed
+        assert decoder.stream_index == 0
+        assert VideoDecoder(payload, seek_mode="exact").stream_index == 1
         actual = decoder.get_frames_at(indices=[11, 0, 5])
-        expected = VideoDecoder(payload, seek_mode="exact").get_frames_at(indices=[11, 0, 5])
+        expected = VideoDecoder(payload, stream_index=0, seek_mode="exact").get_frames_at(indices=[11, 0, 5])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
     finally:
-        decoder.close()
+        if collator is not None:
+            collator.close()
+        source.close()
 
 
 def test_signed_composition_offsets():
@@ -329,7 +363,8 @@ def timing_only_mp4(count, variable=False):
 @pytest.mark.parametrize("variable", [False, True])
 def test_million_sample_timeline_memory(variable):
     import tracemalloc
-    from pypaimon.multimodal.lerobot.indexed_torchcodec import _MAX_SAMPLES, _SharedTimeline
+    from pypaimon.multimodal.mp4 import _MAX_SAMPLES
+    from pypaimon.multimodal.lerobot.indexed_torchcodec import _SharedTimeline
 
     payload = timing_only_mp4(_MAX_SAMPLES, variable=variable)
     tracemalloc.start()
@@ -375,20 +410,21 @@ def test_replica_decoders_share_and_release_timeline(tmp_path, variable):
     from pypaimon.table.row.blob import VideoFrameDescriptor
 
     payload = timing_only_mp4(1000000, variable=variable)
-    mapping = VideoKeyframeIndex([(0, len(payload))], [(0, 0, 0)]).serialize()
+    mapping = FrameIndex([(0, len(payload))], [(0, 0, 0)])
     path = tmp_path / 'replicas.video'
-    path.write_bytes(payload + mapping)
-    frame = VideoFrameDescriptor(path.as_uri(), 0, len(payload), 0, len(payload), len(mapping))
+    path.write_bytes(payload)
+    frame = VideoFrameDescriptor(path.as_uri(), 0, len(payload), 0)
     table = SimpleNamespace(file_io=FileIO.get(path.as_uri(), {}))
     collator = VideoFrameCollator(
         table, video_column='video', max_open_videos=4,
-        decoder_factory=lambda stream: _IndexedTorchCodecDecoder(stream, stream.video_keyframe_index),
+        decoder_factory=lambda stream: _IndexedTorchCodecDecoder(stream, mapping),
         decode_fn=lambda *args: None)
     fake = SimpleNamespace(VideoDecoder=Mock())
     with patch.dict(sys.modules, {'torchcodec.decoders': fake}), patch(
+            'pypaimon.multimodal.lerobot.dataset._open_torchcodec_decoder', return_value=Mock()), patch(
             'pypaimon.multimodal.lerobot.indexed_torchcodec._timeline', wraps=_timeline) as parse:
         try:
-            decoders = [collator._decoder(frame.payload_descriptor, frame.keyframe_index_descriptor, replica=i)
+            decoders = [collator._decoder(frame.payload_descriptor, replica=i)
                         for i in range(4)]
             assert all(decoder._indexed for decoder in decoders)
             assert parse.call_count == 1
@@ -410,9 +446,9 @@ def test_replica_decoders_share_and_release_timeline(tmp_path, variable):
                 assert all(decoder._pts is decoders[1]._pts for decoder in decoders[1:])
                 assert all(decoder._durations is decoders[1]._durations for decoder in decoders[1:])
             other_path = tmp_path / 'another.video'
-            other_path.write_bytes(payload + mapping)
-            other_frame = VideoFrameDescriptor(other_path.as_uri(), 0, len(payload), 0, len(payload), len(mapping))
-            other = collator._decoder(other_frame.payload_descriptor, other_frame.keyframe_index_descriptor)
+            other_path.write_bytes(payload)
+            other_frame = VideoFrameDescriptor(other_path.as_uri(), 0, len(payload), 0)
+            other = collator._decoder(other_frame.payload_descriptor)
             assert other._timeline is not reference()
             assert parse.call_count == 2
         finally:
@@ -505,62 +541,5 @@ def test_decoded_frames_are_released_before_next_seek(mp4):
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         np.testing.assert_array_equal(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
         np.testing.assert_array_equal(actual.duration_seconds.numpy(), expected.duration_seconds.numpy())
-    finally:
-        decoder.close()
-
-
-def test_keyframe_timeline_validation_is_lazy():
-    import sys
-    from types import SimpleNamespace
-    from unittest.mock import Mock
-
-    count = 1000000
-    payload = timing_only_mp4(count)
-
-    def read_page(offset, size):
-        first = offset // 24
-        return [(i, i * 1001 + (1 if i == 500000 else 0), 0)
-                for i in range(first, min(first + size // 24, count))]
-
-    read_range = Mock(side_effect=read_page)
-
-    class LazyKeyframes:
-        def __init__(self):
-            self.reads = []
-            self.pages = {}
-
-        def __len__(self):
-            return count
-
-        def __getitem__(self, ordinal):
-            if ordinal < 0:
-                ordinal += count
-            if ordinal >= count:
-                raise IndexError(ordinal)
-            self.reads.append(ordinal)
-            page, entry = divmod(ordinal, 4096)
-            if page not in self.pages:
-                self.pages[page] = read_range(page * 4096 * 24, 4096 * 24)
-            return self.pages[page][entry]
-
-    entries = LazyKeyframes()
-    source = io.BytesIO(payload)
-    source.video_length = len(payload)
-    source.video_read_ranges = lambda ranges: [payload[o:o + n] for o, n in ranges]
-    index = SimpleNamespace(keyframes=entries, metadata_ranges=[(0, len(payload))])
-    with patch.dict(sys.modules, {'torchcodec.decoders': SimpleNamespace(VideoDecoder=Mock())}):
-        decoder = _IndexedTorchCodecDecoder(source, index)
-    try:
-        assert decoder._indexed
-        assert entries.reads == [0, count - 1]
-        assert read_range.call_count == 2
-        exact = Mock()
-        with patch.object(decoder, '_exact', return_value=exact):
-            result = decoder.get_frames_at(indices=[500000])
-        assert not decoder._indexed
-        assert len(entries.reads) < 30  # Binary search, not a scan of every page.
-        assert read_range.call_count < 12
-        exact.get_frames_at.assert_called_once_with(indices=[500000])
-        assert result is exact.get_frames_at.return_value
     finally:
         decoder.close()

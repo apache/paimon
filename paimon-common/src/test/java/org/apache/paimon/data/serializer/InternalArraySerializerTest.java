@@ -23,7 +23,9 @@ import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.fs.FileIO;
@@ -31,14 +33,22 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.TimeType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -114,6 +124,69 @@ class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
         assertThat(copied).isInstanceOf(GenericArray.class);
         assertThat(copied.getBlob(0).toData()).isEqualTo(payload);
         assertThat(copied.isNullAt(1)).isTrue();
+    }
+
+    @ParameterizedTest
+    @MethodSource("intBackedElementTypes")
+    void testCopyPrimitiveIntBackedArray(DataType elementType) throws Exception {
+        int[] values =
+                elementType instanceof TimeType
+                        ? new int[] {0, 1, 86_399_999}
+                        : new int[] {-1, 0, 20_000};
+        int[] expected = values.clone();
+        GenericArray array = new GenericArray(values);
+        InternalArraySerializer serializer = new InternalArraySerializer(elementType);
+
+        InternalArray copied = serializer.copy(array);
+        values[0] = 123;
+        serializer.copy(new GenericArray(new int[] {456}));
+        assertThat(copied.toIntArray()).containsExactly(expected);
+        assertThat(serializer.copy(new GenericArray(new int[0])).size()).isZero();
+        assertThat(
+                        serializer
+                                .deserializeFromBytes(serializer.serializeToBytes(copied))
+                                .toIntArray())
+                .containsExactly(expected);
+    }
+
+    @ParameterizedTest
+    @MethodSource("intBackedElementTypes")
+    void testCopyArrayProducedByInternalRowUtils(DataType elementType) {
+        InternalArray array =
+                InternalRowUtils.copyArray(
+                        new GenericArray(new Integer[] {0, 1, 2}), elementType.notNull());
+        assertThat(array).isInstanceOf(GenericArray.class);
+        assertThat(((GenericArray) array).isPrimitiveArray()).isTrue();
+        assertThat(new InternalArraySerializer(elementType).copy(array).toIntArray())
+                .containsExactly(0, 1, 2);
+    }
+
+    @ParameterizedTest
+    @MethodSource("intBackedElementTypes")
+    void testCopyRowWithPrimitiveIntBackedArray(DataType elementType) {
+        int[] values = {0, 1, 2};
+        InternalRow row = GenericRow.of(new GenericArray(values));
+        row.setRowKind(RowKind.DELETE);
+        InternalRowSerializer serializer = new InternalRowSerializer(new ArrayType(elementType));
+
+        InternalRow copied = serializer.copy(row);
+        InternalRow copiedWithReuse = serializer.copyRowData(row, new GenericRow(1));
+        values[0] = 123;
+
+        assertThat(copied.getArray(0).toIntArray()).containsExactly(0, 1, 2);
+        assertThat(copiedWithReuse.getArray(0).toIntArray()).containsExactly(0, 1, 2);
+        assertThat(copied.getRowKind()).isEqualTo(RowKind.DELETE);
+        assertThat(copiedWithReuse.getRowKind()).isEqualTo(RowKind.DELETE);
+    }
+
+    private static Stream<DataType> intBackedElementTypes() {
+        return Stream.of(
+                DataTypes.INT(),
+                DataTypes.INT().notNull(),
+                DataTypes.DATE(),
+                DataTypes.DATE().notNull(),
+                DataTypes.TIME(),
+                DataTypes.TIME().notNull());
     }
 
     static BinaryArray copyNewOffset(BinaryArray array) {

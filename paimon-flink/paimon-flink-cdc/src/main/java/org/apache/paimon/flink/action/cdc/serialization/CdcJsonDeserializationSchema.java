@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
@@ -62,7 +63,7 @@ public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSo
         try {
             return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
         } catch (Exception e) {
-            LOG.error("Invalid Json:\n{}", new String(message));
+            LOG.error("Invalid Json:\n{}", new String(message, StandardCharsets.UTF_8));
             throw e;
         }
     }

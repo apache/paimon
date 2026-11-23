@@ -28,6 +28,8 @@ import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 
 /**
@@ -37,6 +39,12 @@ import java.util.Collections;
 public class RemovePostponeBucketFilesOperator extends BoundedOneInputOperator<Split, Committable> {
 
     private static final long serialVersionUID = 1L;
+
+    @Nullable private final Long snapshotId;
+
+    public RemovePostponeBucketFilesOperator(@Nullable Long snapshotId) {
+        this.snapshotId = snapshotId;
+    }
 
     @Override
     public void processElement(StreamRecord<Split> element) throws Exception {
@@ -50,7 +58,8 @@ public class RemovePostponeBucketFilesOperator extends BoundedOneInputOperator<S
                         new CompactIncrement(
                                 dataSplit.dataFiles(),
                                 Collections.emptyList(),
-                                Collections.emptyList()));
+                                Collections.emptyList()),
+                        snapshotId);
         output.collect(new StreamRecord<>(new Committable(Long.MAX_VALUE, message)));
     }
 

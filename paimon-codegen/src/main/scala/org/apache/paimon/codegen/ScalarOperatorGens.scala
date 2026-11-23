@@ -247,13 +247,19 @@ object ScalarOperatorGens {
           new BooleanType(elementType.isNullable))
 
         // TODO: With BinaryVector available, we can use it here.
-        val supportsBinaryArrayEquals = !containsFloatingPoint(elementType)
+        val bothBinary =
+          s"$leftTerm instanceof $BINARY_ARRAY && $rightTerm instanceof $BINARY_ARRAY"
+        val binaryEqualsCode =
+          if (supportsBinaryEquals(elementType)) {
+            s"if ($bothBinary) { $resultTerm = $leftTerm.equals($rightTerm); } else"
+          } else {
+            // Equal bytes still mean equal values, but different bytes may not.
+            s"if ($bothBinary && $leftTerm.equals($rightTerm)) { $resultTerm = true; } else"
+          }
         val stmt =
           s"""
              |boolean $resultTerm;
-             |if ($leftTerm instanceof $BINARY_ARRAY && $rightTerm instanceof $BINARY_ARRAY && $supportsBinaryArrayEquals) {
-             |  $resultTerm = $leftTerm.equals($rightTerm);
-             |} else {
+             |$binaryEqualsCode {
              |  if ($leftTerm.size() == $rightTerm.size()) {
              |    $resultTerm = true;
              |    for (int $indexTerm = 0; $indexTerm < $leftTerm.size(); $indexTerm++) {
@@ -481,6 +487,20 @@ object ScalarOperatorGens {
         DataTypeRoot.VECTOR =>
       getNestedTypes(t).asScala.exists(containsFloatingPoint)
     case _ => false
+  }
+
+  /**
+   * Whether two binary values of the given type are equal exactly when their bytes are equal.
+   *
+   * Floating-point values compare with `Float.compare`/`Double.compare`, under which NaNs with
+   * different bits are equal. Maps and multisets compare entries by key, so the same entries in a
+   * different order are equal.
+   */
+  private[codegen] def supportsBinaryEquals(t: DataType): Boolean = t.getTypeRoot match {
+    case FLOAT | DOUBLE | DataTypeRoot.MAP | DataTypeRoot.MULTISET => false
+    case DataTypeRoot.ARRAY | DataTypeRoot.ROW | DataTypeRoot.VECTOR =>
+      getNestedTypes(t).asScala.forall(supportsBinaryEquals)
+    case _ => true
   }
 
   /**

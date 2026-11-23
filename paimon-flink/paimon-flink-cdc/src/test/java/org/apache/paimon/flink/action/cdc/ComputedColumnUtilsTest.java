@@ -18,10 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -125,6 +128,87 @@ public class ComputedColumnUtilsTest {
         assertEquals(DataTypes.INT(), columns.get(0).columnType());
         assertEquals(DataTypes.STRING(), columns.get(1).columnType());
         assertEquals("20", columns.get(1).eval(columns.get(0).eval("2023-03-23")));
+    }
+
+    @Test
+    public void testTemporalFunctionsWithPreEpochValues() {
+        List<DataField> physicalFields =
+                Arrays.asList(
+                        new DataField(0, "_micros", DataTypes.BIGINT()),
+                        new DataField(1, "_nanos", DataTypes.BIGINT()));
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Arrays.asList(
+                                "_from_micros=date_format(_micros,yyyy-MM-dd HH:mm:ss.SSSSSS,6)",
+                                "_from_nanos=date_format(_nanos,yyyy-MM-dd HH:mm:ss.SSSSSSSSS,9)"),
+                        physicalFields);
+
+        assertEquals("1969-12-31 23:59:59.998500", columns.get(0).eval("-1500"));
+        assertEquals("1969-12-31 23:59:59.999998500", columns.get(1).eval("-1500"));
+    }
+
+    @Test
+    public void testCaseInsensitiveMetadataReference() {
+        CdcMetadataConverter timestamp =
+                new PrefixedMetadataConverter(
+                        new KafkaMetadataConverter.TimestampConverter(), "__kafka_");
+        List<ComputedColumn> columns =
+                buildComputedColumns(
+                        Collections.singletonList("dt=date_format(__KAFKA_TIMESTAMP,yyyy-MM-dd)"),
+                        Collections.emptyList(),
+                        new CdcMetadataConverter[] {timestamp},
+                        false);
+
+        assertEquals(
+                "2024-12-30",
+                columns.get(0)
+                        .evalFromRecord(
+                                Collections.singletonMap(
+                                        "__kafka_timestamp", "2024-12-30 10:00:00.000")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testPhysicalFieldTypeTakesPrecedenceOverMetadata(boolean caseSensitive) {
+        String sourceName = caseSensitive ? "offset" : "OFFSET";
+        ComputedColumn column =
+                buildComputedColumns(
+                                Collections.singletonList("s=truncate(offset,2)"),
+                                Collections.singletonList(
+                                        new DataField(0, sourceName, DataTypes.STRING())),
+                                new CdcMetadataConverter[] {
+                                    new KafkaMetadataConverter.OffsetConverter()
+                                },
+                                caseSensitive)
+                        .get(0);
+
+        assertEquals(DataTypes.STRING(), column.columnType());
+        assertEquals("so", column.eval("source"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testPhysicalFieldValueTakesPrecedenceOverMetadata(boolean caseSensitive) {
+        String sourceName = caseSensitive ? "topic" : "TOPIC";
+        ComputedColumn column =
+                buildComputedColumns(
+                                Collections.singletonList("s=substring(topic,0)"),
+                                Collections.singletonList(
+                                        new DataField(0, sourceName, DataTypes.STRING())),
+                                caseSensitive)
+                        .get(0);
+        Map<String, String> source = new HashMap<>();
+        source.put(sourceName, "source-value");
+        Map<String, String> metadata = Collections.singletonMap("topic", "wire-topic");
+
+        assertEquals(
+                "source-value", column.evalFromRecord(source, Collections.emptySet(), metadata));
+        source.put(sourceName, null);
+        assertNull(column.evalFromRecord(source, Collections.emptySet(), metadata));
+        source.clear();
+        assertEquals(
+                "wire-topic",
+                column.evalFromRecord(source, Collections.singleton("topic"), metadata));
     }
 
     @Test

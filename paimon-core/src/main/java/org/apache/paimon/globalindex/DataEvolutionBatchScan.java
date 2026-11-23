@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -29,11 +30,13 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
@@ -58,6 +61,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -279,6 +283,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return this;
     }
 
+    /** Applies a row-ID selection against the snapshot on which it was evaluated. */
+    public DataEvolutionBatchScan withGlobalIndexResult(
+            GlobalIndexResult globalIndexResult, Snapshot snapshot) {
+        withGlobalIndexResult(globalIndexResult);
+        batchScan.withStartingSnapshot(snapshot);
+        return this;
+    }
+
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         return batchScan.listPartitionEntries();
@@ -322,11 +334,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         }
 
-        if (pushDownLimit != null && !rowIdFilterDeferred) {
+        // File counts and statistics include rows excluded by the row range filter.
+        if (pushDownLimit != null && !rowIdFilterDeferred && rowRangeIndex == null) {
             batchScan.withLimit(pushDownLimit);
         }
 
-        if (!globalIndexTopNCandidatesFound && topN != null && !rowIdFilterDeferred) {
+        if (!globalIndexTopNCandidatesFound
+                && topN != null
+                && !rowIdFilterDeferred
+                && rowRangeIndex == null) {
             batchScan.withTopN(topN);
         }
 
@@ -336,6 +352,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    // An OR across a spatial and another column can require fallback for the entire predicate.
+    // Decide this before assigning splits: an individual split only sees its local index files.
+    private static boolean hasMixedSpatialDisjunction(Predicate predicate, boolean underMixedOr) {
+        if (predicate instanceof LeafPredicate) {
+            return underMixedOr
+                    && GlobalIndexEvaluator.indexLookup((LeafPredicate) predicate).function()
+                            instanceof BBoxIntersects;
+        }
+        CompoundPredicate compound = (CompoundPredicate) predicate;
+        boolean mixed =
+                underMixedOr
+                        || (compound.function() instanceof Or
+                                && PredicateVisitor.collectFieldNames(compound).size() > 1);
+        return compound.children().stream()
+                .anyMatch(child -> hasMixedSpatialDisjunction(child, mixed));
     }
 
     /** Plan complete data splits while deferring index evaluation to readers. */
@@ -352,6 +385,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
         Predicate indexFilter = rowIdSafeResidualFilter(filter);
         if (indexFilter == null) {
+            return planEager();
+        }
+        GlobalIndexSearchMode searchMode = table.coreOptions().scalarScanSearchMode();
+        if (searchMode == GlobalIndexSearchMode.FAST
+                && hasMixedSpatialDisjunction(indexFilter, false)) {
             return planEager();
         }
 
@@ -399,6 +437,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexQuery == null) {
             return dataPlan;
         }
+        // Store the effective mode so restored splits keep the original scan semantics.
+        Map<String, String> indexOptions = new HashMap<>(table.options());
+        indexOptions.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), searchMode.toString());
         List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = dataSplit(split);
@@ -406,8 +447,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                     GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
             GlobalIndexQuery splitQuery = indexQuery.forRanges(ranges);
             List<Range> queryRanges =
-                    table.coreOptions().scalarIndexSearchMode()
-                                    == CoreOptions.GlobalIndexSearchMode.FAST
+                    searchMode == GlobalIndexSearchMode.FAST
                             ? Range.and(ranges, splitQuery.indexedRanges())
                             : ranges;
             if (queryRanges.isEmpty() || splitQuery.isEmpty(queryRanges)) {
@@ -415,7 +455,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             Split indexQuerySplit =
                     new IndexQuerySplit(
-                            dataSplit, splitQuery, table.options(), Collections.emptyList());
+                            dataSplit, splitQuery, indexOptions, Collections.emptyList());
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;
@@ -495,7 +535,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+                DataEvolutionGlobalIndexScanner.createForPredicate(
+                        table, batchScan.prepareSnapshot(), partitionFilter, globalIndexFilter);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -515,7 +556,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 LOG.info(
                         "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
                         table.name(),
-                        options.scalarIndexSearchMode(),
+                        options.scalarScanSearchMode(),
                         totalDuration / 1_000_000,
                         metadataDuration / 1_000_000,
                         lookupDuration / 1_000_000,
@@ -534,7 +575,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.createForTopN(table, partitionFilter, topN);
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                        table, batchScan.prepareSnapshot(), partitionFilter, topN);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -555,7 +597,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             LOG.info(
                     "Scan table '{}' with BTree global index TopN. searchMode='{}', topN='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
                     table.name(),
-                    options.scalarIndexSearchMode(),
+                    options.scalarScanSearchMode(),
                     topN,
                     totalDuration / 1_000_000,
                     metadataDuration / 1_000_000,

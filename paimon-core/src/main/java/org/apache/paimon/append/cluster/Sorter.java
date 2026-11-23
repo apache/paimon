@@ -45,6 +45,7 @@ public abstract class Sorter {
     protected final RowType longRowType;
     protected final int[] valueProjectionMap;
     private final int arity;
+    private final KeyProjectedRow projectedRow;
 
     private final transient BinaryExternalSortBuffer buffer;
 
@@ -62,6 +63,7 @@ public abstract class Sorter {
         for (int i = 0; i < valueFieldCount; i++) {
             this.valueProjectionMap[i] = i + keyFieldCount;
         }
+        this.projectedRow = new KeyProjectedRow(valueProjectionMap);
         List<DataField> keyFields = keyType.getFields();
         List<DataField> dataFields = valueType.getFields();
         List<DataField> fields = new ArrayList<>();
@@ -88,11 +90,12 @@ public abstract class Sorter {
                         maxDiskSize);
     }
 
+    /** Returns a row view which must be consumed before the next call. */
     public abstract InternalRow assignSortKey(InternalRow row);
 
+    /** Returns a reusable view valid until the next call or {@link #close()}. */
     public InternalRow removeSortKey(InternalRow rowWithKey) {
-        KeyProjectedRow keyProjectedRow = new KeyProjectedRow(valueProjectionMap);
-        return keyProjectedRow.replaceRow(rowWithKey);
+        return projectedRow.replaceRow(rowWithKey);
     }
 
     public MutableObjectIterator<BinaryRow> sort() throws IOException {
@@ -117,6 +120,7 @@ public abstract class Sorter {
         try {
             buffer.clear();
         } finally {
+            projectedRow.replaceRow(null);
             reader.close();
         }
     }

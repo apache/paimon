@@ -131,6 +131,10 @@ class ReadBuilderExplainTest(unittest.TestCase):
         self.assertIsNone(result.file_skipping)
         self.assertIsNone(result.predicate)
 
+        read = rb.with_projection(['val', 'id']).new_read()
+        self.assertIsNone(read.output_projection)
+        self.assertEqual(['val', 'id'], rb.explain().projection)
+
     # ---- 2. PK + partition + bucket pruning ----------------------------
 
     @pytest.mark.python_plan

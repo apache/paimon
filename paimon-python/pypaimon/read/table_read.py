@@ -63,8 +63,17 @@ class TableRead:
         self.predicate = predicate
         self.read_type = read_type
         self.output_projection = output_projection
-        adapter = (self._reader_adapter() if output_projection is not None
-                   else (read_type, [[field.name] for field in read_type]))
+        adapter = (read_type, [[field.name] for field in read_type])
+        if output_projection is not None:
+            plain_adapter = reader_adapter(read_type, self._table_read_fields())
+            # A pruned ROW or selected MAP can still need a flat adapter.
+            # Elide only when the reader already supplies the complete output.
+            if (not output_projection.named
+                    and output_projection.columns == [(field.name, [field.name]) for field in read_type]
+                    and plain_adapter == adapter):
+                self.output_projection = None
+            else:
+                adapter = self._reader_adapter(plain_adapter)
         self._adapter_read_type = adapter[0]
         physical_names = {field.name for field in self._table_read_fields()}
         self.predicate = self._bind_predicate_to_adapter(self.predicate, *adapter, physical_names)
@@ -219,8 +228,9 @@ class TableRead:
         _, paths = self._reader_adapter()
         return paths if any(len(path) > 1 for path in paths) else None
 
-    def _reader_adapter(self):
-        adapter = reader_adapter(self.read_type, self._table_read_fields())
+    def _reader_adapter(self, adapter=None):
+        if adapter is None:
+            adapter = reader_adapter(self.read_type, self._table_read_fields())
         if (self.predicate is None or self.output_projection is None
                 or self.output_projection.named):
             return adapter

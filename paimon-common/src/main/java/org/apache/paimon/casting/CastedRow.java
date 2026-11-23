@@ -76,7 +76,7 @@ public class CastedRow implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
-        return row.isNullAt(pos);
+        return row.isNullAt(pos) || castMapping[pos].getFieldOrNull(row) == null;
     }
 
     @Override

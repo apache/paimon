@@ -18,12 +18,15 @@
 """LeRobot-compatible map-style reads from a multimodal Paimon table."""
 
 import bisect
+import copy
 import io
 import json
 import math
 import operator
 import pickle
 import sys
+import struct
+import uuid
 import zlib
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -33,18 +36,27 @@ from functools import partial
 from types import SimpleNamespace
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
+from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.multimodal.lerobot.aggregate import (
+    _CONTROLS, _READ_CONTROL_STATS_COLUMN, _READ_CONTROL_STATS_DESCRIPTION,
+    _REBUILT_INFO, _merge_stats,
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
+    _EPISODE_CONTROL_COLUMNS,
+    _dataset_fps,
+    _positive_integer,
     _companion_table_identifiers,
-    _restore_pandas_metadata,
     _tag_snapshot_id,
     _validate_tag_name,
 )
-from pypaimon.multimodal.lerobot.loader import _DECLARED_NUMERIC_RANGES
+from pypaimon.multimodal.lerobot.loader import _DECLARED_NUMERIC_RANGES, _video_fps
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.lerobot.schema import (
     _feature_shape,
+    _merge_schemas,
     _require_v3,
     _schema_from_info,
     _validate_lerobot_schema,
@@ -52,7 +64,7 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.lerobot.source import _info_dict
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.multimodal.mp4 import ContainerFrameIndex, _MAX_METADATA_BYTES
 
 
 _TORCH_DTYPE_NAMES = {
@@ -214,10 +226,8 @@ class PaimonDatasetReader(ABC):
         if self._total_tasks < 0:
             raise ValueError("LeRobot metadata must define total_tasks.")
 
-        self._fps = int(
-            _metadata_member(self.meta, "fps", info.get("fps", 0)))
-        if self._fps <= 0:
-            raise ValueError("LeRobot metadata fps must be positive.")
+        fps = _metadata_member(self.meta, "fps", info.get("fps"))
+        self._fps = None if fps is None else _dataset_fps(fps)
         return info
 
     def _init_episodes(self, episodes):
@@ -230,7 +240,18 @@ class PaimonDatasetReader(ABC):
                 "dataset.")
         self._episode_ends = [end for _, end in self._episode_ranges] \
             if self._episode_ranges is not None else None
+        self._episode_fps = _episode_fps(
+            self.meta, self._fps, self._total_episodes)
+        for name in self._video_keys:
+            for fps in set(self._episode_fps):
+                _video_fps({"fps": fps}, self._features[name], name)
         self.episodes = _selected_episodes(episodes, self._total_episodes)
+        selected_rates = [self._episode_fps[index] for index in (
+            self.episodes if self.episodes is not None
+            else range(self._total_episodes))]
+        if self._fps is None and selected_rates \
+                and len(set(selected_rates)) == 1:
+            self._fps = selected_rates[0]
         if self.episodes is not None and self._episode_ranges is None:
             raise ValueError("Episode selection requires episode metadata.")
         self._selected_ranges = None
@@ -247,12 +268,13 @@ class PaimonDatasetReader(ABC):
                 size += end - begin
                 self._selected_ends.append(size)
 
-        self._delta_indices = _delta_indices(
-            self.delta_timestamps,
-            self._fps,
-            self.tolerance_s,
-            self._features,
-        )
+        self._delta_indices = (
+            {fps: _delta_indices(self.delta_timestamps, fps,
+                                 self.tolerance_s, self._features)
+             for fps in sorted({self._episode_fps[episode] for episode in (
+                 self.episodes if self.episodes is not None
+                 else range(self._total_episodes))})}
+            if self.delta_timestamps else None)
         if self._delta_indices and self._episode_ranges is None:
             raise ValueError("delta_timestamps requires episode metadata.")
 
@@ -290,6 +312,11 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_CODEC_THREADS.default_value()
         )
+        prefetch_max_bytes = (
+            table_options.read_video_prefetch_max_bytes()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES.default_value()
+        )
         self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
@@ -303,6 +330,7 @@ class PaimonDatasetReader(ABC):
                 collate_fn=_identity,
                 range_parallelism=self.blob_parallelism,
                 max_open_videos=cache_size,
+                prefetch_max_bytes=prefetch_max_bytes,
             )
             for key in self._video_keys
         ]
@@ -332,7 +360,7 @@ class PaimonDatasetReader(ABC):
         validation_context = _build_frame_validation_context(
             self.meta,
             self._episode_ranges,
-            self._fps,
+            self._episode_fps,
             tasks,
             subtasks,
             source_schema.field("timestamp").type,
@@ -356,7 +384,7 @@ class PaimonDatasetReader(ABC):
                     "task_index",
                 ]
                 + (["subtask_index"] if subtasks is not None else [])
-                + list(self._delta_indices)
+                + list(self.delta_timestamps)
             ))
 
     @property
@@ -366,6 +394,10 @@ class PaimonDatasetReader(ABC):
     @property
     def fps(self):
         return self._fps
+
+    @property
+    def episode_fps(self):
+        return self._episode_fps
 
     @property
     def num_frames(self):
@@ -526,16 +558,21 @@ class PaimonDatasetReader(ABC):
                 if key in visual_windows:
                     item[key] = visual_windows[key][offset]
                 else:
-                    item[key] = torch.stack([
-                        converted[position][key] for position in positions
-                    ])
+                    values = [converted[position][key] for position in positions]
+                    if _contains_none(values):
+                        item[key] = (None if key != "subtask_index"
+                                     and all(value is None for value in values) else values)
+                    else:
+                        item[key] = torch.stack(values)
             item.update(plan["padding"])
             if self.image_transforms is not None:
                 for key in self._visual_keys:
-                    item[key] = self.image_transforms(item[key])
+                    if item[key] is not None:
+                        item[key] = self.image_transforms(item[key])
             result.append(item)
         if return_batch:
             return _collate_lerobot_batch(result, video_windows)
+        _pack_nullable_labels(result)
         return result
 
     def __getitem__(self, index):
@@ -611,7 +648,7 @@ class PaimonDatasetReader(ABC):
             episode = bisect.bisect_right(self._episode_ends, index)
             begin, end = self._episode_ranges[episode]
             import torch
-            for key, deltas in self._delta_indices.items():
+            for key, deltas in self._delta_indices[self._episode_fps[episode]].items():
                 windows[key] = [
                     min(max(index + delta, begin), end - 1)
                     for delta in deltas
@@ -636,6 +673,7 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             *,
             tag_name=None,
             episodes=None,
+            dataset_index=None,
             image_transforms=None,
             delta_timestamps=None,
             tolerance_s=1e-4,
@@ -643,6 +681,18 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             video_backend=None,
             return_uint8=False):
         self._frames_table, meta = _load_dataset(table, tag_name)
+        if dataset_index is not None:
+            if episodes is not None:
+                raise ValueError("Select either dataset_index or episodes.")
+            if isinstance(dataset_index, bool) or not isinstance(dataset_index, int) \
+                    or dataset_index < 0:
+                raise ValueError("dataset_index must be a non-negative integer.")
+            sources = meta.datasets
+            if sources is None or dataset_index >= len(sources):
+                raise ValueError("LeRobot source dataset_index %d does not exist."
+                                 % dataset_index)
+            begin, end = _source_dataset_ranges(sources)[dataset_index][1:3]
+            episodes = list(range(begin, end))
         self.tag_name = tag_name
         super().__init__(
             meta,
@@ -670,7 +720,110 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             raise ValueError(
                 "Paimon table has %d rows but metadata declares %d frames."
                 % (rows.num_rows, self._total_frames))
+        if self.meta.datasets is not None:
+            rows = _SourceEpisodeFrameReader(
+                rows, self.meta.datasets,
+                getattr(self.meta, "_source_vocabulary_maps", None))
         return rows
+
+
+class _SourceEpisodeFrameReader:
+    """Present source-local Episode IDs as ordinals to the training reader."""
+
+    def __init__(self, reader, datasets, vocabulary_maps=None):
+        self._reader = reader
+        ranges = _source_dataset_ranges(datasets)
+        self._physical_ids = [source["id"] for source in datasets]
+        self._id_to_ordinal = {value: ordinal
+                               for ordinal, value in enumerate(self._physical_ids)}
+        self._frame_starts = [source[3] for source in ranges]
+        self._frame_ends = [source[4] for source in ranges]
+        self._episode_offsets = pa.array(
+            [source[1] for source in ranges],
+            type=pa.int64())
+        self._episode_counts = pa.array(
+            [source[2] - source[1] for source in ranges], type=pa.int64())
+        self._vocabulary = {}
+        for name, sources in (vocabulary_maps or {}).items():
+            offsets, counts, values = [], [], []
+            for source in sources:
+                offsets.append(len(values))
+                counts.append(len(source))
+                values.extend(source)
+            self._vocabulary[name] = (
+                pa.array(offsets, type=pa.int64()),
+                pa.array(counts, type=pa.int64()),
+                pa.array(values, type=pa.int64()))
+        self.num_rows = reader.num_rows
+        self.file_io = reader.file_io
+        self.snapshot_id = reader.snapshot_id
+        self._table = reader._table
+        self._locator = reader._locator
+
+    def read_indices(self, indices, columns):
+        mapped = [name for name in self._vocabulary if name in columns]
+        projection = list(columns)
+        if "dataset_id" not in projection:
+            projection.append("dataset_id")
+        if "index" not in projection:
+            projection.append("index")
+        keys = []
+        for index in indices:
+            dataset_index = bisect.bisect_right(self._frame_ends, index)
+            if dataset_index >= len(self._frame_ends) or index < 0:
+                raise IndexError("LeRobot frame index %d is out of range." % index)
+            keys.append((self._physical_ids[dataset_index],
+                         index - self._frame_starts[dataset_index]))
+        data = self._reader.read_keys(keys, projection)
+        if data.num_rows == 0:
+            return data.select(columns)
+        expected = set(keys)
+        actual = list(zip(data["dataset_id"].to_pylist(),
+                          data["index"].to_pylist()))
+        if len(actual) != len(expected) or set(actual) != expected:
+            raise ValueError("LeRobot frame keys are missing or duplicated.")
+        data = data.set_column(
+            data.schema.get_field_index("index"), data.schema.field("index"),
+            pa.array([self._frame_starts[self._id_to_ordinal[dataset_id]] + local
+                      for dataset_id, local in actual], type=pa.int64()))
+        source_ids = pa.array([self._id_to_ordinal[value]
+                               for value in data["dataset_id"].to_pylist()],
+                              type=pa.int64())
+        if "episode_index" in columns:
+            try:
+                local_ids = data["episode_index"]
+                offsets = pc.take(self._episode_offsets, source_ids)
+                counts = pc.take(self._episode_counts, source_ids)
+                valid = pc.and_(pc.greater_equal(local_ids, 0),
+                                pc.less(local_ids, counts))
+                if valid.null_count or not pc.all(valid).as_py():
+                    raise ValueError("LeRobot frame has an invalid source Episode key.")
+                ordinals = pc.add_checked(offsets, local_ids)
+            except (pa.ArrowInvalid, pa.ArrowIndexError, TypeError) as error:
+                raise ValueError("LeRobot frame has an invalid source Episode key.") from error
+            data = data.set_column(
+                data.schema.get_field_index("episode_index"),
+                data.schema.field("episode_index"), ordinals)
+        for name in mapped:
+            offsets, counts, values = self._vocabulary[name]
+            try:
+                local_ids = data[name]
+                if name == "task_index" and local_ids.null_count:
+                    raise ValueError("LeRobot frame has an invalid source task_index.")
+                valid = pc.and_(pc.greater_equal(local_ids, 0),
+                                pc.less(local_ids, pc.take(counts, source_ids)))
+                if not pc.all(pc.fill_null(valid, True)).as_py():
+                    raise ValueError("LeRobot frame has an invalid source %s." % name)
+                translated = pc.take(
+                    values, pc.add_checked(pc.take(offsets, source_ids), local_ids))
+            except (pa.ArrowInvalid, pa.ArrowIndexError, TypeError) as error:
+                raise ValueError("LeRobot frame has an invalid source %s." % name) from error
+            data = data.set_column(data.schema.get_field_index(name),
+                                   data.schema.field(name), translated)
+        return data.select(columns)
+
+    def close(self):
+        self._reader.close()
 
 
 class PaimonLeRobotDataset:
@@ -682,6 +835,7 @@ class PaimonLeRobotDataset:
             *,
             tag_name=None,
             episodes=None,
+            dataset_index=None,
             image_transforms=None,
             delta_timestamps=None,
             tolerance_s=1e-4,
@@ -693,6 +847,7 @@ class PaimonLeRobotDataset:
             if (
                 tag_name is not None
                 or episodes is not None
+                or dataset_index is not None
                 or image_transforms is not None
                 or delta_timestamps is not None
                 or tolerance_s != 1e-4
@@ -708,6 +863,7 @@ class PaimonLeRobotDataset:
                 table,
                 tag_name=tag_name,
                 episodes=episodes,
+                dataset_index=dataset_index,
                 image_transforms=image_transforms,
                 delta_timestamps=delta_timestamps,
                 tolerance_s=tolerance_s,
@@ -821,7 +977,7 @@ class _PaimonLeRobotMetadata:
 
     def __init__(
             self, repo_id, tag_name, info, stats, episodes, tasks,
-            subtasks):
+            subtasks, datasets=None):
         self.repo_id = repo_id
         self.revision = tag_name
         self.info = info
@@ -829,6 +985,7 @@ class _PaimonLeRobotMetadata:
         self.episodes = episodes
         self.tasks = tasks
         self.subtasks = subtasks
+        self.datasets = datasets
         self._compress_episodes = False
 
     def __getstate__(self):
@@ -922,6 +1079,7 @@ def _reader_metadata(metadata):
         _metadata_member(metadata, "episodes"),
         _metadata_member(metadata, "tasks"),
         _metadata_member(metadata, "subtasks"),
+        _metadata_member(metadata, "datasets"),
     )
 
 
@@ -936,30 +1094,204 @@ def _load_dataset(table, tag_name):
     frames = _component_table(catalog, raw_table, tag_name)
     episodes_table = _component_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag_name)
-    episodes = _episode_dataset(episodes_table)
-    tasks_table = _component_table(
-        catalog, catalog.get_table(identifiers["tasks"]), tag_name)
-    tasks = _component_dataframe(tasks_table, "task_index")
-    subtasks = None
-    if "subtasks" in identifiers:
-        subtasks_table = _component_table(
-            catalog, catalog.get_table(identifiers["subtasks"]), tag_name)
-        subtasks = _component_dataframe(subtasks_table, "subtask_index")
+    source_local_layout = "dataset_id" in _target_schema(episodes_table).names
+    datasets_table = _component_table(
+        catalog, catalog.get_table(identifiers["datasets"]), tag_name)
+    source_columns = ["id", "name", "info", "tasks", "subtasks", "stats"]
+    datasets_schema = _target_schema(datasets_table)
+    if _READ_CONTROL_STATS_COLUMN in datasets_schema.names:
+        field = datasets_schema.field(_READ_CONTROL_STATS_COLUMN)
+        if (field.metadata or {}).get(b"description") == \
+                _READ_CONTROL_STATS_DESCRIPTION.encode("utf-8"):
+            source_columns.append(_READ_CONTROL_STATS_COLUMN)
+    source_rows = _read_arrow(datasets_table, source_columns).sort_by("id").to_pylist()
+    datasets = ([{key: value for key, value in row.items()
+                  if key not in ("tasks", "subtasks", "stats", _READ_CONTROL_STATS_COLUMN)}
+                 for row in source_rows] if source_local_layout else None)
+    episodes = _episode_dataset(episodes_table, datasets)
+    tasks, task_maps = _source_vocabulary(source_rows, "task")
+    source_vocabulary_maps = ({"task_index": task_maps}
+                              if source_local_layout else None)
+    subtasks, subtask_maps = _source_vocabulary(source_rows, "subtask")
+    if source_vocabulary_maps is not None and subtask_maps is not None:
+        source_vocabulary_maps["subtask_index"] = subtask_maps
 
-    info = _metadata_object(_component_table(
-        catalog, catalog.get_table(identifiers["info"]), tag_name), "info")
+    info = (json.loads(source_rows[0]["info"])
+            if not source_local_layout else _merged_source_info(
+                source_rows, tasks, subtasks))
     for feature in info.get("features", {}).values():
         feature["shape"] = tuple(feature["shape"])
-    stats = None
-    if "stats" in identifiers:
-        stats = _numpy_stats(_metadata_object(_component_table(
-            catalog, catalog.get_table(identifiers["stats"]), tag_name),
-            "stats"))
+    if source_local_layout:
+        stats = _merged_source_stats(source_rows, episodes_table)
+    else:
+        value = source_rows[0]["stats"]
+        stats = _numpy_stats(json.loads(value)) if value is not None else None
     metadata = _PaimonLeRobotMetadata(
         str(table.identifier), tag_name, info, stats, episodes, tasks,
-        subtasks)
+        subtasks, datasets)
+    metadata._source_vocabulary_maps = source_vocabulary_maps
     metadata._compress_episodes = True
     return frames, metadata
+
+
+def _source_vocabulary(sources, singular):
+    import pandas as pd
+
+    field = singular + "s"
+    index = singular + "_index"
+    if not sources:
+        raise ValueError("LeRobot Dataset metadata is required for %s." % field)
+    values = [source.get(field) for source in sources]
+    if all(value is None for value in values) and singular == "subtask":
+        return None, None
+    if singular == "subtask":
+        values = [value if value is not None else [] for value in values]
+    elif any(value is None for value in values):
+        raise ValueError("LeRobot sources disagree on %s metadata." % field)
+    by_text, rows, maps = {}, [], []
+    for ordinal, entries in enumerate(values):
+        mapping = [None] * len(entries)
+        seen = set()
+        for entry in entries:
+            local, label = entry[index], entry[singular]
+            if not isinstance(local, int) or not 0 <= local < len(entries) \
+                    or mapping[local] is not None or not isinstance(label, str) \
+                    or label in seen:
+                raise ValueError("LeRobot source %d has invalid %s metadata." %
+                                 (ordinal, field))
+            seen.add(label)
+            mapping[local] = label
+        for local, label in enumerate(mapping):
+            if label not in by_text:
+                by_text[label] = len(rows)
+                rows.append({index: len(rows), singular: label})
+            mapping[local] = by_text[label]
+        maps.append(mapping)
+    frame = pd.DataFrame(rows, columns=[index, singular]).set_index(singular)
+    return frame, maps
+
+
+def _merged_source_info(sources, tasks, subtasks):
+    if not sources:
+        raise ValueError("LeRobot Dataset metadata is required for info.")
+    infos = []
+    for ordinal, source in enumerate(sources):
+        try:
+            info = json.loads(source["info"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("LeRobot source %d has invalid info." % ordinal) from error
+        if not isinstance(info, dict) or not isinstance(info.get("features"), dict):
+            raise ValueError("LeRobot source %d has invalid info." % ordinal)
+        infos.append(info)
+    merged = copy.deepcopy(infos[0])
+    merged["features"] = {}
+    for info in infos:
+        for name, feature in info["features"].items():
+            merged["features"].setdefault(name, copy.deepcopy(feature))
+    for field in _merge_schemas([_schema_from_info(info) for info in infos]):
+        if field.nullable:
+            merged["features"][field.name]["nullable"] = True
+    for key in list(merged):
+        if key not in _REBUILT_INFO and key not in ("codebase_version", "robot_type", "fps") \
+                and any(info.get(key) != merged[key] for info in infos):
+            del merged[key]
+    merged.update(total_frames=sum(info["total_frames"] for info in infos),
+                  total_episodes=sum(info["total_episodes"] for info in infos),
+                  total_tasks=len(tasks))
+    merged["splits"] = {"train": "0:%d" % merged["total_episodes"]}
+    merged.pop("fps_mode", None)
+    mixed_fps = len({info["fps"] for info in infos}) > 1
+    if mixed_fps:
+        merged["fps"] = None
+        for feature in merged["features"].values():
+            if feature.get("dtype") != "video":
+                continue
+            feature.pop("fps", None)
+            for key in ("info", "video_info"):
+                if isinstance(feature.get(key), dict):
+                    feature[key].pop("video.fps", None)
+    if subtasks is not None:
+        merged["total_subtasks"] = len(subtasks)
+    for key in ("total_chunks", "total_videos", "data_path", "video_path",
+                "chunks_size", "data_files_size_in_mb", "video_files_size_in_mb"):
+        merged.pop(key, None)
+    for name, feature in merged["features"].items():
+        if feature.get("dtype") != "video":
+            continue
+        for key in ("info", "video_info"):
+            details = [info["features"][name].get(key) for info in infos
+                       if name in info["features"]]
+            details = [value if isinstance(value, dict) else {} for value in details]
+            feature[key] = {k: v for k, v in details[0].items()
+                            if all(value.get(k) == v for value in details[1:])}
+    return merged
+
+
+def _merged_source_stats(sources, episodes_table):
+    values = [source.get("stats") for source in sources]
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ValueError("LeRobot sources disagree on stats metadata.")
+    decoded = [json.loads(value) for value in values]
+    names = dict.fromkeys(name for value in decoded for name in value)
+    merged = {
+        name: (decoded[0][name] if len(decoded) == 1 else
+               _merge_stats([value[name] for value in decoded if name in value]))
+        for name in names if name not in _CONTROLS}
+    columns = _target_schema(episodes_table).names
+    if "stats" in columns:
+        decoded_rows = []
+        legacy_ids = {source["id"] for source in sources
+                      if not source.get(_READ_CONTROL_STATS_COLUMN)}
+        legacy_stats = {}
+        if legacy_ids:
+            legacy_rows = _read_arrow(episodes_table, ["dataset_id", "stats"]).to_pylist()
+            for row in legacy_rows:
+                if row["dataset_id"] not in legacy_ids or not row["stats"]:
+                    continue
+                raw = row["stats"]
+                stats = (GenericVariant.from_arrow_struct(raw).to_python()
+                         if isinstance(raw, dict) else json.loads(raw))
+                legacy_stats.setdefault(row["dataset_id"], []).append(stats)
+        for source, (_, episode_offset, _, _, _) in zip(
+                sources, _source_dataset_ranges(sources)):
+            raw = source.get(_READ_CONTROL_STATS_COLUMN)
+            if raw:
+                decoded_rows.append(json.loads(raw))
+            else:
+                for stats in legacy_stats.get(source["id"], []):
+                    episode = stats.get("episode_index")
+                    if episode:
+                        for name in ("min", "max", "mean"):
+                            if episode.get(name) is not None:
+                                episode[name] = [value + episode_offset
+                                                 for value in episode[name]]
+                    decoded_rows.append(stats)
+        for name in _CONTROLS:
+            parts = [row[name] for row in decoded_rows if name in row
+                     and row[name].get("count") is not None]
+            if parts:
+                merged[name] = _merge_stats(parts)
+        return _numpy_stats(merged)
+    fields_by_name = {}
+    for name in _CONTROLS:
+        fields = ["stats/%s/%s" % (name, stat)
+                  for stat in ("min", "max", "mean", "std", "count")]
+        if all(field in columns for field in fields):
+            fields_by_name[name] = fields
+    projection = [field for fields in fields_by_name.values() for field in fields]
+    episode_stats = _read_arrow(episodes_table, projection) if projection else None
+    for name, fields in fields_by_name.items():
+        parts = []
+        for row in episode_stats.select(fields).to_pylist():
+            if row[fields[-1]] is None:
+                continue
+            parts.append({stat: row[field]
+                          for stat, field in zip(("min", "max", "mean", "std", "count"), fields)})
+        if parts:
+            merged[name] = _merge_stats(parts)
+    return _numpy_stats(merged)
 
 
 def _component_table(catalog, table, tag_name):
@@ -981,7 +1313,7 @@ def _read_arrow(table, projection=None):
     return builder.new_read().to_arrow(plan.splits())
 
 
-def _episode_dataset(table):
+def _episode_dataset(table, datasets=None):
     try:
         from datasets import Dataset
     except ImportError as error:
@@ -989,34 +1321,51 @@ def _episode_dataset(table):
             "PaimonLeRobotDataset requires datasets from "
             "'pypaimon[lerobot]'.") from error
 
-    projection = [
-        name for name in _target_schema(table).names
-        if not name.startswith("stats/")
-    ]
-    data = _read_arrow(table, projection).sort_by("episode_index")
+    if datasets is not None:
+        # Merged Episodes may contain Arrow extensions unsupported by HF Dataset.
+        projection = _EPISODE_CONTROL_COLUMNS + ["dataset_id"]
+    else:
+        projection = [name for name in _target_schema(table).names
+                      if not name.startswith("stats/") and name != "stats"]
+    data = _read_arrow(table, projection)
+    if datasets is not None:
+        physical_ids = [dataset["id"] for dataset in datasets]
+        ordinals = pc.index_in(data["dataset_id"],
+                               value_set=pa.array(physical_ids, type=pa.string()))
+        if ordinals.null_count:
+            raise ValueError("LeRobot Episode references an unknown Dataset UUID.")
+        ordinals = pc.cast(ordinals, pa.int64())
+        data = data.set_column(
+            data.schema.get_field_index("dataset_id"),
+            pa.field("dataset_index", pa.int64()), ordinals)
+        data = data.sort_by([
+            ("dataset_index", "ascending"),
+            ("episode_index", "ascending"),
+        ])
+        ranges = _source_dataset_ranges(datasets)
+        expected = [
+            (index, local)
+            for index, (unused, begin, end, frame_begin, frame_end)
+            in enumerate(ranges)
+            for local in range(end - begin)
+        ]
+        actual = list(zip(data["dataset_index"].to_pylist(),
+                          data["episode_index"].to_pylist()))
+        if actual != expected:
+            raise ValueError("LeRobot source Episode keys are not contiguous.")
+        offsets = pa.array([item[3] for item in ranges], type=pa.int64())
+        source_offsets = pc.take(offsets, data["dataset_index"])
+        for name in ("dataset_from_index", "dataset_to_index"):
+            data = data.set_column(
+                data.schema.get_field_index(name), data.schema.field(name),
+                pc.add_checked(data[name], source_offsets))
+        data = data.set_column(
+            data.schema.get_field_index("episode_index"),
+            pa.field("episode_index", pa.int64()),
+            pa.array(range(data.num_rows), type=pa.int64()))
+    else:
+        data = data.sort_by("episode_index")
     return Dataset(data)
-
-
-def _component_dataframe(table, index_field):
-    data = _read_arrow(table).sort_by(index_field)
-    return _restore_pandas_metadata(table, data).to_pandas()
-
-
-def _metadata_object(table, name):
-    result = {}
-    for row in _read_arrow(table).to_pylist():
-        key = row.get("key")
-        if not isinstance(key, str) or key in result:
-            raise ValueError(
-                "Paimon LeRobot %s metadata contains an invalid key."
-                % name)
-        try:
-            result[key] = json.loads(row.get("value"))
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Paimon LeRobot %s metadata value for %r is invalid JSON."
-                % (name, key)) from error
-    return result
 
 
 def _numpy_stats(value):
@@ -1100,6 +1449,79 @@ def _episode_ranges(metadata, total_frames, total_episodes):
     return ranges
 
 
+def _episode_fps(metadata, fps, total_episodes):
+    if _metadata_member(metadata, "datasets") is not None:
+        return _source_dataset_fps(metadata, fps, total_episodes)
+    if fps is None:
+        raise ValueError("LeRobot metadata is missing fps; enable source FPS explicitly.")
+    return (fps,) * total_episodes
+
+
+def _source_dataset_ranges(datasets):
+    """Derive source ranges from the original counts in each source's info."""
+    result = []
+    episode_offset = frame_offset = 0
+    previous_id = None
+    for ordinal, dataset in enumerate(datasets):
+        try:
+            identifier = dataset["id"]
+            if not isinstance(identifier, str) or str(uuid.UUID(identifier)) != identifier \
+                    or uuid.UUID(identifier).version != 7:
+                raise ValueError("id must be a canonical UUIDv7 string")
+            if previous_id is not None and identifier <= previous_id:
+                raise ValueError("id must be unique and sorted")
+            previous_id = identifier
+            info = json.loads(dataset["info"] if "info" in dataset else dataset["info_json"])
+            if not isinstance(info, dict):
+                raise ValueError("info must be a JSON object")
+            episodes = _positive_integer(info.get("total_episodes"), "total_episodes")
+            frames = _positive_integer(info.get("total_frames"), "total_frames")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("LeRobot source dataset %d metadata is invalid: %s."
+                             % (ordinal, error)) from error
+        result.append((info, episode_offset, episode_offset + episodes,
+                       frame_offset, frame_offset + frames))
+        episode_offset += episodes
+        frame_offset += frames
+    return result
+
+
+def _source_dataset_fps(metadata, fps, total_episodes):
+    datasets = _metadata_member(metadata, "datasets")
+    episodes = _metadata_member(metadata, "episodes")
+    if not datasets or episodes is None:
+        raise ValueError("LeRobot source FPS requires datasets and episodes metadata.")
+    rates = []
+    ranges = _source_dataset_ranges(datasets)
+    for ordinal, (source_info, begin, end, frame_begin, frame_end) in enumerate(ranges):
+        if source_info.get("fps") is None:
+            raise ValueError("LeRobot source dataset %d is missing fps." % ordinal)
+        rate = _dataset_fps(source_info.get("fps"))
+        dataset = datasets[ordinal]
+        if "fps" in dataset and _positive_integer(dataset["fps"], "source dataset %d fps" % ordinal) != rate:
+            raise ValueError("LeRobot source dataset %d has inconsistent fps." % ordinal)
+        if fps is not None and rate != fps:
+            raise ValueError("LeRobot source dataset %d fps does not match info.fps." % ordinal)
+        rates.extend([rate] * (end - begin))
+    if len(rates) != total_episodes:
+        raise ValueError("LeRobot source datasets do not cover all episodes.")
+    columns = ("dataset_index", "dataset_from_index", "dataset_to_index")
+    for ordinal, row in enumerate(_episode_rows(episodes, columns)):
+        try:
+            index = operator.index(row["dataset_index"])
+        except (KeyError, TypeError) as error:
+            raise ValueError("LeRobot episode %d is missing dataset_index." % ordinal) from error
+        if index < 0 or index >= len(datasets):
+            raise ValueError("LeRobot episode %d has invalid dataset_index." % ordinal)
+        unused, begin, end, frame_begin, frame_end = ranges[index]
+        if not begin <= ordinal < end:
+            raise ValueError("LeRobot episode %d has invalid dataset_index." % ordinal)
+        if ((ordinal == begin and row["dataset_from_index"] != frame_begin)
+                or (ordinal == end - 1 and row["dataset_to_index"] != frame_end)):
+            raise ValueError("LeRobot source dataset %d has inconsistent frame ranges." % index)
+    return tuple(rates)
+
+
 def _validate_component_metadata(features, total_tasks, tasks, subtasks):
     task_count = 0 if tasks is None else len(tasks)
     if task_count != total_tasks:
@@ -1115,7 +1537,7 @@ def _validate_component_metadata(features, total_tasks, tasks, subtasks):
 
 
 def _build_frame_validation_context(
-        metadata, episode_ranges, fps, tasks, subtasks, timestamp_type):
+        metadata, episode_ranges, episode_fps, tasks, subtasks, timestamp_type):
     task_names = _index_names(tasks, "task_index")
     subtask_names = _index_names(subtasks, "subtask_index")
     episode_tasks = _episode_tasks(metadata) \
@@ -1125,7 +1547,7 @@ def _build_frame_validation_context(
         "episode_ends": (
             [end for _, end in episode_ranges]
             if episode_ranges is not None else None),
-        "fps": fps,
+        "episode_fps": episode_fps,
         "task_names": task_names,
         "subtask_names": subtask_names,
         "episode_tasks": episode_tasks,
@@ -1134,8 +1556,10 @@ def _build_frame_validation_context(
 
 
 def _index_names(values, index_field):
-    if values is None or len(values) == 0:
+    if values is None:
         return None
+    if len(values) == 0:
+        return {}
     if not hasattr(values, "iterrows"):
         return {
             index: str(value) for index, value in enumerate(values)
@@ -1296,8 +1720,12 @@ def _numeric_tensor_rows(column, name, feature):
     import numpy as np
     import torch
 
-    values = column.combine_chunks()
+    values = column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column
     if values.null_count:
+        if feature.get("nullable"):
+            valid = pc.is_valid(values)
+            converted = iter(_numeric_tensor_rows(pc.filter(values, valid), name, feature))
+            return [next(converted) if present else None for present in valid.to_pylist()]
         raise ValueError(
             "LeRobot numeric feature %s contains null values." % name)
     shape = _feature_shape(feature, name)
@@ -1373,7 +1801,7 @@ def _validate_control_row(index, row, validation_context, tolerance_s):
 
     timestamp = row.get("timestamp")
     expected_timestamp = pa.scalar(
-        frame / validation_context["fps"],
+        frame / validation_context["episode_fps"][episode],
         type=validation_context["timestamp_type"],
     ).as_py()
     if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) \
@@ -1399,11 +1827,16 @@ def _validate_control_row(index, row, validation_context, tolerance_s):
             % (index, episode))
     subtasks = validation_context["subtask_names"]
     if subtasks is not None:
-        subtask = _control_index(row, "subtask_index", index)
-        if subtask not in subtasks:
+        if "subtask_index" not in row:
             raise ValueError(
-                "Paimon subtask_index at LeRobot index %d is absent from "
-                "metadata: %r." % (index, subtask))
+                "Paimon subtask_index at LeRobot index %d is missing."
+                % index)
+        if row["subtask_index"] is not None:
+            subtask = _control_index(row, "subtask_index", index)
+            if subtask not in subtasks:
+                raise ValueError(
+                    "Paimon subtask_index at LeRobot index %d is absent from "
+                    "metadata: %r." % (index, subtask))
 
 
 def _control_index(row, name, index):
@@ -1435,7 +1868,7 @@ def _resolve_image_blobs(
     for rows in row_groups:
         for row in rows.values():
             for key in image_keys:
-                if key in row:
+                if key in row and row[key] is not None:
                     targets[key].append(row)
                     values[key].append(row[key])
     used = [key for key in image_keys if values[key]]
@@ -1452,7 +1885,7 @@ def _decode_image_rows(row_groups, image_keys, features, return_uint8):
     for rows in row_groups:
         for row in rows.values():
             for key in image_keys:
-                if key in row:
+                if key in row and row[key] is not None:
                     row[key] = _image_tensor(
                         row[key], features[key], return_uint8=return_uint8)
 
@@ -1463,7 +1896,7 @@ def _image_blob_sources(row_groups, image_keys):
         for rows in row_groups
         for row in rows.values()
         for key in image_keys
-        if key in row
+        if key in row and row[key] is not None
     ]
 
 
@@ -1477,8 +1910,9 @@ def _attach_task_labels(rows, task_names, subtask_names):
         task_index = operator.index(row["task_index"])
         row["task"] = task_names[task_index]
         if subtask_names is not None:
-            subtask_index = operator.index(row["subtask_index"])
-            row["subtask"] = subtask_names[subtask_index]
+            subtask_index = row["subtask_index"]
+            row["subtask"] = (None if subtask_index is None
+                              else subtask_names[operator.index(subtask_index)])
 
 
 def _decode_video_windows(
@@ -1553,17 +1987,11 @@ def _decode_video_windows_with_pool(
             window = [descriptors[p] for p in plan["windows"][key]]
             if not window or any(d is None for d in window):
                 return key, None
-            payload = window[0].payload_descriptor
+            payload = window[0].video_descriptor
             # Cross-file windows use the regular frame assembly path.
-            if any(d.payload_descriptor != payload for d in window):
+            if any(d.video_descriptor != payload for d in window):
                 return key, None
-            keyframe_index = window[0].keyframe_index_descriptor
-            if any(d.keyframe_index_descriptor != keyframe_index
-                   for d in window):
-                raise ValueError(
-                    "One video payload references different keyframe indexes."
-                )
-            requests.setdefault((payload, keyframe_index), []).append((
+            requests.setdefault((payload,), []).append((
                 offset, [d.frame_index for d in window]))
 
         if len(requests) == 1 and executor is not None:
@@ -1668,18 +2096,73 @@ def _decode_video_windows_with_pool(
     return {key: windows for key, windows in decoded if windows is not None}
 
 
+def _pack_nullable_labels(rows):
+    import torch
+
+    labels = [row.get("subtask_index") for row in rows]
+    if not any(_contains_none(value) for value in labels):
+        return
+    tensors = [value for label in labels
+               for value in (label if isinstance(label, list) else [label])
+               if torch.is_tensor(value)]
+    if not tensors:
+        return
+    # Disjoint views preserve isolation while sharing one storage across IPC.
+    packed = torch.cat([value.reshape(-1) for value in tensors])
+    views = iter(packed.split([value.numel() for value in tensors]))
+    for row, label in zip(rows, labels):
+        if isinstance(label, list):
+            row["subtask_index"] = [
+                next(views).reshape(value.shape) if torch.is_tensor(value) else value
+                for value in label]
+        elif torch.is_tensor(label):
+            row["subtask_index"] = next(views).reshape(label.shape)
+
+
 def _collate_lerobot_batch(rows, video_windows):
+    import torch
     from torch.utils.data import default_collate
 
-    if not video_windows:
+    nullable = {}
+    if "subtask_index" in rows[0]:
+        labels = [row["subtask_index"] for row in rows]
+        mask_name = "subtask_index_is_valid"
+        while any(mask_name in row for row in rows):
+            mask_name = "_" + mask_name
+        if any(_contains_none(value) for value in labels):
+            def values(label):
+                if isinstance(label, list):
+                    return [values(value) for value in label]
+                return -1 if label is None else label.tolist()
+
+            nullable["subtask_index"] = torch.tensor(
+                [values(label) for label in labels], dtype=torch.int64, device="cpu")
+            nullable[mask_name] = nullable["subtask_index"] >= 0
+        else:
+            nullable["subtask_index"] = default_collate(labels)
+            nullable[mask_name] = torch.ones_like(
+                nullable["subtask_index"], dtype=torch.bool)
+    if "subtask" in rows[0] and any(_contains_none(row["subtask"]) for row in rows):
+        nullable["subtask"] = [row["subtask"] for row in rows]
+    for key in rows[0]:
+        if key not in nullable and any(_contains_none(row[key]) for row in rows):
+            nullable[key] = [row[key] for row in rows]
+    if not video_windows and not nullable:
         return default_collate(rows)
     remaining = [{
         key: value for key, value in row.items()
-        if key not in video_windows
+        if key not in video_windows and key not in nullable
     } for row in rows]
     batch = default_collate(remaining)
+    batch.update(nullable)
     batch.update(video_windows)
     return batch
+
+
+def _contains_none(value):
+    if isinstance(value, (list, tuple)):
+        return any(_contains_none(item) for item in value)
+    return value is None
 
 
 def _stack_visual_windows(plans, rows, visual_keys):
@@ -1695,9 +2178,9 @@ def _stack_visual_windows(plans, rows, visual_keys):
     def stack(key):
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled):
-            return [torch.stack([
-                rows[position][key] for position in plan["windows"][key]
-            ]) for plan in plans]
+            windows = [[rows[position][key] for position in plan["windows"][key]] for plan in plans]
+            return [None if all(value is None for value in window) else window
+                    if _contains_none(window) else torch.stack(window) for window in windows]
 
     with ThreadPoolExecutor(
             max_workers=min(len(keys), _MAX_VISUAL_WORKERS)) as executor:
@@ -1712,13 +2195,16 @@ def _torch_row(row, features, return_uint8=False):
         if key not in result:
             continue
         value = result[key]
+        if value is None:
+            continue
         if feature.get("dtype") == "image" and not torch.is_tensor(value):
             result[key] = _image_tensor(
                 value, feature, return_uint8=return_uint8)
         elif feature.get("dtype") == "video":
             result[key] = _video_tensor(
                 value, feature, return_uint8=return_uint8)
-        elif feature.get("dtype") != "string" and not torch.is_tensor(value):
+        elif value is not None and feature.get("dtype") != "string" \
+                and not torch.is_tensor(value):
             dtype = getattr(torch, _TORCH_DTYPE_NAMES[feature.get("dtype")])
             result[key] = torch.tensor(value, dtype=dtype)
     return result
@@ -1779,9 +2265,37 @@ def _video_decoder_fallback_errors():
 
 def _open_video_decoder(stream, backend=None, codec_threads=0):
     pyav_options = {"thread_count": codec_threads} if codec_threads else {}
-    keyframe_index = getattr(stream, "video_keyframe_index", None)
-    if not isinstance(keyframe_index, VideoKeyframeIndex):
-        keyframe_index = None
+    keyframe_index = getattr(stream, "__dict__", {}).get("video_keyframe_index")
+    if keyframe_index is None and isinstance(getattr(stream, "video_length", None), int):
+        cache = getattr(stream, "video_metadata_cache", None)
+        key = ("container", getattr(stream, "video_metadata_key", None))
+        keyframe_index = cache.get(key) if cache is not None else None
+        if keyframe_index is None:
+            try:
+                source = stream
+                hint = getattr(stream, "video_moov_range", (0, 0))
+                ranges = getattr(stream, "video_read_ranges", None)
+                if 0 < hint[1] <= _MAX_METADATA_BYTES and callable(ranges):
+                    source = _RangeBackedVideo(stream.video_length, ranges)
+                    source.video_moov_range = hint
+                    head = 65536
+                    if 0 <= hint[0] and hint[0] + hint[1] <= head:
+                        # PyAV may probe past a front-loaded moov. Fetch its
+                        # immediate neighborhood in the same range request.
+                        head = min(256 * 1024, hint[0] + hint[1] + 128 * 1024)
+                    source.prefetch([(0, min(head, stream.video_length)), hint])
+                    stream.video_bootstrap = source
+                keyframe_index = ContainerFrameIndex(source, stream.video_length)
+            except (ValueError, OSError, RuntimeError, EOFError, OverflowError, IndexError, struct.error):
+                bootstrap = getattr(stream, "video_bootstrap", None)
+                if bootstrap is not None:
+                    bootstrap.close()
+                    stream.video_bootstrap = None
+            finally:
+                stream.seek(0)
+            if keyframe_index is not None and cache is not None:
+                cache[key] = keyframe_index
+        stream.video_keyframe_index = keyframe_index
     if backend is None and keyframe_index is not None:
         try:
             decoder = _PyAVVideoDecoder(stream, keyframe_index, **pyav_options)
@@ -1812,11 +2326,28 @@ def _open_torchcodec_decoder(stream):
             "'pypaimon[lerobot]'."
         ) from error
     try:
-        return VideoDecoder(stream, seek_mode="exact")
+        from torchcodec import _core
+    except ImportError:
+        from torchcodec.decoders import _core  # TorchCodec 0.2
+
+    source = stream
+    try:
+        decoder = VideoDecoder(source, seek_mode="exact")
     except TypeError:
         # TorchCodec 0.2 accepts bytes but not seekable file-like objects.
         stream.seek(0)
-        return VideoDecoder(stream.read(), seek_mode="exact")
+        source = stream.read()
+        decoder = VideoDecoder(source, seek_mode="exact")
+    metadata = _core.get_container_metadata(decoder._decoder)
+    first_video = next(item.stream_index for item in metadata.streams
+                       if isinstance(item, _core.VideoStreamMetadata))
+    if decoder.stream_index != first_video:
+        # Frame ordinals refer to the first video track, not the default track.
+        del decoder
+        if source is stream:
+            stream.seek(0)
+        decoder = VideoDecoder(source, stream_index=first_video, seek_mode="exact")
+    return decoder
 
 
 class _FallbackVideoDecoder:
@@ -2011,9 +2542,6 @@ class _PyAVVideoDecoder:
         self._source = stream
         self._keyframe_index = keyframe_index
         self._thread_count = thread_count
-        self._anchor_ordinals = (
-            keyframe_index.ordinals
-            if keyframe_index is not None else [])
         self._container = None
         self._indexed_source = None
         self._stream = None
@@ -2094,7 +2622,9 @@ class _PyAVVideoDecoder:
 
     def _read_indexed(self, indices):
         requested = [operator.index(index) for index in indices]
-        if any(index < 0 for index in requested):
+        if any(index < 0 or (isinstance(self._keyframe_index, ContainerFrameIndex)
+                             and index >= len(self._keyframe_index.pts))
+               for index in requested):
             raise IndexError("Video frame index is out of range.")
         requested_set = set(requested)
         frames = {
@@ -2103,7 +2633,24 @@ class _PyAVVideoDecoder:
         }
         missing = sorted(requested_set - set(frames))
         if missing:
-            frames.update(self._decode_indexed(missing))
+            try:
+                frames.update(self._decode_indexed(missing))
+            except (ValueError, RuntimeError):
+                if not isinstance(self._keyframe_index, ContainerFrameIndex):
+                    raise
+                import av
+                self.close()
+                self._keyframe_index = None
+                self._cache.clear()
+                self._timestamps = []
+                self._keyframes = []
+                self._next_index = 0
+                self._source.seek(0)
+                self._container = av.open(self._source)
+                self._stream = self._container.streams.video[0]
+                self._stream.thread_count = self._thread_count
+                self._frames = iter(self._container.decode(self._stream))
+                return [self[index] for index in requested]
         try:
             return [frames[index] for index in requested]
         except KeyError as error:
@@ -2117,9 +2664,15 @@ class _PyAVVideoDecoder:
         decoded = {}
         try:
             if self._container is None:
-                self._indexed_source = _RangeBackedVideo(
-                    self._video_length(), self._read_video_ranges)
-                self._indexed_source.prefetch(self._keyframe_index.metadata_ranges)
+                self._indexed_source = getattr(self._source, "video_bootstrap", None)
+                if self._indexed_source is None:
+                    self._indexed_source = _RangeBackedVideo(
+                        self._video_length(), self._read_video_ranges)
+                else:
+                    self._source.video_bootstrap = None
+                self._indexed_source.prefetch(
+                    [(0, min(65536, self._video_length()))]
+                    + list(self._keyframe_index.metadata_ranges))
                 self._container = av.open(self._indexed_source)
                 self._stream = self._container.streams.video[0]
                 self._stream.thread_count = self._thread_count
@@ -2147,8 +2700,7 @@ class _PyAVVideoDecoder:
         groups = {}
         ranges = []
         for index in indices:
-            preceding = bisect.bisect_right(
-                self._anchor_ordinals, index) - 1
+            preceding = mapping.preceding(index)
             if preceding < 0:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)
@@ -2175,8 +2727,11 @@ class _PyAVVideoDecoder:
             decoded):
         anchor_ordinal, anchor_pts, unused_position = (
             self._keyframe_index.keyframes[anchor])
+        if isinstance(self._keyframe_index, ContainerFrameIndex):
+            if self._keyframe_index.scale * stream.time_base != 1:
+                raise ValueError("MP4 time base differs from the decoder.")
         container.seek(
-            anchor_pts, backward=True, any_frame=False, stream=stream)
+            int(anchor_pts), backward=True, any_frame=False, stream=stream)
         ordinal = anchor_ordinal
         found_anchor = False
         remaining = set(targets)
@@ -2186,6 +2741,11 @@ class _PyAVVideoDecoder:
                 if frame.pts != anchor_pts or not frame.key_frame:
                     continue
                 found_anchor = True
+            if isinstance(self._keyframe_index, ContainerFrameIndex):
+                timeline = self._keyframe_index.pts
+                if (ordinal >= len(timeline) or frame.pts is None
+                        or frame.pts != timeline[int(ordinal)]):
+                    raise ValueError("Decoded PTS differs from the MP4 sample table.")
             if ordinal in remaining:
                 found[ordinal] = self._tensor(frame)
                 remaining.remove(ordinal)
@@ -2326,7 +2886,7 @@ def _decode_video_rows(
         input_rows = []
         for rows in row_groups:
             for index, row in rows.items():
-                if collator.video_column in row:
+                if collator.video_column in row and row[collator.video_column] is not None:
                     targets.append((rows, index))
                     input_rows.append(row)
         if not input_rows:

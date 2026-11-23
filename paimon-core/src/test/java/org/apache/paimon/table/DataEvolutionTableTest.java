@@ -606,6 +606,35 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testRowIdOrWithMaximumBoundReadsAllRows() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder writeBuilder = getTableDefault().newBatchWriteBuilder();
+        for (int batch = 0; batch < 2; batch++) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                for (int i = batch * 5; i < (batch + 1) * 5; i++) {
+                    write.write(
+                            GenericRow.of(
+                                    i,
+                                    BinaryString.fromString("a" + i),
+                                    BinaryString.fromString("b" + i)));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        PredicateBuilder builder = new PredicateBuilder(rowTypeWithRowId(schema));
+        int rowIdIndex = schema.rowType().getFieldCount();
+        Predicate filter =
+                PredicateBuilder.or(
+                        builder.between(rowIdIndex, 0L, Long.MAX_VALUE),
+                        builder.equal(rowIdIndex, 0L));
+
+        assertThat(readF0WithFilter(filter)).isEqualTo(Arrays.asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9));
+    }
+
+    @Test
     public void testDescendingRowIdInIntersectBetweenReadsCorrectRows() throws Exception {
         // Table-level regression: a descending _ROW_ID IN list intersected with a BETWEEN used to
         // drop ranges (Range.toRanges/Range.and need ascending, deduped input), and the dropped

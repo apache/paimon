@@ -84,6 +84,8 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
                 case SMALLINT:
                     return new GenericArray(Arrays.copyOf(array.toShortArray(), array.size()));
                 case INTEGER:
+                case DATE:
+                case TIME_WITHOUT_TIME_ZONE:
                     return new GenericArray(Arrays.copyOf(array.toIntArray(), array.size()));
                 case BIGINT:
                     return new GenericArray(Arrays.copyOf(array.toLongArray(), array.size()));
