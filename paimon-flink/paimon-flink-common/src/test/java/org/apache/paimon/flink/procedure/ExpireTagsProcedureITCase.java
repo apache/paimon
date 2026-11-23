@@ -26,6 +26,7 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -35,6 +36,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ExpireTagsProcedure}. */
 public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testCreateTagUsesDefaultRetention() throws Exception {
+        sql("CREATE TABLE T (id INT) WITH ('tag.default-time-retained' = '1d')");
+        sql("INSERT INTO T VALUES (1)");
+        sql("INSERT INTO T VALUES (2)");
+
+        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'latest')");
+        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'by-id', snapshot_id => 1)");
+        sql(
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'override', time_retained => '1h')");
+
+        FileStoreTable table = paimonTable("T");
+        assertThat(table.tagManager().getOrThrow("latest").id()).isEqualTo(2L);
+        assertThat(table.tagManager().getOrThrow("by-id").id()).isEqualTo(1L);
+        assertThat(table.tagManager().getOrThrow("latest").getTagTimeRetained())
+                .isEqualTo(Duration.ofDays(1));
+        assertThat(table.tagManager().getOrThrow("by-id").getTagTimeRetained())
+                .isEqualTo(Duration.ofDays(1));
+        assertThat(table.tagManager().getOrThrow("override").getTagTimeRetained())
+                .isEqualTo(Duration.ofHours(1));
+    }
 
     @Test
     public void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {

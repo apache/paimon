@@ -24,11 +24,22 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 /** Test for {@link RangeShuffle}. */
 class RangeShuffleTest {
+
+    @Test
+    void testBoundaryAboveTwoGiB() {
+        List<Tuple2<Integer, Integer>> samples = new ArrayList<>();
+        for (int key = 1; key <= 2000; key++) {
+            samples.add(Tuple2.of(key, 3 * 1024 * 1024));
+        }
+        Object[] boundaries = RangeShuffle.allocateRangeBaseSize(samples, 2);
+        Assertions.assertArrayEquals(new Object[] {1000}, boundaries);
+    }
 
     @Test
     void testAllocateRange() {

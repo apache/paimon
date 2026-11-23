@@ -57,6 +57,7 @@ import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
+import static org.apache.paimon.table.system.RowRangesTable.ROW_RANGES;
 import static org.apache.paimon.table.system.RowTrackingTable.ROW_TRACKING;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
@@ -87,6 +88,7 @@ public class SystemTableLoader {
                     .put(STATISTICS, StatisticTable::new)
                     .put(BINLOG, BinlogTable::new)
                     .put(TABLE_INDEXES, TableIndexesTable::new)
+                    .put(ROW_RANGES, RowRangesTable::new)
                     .put(ROW_TRACKING, RowTrackingTable::new)
                     .build();
 
@@ -100,7 +102,7 @@ public class SystemTableLoader {
      * distinct/null counts -- none of which a column mask covers.
      */
     private static final List<String> PHYSICAL_METADATA_TABLES =
-            Arrays.asList(FILES, FILE_KEY_RANGES, BINLOG, STATISTICS);
+            Arrays.asList(FILES, FILE_KEY_RANGES, ROW_RANGES, BINLOG, STATISTICS);
 
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {

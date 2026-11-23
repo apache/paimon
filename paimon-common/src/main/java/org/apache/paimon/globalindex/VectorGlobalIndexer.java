@@ -18,8 +18,18 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+
+import java.util.List;
+
 /** A {@link GlobalIndexer} that supports vector similarity search. */
 public interface VectorGlobalIndexer extends GlobalIndexer {
+
+    /** Bind exact scoring to the persisted metric of a routed index. */
+    default VectorGlobalIndexer forRead(
+            GlobalIndexFileReader reader, List<GlobalIndexIOMeta> files) {
+        return this;
+    }
 
     /** Returns the metric name used to convert vector distances to comparable scores. */
     String metric();

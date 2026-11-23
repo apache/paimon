@@ -18,7 +18,9 @@
 import logging
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Union
-from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
+from pypaimon.api.api_response import (
+    ErrorResponse, GetSemanticViewResponse, GetTableResponse, GetTagResponse, PagedList, Partition,
+)
 from pypaimon.api.model import CreateModelRequest
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_permission_management import RESTPermissionManagement
@@ -628,6 +630,21 @@ class RESTCatalog(Catalog):
             return PagedList(functions, result.next_page_token)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+
+    def get_semantic_view(self, identifier: Union[str, Identifier]) -> GetSemanticViewResponse:
+        """Read the name and complete stored definition of a semantic view."""
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        return self.rest_api.get_semantic_view(identifier)
+
+    def list_semantic_views_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[str]:
+        """List one page of visible semantic view names and its continuation token."""
+        return self.rest_api.list_semantic_views_paged(database_name, max_results, page_token)
 
     def create_model(
             self,

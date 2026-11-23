@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -74,6 +75,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -103,6 +105,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private final DVMetaCache dvMetaCache;
 
     private ScanMode scanMode = ScanMode.ALL;
+    @Nullable private Snapshot specifiedSnapshot;
     private boolean hasNonPartitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
@@ -185,13 +188,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    @Nullable
+    public Snapshot specifiedSnapshot() {
+        return specifiedSnapshot;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
-        scan.withSnapshot(snapshotId);
-        return this;
+        return withSnapshot(snapshotManager.snapshot(snapshotId));
     }
 
     @Override
     public SnapshotReader withSnapshot(Snapshot snapshot) {
+        specifiedSnapshot = snapshot;
         scan.withSnapshot(snapshot);
         return this;
     }
@@ -573,8 +582,28 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
 
-                // deduplicate: remove entries common to both lists
-                deduplicate(beforeEntries, dataEntries);
+                Map<String, DeletionFile> beforeVectors =
+                        beforeDeletionFilesMap == null
+                                ? Collections.emptyMap()
+                                : beforeDeletionFilesMap.getOrDefault(
+                                        Pair.of(part, bucket), Collections.emptyMap());
+                Map<String, DeletionFile> afterVectors =
+                        afterDeletionFilesMap == null
+                                ? Collections.emptyMap()
+                                : afterDeletionFilesMap.getOrDefault(
+                                        Pair.of(part, bucket), Collections.emptyMap());
+                // A primary-key diff must read both versions of a shared file when its visible
+                // rows changed. Append diffs only read newly added files.
+                deduplicate(
+                        beforeEntries,
+                        dataEntries,
+                        file ->
+                                tableSchema.primaryKeys().isEmpty()
+                                        || sameDeletionVector(
+                                                part,
+                                                bucket,
+                                                beforeVectors.get(file),
+                                                afterVectors.get(file)));
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -585,20 +614,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
                 List<DeletionFile> beforeDeletionFiles = null;
                 if (deletionVectors && beforeDeletionFilesMap != null) {
-                    beforeDeletionFiles =
-                            getDeletionFiles(
-                                    before,
-                                    beforeDeletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap()));
+                    beforeDeletionFiles = getDeletionFiles(before, beforeVectors);
                 }
 
                 List<DeletionFile> afterDeletionFiles = null;
                 if (deletionVectors && afterDeletionFilesMap != null) {
-                    afterDeletionFiles =
-                            getDeletionFiles(
-                                    after,
-                                    afterDeletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap()));
+                    afterDeletionFiles = getDeletionFiles(after, afterVectors);
                 }
 
                 IncrementalSplit split =
@@ -765,16 +786,41 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     /**
-     * Remove entries common to both lists using HashSet for O(n+m) complexity instead of O(n*m)
-     * with List.remove().
+     * A changed deletion vector rewrites every vector of its bucket into a new index file, so
+     * different descriptors may still hold the same bitmap.
+     */
+    private boolean sameDeletionVector(
+            BinaryRow partition,
+            int bucket,
+            @Nullable DeletionFile before,
+            @Nullable DeletionFile after) {
+        if (Objects.equals(before, after)) {
+            return true;
+        }
+        if (before == null
+                || after == null
+                || (before.cardinality() != null
+                        && after.cardinality() != null
+                        && !before.cardinality().equals(after.cardinality()))) {
+            return false;
+        }
+        DeletionVectorsIndexFile dvIndex = indexFileHandler.dvIndex(partition, bucket);
+        return dvIndex.readDeletionVector(before).equals(dvIndex.readDeletionVector(after));
+    }
+
+    /**
+     * Remove unchanged entries common to both lists using HashSet for O(n+m) complexity instead of
+     * O(n*m) with List.remove().
      */
     private static void deduplicate(
-            List<ManifestEntry> beforeEntries, List<ManifestEntry> dataEntries) {
+            List<ManifestEntry> beforeEntries,
+            List<ManifestEntry> dataEntries,
+            Filter<String> unchangedFile) {
         Set<ManifestEntry> afterSet = new HashSet<>(dataEntries);
         Set<ManifestEntry> commonEntries = new HashSet<>();
         beforeEntries.removeIf(
                 entry -> {
-                    if (afterSet.contains(entry)) {
+                    if (afterSet.contains(entry) && unchangedFile.test(entry.file().fileName())) {
                         commonEntries.add(entry);
                         return true;
                     }

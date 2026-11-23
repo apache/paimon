@@ -14,8 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
+import sys
 from functools import wraps
+from pathlib import Path
 
 import pytest
 
@@ -202,13 +205,25 @@ def pytest_configure(config):
         track_update(NativeShardTableUpdator, 'prepare_commit', 'shard')
 
 
-def pytest_collection_modifyitems(items):
-    if _native_plan_enabled():
-        return
-    skip_native = pytest.mark.skip(reason="native plan tests run in Native CI")
-    for item in items:
-        if item.get_closest_marker("native_plan") is not None:
-            item.add_marker(skip_native)
+@pytest.hookimpl(hookwrapper=True)
+def pytest_collection_modifyitems(config, items):
+    if not _native_plan_enabled():
+        skip_native = pytest.mark.skip(reason="native plan tests run in Native CI")
+        for item in items:
+            if item.get_closest_marker("native_plan") is not None:
+                item.add_marker(skip_native)
+
+    # Shard the same set of test cases pytest would run after marker selection.
+    yield
+    shard = os.environ.get("PYPAIMON_CI_SHARD")
+    if shard is not None:
+        from dev.ci_shards import select_shard
+
+        version = "{}.{}".format(*sys.version_info[:2])
+        selected, deselected, report = select_shard(items, os.environ[_EXECUTION_ENV], version, int(shard))
+        config.paimon_shard_report = report
+        items[:] = selected
+        config.hook.pytest_deselected(items=deselected)
 
 
 @pytest.fixture(autouse=True)
@@ -281,6 +296,17 @@ def enable_native_backends(request, monkeypatch):
 
 def pytest_sessionfinish(session, exitstatus):
     if exitstatus == 0:
+        report = getattr(session.config, "paimon_shard_report", None)
+        if report is not None:
+            report["native"] = {
+                "plan": _native_plan_count,
+                "read": _native_read_count,
+                "write": _native_write_count,
+                "commit": _native_commit_count,
+            }
+            report["native"].update(("update." + kind, count) for kind, count in _native_update_counts.items())
+            Path(os.environ["PYPAIMON_CI_SHARD_REPORT"]).write_text(json.dumps(report), encoding="utf-8")
+            return
         if ((_native_plan_enabled() and _native_plan_count == 0)
                 or (_native_read_enabled() and _native_read_count == 0)
                 or (_native_write_enabled() and _native_write_count == 0)

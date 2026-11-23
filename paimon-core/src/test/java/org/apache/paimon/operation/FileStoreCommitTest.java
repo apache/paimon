@@ -27,6 +27,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
@@ -41,6 +42,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -52,6 +54,7 @@ import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -889,6 +892,47 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testDropPartitionsByPredicate() throws Exception {
+        Map<BinaryRow, List<KeyValue>> data =
+                generateData(ThreadLocalRandom.current().nextInt(50, 1000));
+        TestFileStore store = createStore(false);
+        store.commitData(
+                data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
+                gen::getPartition,
+                kv -> 0);
+
+        // A predicate on dt alone also drops an hr partition the first commit did not write.
+        BinaryString dropped = data.keySet().iterator().next().getString(0);
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        new PredicateBuilder(TestKeyValueGenerator.DEFAULT_PART_TYPE)
+                                .equal(0, dropped));
+        store.commitData(
+                Collections.singletonList(
+                        gen.nextPartitionedData(RowKind.INSERT, dropped.toString(), 10)),
+                gen::getPartition,
+                kv -> 0);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.dropPartitions(partitionFilter, Long.MAX_VALUE);
+        }
+
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        List<KeyValue> expectedKvs = new ArrayList<>();
+        data.forEach(
+                (partition, kvs) -> {
+                    if (!partition.getString(0).equals(dropped)) {
+                        expectedKvs.addAll(kvs);
+                    }
+                });
+        gen.sort(expectedKvs);
+        List<KeyValue> actualKvs = store.readKvsFromSnapshot(snapshot.id());
+        gen.sort(actualKvs);
+        assertThat(store.toKvMap(actualKvs)).isEqualTo(store.toKvMap(expectedKvs));
+    }
+
+    @Test
     public void testDropEmptyPartition() throws Exception {
         TestFileStore store = createStore(false);
         assertThatThrownBy(() -> store.dropPartitions(Collections.emptyList()))
@@ -1007,15 +1051,18 @@ public class FileStoreCommitTest {
     public void testMaterializedCompactionOnlyRefreshesGlobalIndexInSameBucket() throws Exception {
         TestFileStore store = createStore(false, 2);
         BinaryRow partition = gen.getPartition(gen.next());
-        IndexManifestEntry materializedBucketDelete =
-                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
-        IndexManifestEntry otherBucketDelete =
-                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+        IndexManifestEntry materializedBucketIndex =
+                globalIndexEntry(partition, 0, "materialized-bucket-index");
+        IndexManifestEntry otherBucketIndex = globalIndexEntry(partition, 1, "other-bucket-index");
+        IndexManifestFile manifestFile = store.indexManifestFileFactory().create();
+        String manifest =
+                manifestFile.writeWithoutRolling(
+                        Arrays.asList(materializedBucketIndex, otherBucketIndex));
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.indexManifest()).thenReturn(manifest);
         CommitChanges changes =
                 new CommitChanges(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =
@@ -1023,18 +1070,23 @@ public class FileStoreCommitTest {
                                     changes,
                                     Snapshot.CommitKind.COMPACT,
                                     Collections.singleton(Pair.of(partition, 0)))
-                            .provide(null);
+                            .provide(snapshot);
 
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+            assertThat(refreshed.indexFiles)
+                    .containsExactly(materializedBucketIndex.toDeleteEntry());
+            String refreshedManifest =
+                    manifestFile.writeIndexFiles(
+                            manifest, refreshed.indexFiles, store.bucketMode());
+            assertThat(manifestFile.read(refreshedManifest)).containsExactly(otherBucketIndex);
         }
     }
 
-    private static IndexManifestEntry globalIndexDeleteEntry(
+    private static IndexManifestEntry globalIndexEntry(
             BinaryRow partition, int bucket, String fileName) {
         IndexFileMeta file =
                 new IndexFileMeta(
                         "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
-        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
+        return new IndexManifestEntry(FileKind.ADD, partition, bucket, file);
     }
 
     @Test

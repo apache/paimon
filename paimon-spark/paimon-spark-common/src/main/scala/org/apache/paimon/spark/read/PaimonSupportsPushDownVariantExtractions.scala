@@ -19,8 +19,10 @@
 package org.apache.paimon.spark.read
 
 /**
- * No-op default for Spark versions without `SupportsPushDownVariantExtractions` (3.x / 4.0). The
- * 4.1 module overrides this trait at the same FQN to mix in the Spark interface. See
+ * No-op on every Spark version: Paimon accepts no variant extractions. On Spark 4.1 and 4.2, once a
+ * scan accepts one, Spark builds it without column pruning and without its metadata columns (fixed
+ * by SPARK-57499 in Spark 4.3). Spark 4.3 still cannot plan a partly accepted call, so a version
+ * module that overrides this trait at the same FQN must accept all extractions or none. See
  * [[PaimonSupportsRuntimeFiltering]] for the same shadowing pattern.
  */
 trait PaimonSupportsPushDownVariantExtractions {

@@ -43,7 +43,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     val writeOptions = Map(
       CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
       CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
-    paimonTable.copy(writeOptions.asJava)
+    paimonTable.copyWithoutTimeTravel(writeOptions.asJava)
   }
 
   private val dataEvolutionNestedFieldEnabled =

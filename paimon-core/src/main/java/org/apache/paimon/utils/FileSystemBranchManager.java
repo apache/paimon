@@ -44,6 +44,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A {@link BranchManager} implementation to manage branches via file system. */
 public class FileSystemBranchManager implements BranchManager {
@@ -441,7 +442,11 @@ public class FileSystemBranchManager implements BranchManager {
 
         try {
             // Use rename for atomic operation and better performance
-            fileIO.rename(branchPath(fromBranch), branchPath(toBranch));
+            checkState(
+                    fileIO.rename(branchPath(fromBranch), branchPath(toBranch)),
+                    "Failed to rename branch '%s' to '%s'.",
+                    fromBranch,
+                    toBranch);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

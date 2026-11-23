@@ -221,6 +221,10 @@ conditions.
 Runtime index filtering uses the scan's original snapshot and combines join keys
 with its existing filters. It only activates when the index covers the complete
 snapshot and its source metadata confirms that indexed values have not changed.
+Runtime keys also require recorded build-schema metadata and matching field types.
+Legacy indexes without a build schema, changed key types, or missing historical
+schemas keep the ordinary scan. After changing an indexed type, drop and rebuild
+the index to make it eligible again; comments and same-type renames are compatible.
 Every eligible single-column index definition must cover the snapshot. Columns
 also present in a composite index are excluded because the query planner may
 choose that index after combining static and runtime predicates.

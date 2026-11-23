@@ -21,19 +21,271 @@ package org.apache.paimon.spark
 import org.apache.paimon.data.GenericRow
 import org.apache.paimon.fs.Path
 import org.apache.paimon.globalindex.{IndexedSplit, IndexQuerySplit}
+import org.apache.paimon.index.{DataEvolutionIndexSourceMeta, GlobalIndexMeta, IndexFileMeta}
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder
 import org.apache.paimon.table.AppendOnlyFileStoreTable
+import org.apache.paimon.table.SpecialFields
 import org.apache.paimon.table.sink.CommitMessageImpl
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.expressions.Expressions
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.read.{Batch, PartitionReaderFactory}
-import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation}
 import org.mockito.Mockito.{atLeastOnce, clearInvocations, mockingDetails, never, spy, verify}
+
+import java.nio.ByteBuffer
 
 import scala.collection.JavaConverters._
 
 class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
+
+  test("a retained index builder is checked after a concurrent key type change") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact", "runtime_dim") {
+        sql("""CREATE TABLE runtime_fact (id INT, k INT) TBLPROPERTIES (
+              |'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+        sql("""INSERT INTO runtime_fact SELECT /*+ COALESCE(1) */
+              |CAST(id AS INT), CAST(id % 10 AS INT) FROM range(100)""".stripMargin)
+        val oldTable = loadTable("runtime_fact")
+        val oldRelation = sql("SELECT * FROM runtime_fact").queryExecution.analyzed.collectFirst {
+          case r: DataSourceV2Relation => r
+        }.get
+        sql("ALTER TABLE runtime_fact ALTER COLUMN k TYPE BIGINT")
+        sql("INSERT INTO runtime_fact VALUES (100, 2L)")
+        val messages = new SortedIndexTopoBuilder().buildIndex(
+          spark,
+          oldRelation,
+          null,
+          oldTable,
+          "btree",
+          SpecialFields.rowTypeWithRowId(oldTable.rowType().project("k")),
+          oldTable.rowType().getField("k"),
+          oldTable.coreOptions().toConfiguration
+        )
+        val commit = oldTable.newCommit("retained-index-builder")
+        try commit.commit(messages)
+        finally commit.close()
+        val current = loadTable("runtime_fact")
+        val entry = current
+          .store()
+          .newIndexFileHandler()
+          .scan(current.snapshotManager().latestSnapshot(), "btree")
+          .get(0)
+        val source = DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile())
+        assert(source.sourceSchemaId() == oldTable.schema().id())
+        assert(
+          current.snapshotManager().snapshot(source.scanSnapshotId()).schemaId() >
+            source.sourceSchemaId())
+        sql("CREATE TABLE runtime_dim (k BIGINT, keep INT)")
+        sql("INSERT INTO runtime_dim VALUES (2L, 1), (7L, 0)")
+        val query = """SELECT /*+ BROADCAST(d) */ f.id
+                      |FROM runtime_fact f JOIN runtime_dim d ON f.k = d.k
+                      |WHERE d.keep = 1""".stripMargin
+        Seq(false, true).foreach {
+          enabled =>
+            withSparkSQLConf(
+              "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> enabled.toString) {
+              checkAnswer(sql(query), (2 until 100 by 10).map(Row(_)) :+ Row(100))
+            }
+        }
+      }
+    }
+  }
+
+  Seq(false, true).foreach {
+    queryInReader =>
+      test(s"a widened index key falls back until the index is rebuilt, reader: $queryInReader") {
+        withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+          withTable("runtime_fact", "runtime_dim") {
+            sql(s"""CREATE TABLE runtime_fact (id INT, k INT) TBLPROPERTIES (
+                   |'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                   |'global-index.query-in-reader.enabled'='$queryInReader')""".stripMargin)
+            sql("""INSERT INTO runtime_fact SELECT /*+ COALESCE(1) */
+                  |CAST(id AS INT), CAST(id % 10 AS INT) FROM range(100)""".stripMargin)
+            sql(
+              "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+                "index_column => 'k', index_type => 'btree')")
+            sql("ALTER TABLE runtime_fact ALTER COLUMN k TYPE BIGINT")
+            sql("CREATE TABLE runtime_dim (k BIGINT, keep INT)")
+            sql("INSERT INTO runtime_dim VALUES (2L, 1), (7L, 0)")
+            val query = """SELECT /*+ BROADCAST(d) */ f.id
+                          |FROM runtime_fact f JOIN runtime_dim d ON f.k = d.k
+                          |WHERE d.keep = 1""".stripMargin
+            val expected = (2 until 100 by 10).map(Row(_))
+            Seq(false, true).foreach {
+              enabled =>
+                withSparkSQLConf(
+                  "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> enabled.toString) {
+                  checkAnswer(sql(query), expected)
+                }
+            }
+
+            sql(
+              "CALL sys.drop_global_index(table => 'test.runtime_fact', " +
+                "index_column => 'k', index_type => 'btree')")
+            sql(
+              "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+                "index_column => 'k', index_type => 'btree')")
+            val rebuilt = sql(query)
+            checkAnswer(rebuilt, expected)
+            val scan = rebuilt.queryExecution.executedPlan.collectFirst {
+              case s: BatchScanExec if s.output.exists(_.name == "id") => s
+            }.get
+            assert(scan.runtimeFilters.nonEmpty)
+            val indexedRows = scan.scan
+              .asInstanceOf[PaimonScan]
+              .inputSplits
+              .map {
+                case split: IndexedSplit => split.rowCount()
+                case split: IndexQuerySplit =>
+                  split.evaluate(loadTable("runtime_fact").fileIO()).rowCount()
+                case other => fail(s"Expected an index split, found $other")
+              }
+              .sum
+            assert(indexedRows == 10)
+          }
+        }
+      }
+  }
+
+  test("comments and same-type renames keep runtime index filtering eligible") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact") {
+        createFact()
+        sql("ALTER TABLE runtime_fact ALTER COLUMN k COMMENT 'index key'")
+        sql("ALTER TABLE runtime_fact RENAME COLUMN k TO renamed_k")
+        val scan = factScan("SELECT id, renamed_k FROM runtime_fact")
+        scan.filter(
+          Array(
+            new Predicate(
+              "IN",
+              Array(Expressions.column("renamed_k"), Expressions.literal(Int.box(2))))))
+        assert(readIds(scan.toBatch, scan.toBatch.createReaderFactory()) == Seq(2, 12, 22))
+        assert(scan.inputSplits.forall(_.isInstanceOf[IndexedSplit]))
+      }
+    }
+  }
+
+  test("an expired source snapshot does not invalidate a recorded build schema") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact") {
+        createFact()
+        val table = loadTable("runtime_fact")
+        val manager = table.snapshotManager()
+        val entry =
+          table.store().newIndexFileHandler().scan(manager.latestSnapshot(), "btree").get(0)
+        val sourceId =
+          DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile()).scanSnapshotId()
+        assert(sourceId < manager.latestSnapshotId())
+        table.fileIO().delete(manager.snapshotPath(sourceId), false)
+        manager.invalidateCache()
+        val scan = factScan("SELECT id, k FROM runtime_fact")
+        scan.filter(Array(in(2)))
+        assert(readIds(scan.toBatch, scan.toBatch.createReaderFactory()) == Seq(2, 12, 22))
+        assert(scan.inputSplits.forall(_.isInstanceOf[IndexedSplit]))
+      }
+    }
+  }
+
+  test("a missing index build schema keeps the ordinary scan") {
+    withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+      withTable("runtime_fact") {
+        createFact()
+        sql(
+          "CALL sys.drop_global_index(table => 'test.runtime_fact', " +
+            "index_column => 'k', index_type => 'btree')")
+        sql("ALTER TABLE runtime_fact ALTER COLUMN k COMMENT 'build schema'")
+        sql(
+          "CALL sys.create_global_index(table => 'test.runtime_fact', " +
+            "index_column => 'k', index_type => 'btree')")
+        val buildSchemaId = loadTable("runtime_fact").schema().id()
+        sql("ALTER TABLE runtime_fact ALTER COLUMN k COMMENT 'read schema'")
+        val table = loadTable("runtime_fact")
+        table.fileIO().delete(table.schemaManager().toSchemaPath(buildSchemaId), false)
+        val scan = factScan("SELECT id, k FROM runtime_fact")
+        assert(scan.filterAttributes().isEmpty)
+        scan.filter(Array(in(2)))
+        assert(readIds(scan.toBatch, scan.toBatch.createReaderFactory()).size == 30)
+      }
+    }
+  }
+
+  for (sourceVersion <- Seq(1, 2); queryInReader <- Seq(false, true)) {
+    test(
+      s"unknown build schema falls back after type change, source v$sourceVersion, reader: $queryInReader") {
+      withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+        withTable("runtime_fact", "runtime_dim") {
+          sql(s"""CREATE TABLE runtime_fact (id INT, k INT) TBLPROPERTIES (
+                 |'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                 |'global-index.query-in-reader.enabled'='$queryInReader')""".stripMargin)
+          sql("""INSERT INTO runtime_fact SELECT /*+ COALESCE(1) */
+                |CAST(id AS INT), CAST(id % 10 AS INT) FROM range(30)""".stripMargin)
+          val table = loadTable("runtime_fact")
+          val relation = sql("SELECT * FROM runtime_fact").queryExecution.analyzed.collectFirst {
+            case r: DataSourceV2Relation => r
+          }.get
+          val messages = new SortedIndexTopoBuilder().buildIndex(
+            spark,
+            relation,
+            null,
+            table,
+            "btree",
+            SpecialFields.rowTypeWithRowId(table.rowType().project("k")),
+            table.rowType().getField("k"),
+            table.coreOptions().toConfiguration
+          )
+          messages.asScala.foreach {
+            message =>
+              val files =
+                message.asInstanceOf[CommitMessageImpl].newFilesIncrement().newIndexFiles()
+              val legacyFiles = files.asScala.map {
+                file =>
+                  val meta = file.globalIndexMeta()
+                  val sourceId = DataEvolutionIndexSourceMeta.fromIndexFile(file).scanSnapshotId()
+                  val source = if (sourceVersion == 1) {
+                    ByteBuffer.allocate(16).putInt(0x44454958).putInt(1).putLong(sourceId).array()
+                  } else {
+                    new DataEvolutionIndexSourceMeta(sourceId).serialize()
+                  }
+                  new IndexFileMeta(
+                    file.indexType(),
+                    file.fileName(),
+                    file.fileSize(),
+                    file.rowCount(),
+                    new GlobalIndexMeta(
+                      meta.rowRangeStart(),
+                      meta.rowRangeEnd(),
+                      meta.indexFieldId(),
+                      meta.extraFieldIds(),
+                      meta.indexMeta(),
+                      source),
+                    file.externalPath()
+                  )
+              }.toList
+              files.clear()
+              files.addAll(legacyFiles.asJava)
+          }
+          val commit = table.newCommit("legacy-index-fixture")
+          try commit.commit(messages)
+          finally commit.close()
+          sql("ALTER TABLE runtime_fact ALTER COLUMN k TYPE BIGINT")
+          sql("CREATE TABLE runtime_dim (k BIGINT, keep INT)")
+          sql("INSERT INTO runtime_dim VALUES (2L, 1), (7L, 0)")
+          val query = """SELECT /*+ BROADCAST(d) */ f.id
+                        |FROM runtime_fact f JOIN runtime_dim d ON f.k = d.k
+                        |WHERE d.keep = 1""".stripMargin
+          Seq(false, true).foreach {
+            enabled =>
+              withSparkSQLConf(
+                "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> enabled.toString) {
+                checkAnswer(sql(query), Seq(Row(2), Row(12), Row(22)))
+              }
+          }
+        }
+      }
+    }
+  }
 
   test("ordinary fallback reads preserve a branch snapshot newer than main") {
     withTable("runtime_fact") {
@@ -95,6 +347,7 @@ class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
               s"CALL sys.create_global_index(table => 'test.runtime_fact', " +
                 s"index_column => '$field', index_type => 'btree')")
         }
+        sql("ALTER TABLE runtime_fact ALTER COLUMN k COMMENT 'new read schema'")
         val original = loadTable("runtime_fact")
         val fileIO = spy(original.fileIO())
         val table = new AppendOnlyFileStoreTable(
@@ -113,6 +366,7 @@ class RuntimeScalarIndexFilterTest extends PaimonSparkTestBase {
               !n.startsWith("manifest-list-"))
         assert(scan.filterAttributes().map(_.fieldNames().head).toSet == Set("p", "k", "c"))
         assert(reads.count(_.startsWith("index-manifest-")) == 1)
+        assert(reads.count(_ == "schema-0") == 1)
         assert(dataReads.isEmpty)
         clearInvocations(fileIO)
         scan.filter(Array(in(2)))

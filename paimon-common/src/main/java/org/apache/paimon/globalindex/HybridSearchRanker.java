@@ -126,12 +126,8 @@ public class HybridSearchRanker {
                 min = Math.min(min, score);
                 max = Math.max(max, score);
             }
-            float range = max - min;
-
             for (long rowId : result.results()) {
-                // No spread within the route (single hit or all ties) carries no relative signal,
-                // so every hit maps to 1.0 rather than being zeroed out.
-                float normalized = range > 0.0f ? (scoreGetter.score(rowId) - min) / range : 1.0f;
+                float normalized = normalizeRouteScore(scoreGetter.score(rowId), min, max);
                 float contribution = weight * normalized;
                 scores.compute(
                         rowId,
@@ -139,6 +135,15 @@ public class HybridSearchRanker {
             }
         }
         return topK(scores, limit);
+    }
+
+    /** Min-max normalizes a score within its route. A route with no spread maps to one. */
+    public static float normalizeRouteScore(float score, float min, float max) {
+        float range = max - min;
+        if (Float.isInfinite(range) && Float.isFinite(min) && Float.isFinite(max)) {
+            return (float) (((double) score - min) / ((double) max - min));
+        }
+        return range > 0.0f ? (score - min) / range : 1.0f;
     }
 
     public static ScoredGlobalIndexResult mrr(

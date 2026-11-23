@@ -43,6 +43,12 @@ public interface GlobalIndexerFactory {
         return files;
     }
 
+    /** Creates an indexer for existing files. Implementations can use persisted build settings. */
+    default GlobalIndexer createForRead(List<DataField> indexFields, Options tableOptions) {
+        return create(
+                indexFields, GlobalIndexer.resolveOptions(identifier(), indexFields, tableOptions));
+    }
+
     /** Creates an indexer over a non-empty list of columns in index order. */
     GlobalIndexer create(List<DataField> indexFields, Options options);
 }

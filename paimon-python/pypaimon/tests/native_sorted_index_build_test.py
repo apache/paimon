@@ -31,9 +31,12 @@ from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.read.plan import native_plan
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.schema.schema_change import SchemaChange
@@ -398,6 +401,29 @@ def test_both_index_types_can_share_one_explicit_commit(rest_catalog):
     assert table.snapshot_manager().get_latest_snapshot().id == 2
     assert {file.index_type for file in _files(table)} == {'btree', 'bitmap'}
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
+
+
+@pytest.mark.parametrize('kind', ['btree', 'bitmap'])
+@pytest.mark.parametrize('source_schema_id', [0, -1])
+def test_native_query_reads_index_with_version_two_source_meta(rest_catalog, kind, source_schema_id):
+    catalog, _ = rest_catalog
+    table = _create(catalog)
+    _append(table, ROWS)
+    messages = _build(table, kind)
+    for file in _message_files(messages):
+        meta = file.global_index_meta
+        source = DataEvolutionIndexSourceMeta.deserialize(meta.source_meta)
+        meta.source_meta = DataEvolutionIndexSourceMeta(
+            source.scan_snapshot_id, source_schema_id).serialize()
+    _commit(table, messages)
+
+    files = _files(table)
+    assert files
+    assert all(file.global_index_meta.source_meta == struct.pack('>iiqq', 0x44454958, 2, 1, source_schema_id)
+               for file in files)
+    predicate = table.new_read_builder().new_predicate_builder().equal('name', 'a')
+    assert any(isinstance(split, IndexedSplit) for split in native_plan(table, predicate=predicate).splits())
+    assert _ids(table, predicate) == [1, 5]
 
 
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])

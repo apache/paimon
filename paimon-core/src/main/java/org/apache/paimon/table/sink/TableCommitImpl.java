@@ -32,6 +32,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagAutoCreation;
@@ -54,7 +55,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -70,6 +71,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
@@ -184,6 +186,16 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl dataEvolutionRangeSortCheck() {
+        commit.dataEvolutionRangeSortCheck();
+        return this;
+    }
+
+    public boolean isRangeSortConflict(RuntimeException failure) {
+        return commit.isRangeSortConflict(failure);
+    }
+
+    @Override
     public TableCommitImpl withOperation(Snapshot.Operation operation) {
         commit.withOperation(operation);
         return this;
@@ -218,6 +230,13 @@ public class TableCommitImpl implements InnerTableCommit {
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
         commit.withOperation(Snapshot.Operation.TRUNCATE);
         commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public void truncatePartitions(PartitionPredicate partitionFilter) {
+        checkNotNull(partitionFilter, "Partition filter cannot be null.");
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
+        commit.dropPartitions(partitionFilter, COMMIT_IDENTIFIER);
     }
 
     @Override
@@ -440,7 +459,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         // expire consumer first to avoid preventing snapshot expiration
         if (doExpire && consumerExpireTime != null) {
-            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
+            consumerManager.expire(Instant.now().minus(consumerExpireTime).toEpochMilli());
         }
 
         // snapshot expiration usually take the most time, so put it at the end

@@ -20,7 +20,7 @@ package org.apache.paimon.spark.read
 
 import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.{GlobalIndexSearchMode, StartupMode}
-import org.apache.paimon.globalindex.{DataEvolutionGlobalIndexCoverage, DataEvolutionGlobalIndexRefreshPlanner}
+import org.apache.paimon.globalindex.{DataEvolutionGlobalIndexCoverage, DataEvolutionGlobalIndexRefreshPlanner, DataEvolutionIndexSchema}
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.partition.PartitionPredicate
@@ -100,6 +100,7 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
   // Only inspect index metadata here; scan data manifests for freshness in filter().
   private lazy val runtimeIndexFields: Set[String] = runtimeReadSnapshot.toSeq.flatMap {
     case (fileTable, snapshot) =>
+      val indexSchema = new DataEvolutionIndexSchema(fileTable)
       val compositeFields = runtimeIndexEntries
         .filter(_.indexFile().globalIndexMeta().getIndexedFieldIds.size() > 1)
         .flatMap(_.indexFile().globalIndexMeta().getIndexedFieldIds.asScala)
@@ -128,12 +129,16 @@ trait PaimonSupportsRuntimeFiltering extends BaseScan with SupportsRuntimeV2Filt
                   snapshot,
                   null,
                   entries.map(_.indexFile()).asJava,
-                  GlobalIndexSearchMode.FULL).unindexedRanges(field.id()).isEmpty
+                  GlobalIndexSearchMode.FULL,
+                  indexSchema).unindexedRanges(field.id()).isEmpty
             } &&
             fieldEntries.forall(
               e =>
                 DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                  e.indexFile().globalIndexMeta().sourceMeta()))
+                  e.indexFile().globalIndexMeta().sourceMeta()) &&
+                  indexSchema.isCompatible(e.indexFile()) &&
+                  // A data snapshot's schema is not necessarily the index builder's schema.
+                  DataEvolutionIndexSourceMeta.fromIndexFile(e.indexFile()).sourceSchemaId() >= 0)
         }
         .map(_.name())
         .toSet

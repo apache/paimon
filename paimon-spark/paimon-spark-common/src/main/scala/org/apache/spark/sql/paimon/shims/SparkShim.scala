@@ -127,6 +127,12 @@ trait SparkShim {
       catalog: TableCatalog,
       ident: Identifier): Array[Column]
 
+  // Spark 4.1 added table constraints. Earlier versions have none to validate.
+  def validateTableConstraints(
+      tableSpec: TableSpec,
+      catalog: TableCatalog,
+      ident: Identifier): Unit = {}
+
   def copyTableSpec(
       tableSpec: TableSpec,
       additionalProperties: Map[String, String],

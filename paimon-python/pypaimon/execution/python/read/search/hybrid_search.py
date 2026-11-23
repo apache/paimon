@@ -198,12 +198,20 @@ def _weighted_score(self, route_results):
         if not route_scores:
             continue
         min_score = min(route_scores.values())
-        score_range = max(route_scores.values()) - min_score
+        max_score = max(route_scores.values())
+        with np.errstate(over="ignore"):
+            score_range = max_score - min_score
+        use_wide_range = np.isinf(score_range) and np.isfinite(min_score) and np.isfinite(max_score)
+        if use_wide_range:
+            min_score = float(min_score)
+            score_range = float(max_score) - min_score
         for row_id, raw in route_scores.items():
+            if use_wide_range:
+                raw = float(raw)
             # No spread within the route (single hit or all ties) carries no
             # relative signal, so every hit maps to 1.0 rather than zeroed out.
             normalized = (
-                (raw - min_score) / score_range if score_range > 0.0 else np.float32(1.0))
+                np.float32((raw - min_score) / score_range) if score_range > 0.0 else np.float32(1.0))
             scores[row_id] = scores.get(row_id, np.float32(0.0)) + weight * normalized
     return _top_k(scores, self._limit)
 

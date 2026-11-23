@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.globalindex.HybridSearchRanker;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -108,9 +110,9 @@ public final class PrimaryKeySearchRanker {
                 min = Math.min(min, position.score());
                 max = Math.max(max, position.score());
             }
-            float range = max - min;
             for (PrimaryKeySearchPosition position : ranking.positions) {
-                double normalized = range > 0F ? (position.score() - min) / range : 1D;
+                double normalized =
+                        HybridSearchRanker.normalizeRouteScore(position.score(), min, max);
                 fusedScores.merge(position, ranking.weight * normalized, Double::sum);
             }
         }

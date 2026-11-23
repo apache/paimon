@@ -159,7 +159,8 @@ public class SortedGlobalIndexWriter implements Serializable {
             BinaryRow partition,
             long scanSnapshotId)
             throws IOException {
-        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(scanSnapshotId).serialize();
+        byte[] sourceMeta =
+                new DataEvolutionIndexSourceMeta(scanSnapshotId, table.schema().id()).serialize();
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),

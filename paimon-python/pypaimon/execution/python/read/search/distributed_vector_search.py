@@ -17,15 +17,16 @@
 
 """Python search tasks and global result coordination for distributed executors."""
 
-from collections import Counter
 import math
+from collections import Counter
+from itertools import chain
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.execution.python.read.search.vector_search_read import (
     BatchVectorSearchReadImpl, DataEvolutionVectorRead,
-    _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits,
+    _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits, _top_vector_scores,
 )
 from pypaimon.execution.python.read.search import global_index_live_row_filter
 from pypaimon.execution.python.read.search.distributed_search import closing_task_results
@@ -77,15 +78,12 @@ class DistributedVectorSearchRead(DataEvolutionVectorRead):
         table_read, splits = self._plan_raw_read(ranges, include_filter, snapshot)
         context = (table_read, self._vector_column, query_vector,
                    self._limit, self._search_metric(index_type))
-        heap = []
         # Keep each planned data split intact: its files may be vertical column
         # groups that must be read together to reconstruct a logical row.
         work = [SearchTask(_search_raw_split, context, split) for split in splits]
         with closing_task_results(self._executor.map(work)) as tasks:
-            for _, scores in tasks:
-                for row_id, score in scores.items():
-                    _offer_score(heap, self._limit, row_id, score)
-        return _scored_result(heap)
+            rows = chain.from_iterable(scores.items() for _, scores in tasks)
+            return _top_vector_scores(rows, self._limit)
 
 
 class DistributedBatchVectorSearchRead(BatchVectorSearchReadImpl):

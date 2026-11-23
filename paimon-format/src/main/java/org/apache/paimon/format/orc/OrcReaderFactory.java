@@ -452,7 +452,12 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 options.positionalEvolutionLevel(
                         OrcConf.FORCE_POSITIONAL_EVOLUTION_LEVEL.getInt(conf));
             }
-            if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled && selection == null) {
+            // Nested vectors use physical child positions and cannot consume selected-row batches.
+            // Keep row-group pruning for these schemas; callers evaluate the residual filter.
+            if (!conjunctPredicates.isEmpty()
+                    && !deletionVectorsEnabled
+                    && selection == null
+                    && schema.getChildren().stream().allMatch(t -> t.getCategory().isPrimitive())) {
                 // row group filter push down will make row number change incorrect
                 // so deletion vectors mode and bitmap index cannot work with row group push down
                 options.useSelected(OrcConf.READER_USE_SELECTED.getBoolean(conf));

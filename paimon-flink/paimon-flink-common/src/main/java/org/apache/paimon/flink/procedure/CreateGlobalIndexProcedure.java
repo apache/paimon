@@ -20,7 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
-import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -117,20 +117,9 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         Options userOptions = createUserOptions(table, options);
 
         indexType = indexType.toLowerCase(Locale.ROOT).trim();
-        if (indexColumns.size() > 1) {
-            // Fail fast before submitting the job: index types that do not support multi-column
-            // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.
-            List<DataField> indexFields =
-                    indexColumns.stream().map(rowType::getField).collect(Collectors.toList());
-            try {
-                GlobalIndexer.create(indexType, indexFields, userOptions);
-            } catch (UnsupportedOperationException e) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Index type '%s' does not support multi-column index, got columns: %s",
-                                indexType, indexColumns));
-            }
-        }
+        List<DataField> indexFields =
+                indexColumns.stream().map(rowType::getField).collect(Collectors.toList());
+        GlobalIndexBuilderUtils.validateIndexFields(indexType, indexFields, userOptions);
         try {
             if (SortedIndexTopoBuilder.supports(indexType)) {
                 SortedIndexTopoBuilder.buildIndexAndExecute(

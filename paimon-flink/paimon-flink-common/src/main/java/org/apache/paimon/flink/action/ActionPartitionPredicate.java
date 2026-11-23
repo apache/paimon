@@ -36,11 +36,11 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Creates partition predicates shared by table actions. */
-final class ActionPartitionPredicate {
+public final class ActionPartitionPredicate {
 
     private ActionPartitionPredicate() {}
 
-    static PartitionPredicate create(
+    public static PartitionPredicate create(
             FileStoreTable table,
             List<Map<String, String>> partitions,
             String whereSql,

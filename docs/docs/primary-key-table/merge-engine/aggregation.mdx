@@ -97,6 +97,7 @@ Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` rec
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
   For TINYINT, SMALLINT, INTEGER, and BIGINT, overflows are ignored by default.
+  For DECIMAL, a precision overflow makes the aggregated value NULL by default.
   Set `fields.<field-name>.sum.fail-on-overflow` to `true` to throw an exception on overflow.
 
 ### product
@@ -165,7 +166,7 @@ count of distinct event IDs.
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
   Each field not part of the primary keys can be given a list agg delimiter, specified by the fields.\<field-name>.list-agg-delimiter table property, otherwise it will use "," as default.
-  You can use `fields.<field-name>.distinct=true` to deduplicate values split by the `fields.<field-name>.list-agg-delimiter`.
+  With `fields.<field-name>.distinct=true`, values are split by the `fields.<field-name>.list-agg-delimiter` and each non-blank token is kept once, in the order first seen. This also applies to the first value, so merging `a,a` with `b` produces `a,b`.
 
 ### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.

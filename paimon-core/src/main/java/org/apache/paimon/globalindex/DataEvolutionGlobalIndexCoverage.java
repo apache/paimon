@@ -60,6 +60,22 @@ public class DataEvolutionGlobalIndexCoverage {
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles,
             GlobalIndexSearchMode searchMode) {
+        this(
+                table,
+                snapshot,
+                partitionFilter,
+                indexFiles,
+                searchMode,
+                new DataEvolutionIndexSchema(table));
+    }
+
+    public DataEvolutionGlobalIndexCoverage(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles,
+            GlobalIndexSearchMode searchMode,
+            DataEvolutionIndexSchema schema) {
         this.table = table;
         this.snapshot = snapshot;
         this.partitionFilter = partitionFilter;
@@ -67,16 +83,13 @@ public class DataEvolutionGlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
-                continue;
-            }
             // Single-field coverage belongs to single-field index definitions. Multi-field
             // query paths supply their actual coverage explicitly.
-            if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
+            if ((meta.extraFieldIds() != null && meta.extraFieldIds().length > 0)
+                    || !schema.isCompatible(indexFile)) {
                 continue;
             }
-            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            addCoverage(meta.indexFieldId(), range);
+            addCoverage(meta.indexFieldId(), meta.rowRange());
         }
     }
 

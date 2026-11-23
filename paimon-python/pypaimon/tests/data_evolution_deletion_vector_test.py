@@ -66,7 +66,7 @@ class _OneBatchReader(RecordBatchReader):
 class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
     def __init__(
         self, files, values_by_file_name, row_ranges=None, deletion_vector=None,
-        batch_size=1024
+        batch_size=1024, logical_ranges=None
     ):
         super().__init__(
             [(file, lambda: None) for file in files],
@@ -76,6 +76,7 @@ class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
             blob_as_descriptor=False,
             deletion_vector=deletion_vector,
             batch_size=batch_size,
+            logical_ranges=logical_ranges,
         )
         self._values_by_file_name = values_by_file_name
 
@@ -385,6 +386,43 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
                 [("blob-0.blob", [0]), ("blob-10.blob", [10])],
                 reader.selected_calls,
             )
+        finally:
+            reader.close()
+
+    def test_disjoint_blob_sequences_visit_states_linearly(self):
+        files = [_file(f"blob-{i}.blob", i * 2, 2, i + 1) for i in range(128)]
+        values = {
+            file.file_name: [BlobData(str(file.first_row_id + j).encode()) for j in range(2)]
+            for file in files
+        }
+        reader = _BlobFallbackBatchReaderForTest(list(reversed(files)), values, batch_size=2)
+        reader._state_overlaps_batch = Mock(wraps=reader._state_overlaps_batch)
+        try:
+            result = []
+            for batch in iter(reader.read_arrow_batch, None):
+                result.extend(batch.column(0).to_pylist())
+            self.assertEqual([str(i).encode() for i in range(256)], result)
+            self.assertLessEqual(reader._state_overlaps_batch.call_count, 2 * len(files))
+        finally:
+            reader.close()
+
+    def test_disjoint_blob_sequences_preserve_selected_gaps_and_placeholders(self):
+        deletion_vector = BitmapDeletionVector()
+        deletion_vector.delete(5)
+        reader = _BlobFallbackBatchReaderForTest(
+            [_file("right.blob", 5, 2, 3), _file("left.blob", 1, 2, 7)],
+            {"left.blob": [BlobData(b"left"), Blob.PLACE_HOLDER],
+             "right.blob": [BlobData(b"deleted"), None]},
+            row_ranges=[Range(0, 2), Range(4, 7)],
+            deletion_vector=(Range(0, 7), deletion_vector),
+            batch_size=2,
+            logical_ranges=[Range(0, 7)],
+        )
+        try:
+            result = []
+            for batch in iter(reader.read_arrow_batch, None):
+                result.extend(batch.column(0).to_pylist())
+            self.assertEqual([None, b"left", None, None, None, None], result)
         finally:
             reader.close()
 

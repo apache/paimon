@@ -200,7 +200,7 @@ To perform vector similarity search on a table with a global vector index. Retur
 
 - `vector_column` (required): the name of the vector column to search.
 
-- `query_vector` (required): comma-separated float values representing the query vector, e.g. '1.0,2.0,3.0'.
+- `query_vector` (required) accepts comma-separated coordinates for one vector, such as `'1.0,2.0,3.0'`. For MaxSim search on a list of vectors in a Data Evolution table, pass a JSON matrix such as `'[[1,0],[0,1]]'`.
 
 - `top_k` (required): the number of nearest neighbors to return.
 
