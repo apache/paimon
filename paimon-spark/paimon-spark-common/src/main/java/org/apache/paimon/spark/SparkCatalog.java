@@ -121,6 +121,7 @@ import static org.apache.paimon.spark.utils.CatalogUtils.checkNoDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
+import static org.apache.paimon.spark.utils.CatalogUtils.toPaimonDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultValue;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -783,7 +784,8 @@ public class SparkCatalog extends SparkBaseCatalog
                     type,
                     comment,
                     field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)
-                            ? field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY)
+                            ? toPaimonDefaultValue(
+                                    field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY))
                             : null,
                     generationExpression);
         }

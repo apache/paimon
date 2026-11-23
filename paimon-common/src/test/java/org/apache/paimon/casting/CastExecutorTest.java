@@ -649,10 +649,6 @@ public class CastExecutorTest {
         CastExecutor<?, ?> cast =
                 CastExecutors.resolve(VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.INT()));
         compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
-        compareCastResult(
-                cast,
-                BinaryString.fromString("ARRAY(1, " + literal + ")"),
-                new GenericArray(new Object[] {1, null}));
     }
 
     @ParameterizedTest
@@ -662,10 +658,6 @@ public class CastExecutorTest {
                 CastExecutors.resolve(
                         VarCharType.STRING_TYPE, DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
         compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
-        compareCastResult(
-                cast,
-                BinaryString.fromString("MAP(1, " + literal + ")"),
-                new GenericMap(Collections.singletonMap(1, null)));
     }
 
     @ParameterizedTest
@@ -675,38 +667,46 @@ public class CastExecutorTest {
                 CastExecutors.resolve(
                         VarCharType.STRING_TYPE, RowType.of(DataTypes.INT(), DataTypes.INT()));
         compareCastResult(cast, BinaryString.fromString(" " + literal + " "), null);
-        compareCastResult(
-                cast,
-                BinaryString.fromString("STRUCT(1, " + literal + ")"),
-                GenericRow.of(1, null));
     }
 
     @Test
-    public void testQuotedAndEscapedNullStringsRemainLiteral() {
-        for (String literal : Arrays.asList("null", "NULL", "NuLl")) {
+    public void testOnlyUnquotedLowercaseNullIsNullToken() {
+        // Persisted defaults such as [NULL] have always meant the four-character string.
+        for (String literal : Arrays.asList("NULL", "NuLl")) {
             BinaryString value = BinaryString.fromString(literal);
-            String fields = "\"" + literal + "\", \\" + literal + ", null";
+            String fields = "\"" + literal + "\", \\" + literal + ", " + literal + ", null";
             compareCastResult(
                     CastExecutors.resolve(
                             VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.STRING())),
                     BinaryString.fromString("ARRAY(" + fields + ")"),
-                    new GenericArray(new Object[] {value, value, null}));
+                    new GenericArray(new Object[] {value, value, value, null}));
             compareCastResult(
                     CastExecutors.resolve(
                             VarCharType.STRING_TYPE,
-                            RowType.of(DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING())),
+                            RowType.of(
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING())),
                     BinaryString.fromString("STRUCT(" + fields + ")"),
-                    GenericRow.of(value, value, null));
+                    GenericRow.of(value, value, value, null));
             Map<Object, Object> expected = new HashMap<>();
             expected.put(1, value);
             expected.put(2, value);
-            expected.put(3, null);
+            expected.put(3, value);
+            expected.put(4, null);
             compareCastResult(
                     CastExecutors.resolve(
                             VarCharType.STRING_TYPE,
                             DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())),
                     BinaryString.fromString(
-                            "MAP(1, \"" + literal + "\", 2, \\" + literal + ", 3, null)"),
+                            "MAP(1, \""
+                                    + literal
+                                    + "\", 2, \\"
+                                    + literal
+                                    + ", 3, "
+                                    + literal
+                                    + ", 4, null)"),
                     new GenericMap(expected));
         }
     }

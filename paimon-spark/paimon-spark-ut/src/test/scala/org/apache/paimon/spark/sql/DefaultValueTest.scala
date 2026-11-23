@@ -48,6 +48,15 @@ class DefaultValueTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Default Value: NULL element set by ALTER COLUMN") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, a ARRAY<STRING>)")
+      sql("ALTER TABLE t ALTER COLUMN a SET DEFAULT ARRAY(\"x\", NULL)")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(Seq("x", null))))
+    }
+  }
+
   test("Default Value: NULL array and struct") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, a ARRAY<INT> DEFAULT NULL, r STRUCT<b: INT> DEFAULT NULL)")
