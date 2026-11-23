@@ -138,6 +138,23 @@ class PartialUpdateFirstRetractTest {
         assertThat(buffer.getResult().value().getLong(2)).isEqualTo(1L);
     }
 
+    @Test
+    void testNotNullIgnoreRetractSumStartsEmpty() {
+        Options options = sumOptions();
+        options.set("fields.f1.ignore-retract", "true");
+        ReducerMergeFunctionWrapper buffer = newReducer(true, options);
+        buffer.add(record(RowKind.UPDATE_BEFORE, 2, "90"));
+        buffer.add(record(RowKind.UPDATE_BEFORE, 3, "40"));
+        KeyValue retraction = buffer.getResult();
+        assertThat(retraction.valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(retraction.value().getDecimal(1, PRECISION, SCALE)).isEqualTo(decimal("0"));
+        assertThat(retraction.value().getLong(2)).isEqualTo(2L);
+
+        buffer.add(record(RowKind.UPDATE_AFTER, 4, "60"));
+        assertThat(buffer.getResult().value())
+                .isEqualTo(GenericRow.of(1, decimal("60"), -1L, Timestamp.fromEpochMillis(4)));
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testIgnoredHistoricalRetractionDoesNotSeedSum(boolean notNullAggregates) {

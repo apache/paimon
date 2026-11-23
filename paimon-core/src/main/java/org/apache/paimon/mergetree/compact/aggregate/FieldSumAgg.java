@@ -35,8 +35,14 @@ public class FieldSumAgg extends FieldAggregator {
         this.failOnOverflow = failOnOverflow;
     }
 
-    public Object zero() {
+    @Override
+    public Object emptyAccumulator() {
         return TypeUtils.castFromString("0", fieldType);
+    }
+
+    @Override
+    public Object retractionResult(Object accumulator) {
+        return negative(accumulator);
     }
 
     @Override

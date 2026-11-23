@@ -24,7 +24,6 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
-import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory;
@@ -134,7 +133,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final List<WrapperWithFieldIndex<FieldAggregator>> fieldAggregators;
-    private final Map<Integer, Object> initialSumValues;
+    private final Map<Integer, Object> emptyAccumulators;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
@@ -166,12 +165,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = getKeySortedListFromMap(fieldSeqComparators);
         this.fieldAggregators = getKeySortedListFromMap(fieldAggregators);
-        this.initialSumValues = new HashMap<>();
+        this.emptyAccumulators = new HashMap<>();
         fieldAggregators.forEach(
                 (i, aggregator) -> {
-                    if (aggregator instanceof FieldSumAgg) {
-                        initialSumValues.put(
-                                i, nullables[i] ? null : ((FieldSumAgg) aggregator).zero());
+                    Object emptyAccumulator = aggregator.emptyAccumulator();
+                    if (!nullables[i] && emptyAccumulator != null) {
+                        emptyAccumulators.put(i, emptyAccumulator);
                     }
                 });
         this.fieldSequenceEnabled = fieldSequenceEnabled;
@@ -435,16 +434,24 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     private void initRetractRow(GenericRow row, InternalRow value) {
-        // A required sum starts at zero even if its sequence group skips every record.
+        // A required aggregate starts empty even if its sequence group skips every record.
         for (int i = 0; i < getters.length; i++) {
             if (!nullables[i]) {
                 Object field = getters[i].getFieldOrNull(value);
                 if (field == null) {
                     throw new IllegalArgumentException("Field " + i + " can not be null");
                 }
-                row.setField(i, initialSumValues.getOrDefault(i, field));
+                row.setField(i, emptyAccumulators.getOrDefault(i, field));
             }
         }
+    }
+
+    private GenericRow copyRow(GenericRow row) {
+        GenericRow copy = new GenericRow(row.getRowKind(), row.getFieldCount());
+        for (int i = 0; i < row.getFieldCount(); i++) {
+            copy.setField(i, row.getField(i));
+        }
+        return copy;
     }
 
     private void initRow(GenericRow row, InternalRow value) {
@@ -465,17 +472,18 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
         GenericRow result = row;
-        if (!meetInsert && !currentDeleteRow && !ignoreDelete && !initialSumValues.isEmpty()) {
-            // A later merge subtracts a DELETE payload. Emit the sum of the retracted
-            // values while keeping the signed accumulator for subsequent calls to add().
-            result = new GenericRow(getters.length);
-            for (int i = 0; i < getters.length; i++) {
-                result.setField(i, row.getField(i));
-            }
+        if (fieldSequenceEnabled && !meetInsert && !currentDeleteRow && !ignoreDelete) {
+            // A later merge retracts the DELETE payload again. Let each aggregator convert its
+            // retraction-only accumulator, and keep the accumulator for subsequent calls to add().
             for (WrapperWithFieldIndex<FieldAggregator> field : fieldAggregators) {
-                if (field.getValue() instanceof FieldSumAgg) {
-                    int i = field.fieldIndex;
-                    result.setField(i, field.getValue().retract(null, row.getField(i)));
+                int i = field.fieldIndex;
+                Object accumulator = row.getField(i);
+                Object retraction = field.getValue().retractionResult(accumulator);
+                if (retraction != accumulator) {
+                    if (result == row) {
+                        result = copyRow(row);
+                    }
+                    result.setField(i, retraction);
                 }
             }
         }
