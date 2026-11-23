@@ -1826,10 +1826,10 @@ class VectorSearchFilterTest(unittest.TestCase):
                 GlobalIndexResult,
                 "from_ranges",
                 side_effect=AssertionError("row ranges entered a bitmap")):
-            result = reader._read_raw_arrow(ranges, include_filter=True)
+            result = reader._read_raw_search(ranges, None, reader._query_vector)
 
         self.assertEqual(ranges, calls["global_index_ranges"])
-        self.assertEqual(1, result.num_rows)
+        self.assertEqual([10], result.results().to_list())
 
     def test_scan_threads_builder_options_to_raw_split_index_type(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit

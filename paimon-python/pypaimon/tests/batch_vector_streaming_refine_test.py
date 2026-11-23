@@ -23,8 +23,9 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.search.vector_scoring import _PreparedQuery, _compute_score
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl, _compute_score
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.utils.range import Range
 
@@ -83,8 +84,9 @@ def test_streaming_refine_preserves_per_query_membership_and_scores(metric, layo
     result = read._maybe_rerank_indexed_results(
         [scored(ids) for ids in candidate_ids], "ivf-pq", queries, snapshot)
     for i, candidates in enumerate(candidate_ids):
-        expected = [(row_id, _compute_score(queries[i], values[row_id], metric))
-                    for row_id in candidates if values.get(row_id) is not None]
+        query = _PreparedQuery(queries[i], metric)
+        expected = [(row_id, _compute_score(query, vector)) for row_id, vector in values.items()
+                    if row_id in candidates and vector is not None]
         expected = sorted(expected, key=lambda item: (-item[1], item[0]))[:2]
         assert scores(result[i]) == dict(expected)
     read._plan_raw_read.assert_called_once_with(
@@ -197,9 +199,9 @@ def test_large_arrow_batch_bounds_scoring_blocks():
     resource = stream(read, [batch])
     from pypaimon.execution.python.read.search.vector_search_read import _iter_arrow_scores
 
-    def score_block(vectors, query, metric):
+    def score_block(vectors, query):
         assert len(vectors) <= 1024
-        return _iter_arrow_scores(vectors, query, metric)
+        return _iter_arrow_scores(vectors, query)
 
     with mock.patch(MODULE + "._iter_arrow_scores", side_effect=score_block):
         result = read._maybe_rerank_indexed_results(

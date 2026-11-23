@@ -16,16 +16,18 @@
 # under the License.
 
 import unittest
-from typing import Iterator, List, Tuple
+from pathlib import Path
+from typing import Iterator, List, Optional, Tuple
 from unittest import mock
 
 import numpy as np
 import pyarrow as pa
+import pytest
 
+import pypaimon.multimodal as pm
+from pypaimon.execution.python.read.search.vector_scoring import _PreparedQuery, _compute_score, _compute_scores
 from pypaimon.execution.python.read.search.vector_search_read import (
     DataEvolutionVectorRead,
-    _compute_score,
-    _compute_scores,
     _iter_arrow_batch_scores,
     _iter_arrow_scores,
     _score_block_size,
@@ -40,6 +42,12 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 class VectorScoringTest(unittest.TestCase):
 
+    def test_batch_rejects_unknown_metric_after_valid_query(self) -> None:
+        vectors = pa.array([[1.0]], type=pa.list_(pa.float32(), 1))
+        queries = [_PreparedQuery([1.0], metric) for metric in ("l2", "unknown")]
+        with self.assertRaisesRegex(ValueError, "Unknown vector search metric: unknown"):
+            list(_iter_arrow_batch_scores(vectors, queries))
+
     def test_scores_exactly_match_scalar_accumulation(self):
         rng = np.random.default_rng(42)
         for dimension in (1, 3, 128, 384):
@@ -47,8 +55,9 @@ class VectorScoringTest(unittest.TestCase):
             query = rng.standard_normal(dimension).tolist()
             for metric in ("l2", "cosine", "inner_product"):
                 with self.subTest(dimension=dimension, metric=metric):
-                    expected = [_compute_score(query, row, metric) for row in vectors.tolist()]
-                    actual = _compute_scores(query, vectors.astype(np.float64), metric)
+                    prepared = _PreparedQuery(query, metric)
+                    expected = [_compute_score(prepared, row) for row in vectors.tolist()]
+                    actual = _compute_scores(prepared, vectors.astype(np.float64))
                     self.assertEqual(expected, actual)
                     self.assertEqual(np.array(expected).tobytes(), np.array(actual).tobytes())
 
@@ -62,8 +71,9 @@ class VectorScoringTest(unittest.TestCase):
         for query, values in cases:
             vectors = np.array(values, dtype=np.float32)
             for metric in ("l2", "cosine", "inner_product"):
-                expected = [_compute_score(query, row, metric) for row in vectors.tolist()]
-                self.assertEqual(expected, _compute_scores(query, vectors.astype(np.float64), metric))
+                prepared = _PreparedQuery(query, metric)
+                expected = [_compute_score(prepared, row) for row in vectors.tolist()]
+                self.assertEqual(expected, _compute_scores(prepared, vectors.astype(np.float64)))
 
     def test_arrow_slices_chunks_and_list_layouts(self):
         values = np.random.default_rng(7).standard_normal((1031, 7)).astype(np.float32).tolist()
@@ -74,8 +84,9 @@ class VectorScoringTest(unittest.TestCase):
             chunked = pa.chunked_array([sliced.slice(0, 511), sliced.slice(511)])
             for data in (sliced, chunked):
                 for metric in ("l2", "cosine", "inner_product"):
-                    expected = [_compute_score(query, row, metric) for row in values[2:1029]]
-                    self.assertEqual(expected, list(_iter_arrow_scores(data, query, metric)))
+                    prepared = _PreparedQuery(query, metric)
+                    expected = [_compute_score(prepared, row) for row in values[2:1029]]
+                    self.assertEqual(expected, list(_iter_arrow_scores(data, prepared)))
 
     def test_batch_arrow_scores_exactly_match_scalar_accumulation(self):
         rng = np.random.default_rng(17)
@@ -84,15 +95,14 @@ class VectorScoringTest(unittest.TestCase):
         queries = rng.standard_normal((5, 128)).astype(np.float32).tolist()
         for metric in ("l2", "cosine", "inner_product"):
             with self.subTest(metric=metric):
+                prepared = [_PreparedQuery(q, metric) for q in queries]
                 actual = [[] for unused in queries]
-                for start, query_index, scores in _iter_arrow_batch_scores(
-                    vectors, queries, metric
-                ):
+                for start, query_index, scores in _iter_arrow_batch_scores(vectors, prepared):
                     self.assertEqual(start, len(actual[query_index]))
                     actual[query_index].extend(scores)
-                for query, scores in zip(queries, actual):
+                for query, scores in zip(prepared, actual):
                     expected = [
-                        _compute_score(query, row, metric)
+                        _compute_score(query, row)
                         for row in values.tolist()
                     ]
                     self.assertEqual(expected, scores)
@@ -100,22 +110,24 @@ class VectorScoringTest(unittest.TestCase):
                         np.array(expected).tobytes(), np.array(scores).tobytes())
 
     def test_null_and_unsupported_data_preserve_scalar_behavior(self):
+        query = _PreparedQuery([1, 2], "l2")
         for dtype in (pa.list_(pa.float32()), pa.list_(pa.float64()), pa.list_(pa.int64())):
             array = pa.array([[1, 2], None, [0, 0]], type=dtype)
-            self.assertEqual([1.0, None, 1.0 / 6.0], list(_iter_arrow_scores(array, [1, 2], "l2")))
-        scores = _iter_arrow_scores(pa.array([None, [1.0]], type=pa.list_(pa.float32())), [1, 2], "l2")
+            self.assertEqual([1.0, None, 1.0 / 6.0], list(_iter_arrow_scores(array, query)))
+        scores = _iter_arrow_scores(pa.array([None, [1.0]], type=pa.list_(pa.float32())), query)
         self.assertIsNone(next(scores))
         with self.assertRaisesRegex(ValueError, "dimension mismatch"):
             next(scores)
         with self.assertRaisesRegex(ValueError, "dimension mismatch"):
-            list(_iter_arrow_scores(pa.array([[1.0], [1.0, 2.0]]), [1, 2], "l2"))
+            list(_iter_arrow_scores(pa.array([[1.0], [1.0, 2.0]]), query))
         with self.assertRaises(TypeError):
-            list(_iter_arrow_scores(pa.array([[1.0, None]], type=pa.list_(pa.float32())), [1, 2], "l2"))
+            list(_iter_arrow_scores(pa.array([[1.0, None]], type=pa.list_(pa.float32())), query))
         values = [[float("nan"), 0], [1, 0]]
-        scores = list(_iter_arrow_scores(pa.array(values, type=pa.list_(pa.float32())), [1, 0], "l2"))
+        scores = list(_iter_arrow_scores(pa.array(values, type=pa.list_(pa.float32())), _PreparedQuery([1, 0], "l2")))
         self.assertTrue(np.isnan(scores[0]))
         self.assertEqual(1.0, scores[1])
-        self.assertEqual([1.0], list(_iter_arrow_scores(pa.array([[]], type=pa.list_(pa.float32())), [], "l2")))
+        empty_row = pa.array([[]], type=pa.list_(pa.float32()))
+        self.assertEqual([1.0], list(_iter_arrow_scores(empty_row, _PreparedQuery([], "l2"))))
 
     def test_batch_null_vectors_preserve_scores_without_scalar_fallback(self):
         rng = np.random.default_rng(37)
@@ -129,12 +141,13 @@ class VectorScoringTest(unittest.TestCase):
             for vectors in (sliced, chunked):
                 for metric in ("l2", "cosine", "inner_product"):
                     with self.subTest(dtype=dtype, chunked=isinstance(vectors, pa.ChunkedArray), metric=metric):
-                        expected = [[None if row is None else _compute_score(query, row, metric)
-                                     for row in values[2:2052]] for query in queries]
+                        prepared = [_PreparedQuery(q, metric) for q in queries]
+                        expected = [[None if row is None else _compute_score(query, row)
+                                     for row in values[2:2052]] for query in prepared]
                         actual = [[] for _ in queries]
                         with mock.patch("pypaimon.execution.python.read.search.vector_search_read._compute_score",
                                         side_effect=AssertionError("valid rows must use vectorized scoring")):
-                            for start, query_index, scores in _iter_arrow_batch_scores(vectors, queries, metric):
+                            for start, query_index, scores in _iter_arrow_batch_scores(vectors, prepared):
                                 self.assertEqual(start, len(actual[query_index]))
                                 actual[query_index].extend(scores)
                         self.assertEqual(expected, actual)
@@ -143,17 +156,19 @@ class VectorScoringTest(unittest.TestCase):
         queries = [[1.0, 0.0], [0.0, 0.0]]
         for dtype in (pa.list_(pa.float32()), pa.large_list(pa.float32()), pa.list_(pa.float32(), 2)):
             for metric in ("l2", "cosine", "inner_product"):
-                result = list(_iter_arrow_batch_scores(pa.array([None, None], type=dtype), queries, metric))
+                prepared = [_PreparedQuery(q, metric) for q in queries]
+                result = list(_iter_arrow_batch_scores(pa.array([None, None], type=dtype), prepared))
                 self.assertEqual([(0, 0, [None, None]), (0, 1, [None, None])], result)
+        prepared = [_PreparedQuery(q, "l2") for q in queries]
         for rows, exception, message in (
                 ([None, [1.0]], ValueError, "dimension mismatch"),
                 ([None, [1.0, None]], TypeError, "NoneType")):
             with self.subTest(rows=rows):
                 vectors = pa.array(rows, type=pa.list_(pa.float32()))
                 with self.assertRaisesRegex(exception, message):
-                    list(_iter_arrow_batch_scores(vectors, queries, "l2"))
+                    list(_iter_arrow_batch_scores(vectors, prepared))
         vectors = pa.array([None, [float("nan"), 0.0], [1.0, 0.0]], type=pa.list_(pa.float32()))
-        scores = list(_iter_arrow_batch_scores(vectors, queries, "l2"))[0][2]
+        _, _, scores = next(_iter_arrow_batch_scores(vectors, prepared))
         self.assertIsNone(scores[0])
         self.assertTrue(np.isnan(scores[1]))
         self.assertEqual(1.0, scores[2])
@@ -164,7 +179,7 @@ class VectorScoringTest(unittest.TestCase):
             children=[pa.array([float("nan"), None, 1.0, 2.0], type=pa.float32())])
         with mock.patch("pypaimon.execution.python.read.search.vector_search_read._compute_score",
                         side_effect=AssertionError("null children must not disable the fast path")):
-            result = list(_iter_arrow_batch_scores(vectors, [[1.0, 2.0]], "l2"))
+            result = list(_iter_arrow_batch_scores(vectors, [_PreparedQuery([1.0, 2.0], "l2")]))
         self.assertEqual([(0, 0, [None, 1.0])], result)
 
     def test_raw_search_filters_before_scoring_and_preserves_ties(self):
@@ -193,15 +208,53 @@ class VectorScoringTest(unittest.TestCase):
 
     def test_refinement_and_block_memory_bound(self):
         column = _field(1, "embedding", "FLOAT")
-        reader = DataEvolutionVectorRead(_StubTable([column], []), 10, column, [1, 0])
-        values = {i: [float(i % 7), 0] for i in range(2051)}
-        original = {row_id: vector[:] for row_id, vector in values.items()}
-        candidates = RoaringBitmap64()
-        for row_id in values:
-            candidates.add(row_id)
-        result = reader._score_raw_vectors(candidates, values, [1, 0], "inner_product", 10)
-        expected = sorted(values, key=lambda i: (-values[i][0], i))[:10]
+        reader = DataEvolutionVectorRead(_StubTable([column], []), 10, column, [1])
+        values = np.arange(2051, dtype=np.float32) % 7
+        values[-1] = 8.0
+        original = values.copy()
+        vectors = pa.FixedSizeListArray.from_arrays(pa.array(values), 1)
+        batch = pa.record_batch([pa.array(range(len(values))), vectors], names=["_ROW_ID", "embedding"])
+        candidates = range(len(values))
+        result = reader._score_raw_batches([batch], [1], "inner_product", candidates)
+        expected = sorted(candidates, key=lambda i: (-original[i], i))[:10]
         self.assertEqual(sorted(expected), result.results().to_list())
-        self.assertEqual(original, values)
+        np.testing.assert_array_equal(values, original)
         self.assertLessEqual(_score_block_size([0] * 4096) * 4096, 1 << 20)
-        self.assertEqual([0.0], _score_rows([[0, 0]], [1, 0], "cosine"))
+        self.assertEqual([0.0], _score_rows([[0, 0]], _PreparedQuery([1, 0], "cosine")))
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_query_conversion_is_shared_across_scoring_blocks(tmp_path: Path, batch: bool) -> None:
+    conversions = []
+
+    class Query(list):
+        def __array__(self, dtype: Optional[np.dtype] = None, copy: Optional[bool] = None) -> np.ndarray:
+            conversions.append(tuple(self))
+            return np.asarray(list(self), dtype=dtype)
+
+    # Cross the 1024-row score block boundary. Tied hits straddle that boundary.
+    rows = [[1, 0]] + [[0, 1]] * 1023 + [[1, 0]]
+    data = pa.table(
+        {"id": range(len(rows)), "embedding": pa.array(rows, type=pa.list_(pa.float32(), 2))}
+    )
+    table = (
+        pm.connect(options={"warehouse": str(tmp_path)})
+        .create_table(
+            "vectors",
+            data=data,
+            options={"vector.file.format": "parquet", "read.native.enabled": "false"},
+        )
+        .raw_table
+    )
+    queries = [Query([1.0, 0.0]), Query([0.0, 1.0])]
+    if batch:
+        builder = table.new_batch_vector_search_builder().with_query_vectors(queries)
+        builder.with_vector_column("embedding").with_limit(2).with_option("metric", "cosine")
+        results = builder.execute_batch_local()
+    else:
+        builder = table.new_vector_search_builder().with_query_vector(queries[0])
+        builder.with_vector_column("embedding").with_limit(2).with_option("metric", "cosine")
+        results = [builder.execute_local()]
+    assert [list(result.results()) for result in results] == [[0, 1024], [1, 2]][: len(results)]
+    assert all(result.score_getter()(i) == 1.0 for result in results for i in result.results())
+    assert sorted(conversions) == sorted(tuple(q) for q in queries[: len(results)])
