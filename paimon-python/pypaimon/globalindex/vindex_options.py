@@ -83,6 +83,11 @@ def train_sample_ratio(
     return ratio
 
 
+def is_multi_vector_type(data_type: DataType) -> bool:
+    return (isinstance(data_type, ArrayType) and isinstance(data_type.element, (ArrayType, VectorType))
+            and _is_float_type(data_type.element.element))
+
+
 def validate_vector_type(data_type: DataType) -> None:
     if isinstance(data_type, VectorType):
         element_type = data_type.element

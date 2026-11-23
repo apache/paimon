@@ -54,7 +54,11 @@ public class PaimonListObjectInspector implements ListObjectInspector {
         if (o == null) {
             return null;
         }
-        return elementGetter.getElementOrNull((InternalArray) o, i);
+        InternalArray array = (InternalArray) o;
+        if (i < 0 || i >= array.size()) {
+            return null;
+        }
+        return elementGetter.getElementOrNull(array, i);
     }
 
     @Override

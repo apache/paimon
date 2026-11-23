@@ -76,6 +76,19 @@ def _catalog_metastore(loader) -> Optional[str]:
     return None
 
 
+def _filesystem_vector_table_supported(table):
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.filesystem.local_file_io import LocalFileIO
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if type(table) is not FileStoreTable or type(table.file_io) is not LocalFileIO:
+        return False
+    environment = table.catalog_environment
+    return (type(environment) is CatalogEnvironment
+            and _catalog_metastore(environment.catalog_loader) == 'filesystem'
+            and table.options.file_format() == 'parquet')
+
+
 def _option_value_to_string(value) -> str:
     """Stringify an option value for the Rust catalog.
 

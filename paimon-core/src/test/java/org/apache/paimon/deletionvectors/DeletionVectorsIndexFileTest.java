@@ -38,6 +38,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,41 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class DeletionVectorsIndexFileTest {
 
     @TempDir java.nio.file.Path tempPath;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testStreamingRewriteFailureRemovesOutputs(boolean rolling) throws IOException {
+        DeletionVectorsIndexFile index =
+                deletionVectorsIndexFile(
+                        getPathFactory(), MemorySize.ofBytes(rolling ? 1 : Long.MAX_VALUE), false);
+        DeletionVector bitmap = new BitmapDeletionVector();
+        bitmap.delete(1);
+        Iterator<Map.Entry<String, DeletionVector>> input =
+                new Iterator<Map.Entry<String, DeletionVector>>() {
+                    private int position;
+
+                    @Override
+                    public boolean hasNext() {
+                        if (position == 2) {
+                            throw new IllegalStateException("Injected bitmap read failure");
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public Map.Entry<String, DeletionVector> next() {
+                        return Collections.singletonMap("file-" + position++, bitmap)
+                                .entrySet()
+                                .iterator()
+                                .next();
+                    }
+                };
+        assertThatThrownBy(() -> index.writeWithRolling(input))
+                .hasMessage("Injected bitmap read failure");
+        try (Stream<java.nio.file.Path> files = Files.list(tempPath)) {
+            assertThat(files).isEmpty();
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

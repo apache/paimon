@@ -274,7 +274,8 @@ public class PartitionEntryScanBenchmark {
                                 schemaManager,
                                 table.schema(),
                                 factory,
-                                property("parallelism", 1)) {
+                                property("parallelism", 1),
+                                table.name()) {
                             @Override
                             protected boolean filterByStats(ManifestEntry entry) {
                                 return true;

@@ -19,12 +19,14 @@
 
 from abc import ABC, abstractmethod
 from copy import copy
+from math import isfinite
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.vector_index_options import VectorIndexOptions
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.common.options.options import Options
+from pypaimon.globalindex.vindex_options import is_multi_vector_type
 
 
 class VectorSearchBuilder(ABC):
@@ -47,6 +49,10 @@ class VectorSearchBuilder(ABC):
         # type: (list) -> VectorSearchBuilder
         """The query vector (list of floats)."""
         pass
+
+    def with_multi_vector(self, vectors):
+        """Rank each row's embedding list against a query matrix using cosine MaxSim."""
+        raise NotImplementedError("%s does not support MultiVector search." % type(self).__name__)
 
     def with_option(self, key, value):
         # type: (str, str) -> VectorSearchBuilder
@@ -223,6 +229,7 @@ class AbstractVectorSearchBuilderImpl:
         reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
+        self._validate_query_matrix_column()
         from pypaimon.table.source.search_dispatch import create_vector_scan
         execution = copy(self)
         execution._options = dict(self._options)
@@ -233,6 +240,12 @@ class AbstractVectorSearchBuilderImpl:
             return False
         return self._vector_column.name in VectorIndexOptions.columns(Options(dict(self._table.table_schema.options)))
 
+    def _validate_query_matrix_column(self):
+        if getattr(self, '_multi_vector', None) is not None and (
+                not self._table.options.data_evolution_enabled()
+                or not is_multi_vector_type(getattr(self._vector_column, 'type', None))):
+            raise ValueError("A query matrix requires a MultiVector column on a Data Evolution table.")
+
 
 class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuilder):
     """Implementation for VectorSearchBuilder."""
@@ -240,13 +253,31 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
     def __init__(self, table):
         super().__init__(table)
         self._query_vector = None
+        self._multi_vector = None
 
     def with_query_vector(self, vector):
         # type: (list) -> VectorSearchBuilder
         self._query_vector = vector
+        self._multi_vector = None
+        return self
+
+    def with_multi_vector(self, vectors):
+        try:
+            query = tuple(tuple(vector) for vector in vectors)
+            valid = (query and query[0] and all(len(vector) == len(query[0]) for vector in query)
+                     and all(isfinite(value) for vector in query for value in vector))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("A query matrix requires numeric vectors with finite coordinates.") from exc
+        if not valid:
+            raise ValueError("A query matrix requires non-empty, equally sized vectors with finite coordinates.")
+        self._multi_vector = query
+        self._query_vector = None
         return self
 
     def execute_local(self):
+        if self._multi_vector is not None:
+            reject_search_under_query_auth(self._table)
+            self._validate_query_matrix_column()
         from pypaimon.table.source.search_dispatch import execute_vector_search
         return execute_vector_search(self, self._query_vector)
 
@@ -257,8 +288,9 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Limit must be positive, set via with_limit()")
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        if self._query_vector is None:
-            raise ValueError("Query vector must be set via with_query_vector()")
+        self._validate_query_matrix_column()
+        if self._query_vector is None and self._multi_vector is None:
+            raise ValueError("Query must be set via with_query_vector() or with_multi_vector()")
         from pypaimon.table.source.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)

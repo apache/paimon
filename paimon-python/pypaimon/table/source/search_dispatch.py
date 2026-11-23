@@ -95,13 +95,16 @@ class _SearchRead:
             self._python_executor = self._python_factory()
         return self._python_executor
 
+    def _reader_for(self, plan=None, splits=()):
+        return self._native_reader
+
     def read_plan(self, plan, executor=None):
-        return (self._native_reader.read_plan(plan) if executor is None else
-                self._native_reader.read_plan(plan, executor=executor))
+        reader = self._reader_for(plan)
+        return reader.read_plan(plan) if executor is None else reader.read_plan(plan, executor=executor)
 
     def read_batch_plan(self, plan, executor=None):
-        return (self._native_reader.read_batch_plan(plan) if executor is None else
-                self._native_reader.read_batch_plan(plan, executor=executor))
+        reader = self._reader_for(plan)
+        return reader.read_batch_plan(plan) if executor is None else reader.read_batch_plan(plan, executor=executor)
 
 
 class _SplitSearchRead(_SearchRead):
@@ -112,6 +115,59 @@ class _SplitSearchRead(_SearchRead):
 class _BatchSearchRead(_SearchRead):
     def read_batch(self, splits):
         return self._native_reader.read_batch(splits)
+
+
+class _FilesystemVectorScan:
+    def __init__(self, builder, batch):
+        self._builder = builder
+        self._batch = batch
+
+    def scan(self):
+        from pypaimon.execution.native.read.native_search_plan import native_vector_scan
+        from pypaimon.execution.native.read.native_vector_search import (
+            _filesystem_vector_search_view, _has_centroid_indexes,
+        )
+
+        request = copy(self._builder)
+        request._table, entries = _filesystem_vector_search_view(request._table, request._partition_filter)
+        if _has_centroid_indexes(entries, [request._vector_column]):
+            scan = native_vector_scan(request, self._batch)
+            if scan is not None:
+                return scan.scan()
+        return _python_vector_scan(request).scan(partition_entries=entries)
+
+
+class _FilesystemVectorRead(_SearchRead):
+    def __init__(self, native_factory, python_factory):
+        super().__init__(None, python_factory)
+        self._native_factory = native_factory
+
+    def _reader_for(self, plan=None, splits=()):
+        from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
+
+        if plan is not None:
+            splits = plan.splits()
+        native = any(getattr(split, '_native_vector_layout', False) for split in splits) or any(
+            file.global_index_meta is not None and file.global_index_meta.is_centroid_index()
+            for split in splits if isinstance(split, IndexVectorSearchSplit) for file in split.vector_index_files)
+        if native:
+            if self._native_reader is None:
+                self._native_reader = self._native_factory()
+            if self._native_reader is not None:
+                return self._native_reader
+        return self._python_reader()
+
+
+class _FilesystemSingleVectorRead(_FilesystemVectorRead):
+    def read(self, splits):
+        splits = list(splits)
+        return self._reader_for(splits=splits).read(splits)
+
+
+class _FilesystemBatchVectorRead(_FilesystemVectorRead):
+    def read_batch(self, splits):
+        splits = list(splits)
+        return self._reader_for(splits=splits).read_batch(splits)
 
 
 def python_search_reader(reader):
@@ -127,11 +183,21 @@ def _native_requested(builder):
     return callable(enabled) and enabled()
 
 
+def _filesystem_vector_layout_dispatch(builder):
+    from pypaimon.execution.native.read.native_vector_search import (
+        _filesystem_vector_search_supported, _multi_vector_requested,
+    )
+    return (not getattr(builder, '_native_hybrid_route', False)
+            and not _multi_vector_requested(builder) and _filesystem_vector_search_supported(builder._table))
+
+
 def create_vector_scan(builder, execution, batch=False):
     python_factory = partial(_python_vector_scan, execution)
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_scan
+    if _filesystem_vector_layout_dispatch(builder):
+        return _FilesystemVectorScan(execution, batch)
     native = native_vector_scan(builder, batch)
     return python_factory() if native is None else _SearchScan(native, python_factory)
 
@@ -141,6 +207,9 @@ def create_vector_read(builder, batch=False):
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_read
+    if _filesystem_vector_layout_dispatch(builder):
+        reader_type = _FilesystemBatchVectorRead if batch else _FilesystemSingleVectorRead
+        return reader_type(partial(native_vector_read, builder, batch), python_factory)
     native = native_vector_read(builder, batch)
     if native is None:
         return python_factory()
@@ -167,7 +236,7 @@ def create_full_text_read(builder, execution):
 
 
 def execute_vector_search(builder, queries, batch=False):
-    if _native_requested(builder):
+    if _native_requested(builder) and not _filesystem_vector_layout_dispatch(builder):
         from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
         result = try_native_vector_search(builder, queries, batch)
         if result is not None:
@@ -195,14 +264,40 @@ def _standard_hybrid_builder(builder):
         'route_builders', 'to_route_result', 'rank', '_new_vector_search_builder', '_new_full_text_search_builder'))
 
 
+def _hybrid_search_request(builder):
+    from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
+    from pypaimon.execution.native.read.native_vector_search import (
+        _filesystem_vector_search_supported, _filesystem_vector_search_view, _has_centroid_indexes,
+    )
+    from pypaimon.globalindex.vindex_options import is_multi_vector_type
+
+    reject_search_under_query_auth(builder._table)
+    if not _filesystem_vector_search_supported(builder._table):
+        return builder, True
+    builder._validate_search()
+    try:
+        fields = [builder._table.field_dict[route.field_name] for route in builder._routes if route.is_vector()]
+    except KeyError as exc:
+        raise ValueError("Vector column '%s' not found in table schema" % exc.args[0]) from exc
+    if not fields:
+        return builder, False
+    if any(is_multi_vector_type(field.type) for field in fields):
+        return builder, True
+    request = copy(builder)
+    request._table, entries = _filesystem_vector_search_view(builder._table, builder._partition_filter)
+    return request, _has_centroid_indexes(entries, fields)
+
+
 def execute_hybrid_search(builder, executor=None):
     standard = _standard_hybrid_builder(builder)
     if standard and _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
-        result = (try_native_hybrid_search(builder) if executor is None else
-                  try_native_hybrid_search(builder, executor=executor))
-        if result is not None:
-            return result
+        builder, native = _hybrid_search_request(builder)
+        if native:
+            result = (try_native_hybrid_search(builder) if executor is None else
+                      try_native_hybrid_search(builder, executor=executor))
+            if result is not None:
+                return result
     from pypaimon.execution.python.read.search.hybrid_search import execute
     return execute(builder, executor)
 
@@ -214,9 +309,11 @@ def hybrid_route_builders(builder):
     reject_search_under_query_auth(builder._table)
     if _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_routes
-        routes = try_native_hybrid_routes(builder)
-        if routes is not None:
-            return routes
+        builder, native = _hybrid_search_request(builder)
+        if native:
+            routes = try_native_hybrid_routes(builder)
+            if routes is not None:
+                return routes
     from pypaimon.execution.python.read.search.hybrid_search import route_builders
     return route_builders(builder)
 
