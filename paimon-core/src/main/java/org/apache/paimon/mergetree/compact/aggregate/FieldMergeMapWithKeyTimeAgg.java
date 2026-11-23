@@ -21,7 +21,10 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,15 +37,29 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
+    private final InternalRow.FieldGetter timestampFieldGetter;
+    private final DataTypeRoot timestampFieldTypeRoot;
+    private final boolean overwriteOnEqualTs;
 
     /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
     private final boolean binaryKey;
 
     public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
+        this(name, dataType, timestampFieldIndex, false);
+    }
+
+    public FieldMergeMapWithKeyTimeAgg(
+            String name, MapType dataType, int timestampFieldIndex, boolean overwriteOnEqualTs) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
         this.timestampFieldIndex = timestampFieldIndex;
+        RowType rowType = (RowType) dataType.getValueType();
+        this.timestampFieldGetter =
+                InternalRow.createFieldGetter(
+                        rowType.getTypeAt(timestampFieldIndex), timestampFieldIndex);
+        this.timestampFieldTypeRoot = rowType.getTypeAt(timestampFieldIndex).getTypeRoot();
+        this.overwriteOnEqualTs = overwriteOnEqualTs;
         this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
     }
 
@@ -105,9 +122,11 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 if (existingRow.isNullAt(timestampFieldIndex)) {
                     resultMap.put(key, newRow);
                 } else {
-                    String newTs = newRow.getString(timestampFieldIndex).toString();
-                    String existingTs = existingRow.getString(timestampFieldIndex).toString();
-                    if (newTs.compareTo(existingTs) > 0) {
+                    Object newTs = timestampFieldGetter.getFieldOrNull(newRow);
+                    Object existingTs = timestampFieldGetter.getFieldOrNull(existingRow);
+                    int comparison =
+                            InternalRowUtils.compare(newTs, existingTs, timestampFieldTypeRoot);
+                    if (comparison > 0 || (comparison == 0 && overwriteOnEqualTs)) {
                         resultMap.put(key, newRow);
                     }
                 }

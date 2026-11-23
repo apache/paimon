@@ -49,6 +49,11 @@ class RangeTest(unittest.TestCase):
         result = _row_ranges_from_predicate(pred_between)
         assert result is not None and result == [Range(10, 20)]
 
+        inverted = Predicate('between', 0, SpecialFields.ROW_ID.name, [2, 0])
+        assert _row_ranges_from_predicate(inverted) == []
+        assert _row_ranges_from_predicate(Predicate('or', None, None, [inverted, pred_eq])) == [Range(5, 5)]
+        assert _row_ranges_from_predicate(Predicate('and', None, None, [inverted, pred_eq])) == []
+
         pred_other = Predicate('equal', 0, 'other_field', [5])
         assert _row_ranges_from_predicate(pred_other) is None
 

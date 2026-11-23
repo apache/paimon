@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -271,4 +272,10 @@ class DLFTokenLoaderFactory:
         token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
         if token_path is not None:
             return DLFLocalFileTokenLoader(token_path)
-        return None
+        if any(options.get(key) is not None for key in (
+                CatalogOptions.DLF_ACCESS_KEY_ID,
+                CatalogOptions.DLF_ACCESS_KEY_SECRET,
+                CatalogOptions.DLF_ACCESS_SECURITY_TOKEN)):
+            return None
+        token_path = os.environ.get('DLF_TOKEN_PATH')
+        return DLFLocalFileTokenLoader(token_path) if token_path else None

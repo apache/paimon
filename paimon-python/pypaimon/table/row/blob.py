@@ -229,11 +229,10 @@ class VideoFrameDescriptor(BlobDescriptor):
 
     CURRENT_VERSION = 1
     MAGIC = 0x564944454F46524D  # "VIDEOFRM"
-    _FIXED_LENGTH = 1 + 8 + 4 + 8 + 8 + 8 + 8 + 8
+    _FIXED_LENGTH = 1 + 8 + 4 + 5 * 8
 
-    def __init__(
-            self, uri: str, offset: int, length: int, frame_index: int,
-            keyframe_index_offset: int, keyframe_index_length: int):
+    def __init__(self, uri: str, offset: int, length: int, frame_index: int,
+                 moov_offset: int = 0, moov_length: int = 0):
         if isinstance(frame_index, bool) or not isinstance(frame_index, int):
             raise TypeError("Video frame index must be an int.")
         if frame_index < 0:
@@ -241,15 +240,24 @@ class VideoFrameDescriptor(BlobDescriptor):
                 "Video frame index must be non-negative, but was %s."
                 % frame_index
             )
-        if keyframe_index_length < 0:
-            raise ValueError("Video keyframe index length must be non-negative.")
-        if ((keyframe_index_length == 0 and keyframe_index_offset != -1)
-                or (keyframe_index_length > 0 and keyframe_index_offset < 0)):
-            raise ValueError("Invalid video keyframe index range.")
         super().__init__(uri, offset, length)
+        if any(isinstance(v, bool) or not isinstance(v, int)
+               for v in (moov_offset, moov_length)):
+            raise TypeError("Moov offset and length must be integers.")
+        if (moov_offset < 0 or moov_length < 0
+                or (moov_length == 0 and moov_offset != 0)
+                or (moov_length > 0 and (length < 0 or moov_offset > length
+                                         or moov_length > length - moov_offset))):
+            raise ValueError("Moov range must be within the video payload.")
+        self.moov_offset = moov_offset
+        self.moov_length = moov_length
         self._frame_index = frame_index
-        self._keyframe_index_offset = keyframe_index_offset
-        self._keyframe_index_length = keyframe_index_length
+
+    @property
+    def video_descriptor(self):
+        """Frame-independent decoder cache key retaining the moov hint."""
+        return VideoFrameDescriptor(self.uri, self.offset, self.length, 0,
+                                    self.moov_offset, self.moov_length)
 
     @property
     def frame_index(self) -> int:
@@ -260,28 +268,14 @@ class VideoFrameDescriptor(BlobDescriptor):
         """Physical video identity without the logical frame locator."""
         return BlobDescriptor(self.uri, self.offset, self.length)
 
-    @property
-    def keyframe_index_descriptor(self) -> Optional[BlobDescriptor]:
-        if self._keyframe_index_length == 0:
-            return None
-        return BlobDescriptor(
-            self.uri,
-            self._keyframe_index_offset,
-            self._keyframe_index_length,
-        )
-
     def serialize(self) -> bytes:
         uri_bytes = self.uri.encode('utf-8')
         return (
             struct.pack('<BQI', self.CURRENT_VERSION, self.MAGIC, len(uri_bytes))
             + uri_bytes
             + struct.pack(
-                '<qqqqq',
-                self.offset,
-                self.length,
-                self.frame_index,
-                self._keyframe_index_offset,
-                self._keyframe_index_length,
+                '<qqqqq', self.offset, self.length, self.frame_index,
+                self.moov_offset, self.moov_length
             )
         )
 
@@ -317,22 +311,11 @@ class VideoFrameDescriptor(BlobDescriptor):
 
         uri_end = 13 + uri_length
         uri = raw[13:uri_end].decode('utf-8')
-        (
-            offset,
-            length,
-            frame_index,
-            keyframe_index_offset,
-            keyframe_index_length,
-        ) = struct.unpack('<qqqqq', raw[uri_end:uri_end + 40])
+        offset, length, frame_index, moov_offset, moov_length = struct.unpack(
+            '<qqqqq', raw[uri_end:uri_end + 40]
+        )
         try:
-            return cls(
-                uri,
-                offset,
-                length,
-                frame_index,
-                keyframe_index_offset,
-                keyframe_index_length,
-            )
+            return cls(uri, offset, length, frame_index, moov_offset, moov_length)
         except ValueError as error:
             raise ValueError(
                 "Invalid VideoFrameDescriptor data: %s" % error
@@ -353,15 +336,13 @@ class VideoFrameDescriptor(BlobDescriptor):
             isinstance(other, VideoFrameDescriptor)
             and self.payload_descriptor == other.payload_descriptor
             and self.frame_index == other.frame_index
-            and self.keyframe_index_descriptor == other.keyframe_index_descriptor
+            and self.moov_offset == other.moov_offset
+            and self.moov_length == other.moov_length
         )
 
     def __hash__(self) -> int:
-        return hash((
-            self.payload_descriptor,
-            self.frame_index,
-            self.keyframe_index_descriptor,
-        ))
+        return hash((self.payload_descriptor, self.frame_index,
+                     self.moov_offset, self.moov_length))
 
     def __str__(self) -> str:
         return (

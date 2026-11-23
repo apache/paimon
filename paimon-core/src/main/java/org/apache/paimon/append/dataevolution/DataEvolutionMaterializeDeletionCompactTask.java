@@ -42,13 +42,15 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -82,11 +84,6 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
 
     @Override
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
-        if (compactBefore.stream().anyMatch(file -> isVectorStoreFile(file.fileName()))) {
-            // TODO: support vector-store file compaction
-            throw new UnsupportedOperationException("Vector-store task is not supported");
-        }
-
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
@@ -101,7 +98,13 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
                         .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
                         .rawConvertible(false)
                         .build();
-        RecordReader<InternalRow> reader = createReader(store, table.rowType(), dataSplit);
+        RowType readType = table.rowType();
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+        for (IndexedSplit split : readSplits(dataSplit)) {
+            readers.add(
+                    () -> store.newDataEvolutionRead().withReadType(readType).createReader(split));
+        }
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(readers);
         @Nullable AppendFileStoreWrite storeWrite = null;
         @Nullable RecordWriter<InternalRow> writer = null;
         try {
@@ -138,48 +141,68 @@ public class DataEvolutionMaterializeDeletionCompactTask extends DataEvolutionCo
         return commitMessage(compactBefore, compactAfter);
     }
 
-    private RecordReader<InternalRow> createReader(
-            AppendOnlyFileStore store, RowType readType, DataSplit dataSplit) throws IOException {
-        List<DataFileMeta> normalFiles = new ArrayList<>();
-        for (DataFileMeta file : compactBefore) {
-            if (!isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())) {
-                normalFiles.add(file);
+    static List<IndexedSplit> readSplits(DataSplit input) {
+        List<IndexedSplit> splits = new ArrayList<>();
+        List<DataFileMeta> inputFiles = input.dataFiles();
+        List<DeletionFile> inputDeletions =
+                input.deletionFiles().orElseGet(() -> Collections.nCopies(inputFiles.size(), null));
+        for (Map.Entry<Range, List<Integer>> group : filesByNormalRange(inputFiles).entrySet()) {
+            List<DataFileMeta> files = new ArrayList<>();
+            List<DeletionFile> deletions = new ArrayList<>();
+            for (int position : group.getValue()) {
+                files.add(inputFiles.get(position));
+                deletions.add(inputDeletions.get(position));
             }
+            DataSplit split =
+                    DataSplit.builder()
+                            .withSnapshot(input.snapshotId())
+                            .withPartition(input.partition())
+                            .withBucket(input.bucket())
+                            .withBucketPath(input.bucketPath())
+                            .withDataFiles(files)
+                            .withDataDeletionFiles(deletions)
+                            .rawConvertible(false)
+                            .build();
+            splits.add(new IndexedSplit(split, Collections.singletonList(group.getKey()), null));
         }
+        return splits;
+    }
 
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        for (List<DataFileMeta> normalGroup : rangeHelper.mergeOverlappingRanges(normalFiles)) {
+    private static NavigableMap<Range, List<Integer>> filesByNormalRange(
+            List<DataFileMeta> inputFiles) {
+        List<DataFileMeta> normalFiles =
+                inputFiles.stream()
+                        .filter(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()))
+                        .collect(Collectors.toList());
+        checkArgument(!normalFiles.isEmpty(), "Row range rewrite contains no normal files.");
+        RangeHelper<DataFileMeta> helper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        NavigableMap<Range, List<Integer>> groups =
+                new TreeMap<>(Comparator.comparingLong(range -> range.to));
+        for (List<DataFileMeta> normalGroup : helper.mergeOverlappingRanges(normalFiles)) {
             checkArgument(
-                    rangeHelper.areAllRangesSame(normalGroup),
+                    helper.areAllRangesSame(normalGroup),
                     "Normal data files %s should have the same row id range.",
                     normalGroup);
-            Range range = normalGroup.get(0).nonNullRowIdRange();
-            Set<DataFileMeta> normalGroupFiles = new HashSet<>(normalGroup);
-            DataSplit rangeSplit =
-                    dataSplit
-                            .filterDataFile(
-                                    file ->
-                                            normalGroupFiles.contains(file)
-                                                    || ((isBlobFile(file.fileName())
-                                                                    || isVectorStoreFile(
-                                                                            file.fileName()))
-                                                            && file.nonNullRowIdRange()
-                                                                    .hasIntersection(range)))
-                            .orElseThrow(
-                                    () ->
-                                            new IllegalStateException(
-                                                    "Cannot find files for row id range " + range));
-            IndexedSplit indexedSplit =
-                    new IndexedSplit(rangeSplit, Collections.singletonList(range), null);
-            readers.add(
-                    () ->
-                            store.newDataEvolutionRead()
-                                    .withReadType(readType)
-                                    .createReader(indexedSplit));
+            groups.put(normalGroup.get(0).nonNullRowIdRange(), new ArrayList<>());
         }
-        checkArgument(!readers.isEmpty(), "Materialize deletion task contains no normal files.");
-        return ConcatRecordReader.create(readers);
+
+        // Normal ranges are disjoint. Seek the first one whose end reaches the file's start,
+        // then visit only ranges it spans. Keep manifest order and the matching DV position.
+        for (int i = 0; i < inputFiles.size(); i++) {
+            Range file = inputFiles.get(i).nonNullRowIdRange();
+            Range firstEnd = new Range(file.from, file.from);
+            for (Map.Entry<Range, List<Integer>> group :
+                    groups.tailMap(firstEnd, true).entrySet()) {
+                if (group.getKey().from > file.to) {
+                    break;
+                }
+                group.getValue().add(i);
+            }
+        }
+        return groups;
     }
 
     @Override

@@ -30,6 +30,7 @@ import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
@@ -64,6 +65,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit Tests for {@link org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor}. */
 public class OrcFilterConverterTest {
+
+    @Test
+    public void testBoundingBoxIsNotPushedDown() {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.GEOMETRY()));
+        Predicate bbox = builder.bboxIntersects(1, 0, 0, 1, 1);
+
+        assertThat(bbox.visit(OrcPredicateFunctionVisitor.VISITOR)).isEmpty();
+        assertThat(
+                        PredicateBuilder.and(builder.equal(0, 7), bbox)
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEmpty();
+        assertThat(
+                        PredicateBuilder.or(builder.equal(0, 7), bbox)
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEmpty();
+    }
 
     @Test
     public void testApplyCompoundPredicate() {

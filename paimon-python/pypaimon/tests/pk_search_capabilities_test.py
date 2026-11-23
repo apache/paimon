@@ -21,32 +21,32 @@ from types import SimpleNamespace
 import pytest
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.multimodal.query import BatchVectorQuery, VectorQuery
-from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
+from pypaimon.multimodal.query import BatchVectorQuery, HybridQuery, TextQuery, VectorQuery
 from pypaimon.tests.primary_key_global_index_golden_test import GOLDEN_ARCHIVE
 
 
-def _query(query_type):
-    table = SimpleNamespace(
-        fields=[], options=SimpleNamespace(data_evolution_enabled=lambda: False))
-    vectors = [[1., 0.]] if query_type is BatchVectorQuery else [1., 0.]
-    return query_type(table, vectors, "embedding")
+@pytest.fixture
+def pk_table_stub():
+    return SimpleNamespace(
+        fields=[], is_primary_key_table=True,
+        options=SimpleNamespace(data_evolution_enabled=lambda: False))
 
 
-@pytest.mark.parametrize("query_type", [VectorQuery, BatchVectorQuery])
-def test_pk_ray_dataset_conversion_requires_row_id_results(query_type):
-    pytest.importorskip("ray")
-    from pypaimon.ray.search_result import read_search_result
-
-    query = _query(query_type)
-    with pytest.raises(NotImplementedError, match="require a data-evolution table"):
-        read_search_result(query, PrimaryKeyScoredResult(0, [], []), 1, {}, None)
+@pytest.mark.parametrize("query_type,kwargs", [
+    (TextQuery, {"text_query": {"column": "text", "query": "search term"}}),
+    (HybridQuery, {}),
+])
+def test_pk_text_and_hybrid_ray_dataset_require_data_evolution(pk_table_stub, query_type, kwargs):
+    query = query_type(pk_table_stub, **kwargs)
+    with pytest.raises(NotImplementedError, match="requires a data-evolution table"):
+        query.to_ray(execution="local")
 
 
 @pytest.mark.parametrize("query_type", [VectorQuery, BatchVectorQuery])
 @pytest.mark.parametrize("method", ["with_score", "order_by_score"])
-def test_pk_score_outputs_rejected_when_configuring_query(query_type, method):
-    query = _query(query_type)
+def test_pk_score_outputs_rejected_when_configuring_query(pk_table_stub, query_type, method):
+    vectors = [[1., 0.]] if query_type is BatchVectorQuery else [1., 0.]
+    query = query_type(pk_table_stub, vectors, "embedding")
     with pytest.raises(NotImplementedError, match="Search score output and ordering require a data-evolution"):
         getattr(query, method)()
 

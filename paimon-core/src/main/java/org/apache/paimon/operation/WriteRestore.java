@@ -26,17 +26,43 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Restore for write to restore data files by partition and bucket from file system. */
+/** Restores data file metadata and indexes for write initialization. */
 public interface WriteRestore {
 
     long latestCommittedIdentifier(String user);
 
+    /** Restores data file metadata and the requested indexes for a partition and bucket. */
     RestoreFiles restoreFiles(
             BinaryRow partition,
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex,
             boolean scanSourceIndexPayloads);
+
+    /**
+     * Restores data file metadata and selected indexes for a partition and bucket.
+     *
+     * <p>When {@code scanDataFileMetas} is false, implementations may omit data file metadata and
+     * the total bucket count. Index restoration is controlled independently by the index scan
+     * flags.
+     *
+     * <p>The default implementation delegates to {@link #restoreFiles(BinaryRow, int, boolean,
+     * boolean, boolean)}, regardless of {@code scanDataFileMetas}.
+     */
+    default RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex,
+            boolean scanSourceIndexPayloads,
+            boolean scanDataFileMetas) {
+        return restoreFiles(
+                partition,
+                bucket,
+                scanDynamicBucketIndex,
+                scanDeleteVectorsIndex,
+                scanSourceIndexPayloads);
+    }
 
     @Nullable
     static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {

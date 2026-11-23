@@ -31,7 +31,6 @@ import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions.{assertThat, assertThatIllegalArgumentException}
 
 import java.sql.Timestamp
-import java.util.Collections
 
 import scala.collection.JavaConverters._
 
@@ -342,22 +341,11 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
           assert(table.changelogManager().earliestLongLivedChangelogId() == 1L)
           assert(table.changelogManager().latestLongLivedChangelogId() == 3L)
           assert(readChangelogIds(table, firstChangelog) == List(1))
-          // Operation-local overrides do not change the reader's persisted configuration.
-          // Retained history is discovered only when the reader also uses decoupled retention.
-          val reloaded = loadTable("T")
-          val readTable = retentionSource match {
-            case "dynamic" =>
-              reloaded.copy(Collections.singletonMap("changelog.time-retained", "7 d"))
-            case "retain_max" =>
-              assert(reloaded.options().get("snapshot.num-retained.max") == "4")
-              assert(reloaded.options().get("changelog.num-retained.max") == "4")
-              val coupledScan = reloaded.newReadBuilder().newStreamScan()
-              coupledScan.restore(1L)
-              // This first plan cannot discover the retained changelog through coupled options.
-              assert(coupledScan.plan().splits().isEmpty)
-              assert(readChangelogIds(reloaded, firstChangelog) == List(1))
-              reloaded.copy(Collections.singletonMap("changelog.num-retained.max", "5"))
-            case _ => reloaded
+          // Readers discover retained history without repeating operation-local overrides.
+          val readTable = loadTable("T")
+          if (retentionSource == "retain_max") {
+            assert(readTable.options().get("snapshot.num-retained.max") == "4")
+            assert(readTable.options().get("changelog.num-retained.max") == "4")
           }
           val restored = readTable.newReadBuilder().newStreamScan()
           restored.restore(1L)

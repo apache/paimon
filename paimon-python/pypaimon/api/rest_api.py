@@ -33,6 +33,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ErrorResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
+                                       GetSemanticViewResponse,
                                        GetTableResponse,
                                        GetTableTokenResponse, GetTagResponse,
                                        ListBranchesResponse,
@@ -42,6 +43,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionsResponse,
                                        ListPermissionsResponse,
                                        ListPoliciesResponse,
+                                       ListSemanticViewsResponse,
                                        CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
@@ -52,8 +54,9 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
+from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
 from pypaimon.api.resource_paths import ResourcePaths
-from pypaimon.api.rest_exception import NoSuchResourceException
+from pypaimon.api.rest_exception import NoSuchResourceException, RESTException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
 from pypaimon.common import user_agent
@@ -81,6 +84,7 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
+    MODEL_NAME_PATTERN = "modelNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
@@ -167,7 +171,7 @@ class RESTApi:
 
             page_token = response.next_page_token
 
-            if not page_token or not response.data:
+            if not page_token:
                 break
 
         return results
@@ -562,9 +566,13 @@ class RESTApi:
         if resource_name is not None:
             components.append((resource_name, 'Resource name'))
         for value, label in components:
-            if not value or not value.strip() or value in ('.', '..'):
-                raise ValueError('{} must be a non-empty resource path component'.format(label))
+            RESTApi._validate_resource_path_component(value, label)
         return database_name, table_name
+
+    @staticmethod
+    def _validate_resource_path_component(value, label):
+        if not value or not value.strip() or value in ('.', '..'):
+            raise ValueError('{} must be a non-empty resource path component'.format(label))
 
     def create_branch(
             self,
@@ -737,6 +745,79 @@ class RESTApi:
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
+            self.rest_auth_function,
+        )
+
+    def get_semantic_view(self, identifier: Identifier) -> GetSemanticViewResponse:
+        if identifier is None:
+            raise ValueError("Identifier cannot be None")
+        response = self.client.get_with_params(
+            self.resource_paths.semantic_view(identifier.get_database_name(), identifier.get_object_name()),
+            {},
+            GetSemanticViewResponse,
+            self.rest_auth_function,
+            preserve_encoded_dots=True,
+        )
+        if response is None:
+            raise RESTException("Semantic view response must not be null")
+        return response
+
+    def list_semantic_views_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[str]:
+        if max_results is not None and (
+                isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 1000):
+            raise ValueError("max_results must be an integer between 1 and 1000")
+        response = self.client.get_with_params(
+            self.resource_paths.semantic_views(database_name),
+            self.__build_paged_query_params(max_results, page_token, {}),
+            ListSemanticViewsResponse,
+            self.rest_auth_function,
+            preserve_encoded_dots=True,
+        )
+        if response is None:
+            raise RESTException("Semantic view list response must not be null")
+        return PagedList(response.data(), response.get_next_page_token())
+
+    def list_models(self, database_name: str) -> List[GetModelResponse]:
+        self._validate_resource_path_component(database_name, "Database name")
+        return self.__list_data_from_page_api(
+            lambda query_params: self.client.get_with_params(
+                self.resource_paths.models(database_name),
+                query_params,
+                ListModelsResponse,
+                self.rest_auth_function,
+            )
+        )
+
+    def get_model(self, identifier: Identifier) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        return self.client.get(
+            self.resource_paths.model(database_name, model_name),
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def create_model(
+            self, identifier: Identifier, request: CreateModelRequest
+    ) -> GetModelResponse:
+        database_name, model_name = self._validate_resource_path(identifier)
+        if request.name != model_name:
+            raise ValueError("Model request name must match the identifier")
+        return self.client.post_with_response_type(
+            self.resource_paths.models(database_name),
+            request,
+            GetModelResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_model(self, identifier: Identifier) -> None:
+        database_name, model_name = self._validate_resource_path(identifier)
+        self.client.delete(
+            self.resource_paths.model(database_name, model_name),
             self.rest_auth_function,
         )
 

@@ -21,6 +21,7 @@ import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.execution.python.write.format_file_writer import parquet_write_data, parquet_write_schema
+from pypaimon.utils.numeric_utils import java_floating_sort_key
 
 
 class SingleFileWriter:
@@ -68,13 +69,16 @@ class SingleFileWriter:
                 previous = self.column_stats.get(field.name)
                 if previous is not None:
                     current['null_counts'] += previous['null_counts']
+                    if previous.get('bounds_unavailable'):
+                        current['bounds_unavailable'] = True
                     for key, choose in (
                             ('min_values', min), ('max_values', max)):
                         values = [
                             value for value in (previous[key], current[key])
                             if value is not None
                         ]
-                        current[key] = choose(values) if values else None
+                        sort_key = java_floating_sort_key if values and isinstance(values[0], float) else None
+                        current[key] = choose(values, key=sort_key) if values else None
                 self.column_stats[field.name] = current
         except Exception:
             self.abort()

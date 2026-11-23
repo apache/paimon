@@ -53,6 +53,7 @@ import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** File system implementation of {@link SchemaManager}. */
 @ThreadSafe
@@ -262,7 +263,10 @@ public class FileSystemSchemaManager implements SchemaManager {
                 schemaModification.alterSchema(changes);
                 return true;
             } else {
-                return commit(update);
+                checkState(
+                        commit(update),
+                        "Failed to publish the merged schema. Please retry the operation.");
+                return true;
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to commit the schema.", e);
@@ -276,6 +280,7 @@ public class FileSystemSchemaManager implements SchemaManager {
             SchemaValidation.validateGeneratedColumnEvolution(previous.get(), newSchema);
         }
         SchemaValidation.validateTableSchema(newSchema);
+        SchemaValidation.validateAggregationFunctionTypes(newSchema);
         SchemaValidation.validateHistoricalIcebergTypes(
                 this::listAll, new CoreOptions(newSchema.options()));
         SchemaValidation.validateFallbackBranch(this, newSchema);

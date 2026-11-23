@@ -129,6 +129,33 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testTagDelayDoesNotSkipPeriods() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_CREATION_DELAY, Duration.ofMinutes(10));
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:05:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
+
+        // the delay of hour 12 has not passed
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T13:05:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
+
+        // the delay of hour 12 has passed, but the delay of hour 13 has not
+        commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T14:05:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11", "2023-07-18 12");
+
+        commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T15:05:00")));
+        assertThat(tagManager.allTagNames())
+                .containsOnly("2023-07-18 11", "2023-07-18 12", "2023-07-18 13");
+        commit.close();
+    }
+
+    @Test
     public void testTagSinkWatermark() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);

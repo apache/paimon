@@ -130,10 +130,6 @@ class DedicatedFormatWriter(CompositeDataWriter):
             column for column in self.blob_file_column_names
             if column in configured_video_fields
         ]
-        normal_name_set = set(self.normal_column_names)
-        self.normal_columns = [
-            field for field in self.table.table_schema.fields if field.name in normal_name_set
-        ]
         all_normal_column_names = [
             col for col in all_column_names if col not in dedicated_set
         ]

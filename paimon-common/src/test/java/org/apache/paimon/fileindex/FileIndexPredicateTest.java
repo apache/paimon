@@ -76,6 +76,35 @@ public class FileIndexPredicateTest {
         }
     }
 
+    @Test
+    public void testBoundingBoxAlongsideAnotherColumnsBloomFilter() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("geom", DataTypes.GEOMETRY())
+                        .build();
+        FileIndexWriter indexWriter =
+                new BloomFilterFileIndex(DataTypes.INT(), new Options()).createWriter();
+        indexWriter.writeRecord(7);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(bytes, 1)) {
+            writer.writeIndex("id", BLOOM_FILTER, indexWriter::writeTo);
+            writer.finish();
+        }
+
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate bbox = builder.bboxIntersects(1, 0, 0, 1, 1);
+        try (FileIndexPredicate index = new FileIndexPredicate(bytes.toByteArray(), rowType)) {
+            assertThat(index.evaluate(bbox)).isSameAs(REMAIN);
+            assertThat(index.evaluate(PredicateBuilder.and(builder.equal(0, 7), bbox)).remain())
+                    .isTrue();
+            assertThat(index.evaluate(PredicateBuilder.and(builder.equal(0, 8), bbox)).remain())
+                    .isFalse();
+            assertThat(index.evaluate(PredicateBuilder.or(builder.equal(0, 8), bbox)).remain())
+                    .isTrue();
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Set<String> getRequiredNames(Predicate predicate) throws Exception {
         Method method =

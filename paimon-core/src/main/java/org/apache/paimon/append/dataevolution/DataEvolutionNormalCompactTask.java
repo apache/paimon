@@ -28,6 +28,8 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
@@ -43,16 +45,20 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactProjection.fieldIds;
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactProjection.project;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -61,32 +67,46 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionNormalCompactTask.class);
 
     private final List<Range> protectedRanges;
-
-    public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
-        this(partition, files, Collections.emptyList());
-    }
+    private final boolean partialRewrite;
 
     public DataEvolutionNormalCompactTask(
-            BinaryRow partition, List<DataFileMeta> files, List<Range> protectedRanges) {
+            BinaryRow partition,
+            List<DataFileMeta> files,
+            List<Range> protectedRanges,
+            boolean partialRewrite) {
         super(partition, files);
         checkContiguousRowRange(files);
+        checkArgument(
+                !partialRewrite
+                        || files.stream()
+                                .allMatch(
+                                        file ->
+                                                file.nonNullRowIdRange()
+                                                        .equals(files.get(0).nonNullRowIdRange())),
+                "Partial normal compaction requires identical row-ID ranges.");
         this.protectedRanges =
                 Collections.unmodifiableList(Range.sortAndMergeOverlap(protectedRanges));
+        this.partialRewrite = partialRewrite;
     }
 
     public List<Range> protectedRanges() {
         return protectedRanges;
     }
 
+    public boolean partialRewrite() {
+        return partialRewrite;
+    }
+
     @Override
     public boolean equals(Object other) {
         return super.equals(other)
-                && protectedRanges.equals(((DataEvolutionNormalCompactTask) other).protectedRanges);
+                && protectedRanges.equals(((DataEvolutionNormalCompactTask) other).protectedRanges)
+                && partialRewrite == ((DataEvolutionNormalCompactTask) other).partialRewrite;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), protectedRanges);
+        return Objects.hash(super.hashCode(), protectedRanges, partialRewrite);
     }
 
     @Override
@@ -103,23 +123,16 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 "Vector-store files are compacted by %s.",
                 DataEvolutionVectorCompactTask.class.getSimpleName());
 
-        Set<String> fieldsInDedicatedFile =
-                SetUtils.union(
-                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
-                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
-
+        boolean splitLargeFiles =
+                !partialRewrite && options.dataEvolutionCompactionSplitLargeFiles();
         Map<String, String> writeOptions = new HashMap<>(DYNAMIC_WRITE_OPTIONS);
-        if (options.dataEvolutionCompactionSplitLargeFiles()) {
+        if (splitLargeFiles) {
             writeOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), Long.MAX_VALUE + " b");
         }
         table = table.copy(writeOptions);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
 
-        RowType readWriteType =
-                new RowType(
-                        table.rowType().getFields().stream()
-                                .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
-                                .collect(Collectors.toList()));
+        RowType readWriteType = readWriteType(table);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
@@ -138,7 +151,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
         List<Range> outputRanges =
-                options.dataEvolutionCompactionSplitLargeFiles()
+                splitLargeFiles
                         ? planOutputRanges(options.targetFileSize(false))
                         : Collections.singletonList(checkContiguousRowRange(compactBefore));
         List<DataFileMeta> writeResult = new ArrayList<>();
@@ -188,6 +201,38 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         checkSameRowRange("Normal file", compactBefore, compactAfter);
 
         return commitMessage(compactBefore, compactAfter);
+    }
+
+    protected RowType readWriteType(FileStoreTable table) {
+        CoreOptions options = table.coreOptions();
+        Set<String> fieldsInDedicatedFile =
+                SetUtils.union(
+                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
+                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
+        RowType normalType =
+                new RowType(
+                        table.rowType().getFields().stream()
+                                .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
+                                .collect(Collectors.toList()));
+        if (!partialRewrite) {
+            return normalType;
+        }
+        boolean nestedFieldEnabled = options.dataEvolutionNestedFieldEnabled();
+        SchemaManager schemaManager = table.schemaManager();
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        Set<Integer> fieldIds = new HashSet<>();
+        for (DataFileMeta file : compactBefore) {
+            fieldIds.addAll(
+                    fieldIds(
+                            fileFields(
+                                    schemas.computeIfAbsent(file.schemaId(), schemaManager::schema),
+                                    file),
+                            nestedFieldEnabled));
+        }
+        for (String partitionKey : table.partitionKeys()) {
+            fieldIds.add(table.rowType().getField(partitionKey).id());
+        }
+        return project(normalType, fieldIds, nestedFieldEnabled);
     }
 
     @VisibleForTesting

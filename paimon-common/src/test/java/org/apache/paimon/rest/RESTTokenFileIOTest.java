@@ -289,7 +289,7 @@ class RESTTokenFileIOTest {
     }
 
     @Test
-    void testListFilesIterativeReachesInnerOverride() throws IOException {
+    void testIterativeListingsReachInnerOverride() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         FileIO delegate = mock(FileIO.class);
         FileIOLoader loader = mock(FileIOLoader.class);
@@ -334,6 +334,8 @@ class RESTTokenFileIOTest {
         assertThat(actual.next()).isSameAs(status);
         assertThat(actual.hasNext()).isFalse();
         verify(delegate).listFilesIterative(tableRoot, false);
+        when(delegate.listStatusIterative(tableRoot)).thenReturn(iterator);
+        assertThat(fileIO.listStatusIterative(tableRoot)).isSameAs(iterator);
         // the interface default would construct its own iterator backed by listStatus
         verify(delegate, never()).listStatus(any());
     }

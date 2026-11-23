@@ -88,6 +88,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FallbackReadFileStoreTable.class);
 
+    private static final long EMPTY_BRANCH_SNAPSHOT_ID = -1;
+
     private final FileStoreTable other;
     private final boolean wrappedFirst;
 
@@ -121,9 +123,29 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
+        Map<String, String> otherOptions = new HashMap<>(newTableSchema.options());
+        String snapshotKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
+        String versionKey = CoreOptions.SCAN_VERSION.key();
+        if (!coreOptions().isChainTable()
+                && wrapped.coreOptions().scanSnapshotId() != null
+                && other.coreOptions().scanSnapshotId() != null
+                && Objects.equals(otherOptions.get(snapshotKey), wrapped.options().get(snapshotKey))
+                && Objects.equals(
+                        otherOptions.get(versionKey), wrapped.options().get(versionKey))) {
+            // A schema copy with the same selector keeps the already resolved branch snapshot.
+            otherOptions.remove(snapshotKey);
+            otherOptions.remove(versionKey);
+            otherOptions = rewriteOtherOptions(otherOptions);
+            otherOptions.put(snapshotKey, other.options().get(snapshotKey));
+        } else {
+            otherOptions = rewriteOtherOptions(otherOptions);
+        }
+        if (!coreOptions().isChainTable()) {
+            otherOptions.put(CoreOptions.BRANCH.key(), other.coreOptions().branch());
+        }
         return new FallbackReadFileStoreTable(
                 wrapped.copy(newTableSchema),
-                other.copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))),
+                other.copy(newTableSchema.copy(otherOptions)),
                 wrappedFirst);
     }
 
@@ -222,13 +244,20 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
             Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
-            long otherId;
-            if (otherSnapshot == null) {
-                otherId = Snapshot.FIRST_SNAPSHOT_ID;
-            } else {
-                otherId = otherSnapshot.id();
+            if (otherSnapshot == null && !coreOptions().isChainTable()) {
+                otherSnapshot = other.snapshotManager().earliestSnapshot();
             }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
+            if (otherSnapshot == null) {
+                // Preserve the original snapshot-1 fallback for chain tables.
+                result.put(
+                        scanSnapshotIdOptionKey,
+                        String.valueOf(
+                                coreOptions().isChainTable()
+                                        ? Snapshot.FIRST_SNAPSHOT_ID
+                                        : EMPTY_BRANCH_SNAPSHOT_ID));
+            } else {
+                result.put(scanSnapshotIdOptionKey, String.valueOf(otherSnapshot.id()));
+            }
         }
 
         // bucket number of main branch and other branch are very likely different,
@@ -249,10 +278,96 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     public DataTableScan newFallbackScan(Function<FileStoreTable, DataTableScan> scanCreator) {
-        validateSchema();
+        boolean otherIsEmpty =
+                !coreOptions().isChainTable()
+                        && Objects.equals(
+                                other.coreOptions().scanSnapshotId(), EMPTY_BRANCH_SNAPSHOT_ID);
+        if (!otherIsEmpty) {
+            validateSchema();
+        }
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
-        return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
+        if (coreOptions().isChainTable()) {
+            return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
+        }
+        if (otherIsEmpty) {
+            LOG.warn(
+                    "Skipping branch '{}' because it was empty when resolving this read of branch '{}'.",
+                    other.coreOptions().branch(),
+                    wrapped.coreOptions().branch());
+        } else {
+            validateSnapshotTime();
+        }
+        return new FallbackReadScan(
+                first,
+                second,
+                wrapped.schema(),
+                table -> {
+                    if (table == other && otherIsEmpty) {
+                        return new EmptyBranchScan();
+                    }
+                    return scanCreator.apply(table);
+                });
+    }
+
+    private void validateSnapshotTime() {
+        Long mainId = wrapped.coreOptions().scanSnapshotId();
+        Long otherId = other.coreOptions().scanSnapshotId();
+        if (mainId == null || otherId == null) {
+            return;
+        }
+        Snapshot mainSnapshot = wrapped.snapshotManager().snapshot(mainId);
+        Snapshot otherSnapshot = other.snapshotManager().snapshot(otherId);
+        if (otherSnapshot.timeMillis() <= mainSnapshot.timeMillis()) {
+            return;
+        }
+        Preconditions.checkArgument(
+                coreOptions()
+                        .toConfiguration()
+                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
+                "Snapshot %s (time %s) of branch '%s' is later than the requested snapshot %s (time %s). "
+                        + "Set '%s' to true to allow reading it.",
+                otherId,
+                otherSnapshot.timeMillis(),
+                other.coreOptions().branch(),
+                mainId,
+                mainSnapshot.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        LOG.warn(
+                "Reading snapshot {} (time {}) of branch '{}' after the requested time {} because '{}' is enabled.",
+                otherId,
+                otherSnapshot.timeMillis(),
+                other.coreOptions().branch(),
+                mainSnapshot.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+    }
+
+    private static class EmptyBranchScan implements DataTableScan {
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+            return this;
+        }
+
+        @Override
+        public Plan plan() {
+            return new DataFilePlan<>(Collections.emptyList());
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            return Collections.emptyList();
+        }
     }
 
     protected void validateSchema() {

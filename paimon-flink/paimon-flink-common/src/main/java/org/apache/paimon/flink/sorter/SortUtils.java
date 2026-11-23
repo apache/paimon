@@ -89,6 +89,33 @@ public class SortUtils {
             final KeyAbstract<KEY> shuffleKeyAbstract,
             final ShuffleKeyConvertor<KEY> convertor,
             final TableSortInfo tableSortInfo) {
+        return sortStreamByKey(
+                inputStream,
+                options,
+                valueRowType,
+                sortKeyType,
+                keyTypeInformation,
+                shuffleKeyComparator,
+                shuffleKeyAbstract,
+                convertor,
+                tableSortInfo,
+                null,
+                null);
+    }
+
+    /** Sorts original rows with optional transport transformations around the range exchange. */
+    public static <KEY> DataStream<RowData> sortStreamByKey(
+            final DataStream<RowData> inputStream,
+            final CoreOptions options,
+            final RowType valueRowType,
+            final RowType sortKeyType,
+            final TypeInformation<KEY> keyTypeInformation,
+            final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
+            final KeyAbstract<KEY> shuffleKeyAbstract,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final TableSortInfo tableSortInfo,
+            final RangeShuffle.AssignedRangeOperator<KEY> partitionLocalOperator,
+            final RangeShuffle.ExchangedRowOperator<KEY> exchangeOutputOperator) {
         final int sinkParallelism = tableSortInfo.getSinkParallelism();
         final int localSampleSize = tableSortInfo.getLocalSampleSize();
         final int globalSampleSize = tableSortInfo.getGlobalSampleSize();
@@ -109,6 +136,8 @@ public class SortUtils {
         final RowType longRowType = new RowType(fields);
         final InternalTypeInfo<InternalRow> internalRowType =
                 InternalTypeInfo.fromRowType(longRowType);
+        TypeInformation<RowData> transportValueType =
+                partitionLocalOperator == null ? null : partitionLocalOperator.transportValueType();
 
         // generate the KEY as the key of Pair.
         DataStream<Tuple2<KEY, RowData>> inputWithKey =
@@ -137,7 +166,11 @@ public class SortUtils {
                                         return Tuple2.of(shuffleKeyAbstract.apply(value), value);
                                     }
                                 },
-                                new TupleTypeInfo<>(keyTypeInformation, inputStream.getType()))
+                                new TupleTypeInfo<>(
+                                        keyTypeInformation,
+                                        transportValueType == null
+                                                ? inputStream.getType()
+                                                : transportValueType))
                         .setParallelism(inputStream.getParallelism());
 
         // range shuffle by key
@@ -151,7 +184,9 @@ public class SortUtils {
                         rangeNum,
                         sinkParallelism,
                         valueRowType,
-                        options.sortBySize());
+                        options.sortBySize(),
+                        partitionLocalOperator,
+                        exchangeOutputOperator);
         if (tableSortInfo.isSortInCluster()) {
             return rangeShuffleResult
                     .map(

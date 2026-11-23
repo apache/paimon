@@ -249,12 +249,8 @@ class KeyValueDataWriter(DataWriter):
             split_row = data.num_rows
             if data.nbytes > self.target_file_size:
                 split_row = max(1, self._find_optimal_split_point(data, self.target_file_size))
-            logical_data = data.slice(0, split_row)
-            statistics = self._data_file_statistics(logical_data)
-            physical_data = (self._apply_variant_shredding(logical_data)
-                             if self._variant_shredding else logical_data)
             meta = self._write_changelog_file(
-                physical_data, is_external=self.external_path_provider is not None, **statistics)
+                data.slice(0, split_row), is_external=self.external_path_provider is not None)
             self.committed_changelog_files.append(meta)
             # Advance only after file and metadata are complete. A data-file
             # failure later must neither lose inputs nor write their logs twice.

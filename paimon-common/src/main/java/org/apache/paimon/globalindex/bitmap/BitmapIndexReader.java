@@ -28,6 +28,8 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Comparator;
@@ -148,14 +150,14 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         if (literal == null) {
             return new RoaringNavigableMap64();
         }
-        return scanDictionary(key -> comparator.compare(key, literal) < 0);
+        return scanDictionary(key -> comparator.compare(key, literal) < 0, null, literal);
     }
 
     RoaringNavigableMap64 greaterThan(Object literal) {
         if (literal == null) {
             return new RoaringNavigableMap64();
         }
-        return scanDictionary(key -> comparator.compare(key, literal) > 0);
+        return scanDictionary(key -> comparator.compare(key, literal) > 0, literal, null);
     }
 
     @Override
@@ -273,14 +275,14 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         if (literal == null) {
             return new RoaringNavigableMap64();
         }
-        return scanDictionary(key -> comparator.compare(key, literal) >= 0);
+        return scanDictionary(key -> comparator.compare(key, literal) >= 0, literal, null);
     }
 
     private RoaringNavigableMap64 lessOrEqual(Object literal) {
         if (literal == null) {
             return new RoaringNavigableMap64();
         }
-        return scanDictionary(key -> comparator.compare(key, literal) <= 0);
+        return scanDictionary(key -> comparator.compare(key, literal) <= 0, null, literal);
     }
 
     private RoaringNavigableMap64 between(Object from, Object to) {
@@ -288,7 +290,9 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
             return new RoaringNavigableMap64();
         }
         return scanDictionary(
-                key -> comparator.compare(key, from) >= 0 && comparator.compare(key, to) <= 0);
+                key -> comparator.compare(key, from) >= 0 && comparator.compare(key, to) <= 0,
+                from,
+                to);
     }
 
     private RoaringNavigableMap64 notEqual(Object literal) {
@@ -314,9 +318,20 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
     }
 
     private RoaringNavigableMap64 scanDictionary(Predicate<Object> keyPredicate) {
+        return scanDictionary(keyPredicate, null, null);
+    }
+
+    private RoaringNavigableMap64 scanDictionary(
+            Predicate<Object> keyPredicate, @Nullable Object lower, @Nullable Object upper) {
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        for (BitmapGlobalIndexFormat.DictionaryBlockMeta blockMeta : dictionaryBlocks.get()) {
-            BitmapGlobalIndexFormat.DictionaryBlock dictionaryBlock = dictionaryBlock(blockMeta);
+        List<BitmapGlobalIndexFormat.DictionaryBlockMeta> blocks = dictionaryBlocks.get();
+        int firstBlock =
+                lower == null ? 0 : Math.max(0, findLogicalDictionaryBlockIndex(blocks, lower));
+        int endBlock =
+                upper == null ? blocks.size() : findLogicalDictionaryBlockIndex(blocks, upper) + 1;
+        for (int i = firstBlock; i < endBlock; i++) {
+            BitmapGlobalIndexFormat.DictionaryBlock dictionaryBlock =
+                    dictionaryBlock(blocks.get(i));
             for (BitmapGlobalIndexFormat.DictionaryEntry entry : dictionaryBlock.entries) {
                 Object key = keySerializer.deserialize(MemorySlice.wrap(entry.key.bytes()));
                 if (keyPredicate.test(key)) {

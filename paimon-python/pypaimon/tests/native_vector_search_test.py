@@ -136,9 +136,13 @@ def test_empty_search_keeps_batch_arity(vector_table, rest_catalog, empty):
     if empty == 'table':
         catalog, _ = rest_catalog
         schema = vector_table.table_schema
+        options = {key: value for key, value in schema.options.items()
+                   if key not in ('path', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt')}
         catalog.create_table('default.empty_vectors', Schema(
-            schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+            schema.fields, schema.partition_keys, schema.primary_keys, options), False)
         native = catalog.get_table('default.empty_vectors').copy({'read.native.enabled': 'true'})
+        assert native.table_path != vector_table.table_path
+        assert native.snapshot_manager().get_latest_snapshot() is None
     predicate = native.new_read_builder().new_predicate_builder()
     builder = (native.new_batch_vector_search_builder().with_vector_column('embedding')
                .with_query_vectors([[1, 0], [0, 1]]).with_limit(2))
@@ -180,13 +184,17 @@ def pk_vector_table(rest_catalog, golden_catalog):
     catalog, server = rest_catalog
     golden = golden_catalog.get_table('default.test_pk_vector_golden')
     schema = golden.table_schema
+    options = {key: value for key, value in schema.options.items() if key != 'path'}
     catalog.create_table('default.pk_vectors', Schema(
-        schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
+        schema.fields, schema.partition_keys, schema.primary_keys, options), False)
     source = Path(golden.table_path)
     destination = Path(server.data_path) / server.warehouse / 'default' / 'pk_vectors'
     for directory in ('bucket-0', 'index', 'manifest', 'snapshot'):
         shutil.copytree(str(source / directory), str(destination / directory))
-    return catalog.get_table('default.pk_vectors')
+    table = catalog.get_table('default.pk_vectors')
+    assert table.table_path == destination.as_uri()
+    assert table.catalog_environment.catalog_loader is not None
+    return table
 
 
 @pytest.mark.parametrize('filtered', [False, True])
@@ -561,6 +569,25 @@ def test_unsupported_conjunct_on_same_indexed_field_is_not_exact(rest_catalog, m
         assert len(single.results()) == count
         assert [len(result.results()) for result in batch] == [count, count]
     assert len(_rows(native, _single(native, limit=2).with_filter(is_null).execute_local())) == 1
+
+
+@pytest.mark.parametrize('table_mode, query_options', [
+    ('full', {}),
+    ('fast', {'scalar-index.prefilter.search-mode': 'full'}),
+    ('full', {'scalar-index.prefilter.search-mode': None}),
+])
+def test_prefilter_mode_includes_uncovered_scalar_rows(vector_table, table_mode, query_options):
+    vector_table.create_global_index('id', index_type='btree')
+    _write(vector_table, [{'id': 7, 'embedding': [3, 3], 'pt': 1}])
+    vector_table.create_global_index('embedding', index_type='ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+    table = vector_table.copy({'vector-index.search-mode': 'fast', 'scalar-index.search-mode': 'fast',
+                               'scalar-index.prefilter.search-mode': table_mode})
+    predicate = table.new_read_builder().new_predicate_builder().equal('id', 7)
+    for native in ['false', 'true']:
+        read_table = table.copy({'read.native.enabled': native, 'scan.native-plan.enabled': native})
+        builder = _single(read_table, [3, 3], 10).with_filter(predicate).with_options(query_options)
+        assert _rows(read_table, builder.execute_local()).column('id').to_pylist() == [7]
 
 
 @pytest.mark.parametrize('scalar_mode', ['fast', 'full', 'detail'])

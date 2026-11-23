@@ -94,6 +94,11 @@ public class Schema {
                         this.primaryKeys,
                         this.partitionKeys,
                         CoreOptions.primaryKeyNullable(this.options));
+        List<String> fieldNames =
+                this.fields.stream().map(DataField::name).collect(Collectors.toList());
+        this.options.computeIfPresent(
+                CoreOptions.VECTOR_FIELD.key(),
+                (key, value) -> CoreOptions.normalizeVectorField(value, fieldNames));
         this.comment = comment;
     }
 

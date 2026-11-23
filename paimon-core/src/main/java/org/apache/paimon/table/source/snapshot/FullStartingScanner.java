@@ -34,8 +34,12 @@ public class FullStartingScanner extends ReadPlanStartingScanner {
     private Snapshot startingSnapshot;
 
     public FullStartingScanner(SnapshotManager snapshotManager) {
+        this(snapshotManager, snapshotManager.latestSnapshot());
+    }
+
+    public FullStartingScanner(SnapshotManager snapshotManager, Snapshot startingSnapshot) {
         super(snapshotManager);
-        this.startingSnapshot = snapshotManager.latestSnapshot();
+        this.startingSnapshot = startingSnapshot;
         if (this.startingSnapshot != null) {
             this.startingSnapshotId = startingSnapshot.id();
         }

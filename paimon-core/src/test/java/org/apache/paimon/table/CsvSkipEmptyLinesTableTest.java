@@ -92,11 +92,11 @@ class CsvSkipEmptyLinesTableTest extends TableTestBase {
         // skipped while the file metadata still counts it.
         write(table, GenericRow.of((Object) null), GenericRow.of(1));
 
-        assertThatThrownBy(
-                        () ->
-                                table.copy(
-                                        Collections.singletonMap(
-                                                CsvOptions.SKIP_EMPTY_LINES.key(), "true")))
+        // File-store validation is deferred until runtime initialization, so the dynamic option
+        // is rejected when the copied table is read rather than when it is copied.
+        Table copied =
+                table.copy(Collections.singletonMap(CsvOptions.SKIP_EMPTY_LINES.key(), "true"));
+        assertThatThrownBy(() -> read(copied))
                 .satisfies(anyCauseMatches(IllegalArgumentException.class, ERROR));
 
         // Without the option, the scan and the row count in the metadata agree.

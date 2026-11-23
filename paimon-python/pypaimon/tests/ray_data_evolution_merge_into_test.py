@@ -3030,7 +3030,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self._write(target, self._source(ids=(1, 2, 3, 4)))
         table = self.catalog.get_table(target)
         real_commit = (
-            rewriter_module.commit_self_merge_with_compaction_retry
+            rewriter_module.commit_updates_with_compaction_retry
         )
         real_rewrite = rewriter_module._rewrite_updates
         rewrite_results = []
@@ -3046,7 +3046,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         with patch.object(
                 rewriter_module,
-                'commit_self_merge_with_compaction_retry',
+                'commit_updates_with_compaction_retry',
                 side_effect=compact_then_commit,
         ), patch.object(
                 rewriter_module,
@@ -4457,9 +4457,13 @@ def test_merge_authorizes_named_source_separately(rest_catalog, policy):
 
     catalog, server = rest_catalog
     table = auth_test._table(catalog)
+    options = {key: value for key, value in table.table_schema.options.items()
+               if key not in ('path', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt')}
     catalog.create_table('default.source', Schema.from_pyarrow_schema(
-        auth_test._SCHEMA, options=table.table_schema.options), False)
+        auth_test._SCHEMA, options=options), False)
     source = catalog.get_table('default.source')
+    assert source.table_path != table.table_path
+    assert source.snapshot_manager().get_latest_snapshot() is None
     auth_test._append(source, auth_test._ROWS[1:])
     before = auth_test._files(table)
     with auth_test._restricted(server, source, policy) as authorize, patch.object(
@@ -4484,9 +4488,13 @@ def test_merge_authorizes_named_source_separately(rest_catalog, policy):
 def test_merge_with_full_source_and_target_grants(rest_catalog, seed):
     catalog, server = rest_catalog
     table = auth_test._table(catalog, seed=seed)
+    options = {key: value for key, value in table.table_schema.options.items()
+               if key not in ('path', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt')}
     catalog.create_table('default.source', Schema.from_pyarrow_schema(
-        auth_test._SCHEMA, options=table.table_schema.options), False)
+        auth_test._SCHEMA, options=options), False)
     source = catalog.get_table('default.source')
+    assert source.table_path != table.table_path
+    assert source.snapshot_manager().get_latest_snapshot() is None
     rows = [dict(id=2, value=22, name='B'), dict(id=4, value=40, name='d')]
     auth_test._append(source, rows)
     ray.init(ignore_reinit_error=True, num_cpus=4)

@@ -180,7 +180,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         return new TableWriteImpl<>(
                 rowType(),
                 writer,
-                createRowKeyExtractor(),
+                this::createRowKeyExtractor,
                 (record, rowKind) -> {
                     Preconditions.checkState(
                             rowKind.isAdd(),

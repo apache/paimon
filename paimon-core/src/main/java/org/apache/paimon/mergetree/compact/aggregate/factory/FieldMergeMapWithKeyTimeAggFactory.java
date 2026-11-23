@@ -60,7 +60,8 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 rowType.getFieldCount());
 
         int tsFieldIndex = resolveTsFieldIndex(rowType, options, field);
-        return new FieldMergeMapWithKeyTimeAgg(NAME, mapType, tsFieldIndex);
+        return new FieldMergeMapWithKeyTimeAgg(
+                NAME, mapType, tsFieldIndex, options.fieldMergeMapOverwriteOnEqualTs(field));
     }
 
     private int resolveTsFieldIndex(RowType rowType, CoreOptions options, @Nullable String field) {
@@ -81,8 +82,12 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
 
         DataType tsFieldType = rowType.getTypeAt(tsFieldIndex);
         checkArgument(
-                tsFieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.CHARACTER_STRING),
-                "Timestamp field '%s' for field '%s' must be a string type (CHAR/VARCHAR) but was '%s'.",
+                tsFieldType.isAnyOf(
+                        DataTypeFamily.CHARACTER_STRING,
+                        DataTypeFamily.INTEGER_NUMERIC,
+                        DataTypeFamily.DATETIME),
+                "Timestamp field '%s' for field '%s' must be CHAR/VARCHAR/STRING, TINYINT/SMALLINT/INT/BIGINT or "
+                        + "DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ but was '%s'.",
                 rowType.getFieldNames().get(tsFieldIndex),
                 field,
                 tsFieldType);

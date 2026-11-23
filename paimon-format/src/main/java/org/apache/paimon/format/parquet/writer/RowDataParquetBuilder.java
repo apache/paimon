@@ -43,20 +43,29 @@ public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow
 
     private final RowType rowType;
     private final Configuration conf;
+    private final boolean timestampMillisAsMicros;
 
     public RowDataParquetBuilder(RowType rowType, Options options) {
+        this(rowType, options, false);
+    }
+
+    public RowDataParquetBuilder(
+            RowType rowType, Options options, boolean timestampMillisAsMicros) {
         this.rowType = rowType;
+        this.timestampMillisAsMicros = timestampMillisAsMicros;
         this.conf = new Configuration(false);
         options.toMap().forEach(conf::set);
     }
 
-    private RowDataParquetBuilder(RowType rowType, Configuration conf) {
+    private RowDataParquetBuilder(
+            RowType rowType, Configuration conf, boolean timestampMillisAsMicros) {
         this.rowType = rowType;
         this.conf = conf;
+        this.timestampMillisAsMicros = timestampMillisAsMicros;
     }
 
     public RowDataParquetBuilder withRowType(RowType rowType) {
-        return new RowDataParquetBuilder(rowType, conf);
+        return new RowDataParquetBuilder(rowType, conf, timestampMillisAsMicros);
     }
 
     @Override
@@ -70,7 +79,7 @@ public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow
             OutputFile out, String compression, Supplier<Map<String, byte[]>> metadataSupplier)
             throws IOException {
         ParquetRowDataBuilder builder =
-                new ParquetRowDataBuilder(out, rowType)
+                new ParquetRowDataBuilder(out, rowType, timestampMillisAsMicros)
                         .withMetadataSupplier(metadataSupplier)
                         .withConf(conf)
                         .withCompressionCodec(getCompressionCodec(getCompression(compression)))

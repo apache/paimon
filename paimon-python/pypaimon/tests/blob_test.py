@@ -28,7 +28,7 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pyarrow as pa
 import pytest
@@ -81,6 +81,20 @@ class MockFileIO:
         return self._file_io.new_input_stream(path)
 
 
+def counting_positional_stream(source):
+    def read_at(size, offset):
+        position = source.tell()
+        try:
+            source.seek(offset)
+            return source.read(size)
+        finally:
+            source.seek(position)
+
+    stream = MagicMock(wraps=source)
+    stream.read_at = MagicMock(side_effect=read_at)
+    return stream
+
+
 class CountingBlobFileIO(LocalFileIO):
     def __init__(self, root):
         super().__init__(root, Options({}))
@@ -92,7 +106,7 @@ class CountingBlobFileIO(LocalFileIO):
         return super().get_file_size(path)
 
     def new_input_stream(self, path):
-        stream = MagicMock(wraps=super().new_input_stream(path))
+        stream = counting_positional_stream(super().new_input_stream(path))
         stream.__enter__.return_value = stream
         stream.__exit__.side_effect = lambda *args: stream.close()
         self.streams.append(stream)
@@ -100,7 +114,7 @@ class CountingBlobFileIO(LocalFileIO):
 
     def counts(self):
         return (self.stat_count, len(self.streams),
-                sum(stream.read.call_count for stream in self.streams),
+                sum(stream.read.call_count + stream.read_at.call_count for stream in self.streams),
                 sum(stream.close.call_count for stream in self.streams))
 
 
@@ -1530,7 +1544,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
         self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
-        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0)
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
         video_bytes = video.serialize()
         self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
         self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
@@ -1712,7 +1726,7 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=["payload"]))
 
-        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0).serialize()
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
         writer._validate_inline_stored_fields_input(
             pa.RecordBatch.from_arrays(
                 [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
@@ -1806,7 +1820,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"video-frame-payload"
         descriptor = VideoFrameDescriptor(
-            "file-backed/video.mp4", 0, len(data), 2, -1, 0)
+            "file-backed/video.mp4", 0, len(data), 2)
         file_io = self._token_aware_file_io(data)
         row = OffsetRow(
             (descriptor.serialize(),), 0, 1,
@@ -1833,7 +1847,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"convert video blob"
         descriptor = VideoFrameDescriptor(
-            "file-backed/convert.mp4", 0, len(data), 2, -1, 0)
+            "file-backed/convert.mp4", 0, len(data), 2)
         file_io = self._token_aware_file_io(data)
         batch = RecordBatch.from_arrays(
             [pa.array([descriptor.serialize()], type=pa.large_binary())],
@@ -1939,6 +1953,9 @@ class BlobTest(unittest.TestCase):
             def __init__(self):
                 self.uri_reader_factory = FailingFactory()
                 self.opened_paths = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                return [blob.to_data() if blob is not None else None for blob in blobs]
 
             def new_input_stream(self, path):
                 self.opened_paths.append(path)
@@ -2846,6 +2863,9 @@ class BlobTest(unittest.TestCase):
         class _CatalogEnvironment:
             catalog_loader = _CatalogLoader()
 
+            def catalog_context(self):
+                return self.catalog_loader
+
         class _Table:
             options = CoreOptions(Options({
                 "blob-as-descriptor": "true",
@@ -3314,7 +3334,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 streams = []
 
                 def counted_open(path):
-                    stream = MagicMock(wraps=open_stream(path))
+                    stream = counting_positional_stream(open_stream(path))
                     streams.append(stream)
                     return stream
 
@@ -3333,7 +3353,8 @@ class BlobEndToEndTest(unittest.TestCase):
                             finally:
                                 reader.close()
                         results.append(descriptors)
-                        reads.append(sum(stream.read.call_count for stream in streams))
+                        reads.append(sum(stream.read.call_count + stream.read_at.call_count
+                                         for stream in streams))
                     self.assertEqual(reads, [34, expected_reads])
                     self.assertEqual(results[0], results[1])
                     self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
@@ -3496,6 +3517,83 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch.column(0)[1].as_py(), b"world")
         self.assertEqual(counting_file_io.input_stream_count, 1)
         reader.close()
+
+    def test_blob_index_reads_exact_ranges_without_stream_read_ahead(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "positional-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        file_size = os.path.getsize(path)
+        with open(path, "rb") as input_file:
+            data = input_file.read()
+        index_size = struct.unpack('<I', data[-5:-1])[0]
+        file_io = CountingBlobFileIO(self.temp_dir)
+        reader = FormatBlobReader(file_io, path, [field.name], [field], None, True,
+                                  file_size=file_size)
+        try:
+            descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+            self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+            stream = file_io.streams[0]
+            self.assertEqual([call(5, file_size - 5),
+                              call(index_size, file_size - 5 - index_size)],
+                             stream.read_at.call_args_list)
+            stream.seek.assert_not_called()
+            stream.read.assert_not_called()
+            self.assertEqual(1, len(file_io.streams))
+        finally:
+            reader.close()
+        self.assertEqual(1, file_io.streams[0].close.call_count)
+
+    def test_blob_index_falls_back_for_streams_without_positional_reads(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "stream-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        with open(path, "rb") as input_file:
+            data = input_file.read()
+        stream = MagicMock(wraps=io.BytesIO(data))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        with patch.object(file_io, 'new_input_stream', return_value=stream):
+            reader = FormatBlobReader(file_io, path, [field.name], [field], None, True,
+                                      file_size=len(data))
+            try:
+                descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+                self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+                self.assertEqual(2, stream.seek.call_count)
+                self.assertEqual(2, stream.read.call_count)
+            finally:
+                reader.close()
+        self.assertEqual(1, stream.close.call_count)
+
+    def test_blob_index_rejects_ranges_outside_the_file(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+
+        class PositionalStream(io.BytesIO):
+            def read_at(self, length, offset):
+                if offset < 0:
+                    raise AssertionError("invalid offset must not reach the filesystem")
+                return self.getvalue()[offset:offset + length]
+
+        for content in (b"1234", struct.pack('<IB', 100, 1)):
+            with self.subTest(content=content):
+                stream = PositionalStream(content)
+                file_io = LocalFileIO(self.temp_dir, Options({}))
+                with patch.object(file_io, 'new_input_stream', return_value=stream):
+                    with self.assertRaisesRegex(IOError, "Invalid blob file"):
+                        FormatBlobReader(file_io, str(id(stream)) + ".blob", [field.name],
+                                         [field], None, True, file_size=len(content))
+                self.assertTrue(stream.closed)
+
+    def test_blob_index_falls_back_when_os_pread_is_unavailable(self):
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "local-index.blob")
+        self._write_single_blob(path, field, b"payload")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        with patch.object(os, 'pread', None, create=True):
+            reader = FormatBlobReader(file_io, path, [field.name], [field], None, True)
+            try:
+                descriptor = BlobDescriptor.deserialize(reader.read_arrow_batch().column(0)[0].as_py())
+                self.assertEqual((path, 4, 7), (descriptor.uri, descriptor.offset, descriptor.length))
+            finally:
+                reader.close()
 
     def test_blob_reader_uses_provided_file_size(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
@@ -3699,10 +3797,11 @@ class BlobEndToEndTest(unittest.TestCase):
                 def open_stream(file_path):
                     stream = original_open(file_path)
                     if failure == 'read':
-                        stream.read.side_effect = IOError("injected read failure")
+                        stream.read_at.side_effect = IOError("injected read failure")
                     elif failure == 'index':
-                        read = stream._mock_wraps.read
-                        stream.read.side_effect = lambda size: read(size) if size == 5 else read(size)[:-1]
+                        read_at = stream.read_at.side_effect
+                        stream.read_at.side_effect = lambda size, offset: (
+                            read_at(size, offset) if size == 5 else read_at(size, offset)[:-1])
                     return stream
 
                 with patch.object(file_io, 'new_input_stream', side_effect=open_stream):
@@ -4710,6 +4809,8 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_parallelism=4,
         )
 
+        # The reader has already fetched its footer/index; count payload ranges below.
+        range_reads.clear()
         batch = reader.read_arrow_batch()
 
         self.assertEqual(

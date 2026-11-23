@@ -209,9 +209,13 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
         }
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
 
-        Map<String, String> before = extractRow(root.payload().before());
-        if (!before.isEmpty()) {
-            records.add(createRecord(RowKind.DELETE, before));
+        JsonNode beforeRow = root.payload().before();
+        // Check the raw image before expression lookup populates absent source fields with nulls.
+        if (!isNull(beforeRow) && beforeRow.size() > 0) {
+            Map<String, String> before = extractRow(beforeRow);
+            if (!before.isEmpty()) {
+                records.add(createRecord(RowKind.DELETE, before));
+            }
         }
 
         Map<String, String> after = extractRow(root.payload().after());
@@ -262,6 +266,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
+                resultMap.put(fieldName, null);
                 continue;
             }
 
@@ -277,23 +282,29 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
             resultMap.put(fieldName, newValue);
         }
 
+        Map<String, String> metadataValues = new LinkedHashMap<>();
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            metadataValues.put(
+                    metadataConverter.columnName(),
+                    metadataConverter.read(root.payload().source()));
+        }
+
         // generate values of computed columns
         Set<String> base64EncodedFields =
-                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
+                computedColumns.isEmpty()
+                        ? Collections.emptySet()
+                        : DebeziumSchemaUtils.extractBase64EncodedFields(root.schema());
         for (ComputedColumn computedColumn : computedColumns) {
             resultMap.put(
                     computedColumn.columnName(),
-                    computedColumn.evalFromRecord(resultMap, base64EncodedFields));
+                    computedColumn.evalFromRecord(resultMap, base64EncodedFields, metadataValues));
+            base64EncodedFields.remove(computedColumn.columnName());
 
             // remember the computed column data type for later reference by other computed columns
             schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
         }
 
-        for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            resultMap.put(
-                    metadataConverter.columnName(),
-                    metadataConverter.read(root.payload().source()));
-        }
+        resultMap.putAll(metadataValues);
 
         return resultMap;
     }

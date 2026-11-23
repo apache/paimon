@@ -229,7 +229,8 @@ public class GenericIndexTopoBuilder {
 
         Options mergedOptions = new Options(table.options(), userOptions);
         byte[] sourceMeta =
-                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
+                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId(), table.schema().id())
+                        .serialize();
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
@@ -485,12 +486,6 @@ public class GenericIndexTopoBuilder {
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
-                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
-                    LOG.warn(
-                            "rowCount mismatch: writer reported {} but caller saw {} rows",
-                            resultEntries.get(0).rowCount(),
-                            rowsSeen);
-                }
                 long elapsed = System.currentTimeMillis() - startTime;
                 LOG.info(
                         "Finished shard [{}, {}]: saw {} rows, "

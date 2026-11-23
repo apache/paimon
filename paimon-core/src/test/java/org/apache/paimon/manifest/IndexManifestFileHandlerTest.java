@@ -41,6 +41,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -422,6 +423,26 @@ public class IndexManifestFileHandlerTest {
                         secondManifest,
                         Arrays.asList(first.toDeleteEntry(), second.toDeleteEntry(), ann));
         assertThat(indexManifestFile.read(annManifest)).containsExactly(ann);
+    }
+
+    @Test
+    public void testNestedAndDuplicateAddedRangesPreserveConflictAtEndpoint() {
+        IndexManifestFileHandler.GlobalIndexCombiner combiner =
+                new IndexManifestFileHandler.GlobalIndexCombiner();
+        IndexManifestEntry retained = globalIndexEntry("retained", 100, 110, 1);
+        List<IndexManifestEntry> added =
+                Arrays.asList(
+                        globalIndexEntry("router", 0, 100, 1),
+                        globalIndexEntry("shard", 0, 100, 1),
+                        globalIndexEntry("nested", 20, 30, 1));
+        assertThatThrownBy(() -> combiner.combine(Collections.singletonList(retained), added))
+                .hasMessageContaining("retained")
+                .hasMessageContaining("overlapping row range");
+        assertThat(
+                        combiner.combine(
+                                Collections.singletonList(globalIndexEntry("next", 101, 110, 1)),
+                                added))
+                .hasSize(4);
     }
 
     @Test

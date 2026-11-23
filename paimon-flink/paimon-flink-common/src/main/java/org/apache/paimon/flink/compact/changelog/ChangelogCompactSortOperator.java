@@ -97,7 +97,8 @@ public class ChangelogCompactSortOperator extends AbstractStreamOperator<Committ
                                 message.compactIncrement().compactAfter(),
                                 Collections.emptyList(),
                                 message.compactIncrement().newIndexFiles(),
-                                message.compactIncrement().deletedIndexFiles()));
+                                message.compactIncrement().deletedIndexFiles()),
+                        message.checkFromSnapshot());
         if (!newMessage.isEmpty()) {
             Committable newCommittable = new Committable(committable.checkpointId(), newMessage);
             output.collect(new StreamRecord<>(newCommittable));

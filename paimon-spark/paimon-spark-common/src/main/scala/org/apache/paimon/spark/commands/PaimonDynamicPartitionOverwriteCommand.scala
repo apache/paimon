@@ -49,6 +49,14 @@ case class PaimonDynamicPartitionOverwriteCommand(
 
   override def child: LogicalPlan = query
 
+  // Spark 4.2's WriteWithSchemaEvolution contract. Paimon performs its own schema handling.
+  def withSchemaEvolution: Boolean = false
+
+  def writePrivileges: Set[org.apache.spark.sql.connector.catalog.TableWritePrivilege] =
+    Set(
+      org.apache.spark.sql.connector.catalog.TableWritePrivilege.INSERT,
+      org.apache.spark.sql.connector.catalog.TableWritePrivilege.DELETE)
+
   override def withNewQuery(newQuery: LogicalPlan): PaimonDynamicPartitionOverwriteCommand = {
     copy(query = newQuery)
   }

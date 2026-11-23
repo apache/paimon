@@ -57,6 +57,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagAutoManager;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CatalogBranchManager;
@@ -290,16 +291,30 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     public RowKeyExtractor createRowKeyExtractor() {
+        return createRowKeyExtractor(rowType());
+    }
+
+    /** Creates a {@link RowKeyExtractor} for records in the field order of {@code writeType}. */
+    protected RowKeyExtractor createRowKeyExtractor(RowType writeType) {
+        List<String> keys = new ArrayList<>(schema().partitionKeys());
+        keys.addAll(schema().primaryKeys());
+        keys.addAll(schema().bucketKeys());
+        Preconditions.checkArgument(
+                writeType.getFieldNames().containsAll(keys),
+                "Write type %s must contain partition, primary and bucket keys %s.",
+                writeType.getFieldNames(),
+                keys);
+        TableSchema schema = schema().copy(writeType.getFields());
         switch (bucketMode()) {
             case HASH_FIXED:
-                return new FixedBucketRowKeyExtractor(schema());
+                return new FixedBucketRowKeyExtractor(schema);
             case HASH_DYNAMIC:
             case KEY_DYNAMIC:
-                return new DynamicBucketRowKeyExtractor(schema());
+                return new DynamicBucketRowKeyExtractor(schema);
             case BUCKET_UNAWARE:
-                return new AppendTableRowKeyExtractor(schema());
+                return new AppendTableRowKeyExtractor(schema);
             case POSTPONE_MODE:
-                return new PostponeBucketRowKeyExtractor(schema());
+                return new PostponeBucketRowKeyExtractor(schema);
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }

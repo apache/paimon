@@ -268,7 +268,9 @@ public class DiscardingCompactChangesTest extends TableTestBase {
                                 inputs.get(0).partition(),
                                 inputs.stream()
                                         .map(ManifestEntry::file)
-                                        .collect(Collectors.toList()))
+                                        .collect(Collectors.toList()),
+                                Collections.emptyList(),
+                                false)
                         .doCompact(table, "compact-worker");
     }
 

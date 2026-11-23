@@ -88,9 +88,12 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._adopt_metadata(inner)
         # Preserve original BlobViewStruct bytes when resolve disabled: skip both
         # view resolution (Stage 1) and descriptor-to-data resolution (Stage 2).
-        resolve_enabled = CoreOptions.blob_view_resolve_enabled(
-            table.options) and self._table.catalog_environment.catalog_loader is not None
-        self._view_fields = CoreOptions.blob_view_fields(table.options) if resolve_enabled else set()
+        view_fields = CoreOptions.blob_view_fields(table.options)
+        resolve_enabled = (
+            CoreOptions.blob_view_resolve_enabled(table.options)
+            and (not view_fields
+                 or self._table.catalog_environment.catalog_context() is not None))
+        self._view_fields = view_fields if resolve_enabled else set()
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self._blob_as_descriptor = CoreOptions.blob_as_descriptor(table.options)
         self._field_names = field_names
@@ -110,7 +113,9 @@ class BlobInlineConvertReader(RecordBatchReader):
             if name in resolved_names}
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        # Align with Java: only enter blob view resolution when catalog_loader is available.
+        # Align with Java: only enter blob view resolution when a catalog context
+        # is available. External REST tables have no catalog loader but retain their
+        # catalog context for dependency reads.
         if self._view_fields and not self._prescan_done:
             self._prescan_view_structs()
 

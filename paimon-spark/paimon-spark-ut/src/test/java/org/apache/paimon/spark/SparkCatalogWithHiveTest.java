@@ -23,6 +23,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.TestHiveMetastore;
 import org.apache.paimon.table.FileStoreTableFactory;
 
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.URL;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,6 +118,9 @@ public class SparkCatalogWithHiveTest {
 
     @Test
     public void testSpecifyHiveConfDirInGenericCatalog() throws IOException {
+        URL hiveSiteLocation = HiveConf.getHiveSiteLocation();
+        boolean loadMetastoreConfig = HiveConf.isLoadMetastoreConfig();
+        boolean loadHiveServer2Config = HiveConf.isLoadHiveServer2Config();
         try (SparkSession spark =
                 createSessionBuilder()
                         .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
@@ -127,6 +132,10 @@ public class SparkCatalogWithHiveTest {
                     .rootCause()
                     .isInstanceOf(FileNotFoundException.class)
                     .hasMessageContaining("nonExistentPath");
+        } finally {
+            HiveConf.setHiveSiteLocation(hiveSiteLocation);
+            HiveConf.setLoadMetastoreConfig(loadMetastoreConfig);
+            HiveConf.setLoadHiveServer2Config(loadHiveServer2Config);
         }
     }
 

@@ -420,7 +420,7 @@ under the License.
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
-            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
+            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table. For incremental data-evolution compaction, this limits fully superseded file bytes relative to files still supplying current columns. Files with row-level fallbacks count as live.</td>
         </tr>
         <tr>
             <td><h5>compaction.min.file-num</h5></td>
@@ -456,7 +456,7 @@ under the License.
             <td><h5>compaction.size-ratio</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
-            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set. Also applies to newest-first column-file version selection in incremental data-evolution compaction.</td>
         </tr>
         <tr>
             <td><h5>compaction.skip-expired-partitions</h5></td>
@@ -531,6 +531,12 @@ under the License.
             <td>Skip complete data-evolution compaction tasks with row-range conflicts. Skipped inputs remain live for later compaction. Applies only to data-only compaction messages without row-id validation baselines.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.incremental.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Compact a newest-first prefix of column-file versions within one row-ID range, writing only their columns and retaining older files. Applies to normal, BLOB and VECTOR files when their compaction is enabled. Uses compaction.min.file-num for normal/VECTOR files and the existing two-file trigger for BLOB files, plus compaction.size-ratio and compaction.max-size-amplification-percent. Nested ROW columns are projected by written leaf field IDs. Partial normal rewrites keep their complete row-ID range. Eligible oversized normal files select all normal versions for splitting.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
             <td style="word-wrap: break-word;">2.0</td>
             <td>Double</td>
@@ -549,6 +555,12 @@ under the License.
             <td>Whether data-evolution compaction selects normal data files larger than data-evolution.compaction.large-file-ratio times target-file-size, even below compaction.min.file-num when dedicated-file ranges allow splitting. Normal output ranges are estimated from input file sizes and row counts toward target-file-size, then adjusted to avoid cutting through any BLOB or VECTOR file range. Actual output sizes may differ from the target. Row IDs and logical deletions are preserved, and associated BLOB and VECTOR files are not rewritten by this option.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.data-file-dv-pushdown.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to prune a contiguous deletion span from data file reads. When the deletions of a Parquet data file form one contiguous span of physical rows covering at least half of the file, the scan skips that span and reads the remaining rows as ranges. This applies only when the scan has no other row-range or file-index selection; scattered deletions also keep the regular read path. The deletion vector is still applied on top, so results never change.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -559,6 +571,12 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.merge-into.join-reuse</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to reuse a disk-persisted match result between deterministic UPDATE and INSERT actions on data evolution tables without DELETE actions or dedicated BLOB/VECTOR columns. This replaces the two action joins with a full outer join and trades repeated target scans for shuffle and executor-local disk storage. Requires Spark adaptive query execution and adaptive partition coalescing; otherwise the original join path is used.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.merge-into.source-persist</h5></td>
@@ -849,6 +867,12 @@ under the License.
             <td>Format table file compression.</td>
         </tr>
         <tr>
+            <td><h5>format-table.file.suffix.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to include the file format suffix in data file names written by the Paimon implementation of a format table. Compression suffixes are unaffected.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.implementation</h5></td>
             <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
@@ -1015,6 +1039,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether index file in data file directory.</td>
+        </tr>
+        <tr>
+            <td><h5>lakestream.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable lake-stream mode. When enabled, regular writes are routed to the Lakestream Store. The Lakestream Store's tiering service asynchronously writes data to Paimon. Reads from the original table name access only Paimon, while reads from the '$rt'-suffixed table name combine Paimon and Lakestream Store data.</td>
         </tr>
         <tr>
             <td><h5>local-kv-db.block-size</h5></td>
@@ -1429,6 +1459,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-index.build.parallelism</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent primary-key index build tasks per writer instance, shared by its index columns and buckets. Must be greater than zero. Increasing this value may increase memory and I/O usage.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -1507,16 +1543,16 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
         </tr>
         <tr>
-            <td><h5>rest.commit.acquire-lock</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether this writer acquires a REST commit lease for each publication attempt. Can be set dynamically for a writer and requires rest.commit.lock-enabled on the server-side table.</td>
-        </tr>
-        <tr>
             <td><h5>rest.commit.lock-enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Enable the REST catalog's server-side table commit lease capability. Writers acquire a lease only when rest.commit.acquire-lock is enabled.</td>
+            <td>Enable the REST catalog's server-side table commit lease capability. Writers acquire a lease only when rest.commit.retry-acquire-lock is enabled.</td>
+        </tr>
+        <tr>
+            <td><h5>rest.commit.retry-acquire-lock</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether this writer acquires a REST commit lease when retrying a conflicting publication. The first attempt is optimistic for retryable operations. Rollback as latest and manifest repair acquire the lease before preparing their single attempt. Can be set dynamically for a writer and requires rest.commit.lock-enabled on the server-side table.</td>
         </tr>
         <tr>
             <td><h5>row-tracking.enabled</h5></td>
@@ -1537,10 +1573,16 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
         </tr>
         <tr>
-            <td><h5>scalar-index.search-mode</h5></td>
+            <td><h5>scalar-index.prefilter.search-mode</h5></td>
             <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
-            <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+            <td>Search mode for scalar prefilters in vector and full-text search. If unset, use an explicit scalar-index.search-mode, then an explicit global-index.search-mode, then fast.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scalar-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>scan.bounded.watermark</h5></td>
@@ -1565,6 +1607,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-branch.allow-earliest-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to allow reading the earliest available snapshot of a fallback or primary branch when no snapshot exists at or before the current branch's requested snapshot time. This applies to snapshot-ID time travel, including numeric scan.version. By default, such reads fail unless the other branch has no snapshots. Enabling this option may read data committed after the requested time.</td>
         </tr>
         <tr>
             <td><h5>scan.fallback-branch.read-fail-fast</h5></td>
@@ -1986,6 +2034,12 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-index.post-filter.candidates-factor</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Positive multiplier of the original Top-K for a single ANN query when scalar indexes cannot evaluate a DE vector search filter. The candidate count is at least the reranking limit and capped by the shard size and integer limit. Candidates are checked against the pinned data; fewer than Top-K matches are returned without retry or raw scoring of indexed ranges.</td>
         </tr>
         <tr>
             <td><h5>vector-index.search-mode</h5></td>

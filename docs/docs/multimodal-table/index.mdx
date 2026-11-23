@@ -83,8 +83,9 @@ For JVM primary-key workloads, use the separate guides for
 - A normal-column update writes the selected columns over complete affected file
   ranges. It saves I/O on untouched columns; it can still process more rows than
   the update predicate matches.
-- Appending data does not refresh existing indexes. The default `fast` search mode
-  can omit uncovered rows; choose a [coverage policy](./global-index/manage-indexes#coverage-and-freshness).
+- Appending data does not refresh existing indexes. Ordinary batch scans include uncovered
+  rows by default. The `fast` mode used by default in vector and full-text searches can omit
+  uncovered rows. See [Coverage and Freshness](./global-index/manage-indexes#coverage-and-freshness).
 - Ordinary updates and compaction preserve row IDs. Some maintenance operations
   reassign them; coordinate [row-ID lifetime](./data-evolution-maintenance#row-id-lifetime)
   with BLOB views or applications that persist row references.

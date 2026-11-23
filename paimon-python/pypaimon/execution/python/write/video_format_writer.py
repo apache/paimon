@@ -15,11 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import errno
-import shutil
-import tempfile
 import struct
-import sys
+
+from pypaimon.common.mp4_moov import MoovLocator
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.schema.data_types import is_blob_type
@@ -28,15 +26,7 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
-
-
-def _video_index_fallback_errors():
-    errors = (ImportError, OSError, ValueError, EOFError)
-    av = sys.modules.get("av")
-    ffmpeg_error = getattr(getattr(av, "error", None), "FFmpegError", None)
-    return errors if ffmpeg_error is None else errors + (ffmpeg_error,)
 
 
 class VideoFormatWriter(BlobFormatWriter):
@@ -44,7 +34,7 @@ class VideoFormatWriter(BlobFormatWriter):
 
     VERSION = 1
     FOOTER_MAGIC_NUMBER = 0x4F454449
-    FOOTER_SIZE = 25
+    FOOTER_SIZE = 29
     NULL_REFERENCE = -1
     PLACE_HOLDER_REFERENCE = -2
 
@@ -60,10 +50,9 @@ class VideoFormatWriter(BlobFormatWriter):
             copy_buffer_size=copy_buffer_size,
         )
         self._physical_lengths = []
-        self._keyframe_indexes = []
-        self._index_spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
+        self._moov_offsets = []
+        self._moov_lengths = []
         self._physical_videos = {}
-        self._physical_video_keyframe_indexes = {}
         self._run_lengths = []
         self._run_references = []
         self._run_first_frames = []
@@ -71,7 +60,6 @@ class VideoFormatWriter(BlobFormatWriter):
         self._current_run_reference = None
         self._current_run_first_frame = 0
         self._current_run_last_frame = 0
-        self._keyframe_index_bytes = 0
         self._closed = False
 
     def add_element(self, row) -> None:
@@ -102,33 +90,13 @@ class VideoFormatWriter(BlobFormatWriter):
                 "VideoFrameDescriptor."
             )
         payload = frame.payload_descriptor
-        keyframe_index_descriptor = frame.keyframe_index_descriptor
         ordinal = self._physical_videos.get(payload)
         if ordinal is None:
-            keyframe_index = self._keyframe_index(value, frame)
-            try:
-                length = self._write_video_payload(value)
-            except BaseException:
-                self._index_spool.seek(self._keyframe_index_bytes)
-                self._index_spool.truncate()
-                raise
+            length = self._write_video_payload(value)
             ordinal = len(self._physical_lengths)
             self._physical_lengths.append(length)
-            self._keyframe_indexes.append(keyframe_index)
-            self._keyframe_index_bytes += keyframe_index
             self._physical_videos[payload] = ordinal
-            self._physical_video_keyframe_indexes[
-                payload] = keyframe_index_descriptor
-        elif (self._physical_video_keyframe_indexes[payload]
-              != keyframe_index_descriptor):
-            raise ValueError(
-                "Video frames for the same payload must use the same "
-                "keyframe index."
-            )
         self._append(ordinal, frame.frame_index)
-
-    def reach_target_size(self, target_size: int) -> bool:
-        return self.position + self._keyframe_index_bytes >= target_size
 
     @property
     def physical_video_count(self) -> int:
@@ -143,12 +111,9 @@ class VideoFormatWriter(BlobFormatWriter):
             return
         try:
             self._flush_run()
-            self._index_spool.seek(0)
-            shutil.copyfileobj(self._index_spool, self.output_stream, self.copy_buffer_size)
             physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
-            keyframe_length_index = DeltaVarintCompressor.compress(
-                self._keyframe_indexes
-            )
+            moov_offset_index = DeltaVarintCompressor.compress(self._moov_offsets)
+            moov_length_index = DeltaVarintCompressor.compress(self._moov_lengths)
             run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
             run_reference_index = DeltaVarintCompressor.compress(
                 self._run_references
@@ -157,73 +122,42 @@ class VideoFormatWriter(BlobFormatWriter):
                 self._run_first_frames
             )
             for index in (
-                    physical_index,
-                    keyframe_length_index,
-                    run_length_index,
-                    run_reference_index,
-                    first_frame_index):
+                physical_index,
+                moov_offset_index,
+                moov_length_index,
+                run_length_index,
+                run_reference_index,
+                first_frame_index,
+            ):
                 self.output_stream.write(index)
-            footer = struct.pack(
-                '<IIIIIIB',
+            self.output_stream.write(struct.pack(
+                '<IIIIIIIB',
                 len(physical_index),
-                len(keyframe_length_index),
+                len(moov_offset_index),
+                len(moov_length_index),
                 len(run_length_index),
                 len(run_reference_index),
                 len(first_frame_index),
                 self.FOOTER_MAGIC_NUMBER,
                 self.VERSION,
-            )
-            self.output_stream.write(footer)
+            ))
             if hasattr(self.output_stream, 'flush'):
                 self.output_stream.flush()
+        finally:
+            self._closed = True
             if hasattr(self.output_stream, 'close'):
                 self.output_stream.close()
-        finally:
-            self._index_spool.close()
-            self._closed = True
-
-    def _keyframe_index(self, blob, frame):
-        descriptor = frame.keyframe_index_descriptor
-        start = self._index_spool.tell()
-        try:
-            if descriptor is None:
-                with blob.new_input_stream() as stream:
-                    payload_length = frame.payload_descriptor.length
-                    if payload_length < 0:
-                        stream.seek(0, 2)
-                        payload_length = stream.tell()
-                        stream.seek(0)
-                    try:
-                        mapping = VideoKeyframeIndex.inspect(stream, payload_length)
-                    except _video_index_fallback_errors() as error:
-                        if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EDQUOT, errno.EIO):
-                            raise
-                        return 0
-                    with mapping:
-                        mapping.write_to(self._index_spool)
-            else:
-                with tempfile.TemporaryFile() as mapping:
-                    with Blob.from_descriptor(blob.uri_reader, descriptor).new_input_stream() as source:
-                        shutil.copyfileobj(source, mapping, self.copy_buffer_size)
-                    if mapping.tell() != descriptor.length:
-                        raise ValueError("Video keyframe index length changed while reading.")
-                    VideoKeyframeIndex.validate_stream(mapping, descriptor.length, frame.payload_descriptor.length)
-                    mapping.seek(0)
-                    shutil.copyfileobj(mapping, self._index_spool, self.copy_buffer_size)
-            return self._index_spool.tell() - start
-        except BaseException:
-            self._index_spool.seek(start)
-            self._index_spool.truncate()
-            raise
 
     def _write_video_payload(self, blob: BlobRef) -> int:
         start = self.position
+        locator = MoovLocator()
         stream = blob.new_input_stream()
         try:
             while True:
                 chunk = stream.read(self.copy_buffer_size)
                 if not chunk:
                     break
+                locator.feed(chunk)
                 self.output_stream.write(chunk)
                 self.position += len(chunk)
         finally:
@@ -231,6 +165,9 @@ class VideoFormatWriter(BlobFormatWriter):
         length = self.position - start
         if length <= 0:
             raise ValueError("Encoded video payload must not be empty.")
+        moov_offset, moov_length = locator.finish()
+        self._moov_offsets.append(moov_offset)
+        self._moov_lengths.append(moov_length)
         return length
 
     def _append(self, reference: int, frame_index: int) -> None:

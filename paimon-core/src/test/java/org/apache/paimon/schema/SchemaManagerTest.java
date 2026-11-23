@@ -100,7 +100,7 @@ public class SchemaManagerTest {
     private final Map<String, String> options = Collections.singletonMap("key", "value");
     private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
     private final RowType rowTypeWithSequenceField =
-            RowType.of(new IntType(), new BigIntType(), new VarCharType(), new BigIntType());
+            RowType.of(new IntType(), new BigIntType(), new BigIntType(), new BigIntType());
     private final Schema schema =
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
@@ -894,6 +894,60 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).doesNotContainKey("fields.f3.sequence-group");
+    }
+
+    @Test
+    public void testMergeSchemaCommitConflict() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "merge-conflict");
+        FileSystemSchemaManager otherManager =
+                new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
+        otherManager.createTable(Schema.newBuilder().column("id", DataTypes.INT()).build());
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public boolean tryToWriteAtomic(Path schemaPath, String content)
+                            throws IOException {
+                        if (schemaPath.getName().equals("schema-1")) {
+                            try {
+                                otherManager.commitChanges(
+                                        SchemaChange.addColumn("other", DataTypes.INT()));
+                            } catch (Exception e) {
+                                throw new IOException(e);
+                            }
+                        }
+                        return super.tryToWriteAtomic(schemaPath, content);
+                    }
+                };
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tableRoot);
+        RowType incoming =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"id", "requested"});
+
+        assertThatThrownBy(() -> table.store().mergeSchema(incoming, false, false, true))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Failed to commit the schema.")
+                .hasRootCauseMessage(
+                        "Failed to publish the merged schema. Please retry the operation.");
+        assertThat(otherManager.latest().get().fieldNames()).containsExactly("id", "other");
+    }
+
+    @Test
+    public void testMergeSchemaCommitAndNoOp() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "merge-no-op");
+        FileSystemSchemaManager localManager =
+                new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
+        localManager.createTable(Schema.newBuilder().column("id", DataTypes.INT()).build());
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        RowType incoming =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"id", "requested"});
+
+        assertThat(table.store().mergeSchema(incoming, false, false, true)).isTrue();
+        assertThat(localManager.latest().get().fieldNames()).containsExactly("id", "requested");
+        assertThat(table.store().mergeSchema(incoming, false, false, true)).isFalse();
+        assertThat(localManager.listAll()).hasSize(2);
     }
 
     @Test

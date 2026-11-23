@@ -153,14 +153,17 @@ def test_inactive_vector_option_preserves_parquet_blob_mutations(rest_catalog, n
     files = [file for message in messages for file in message.new_files]
     assert messages
     assert all(file.file_name.endswith(('.parquet', '.blob')) and '.vector.' not in file.file_name for file in files)
+    retained_row_ids = any(file.first_row_id is not None for file in files)
+    assert retained_row_ids == (not operation.endswith('delete'))
+    native_publication = native and not retained_row_ids
     commit = builder.new_commit()
     try:
-        with ExitStack() as stack:
-            if native:
-                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
-                                          'FileStoreCommit.commit',
-                                          side_effect=AssertionError('Python commit fallback')))
+        forbidden = ('pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit'
+                     if native_publication else 'pypaimon.execution.native.write.commit.NativeTableCommit.commit')
+        with patch(forbidden, side_effect=AssertionError('Unexpected publication backend')):
             commit.commit(messages, 7) if stream else commit.commit(messages)
+        assert (commit._native_commit is not None) == native_publication
+        assert (commit._python_commit is None) == native_publication
     finally:
         commit.close()
     actual = [{key: value for key, value in row.items() if key != '_ROW_ID'} for row in _read(table)]

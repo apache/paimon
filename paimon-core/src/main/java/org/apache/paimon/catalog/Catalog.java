@@ -1166,6 +1166,37 @@ public interface Catalog extends AutoCloseable {
     default void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {}
 
+    // ======================= Model methods ===============================
+
+    /** List model metadata in a database. */
+    default List<Model> listModels(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /** Get model metadata by identifier. */
+    default Model getModel(Identifier identifier)
+            throws ModelNotExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /**
+     * Create model metadata.
+     *
+     * @param identifier path of the model to create
+     * @param model model metadata
+     * @param ignoreIfExists whether to return existing metadata when the model already exists
+     */
+    default Model createModel(Identifier identifier, Model model, boolean ignoreIfExists)
+            throws ModelAlreadyExistException, DatabaseNotExistException, ModelNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
+    /** Drop model metadata. */
+    default void dropModel(Identifier identifier, boolean ignoreIfNotExists)
+            throws ModelNotExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support models");
+    }
+
     // ======================= Function methods ===============================
 
     /**
@@ -1861,6 +1892,48 @@ public interface Catalog extends AutoCloseable {
 
         public String dialect() {
             return dialect;
+        }
+    }
+
+    /** Exception for trying to create a model that already exists. */
+    class ModelAlreadyExistException extends Exception {
+
+        private static final String MSG = "Model %s already exists.";
+
+        private final Identifier identifier;
+
+        public ModelAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ModelAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to get a model that doesn't exist. */
+    class ModelNotExistException extends Exception {
+
+        private static final String MSG = "Model %s doesn't exist.";
+
+        private final Identifier identifier;
+
+        public ModelNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ModelNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

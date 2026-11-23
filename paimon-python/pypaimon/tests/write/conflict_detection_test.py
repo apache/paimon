@@ -28,7 +28,7 @@ from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -514,6 +514,52 @@ class TestRowIdColumnConflictChecker(unittest.TestCase):
     def _make_checker(self, delta_files, schema=None):
         schema_mgr = _FakeSchemaManager([schema or _DEFAULT_SCHEMA])
         return RowIdColumnConflictChecker.from_data_files(schema_mgr, delta_files)
+
+    def test_nested_write_paths_resolve_historical_leaf_ids(self):
+        schemas = _FakeSchemaManager([
+            _FakeSchema(0, [DataField(0, 'age', AtomicType('INT')), DataField(1, 'nest', RowType(True, [
+                DataField(2, 'a', AtomicType('INT')), DataField(3, 'b', AtomicType('INT'))]))]),
+            _FakeSchema(1, [DataField(0, 'age', AtomicType('INT')), DataField(1, 'renamed', RowType(True, [
+                DataField(2, 'renamed_a', AtomicType('INT')), DataField(3, 'b', AtomicType('INT')),
+                DataField(4, 'a', AtomicType('INT'))]))]),
+        ])
+        cases = [
+            (['age'], ['renamed.renamed_a'], False),
+            (['nest.a'], ['age'], False),
+            (['nest.a'], ['renamed.b'], False),
+            (['nest.a'], ['renamed.a'], False),
+            (['nest.a'], ['renamed.renamed_a'], True),
+            (['nest'], ['renamed.renamed_a'], True),
+            (['nest.a'], ['renamed'], True),
+            (None, ['renamed.renamed_a'], True),
+            (['nest.a'], None, True),
+        ]
+        for staged_cols, committed_cols, conflict in cases:
+            with self.subTest(staged=staged_cols, committed=committed_cols):
+                staged = _make_file('staged', first_row_id=0, schema_id=0, write_cols=staged_cols)
+                committed = _make_file('committed', first_row_id=0, schema_id=1, write_cols=committed_cols)
+                checker = RowIdColumnConflictChecker.from_data_files(schemas, [staged])
+                self.assertEqual(checker.conflicts_with(committed), conflict)
+
+    def test_unknown_nested_write_path_is_rejected_on_either_side(self):
+        schema = _FakeSchema(0, [DataField(0, 'nest', RowType(True, [DataField(1, 'a', AtomicType('INT'))]))])
+        valid = _make_file('valid', first_row_id=0, write_cols=['nest'])
+        invalid = _make_file('invalid', first_row_id=0, write_cols=['nest.missing'])
+        with self.assertRaisesRegex(RuntimeError, "Column 'nest.missing' not found"):
+            self._make_checker([invalid], schema)
+        with self.assertRaisesRegex(RuntimeError, "Column 'nest.missing' not found"):
+            self._make_checker([valid], schema).conflicts_with(invalid)
+
+    def test_literal_dotted_names_take_precedence_over_nested_paths(self):
+        schema = _FakeSchema(0, [
+            DataField(0, 'nest.a', AtomicType('INT')),
+            DataField(1, 'nest', RowType(True, [
+                DataField(2, 'a', AtomicType('INT')),
+                DataField(3, 'literal.dot', AtomicType('INT'))])),
+        ])
+        checker = self._make_checker([_make_file('staged', first_row_id=0, write_cols=['nest'])], schema)
+        self.assertFalse(checker.conflicts_with(_make_file('literal', first_row_id=0, write_cols=['nest.a'])))
+        self.assertTrue(checker.conflicts_with(_make_file('nested', first_row_id=0, write_cols=['nest.literal.dot'])))
 
     def test_no_conflict_disjoint_rows(self):
         delta_files = [

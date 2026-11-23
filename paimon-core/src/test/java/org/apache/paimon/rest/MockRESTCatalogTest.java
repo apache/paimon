@@ -25,6 +25,9 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.Model;
+import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -148,6 +151,43 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         if (restCatalogServer != null) {
             restCatalogServer.shutdown();
         }
+    }
+
+    @Test
+    void testModelCrudRoundTrip() throws Exception {
+        String database = "model_round_trip";
+        Identifier identifier = Identifier.create(database, "qwen_vl");
+        catalog.createDatabase(database, false);
+
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "bailian",
+                        "qwen3.8-flash",
+                        Collections.singletonList(new ModelField("video", "BLOB", "video")),
+                        Collections.singletonList(new ModelField("result", "STRING", null)),
+                        Collections.singletonMap("enable_thinking", "false"));
+        Model metadata = new Model(identifier, "Video quality model", definition);
+
+        Model created = catalog.createModel(identifier, metadata, false);
+        assertThat(created.fullName()).isEqualTo(identifier.getFullName());
+        ProviderModelDefinition persisted =
+                (ProviderModelDefinition) catalog.getModel(identifier).definition();
+        assertThat(persisted.options()).containsEntry("enable_thinking", "false");
+        assertThat(catalog.listModels(database)).extracting(Model::name).containsExactly("qwen_vl");
+
+        assertThatThrownBy(() -> catalog.createModel(identifier, metadata, false))
+                .isInstanceOf(Catalog.ModelAlreadyExistException.class);
+        assertThat(catalog.createModel(identifier, metadata, true).fullName())
+                .isEqualTo(identifier.getFullName());
+
+        catalog.dropModel(identifier, false);
+        assertThatThrownBy(() -> catalog.getModel(identifier))
+                .isInstanceOf(Catalog.ModelNotExistException.class);
+        catalog.dropModel(identifier, true);
+
+        catalog.dropDatabase(database, false, false);
+        assertThatThrownBy(() -> catalog.getModel(identifier))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
     }
 
     @Test

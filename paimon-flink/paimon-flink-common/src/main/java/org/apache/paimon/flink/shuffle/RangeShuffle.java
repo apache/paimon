@@ -103,6 +103,38 @@ public class RangeShuffle {
             int outParallelism,
             RowType valueRowType,
             boolean isSortBySize) {
+        return rangeShuffleByKey(
+                inputDataStream,
+                keyComparator,
+                keyTypeInformation,
+                localSampleSize,
+                globalSampleSize,
+                rangeNum,
+                outParallelism,
+                valueRowType,
+                isSortBySize,
+                null,
+                null);
+    }
+
+    /**
+     * Applies optional transport transformations immediately before and after the exchange.
+     * Sampling and range assignment always see the original records. The pre-exchange operator must
+     * retain each record's assigned range; the post-exchange operator restores records before
+     * downstream sorting.
+     */
+    public static <T> DataStream<Tuple2<T, RowData>> rangeShuffleByKey(
+            DataStream<Tuple2<T, RowData>> inputDataStream,
+            SerializableSupplier<Comparator<T>> keyComparator,
+            TypeInformation<T> keyTypeInformation,
+            int localSampleSize,
+            int globalSampleSize,
+            int rangeNum,
+            int outParallelism,
+            RowType valueRowType,
+            boolean isSortBySize,
+            AssignedRangeOperator<T> partitionLocalOperator,
+            ExchangedRowOperator<T> exchangeOutputOperator) {
         Transformation<Tuple2<T, RowData>> input = inputDataStream.getTransformation();
 
         OneInputTransformation<Tuple2<T, RowData>, Tuple2<T, Integer>> keyInput =
@@ -159,21 +191,64 @@ public class RangeShuffle {
                                 input.getParallelism(),
                                 input.isParallelismConfigured());
 
+        Transformation<Tuple2<Integer, Tuple2<T, RowData>>> assignedRows = preparePartition;
+        if (partitionLocalOperator != null) {
+            TypeInformation<RowData> transportValueType =
+                    partitionLocalOperator.transportValueType();
+            assignedRows =
+                    new OneInputTransformation<>(
+                            preparePartition,
+                            "TRANSFORM ASSIGNED RANGES",
+                            partitionLocalOperator,
+                            transportValueType == null
+                                    ? preparePartition.getOutputType()
+                                    : new TupleTypeInfo<>(
+                                            BasicTypeInfo.INT_TYPE_INFO,
+                                            new TupleTypeInfo<>(
+                                                    keyTypeInformation, transportValueType)),
+                            preparePartition.getParallelism(),
+                            preparePartition.isParallelismConfigured());
+        }
+
         // 4. Remove the partition id. (shuffle according range partition)
-        return new DataStream<>(
-                inputDataStream.getExecutionEnvironment(),
-                new OneInputTransformation<>(
-                        new PartitionTransformation<>(
-                                preparePartition,
-                                new CustomPartitionerWrapper<>(
-                                        new AssignRangeIndexOperator.RangePartitioner(rangeNum),
-                                        new AssignRangeIndexOperator.Tuple2KeySelector<>()),
-                                StreamExchangeMode.BATCH),
-                        "REMOVE RANGE INDEX",
-                        new RemoveRangeIndexOperator<>(),
-                        input.getOutputType(),
-                        outParallelism,
-                        true));
+        DataStream<Tuple2<T, RowData>> result =
+                new DataStream<>(
+                        inputDataStream.getExecutionEnvironment(),
+                        new OneInputTransformation<>(
+                                new PartitionTransformation<>(
+                                        assignedRows,
+                                        new CustomPartitionerWrapper<>(
+                                                new AssignRangeIndexOperator.RangePartitioner(
+                                                        rangeNum),
+                                                new AssignRangeIndexOperator.Tuple2KeySelector<>()),
+                                        StreamExchangeMode.BATCH),
+                                "REMOVE RANGE INDEX",
+                                new RemoveRangeIndexOperator<>(),
+                                input.getOutputType(),
+                                outParallelism,
+                                true));
+        return exchangeOutputOperator == null
+                ? result
+                : result.transform(
+                                "TRANSFORM EXCHANGED ROWS",
+                                input.getOutputType(),
+                                exchangeOutputOperator)
+                        .setParallelism(outParallelism);
+    }
+
+    /** A transformation of exchanged records before downstream sorting. */
+    public interface ExchangedRowOperator<T>
+            extends OneInputStreamOperator<Tuple2<T, RowData>, Tuple2<T, RowData>> {}
+
+    /** A partition-local transformation which retains the already assigned range indices. */
+    public interface AssignedRangeOperator<T>
+            extends OneInputStreamOperator<
+                    Tuple2<Integer, Tuple2<T, RowData>>, Tuple2<Integer, Tuple2<T, RowData>>> {
+
+        /** Optional wire encoding for original rows and the assigned-range exchange. */
+        default TypeInformation<RowData> transportValueType() {
+            return null;
+        }
     }
 
     /** KeyAndSizeExtractor is responsible for extracting the sort key and row size. */
@@ -425,11 +500,11 @@ public class RangeShuffle {
                 }
             }
 
-            // key not found, but the low index is the target
-            // bucket, since the boundaries are the upper bound
+            // Only equal keys can be spread across duplicate upper bounds. A strictly smaller
+            // key belongs before all of them, and a larger key after the last one.
             return low > lastIndex
-                    ? (keyIndex.get(lastIndex).getRight().get() + 1)
-                    : keyIndex.get(low).getRight().get();
+                    ? keyIndex.get(lastIndex).getRight().last() + 1
+                    : keyIndex.get(low).getRight().first();
         }
 
         /** A {@link KeySelector} to select by f0 of tuple2. */
@@ -562,6 +637,14 @@ public class RangeShuffle {
             list.add(i);
         }
 
+        public int first() {
+            return list.get(0);
+        }
+
+        public int last() {
+            return list.get(list.size() - 1);
+        }
+
         public int get() {
             return list.get(RANDOM.nextInt(list.size()));
         }
@@ -578,7 +661,7 @@ public class RangeShuffle {
             long restSize = sampledData.stream().mapToLong(t -> (long) t.f1).sum();
             double stepRange = restSize / (double) rangesNum;
 
-            int currentWeight = 0;
+            long currentWeight = 0;
             int index = 0;
 
             for (int i = 0; i < boundarySize; i++) {

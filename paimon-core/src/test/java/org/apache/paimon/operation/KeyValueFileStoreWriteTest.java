@@ -41,6 +41,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -48,6 +50,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /** Tests for {@link KeyValueFileStoreWrite}. */
 public class KeyValueFileStoreWriteTest {
@@ -114,6 +118,32 @@ public class KeyValueFileStoreWriteTest {
         Snapshot secondSnapshot = store.snapshotManager().latestSnapshot();
         assertThat(secondSnapshot.properties())
                 .containsEntry(SequenceSnapshotProperties.MAX_SEQUENCE_NUMBER, "1");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSnapshotSequenceNumberInitSkipsRestoreWithoutIndexes(boolean existingSnapshot)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.WRITE_SEQUENCE_NUMBER_INIT_MODE.key(), "snapshot");
+        TestFileStore store = createStoreWithOptions(options);
+        TestKeyValueGenerator gen = new TestKeyValueGenerator();
+        KeyValue row = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first");
+        if (existingSnapshot) {
+            store.commitData(Collections.singletonList(row), gen::getPartition, kv -> 1);
+        }
+
+        WriteRestore restore = mock(WriteRestore.class);
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        try {
+            write.withIOManager(ioManager);
+            write.withWriteRestore(restore);
+            write.write(gen.getPartition(row), 1, row);
+            verifyNoInteractions(restore);
+        } finally {
+            write.close();
+        }
     }
 
     @Test

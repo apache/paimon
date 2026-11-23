@@ -30,7 +30,7 @@ from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, MapType
 
 _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC,
@@ -115,8 +115,11 @@ class NativeTableRead:
             return self._fallback(
                 "the table uses an unsupported BLOB view")
         try:
+            if not self._orc_shared_shredding_supported(splits):
+                return self._fallback("ORC shared-shredding MAP columns require the Python reader")
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
+            runtime._raise_if_native_fork_safety_error(e)
             return self._fallback(str(e), e, log=True)
         rust_splits = []
         for split in splits:
@@ -171,6 +174,25 @@ class NativeTableRead:
             file_name = data_file.file_name.lower()
             if (not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
                     and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIXES)):
+                return False
+        return True
+
+    def _orc_shared_shredding_supported(self, splits):
+        # Rust 0.5.0 cannot restore Java's ORC shared-shredding MAP metadata.
+        # Check retained files and schemas: current write options may have changed.
+        table = self._read.table
+        if not any(isinstance(field.type, MapType) for field in table.fields):
+            return True
+        schema_ids = {file.schema_id for split in splits for file in split.files
+                      if file.file_name.lower().endswith('.orc')}
+        if not schema_ids:
+            return True
+        if any(table.options.map_storage_layout(field.name) == 'shared-shredding' for field in table.fields):
+            return False
+        for schema_id in schema_ids:
+            schema = table.schema_manager.get_schema(schema_id)
+            options = CoreOptions.from_dict(schema.options)
+            if any(options.map_storage_layout(field.name) == 'shared-shredding' for field in schema.fields):
                 return False
         return True
 

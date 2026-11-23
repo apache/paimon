@@ -185,7 +185,7 @@ def test_export_lance_rejects_computed_blob_masks_before_writing(conn, tmp_path,
 def test_export_lance_rejects_hidden_video_mask_source_before_writing(conn, tmp_path, descriptor_mode, mode):
     video = tmp_path / "video.bin"
     video.write_bytes(b"encoded-video")
-    frame = VideoFrameDescriptor(str(video), 0, video.stat().st_size, 3, -1, 0)
+    frame = VideoFrameDescriptor(str(video), 0, video.stat().st_size, 3)
     table = lance_tests._table(conn, "hidden_video", {
         "id": pa.int32(), "out": pa.large_binary(), "frame": pa.large_binary(),
     }, [{"id": 1, "out": b"ordinary", "frame": frame}], options={"video-frame-field": "frame"})

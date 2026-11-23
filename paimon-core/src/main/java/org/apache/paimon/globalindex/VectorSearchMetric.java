@@ -94,7 +94,27 @@ public final class VectorSearchMetric {
             storedNorm += stored[i] * stored[i];
         }
         float denominator = (float) (Math.sqrt(queryNorm) * Math.sqrt(storedNorm));
-        return denominator == 0 ? 0 : dot / denominator;
+        if (queryNorm >= Float.MIN_NORMAL
+                && storedNorm >= Float.MIN_NORMAL
+                && denominator >= Float.MIN_NORMAL
+                && Float.isFinite(denominator)
+                && Float.isFinite(dot)) {
+            return dot / denominator;
+        }
+
+        // Squaring float coordinates can overflow or erase a nonzero vector's norm.
+        double wideDot = 0;
+        double wideQueryNorm = 0;
+        double wideStoredNorm = 0;
+        for (int i = 0; i < query.length; i++) {
+            double q = query[i];
+            double s = stored[i];
+            wideDot += q * s;
+            wideQueryNorm += q * q;
+            wideStoredNorm += s * s;
+        }
+        double wideDenominator = Math.sqrt(wideQueryNorm) * Math.sqrt(wideStoredNorm);
+        return wideDenominator == 0 ? 0 : (float) (wideDot / wideDenominator);
     }
 
     private static float innerProduct(float[] query, float[] stored) {

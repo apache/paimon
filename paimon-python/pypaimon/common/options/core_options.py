@@ -160,11 +160,14 @@ class CoreOptions:
     FIELDS_PREFIX = "fields"
     DISTINCT = "distinct"
     LIST_AGG_DELIMITER = "list-agg-delimiter"
+    SUM_FAIL_ON_OVERFLOW = "sum.fail-on-overflow"
+    PRODUCT_FAIL_ON_OVERFLOW = "product.fail-on-overflow"
     NESTED_KEY = "nested-key"
     NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
     COUNT_LIMIT = "count-limit"
     MERGE_MAP_TS_FIELD = "ts-field"
+    MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts"
     MAP_STORAGE_LAYOUT = "map.storage-layout"
     MAP_SHARED_SHREDDING_MAX_COLUMNS = "map.shared-shredding.max-columns"
     MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY = \
@@ -420,8 +423,8 @@ class CoreOptions:
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
-        .default_value("none")
-        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+        .default_value("truncate(16)")
+        .with_description("Metadata statistics mode: none, counts, full or truncate(N).")
     )
 
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
@@ -720,7 +723,7 @@ class CoreOptions:
     SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("scan.native-plan.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Plan splits via the native (pypaimon_rust) planner "
                           "instead of the Python manifest scanner; the pypaimon "
                           "reader still reads the files.")
@@ -729,16 +732,16 @@ class CoreOptions:
     READ_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("read.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Read data via pypaimon_rust and return PyArrow batches. "
-                          "This also enables native split planning; unsupported "
+                          "This also requests native split planning unless explicitly disabled; unsupported "
                           "routes fall back to pypaimon.")
     )
 
     COMMIT_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("commit.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
     )
@@ -746,7 +749,7 @@ class CoreOptions:
     WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("write.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Write Arrow data via pypaimon_rust when the table and "
                           "writer API are supported. Unsupported routes use Python "
                           "before any native data is written.")
@@ -973,8 +976,18 @@ class CoreOptions:
     SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description("Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                          "setting also serves as a fallback for scalar prefilters.")
+    )
+
+    SCALAR_INDEX_PREFILTER_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.prefilter.search-mode")
+        .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description("Search mode for scalar index queries.")
+        .with_description("Search mode for scalar prefilters in vector and full-text search. If unset, "
+                          "use an explicit scalar-index.search-mode, then an explicit "
+                          "global-index.search-mode, then fast.")
     )
 
     VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
@@ -1176,6 +1189,15 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    WRITE_LEROBOT_REMUX_EPISODES: ConfigOption[bool] = (
+        ConfigOptions.key("write.lerobot.remux-episodes")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Copy each LeRobot Episode's video packets into a separate MP4 "
+            "payload without re-encoding. Requires PyAV.")
+    )
+
     READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
         ConfigOptions.key("read.video.max-open-decoders")
         .int_type()
@@ -1183,6 +1205,16 @@ class CoreOptions:
         .with_description(
             "Maximum cached video decoders per video feature in a PyPaimon "
             "LeRobot DataLoader worker.")
+    )
+
+    READ_VIDEO_PREFETCH_MAX_BYTES: ConfigOption[int] = (
+        ConfigOptions.key("read.video.prefetch-max-bytes")
+        .int_type()
+        .default_value(0)
+        .with_description(
+            "Encoded video bytes retained by whole-payload prefetch across cached "
+            "decoders per video feature and worker. 0 disables prefetch. "
+            "Decoder buffers, decoded frames and temporary copies are additional.")
     )
 
     READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
@@ -1428,9 +1460,6 @@ class CoreOptions:
 
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
-
-    def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
@@ -1794,7 +1823,18 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def scalar_index_search_mode(self):
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST)
+
+    def scalar_scan_search_mode(self):
         return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def scalar_prefilter_search_mode(self):
+        option = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE
+        if self.options.to_map().get(option.key()) is not None:
+            return self.options.get(option)
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, option.default_value())
 
     def vector_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
@@ -1802,11 +1842,11 @@ class CoreOptions:
     def full_text_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
 
-    def _family_index_search_mode(self, option):
+    def _family_index_search_mode(self, option, default=None):
         if self.options.contains(option):
-            return self.options.get(option)
+            return self.options.get(option, default)
         global_mode = self.global_index_search_mode()
-        return global_mode if global_mode is not None else self.options.get(option)
+        return global_mode if global_mode is not None else self.options.get(option, default)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
@@ -1995,7 +2035,12 @@ class CoreOptions:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
 
     def read_video_codec_threads(self) -> int:
-        option = CoreOptions.READ_VIDEO_CODEC_THREADS
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_CODEC_THREADS)
+
+    def read_video_prefetch_max_bytes(self) -> int:
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES)
+
+    def _non_negative_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
         try:
             value = self.options.get(option)
@@ -2031,6 +2076,26 @@ class CoreOptions:
     def dynamic_partition_overwrite(self) -> bool:
         return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)
 
+    def field_sum_fail_on_overflow(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.SUM_FAIL_ON_OVERFLOW}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )
+
+    def field_product_fail_on_overflow(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.PRODUCT_FAIL_ON_OVERFLOW}'
+            )
+            .boolean_type()
+            .default_value(False)
+        )
+
     def field_listagg_delimiter(self, field_name: str) -> str:
         return self.options.get(
             ConfigOptions.key(
@@ -2047,6 +2112,15 @@ class CoreOptions:
             )
             .boolean_type()
             .default_value(False)
+        )
+
+    def field_collect_agg_count_limit(self, field_name: str) -> int:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.COUNT_LIMIT}'
+            )
+            .int_type()
+            .default_value(2147483647)  # Integer.MAX_VALUE
         )
 
     def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
@@ -2100,6 +2174,15 @@ class CoreOptions:
             )
             .string_type()
             .no_default_value()
+        )
+
+    def field_merge_map_overwrite_on_equal_ts(self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_OVERWRITE_ON_EQUAL_TS}'
+            )
+            .boolean_type()
+            .default_value(False)
         )
 
     def map_storage_layout(self, field_name: str) -> str:

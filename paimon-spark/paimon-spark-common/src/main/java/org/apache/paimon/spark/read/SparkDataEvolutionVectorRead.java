@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.read;
 
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResultSerializer;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
@@ -29,8 +28,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataEvolutionVectorRead;
 import org.apache.paimon.table.source.IndexVectorSearchSplit;
-import org.apache.paimon.table.source.RawVectorSearchSplit;
-import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -41,7 +38,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,41 +62,31 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
             DataField vectorColumn,
             float[] vector,
             @Nullable Map<String, String> options) {
-        super(table, partitionFilter, filter, limit, vectorColumn, vector, options);
+        this(table, partitionFilter, filter, limit, vectorColumn, vector, options, null);
+    }
+
+    public SparkDataEvolutionVectorRead(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            @Nullable Map<String, String> options,
+            @Nullable float[][] queryMatrix) {
+        super(table, partitionFilter, filter, limit, vectorColumn, vector, options, queryMatrix);
     }
 
     @Override
-    public GlobalIndexResult read(VectorScan.Plan plan) {
-        this.planSnapshot = plan.snapshot();
-        List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
-        List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
-        prepareSplits(plan.splits(), indexSplits, rawSplits);
-        if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
-        }
-
-        GlobalIndexer globalIndexer =
-                !indexSplits.isEmpty() && !rawSplits.isEmpty()
-                        ? createGlobalIndexer(indexSplits)
-                        : null;
-        ScoredGlobalIndexResult result =
-                indexSplits.isEmpty()
-                        ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexSplitsInSpark(indexSplits, globalIndexer);
-        return result.or(readRawSplitsInSpark(rawSplits, globalIndexer, rawPreFilter(rawSplits)))
-                .topK(limit);
-    }
-
-    protected ScoredGlobalIndexResult readIndexSplitsInSpark(
-            List<IndexVectorSearchSplit> splits, @Nullable GlobalIndexer globalIndexer) {
+    protected ScoredGlobalIndexResult readIndexed(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         if (splits.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         int parallelism = sparkParallelism();
         if (splits.size() < parallelism * 2) {
-            return readIndexed(
-                    splits, globalIndexer == null ? createGlobalIndexer(splits) : globalIndexer);
+            return super.readIndexed(splits, globalIndexer);
         }
 
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
@@ -124,11 +110,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         List<List<SerializedSplit>> splitGroups = splitGroups(serializedSplits, parallelism);
         SerializableFunction<List<SerializedSplit>, byte[]> task =
                 group -> {
-                    GlobalIndexer taskGlobalIndexer =
-                            GlobalIndexer.create(
-                                    indexType,
-                                    Collections.singletonList(vectorColumn),
-                                    table.coreOptions().toConfiguration());
+                    GlobalIndexer taskGlobalIndexer = createGlobalIndexer(indexType);
                     IndexPathFactory indexPathFactory =
                             table.store().pathFactory().globalIndexFileFactory();
 
@@ -159,8 +141,12 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                             results.add(next.get());
                         }
                     }
+                    ScoredGlobalIndexResult merged = mergeIndexedCandidates(results);
                     ScoredGlobalIndexResult result =
-                            ScoredGlobalIndexResult.merge(results).topK(searchLimit);
+                            queryMatrix == null
+                                    ? merged.topK(searchLimit)
+                                    : maybeRerankIndexedResult(
+                                            merged, indexType, taskGlobalIndexer, vector);
                     if (result.results().isEmpty()) {
                         return null;
                     }
@@ -174,31 +160,29 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
         List<byte[]> remoteResults = mapInSpark(splitGroups, task, splitGroups.size());
 
-        GlobalIndexer rerankGlobalIndexer =
-                globalIndexer == null ? createGlobalIndexer(splits) : globalIndexer;
+        if (queryMatrix != null) {
+            return mergeRemoteResults(remoteResults);
+        }
         return maybeRerankIndexedResult(
-                mergeRemoteResults(remoteResults, searchLimit),
-                indexType,
-                rerankGlobalIndexer,
-                vector);
+                mergeRemoteResults(remoteResults, searchLimit), indexType, globalIndexer, vector);
     }
 
-    protected ScoredGlobalIndexResult readRawSplitsInSpark(
-            List<RawVectorSearchSplit> splits,
+    @Override
+    protected ScoredGlobalIndexResult readRawSearch(
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 preFilter,
             @Nullable GlobalIndexer globalIndexer,
-            @Nullable RoaringNavigableMap64 preFilter) {
-        List<Range> rawRowRanges = rawRowRanges(splits);
+            float[] queryVector) {
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         int parallelism = sparkParallelism();
         if (rawRowCount(rawRowRanges) < parallelism * 2L) {
-            return readRawSearch(
-                    rawRowRanges, preFilter, rawSearchIndexer(splits, globalIndexer), vector);
+            return super.readRawSearch(rawRowRanges, preFilter, globalIndexer, queryVector);
         }
 
-        String metric = rawSearchMetric(rawSearchIndexer(splits, globalIndexer));
+        String metric = rawSearchMetric(globalIndexer);
         List<List<Range>> rangeGroups = rangeGroups(rawRowRanges, parallelism);
         List<SerializedSplit> serializedSplits = new ArrayList<>(rangeGroups.size());
         for (List<Range> rangeGroup : rangeGroups) {
@@ -225,7 +209,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                                         rowRanges,
                                         deserializePreFilter(serializedSplit.preFilter),
                                         metric,
-                                        vector);
+                                        queryVector);
                         results.add(splitResult);
                     }
                     ScoredGlobalIndexResult result =

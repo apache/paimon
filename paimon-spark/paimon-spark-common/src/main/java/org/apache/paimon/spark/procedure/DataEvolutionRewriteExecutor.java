@@ -25,6 +25,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPrepa
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -58,12 +59,33 @@ final class DataEvolutionRewriteExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRewriteExecutor.class);
 
+    private static final CommitConfigurer RANGE_SORT_COMMIT =
+            rowIdRewriteCommit(TableCommitImpl::dataEvolutionRangeSortCheck);
+    static final CommitConfigurer MATERIALIZE_DV_COMMIT =
+            rowIdRewriteCommit(TableCommitImpl::materializeDvRowIdCheck);
+
+    private static CommitConfigurer rowIdRewriteCommit(Consumer<TableCommitImpl> check) {
+        return new CommitConfigurer() {
+            @Override
+            public void configure(TableCommitImpl commit) {
+                check.accept(commit);
+            }
+
+            @Override
+            public void prepareMessages(Snapshot snapshot, List<CommitMessage> messages) {
+                messages.replaceAll(
+                        message ->
+                                ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()));
+            }
+        };
+    }
+
     private DataEvolutionRewriteExecutor() {}
 
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer) {
@@ -80,7 +102,7 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
@@ -99,7 +121,7 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, PlanResult> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
@@ -109,17 +131,21 @@ final class DataEvolutionRewriteExecutor {
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         Snapshot preparationSnapshot = initialSnapshot;
         int round = 0;
+        boolean scanFinished = false;
         try {
-            while (true) {
-                List<DataEvolutionCompactTask> compactionTasks =
-                        taskPlanner.apply(preparationSnapshot);
+            while (!scanFinished) {
+                PlanResult plan = taskPlanner.apply(preparationSnapshot);
+                List<DataEvolutionCompactTask> compactionTasks = plan.tasks();
+                // Finish the last batch before stopping, without chasing a newer snapshot.
+                scanFinished = plan.scanFinished();
                 round++;
                 if (compactionTasks.isEmpty()) {
                     LOG.info(
                             "No data evolution rewrite task planned in round {} for table {}, "
-                                    + "continue to scan the next batch.",
+                                    + "scan finished {}.",
                             round,
-                            table.fullName());
+                            table.fullName(),
+                            scanFinished);
                     continue;
                 }
                 boolean containsMaterializeDeletion =
@@ -209,6 +235,16 @@ final class DataEvolutionRewriteExecutor {
         }
     }
 
+    static void commitSorted(
+            FileStoreTable table,
+            Snapshot snapshot,
+            List<CommitMessage> messages,
+            String commitUser,
+            SparkSession spark) {
+        commitWithMergeConflictRetry(
+                table, snapshot, messages, commitUser, spark, RANGE_SORT_COMMIT, null, null);
+    }
+
     private static Snapshot commitWithMergeConflictRetry(
             FileStoreTable table,
             Snapshot taskSnapshot,
@@ -290,7 +326,12 @@ final class DataEvolutionRewriteExecutor {
                 try {
                     commit.commit(preparedMessages);
                 } catch (RuntimeException conflict) {
-                    if (isMergeConflict(conflict)) {
+                    if (commitConfigurer == RANGE_SORT_COMMIT) {
+                        // A post-commit callback can propagate a different writer's conflict.
+                        if (commit.isRangeSortConflict(conflict)) {
+                            abortRetryArtifacts(commit, preparedMessages, conflict, table);
+                        }
+                    } else if (isMergeConflict(conflict)) {
                         abortRetryArtifacts(commit, abortMessages, conflict, table);
                     }
                     throw conflict;
@@ -393,6 +434,25 @@ final class DataEvolutionRewriteExecutor {
             messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
         }
         return messages;
+    }
+
+    static final class PlanResult {
+
+        private final List<DataEvolutionCompactTask> tasks;
+        private final boolean scanFinished;
+
+        PlanResult(List<DataEvolutionCompactTask> tasks, boolean scanFinished) {
+            this.tasks = tasks;
+            this.scanFinished = scanFinished;
+        }
+
+        List<DataEvolutionCompactTask> tasks() {
+            return tasks;
+        }
+
+        boolean scanFinished() {
+            return scanFinished;
+        }
     }
 
     @FunctionalInterface

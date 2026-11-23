@@ -34,17 +34,23 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -73,6 +79,80 @@ public class LazyFilteredBitmapIndexReaderTest {
     private BitmapGlobalIndexer globalIndexer;
 
     @TempDir java.nio.file.Path tempPath;
+
+    @Test
+    void centroidBitmapSectionsPreserveSparseRowIdsAndNulls() throws IOException {
+        DataField state = new DataField(5, "state", DataTypes.INT());
+        RowType fields = RowType.of(dataField, state);
+        CentroidBitmapIndex.ColumnRows tags =
+                column -> {
+                    column.write(BinaryString.fromString("blue"), 90);
+                    column.write(BinaryString.fromString("red"), 90_000);
+                };
+        byte[] originalMeta;
+        try (BitmapGlobalIndexWriter standalone = globalIndexer.createWriter(fileWriter)) {
+            tags.writeTo(standalone);
+            originalMeta = standalone.finish().get(0).meta();
+        }
+        ResultEntry result;
+        try (CentroidBitmapIndex.Writer writer =
+                new CentroidBitmapIndex.Writer(fileWriter, 9, 2, 2)) {
+            writer.writeColumn(
+                    state,
+                    new Options(),
+                    column -> {
+                        column.write(1, 90);
+                        column.write(null, 90_000);
+                    });
+            writer.writeColumn(dataField, new Options(), tags);
+            result = writer.finish();
+        }
+        assertThat(CentroidBitmapIndex.schemaId(result.meta())).isEqualTo(9L);
+        Path path = new Path(basePath, result.fileName());
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
+        ByteBuffer directory = ByteBuffer.wrap(result.meta());
+        directory.position(Long.BYTES);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        long stateLength = directory.getLong();
+        int stateMetaLength = directory.getInt();
+        directory.position(directory.position() + stateMetaLength);
+        assertThat(directory.get()).isEqualTo((byte) 1);
+        assertThat(directory.getLong()).isEqualTo(meta.fileSize() - stateLength);
+        assertThat(directory.getInt()).isEqualTo(originalMeta.length);
+        byte[] storedMeta = new byte[directory.remaining()];
+        directory.get(storedMeta);
+        assertThat(storedMeta).isEqualTo(originalMeta);
+
+        int[] extraFieldIds = {state.id(), dataField.id()};
+        PredicateBuilder builder = new PredicateBuilder(fields);
+        Predicate red = builder.equal(0, BinaryString.fromString("red"));
+        Predicate conjunction = PredicateBuilder.and(red, builder.isNull(1));
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader, meta, extraFieldIds, fields, fields, conjunction))
+                .containsExactly(90_000L);
+        Predicate disjunction = PredicateBuilder.or(red, builder.isNotNull(1), builder.isNull(1));
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader, meta, extraFieldIds, fields, fields, disjunction))
+                .containsExactly(90L, 90_000L);
+        GlobalIndexIOMeta incomplete =
+                new GlobalIndexIOMeta(path, meta.fileSize() - 1, 2, result.meta());
+        assertThatThrownBy(
+                        () ->
+                                CentroidBitmapIndex.match(
+                                        file -> {
+                                            throw new AssertionError(
+                                                    "Invalid manifest opened a file.");
+                                        },
+                                        incomplete,
+                                        extraFieldIds,
+                                        fields,
+                                        fields,
+                                        conjunction))
+                .hasMessageContaining("Invalid centroid bitmap section");
+    }
 
     @BeforeEach
     public void setUp() {
@@ -255,8 +335,11 @@ public class LazyFilteredBitmapIndexReaderTest {
                 org.apache.paimon.options.MemorySize.ofBytes(1));
         BitmapGlobalIndexer intIndexer = new BitmapGlobalIndexer(intField, options);
         GlobalIndexSingleColumnWriter writer = intIndexer.createWriter(fileWriter);
-        writer.write(-1, 0);
-        writer.write(0, 1);
+        int[] keys = {-1000, -256, -1, 0, 1, 255, 256, 1000};
+        for (int i = 0; i < keys.length; i++) {
+            writer.write(keys[i], i);
+        }
+        writer.write(null, keys.length);
         ResultEntry result = writer.finish().get(0);
         Path filePath = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
@@ -266,10 +349,65 @@ public class LazyFilteredBitmapIndexReaderTest {
                 intIndexer.createReader(
                         fileReader,
                         Collections.singletonList(meta),
-                        2,
+                        keys.length + 1,
                         null,
                         newDirectExecutorService())) {
-            assertRows(reader.visitEqual(intFieldRef, 0).join(), 1L);
+            assertRows(reader.visitEqual(intFieldRef, 0).join(), 3L);
+            assertRows(reader.visitLessThan(intFieldRef, -256).join(), 0L);
+            assertRows(reader.visitLessOrEqual(intFieldRef, -256).join(), 0L, 1L);
+            assertRows(reader.visitGreaterThan(intFieldRef, 255).join(), 6L, 7L);
+            assertRows(reader.visitGreaterOrEqual(intFieldRef, 255).join(), 5L, 6L, 7L);
+            assertRows(reader.visitBetween(intFieldRef, -256, 255).join(), 1L, 2L, 3L, 4L, 5L);
+            assertRows(reader.visitBetween(intFieldRef, -255, 254).join(), 2L, 3L, 4L);
+            assertRows(
+                    reader.visitBetween(intFieldRef, -2000, 2000).join(),
+                    0L,
+                    1L,
+                    2L,
+                    3L,
+                    4L,
+                    5L,
+                    6L,
+                    7L);
+            assertRows(reader.visitBetween(intFieldRef, 2, 254).join());
+            assertRows(reader.visitBetween(intFieldRef, 1001, 2000).join());
+            assertRows(reader.visitBetween(intFieldRef, -2000, -1001).join());
+            assertRows(reader.visitBetween(intFieldRef, 1, -1).join());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lz4", "zstd", "lzo"})
+    public void testRangeLookupSkipsUnrelatedDictionaryBlocks(String compression) throws Exception {
+        Options options = new Options();
+        options.set(BitmapGlobalIndexOptions.BITMAP_INDEX_COMPRESSION, compression);
+        options.set(
+                BitmapGlobalIndexOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE,
+                org.apache.paimon.options.MemorySize.ofBytes(256));
+        globalIndexer = new BitmapGlobalIndexer(dataField, options);
+        List<Pair<BinaryString, Long>> rows = new ArrayList<>();
+        for (int i = 0; i < 2000; i++) {
+            rows.add(Pair.of(str(String.format("key-%04d", i)), (long) i));
+        }
+        GlobalIndexIOMeta meta = writeData(rows);
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader,
+                        Collections.singletonList(meta),
+                        rows.size(),
+                        null,
+                        newDirectExecutorService())) {
+            assertRows(
+                    reader.visitBetween(fieldRef, str("key-0998"), str("key-1002")).join(),
+                    998L,
+                    999L,
+                    1000L,
+                    1001L,
+                    1002L);
+            assertThat(countingReader.seekCount())
+                    .as("footer, index, boundary dictionary blocks and matching bitmaps")
+                    .isLessThanOrEqualTo(12);
         }
     }
 

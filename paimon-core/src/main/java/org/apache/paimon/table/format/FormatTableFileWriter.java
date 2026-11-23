@@ -24,6 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FormatTableFilePathFactory;
 import org.apache.paimon.io.FormatTableWrittenFile;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
@@ -142,12 +144,20 @@ public class FormatTableFileWriter {
                     partValues.values(), onlyValueInPath, options.partitionDefaultName());
             parent = new Path(parent, generatePartitionPathUtil(partValues, onlyValueInPath));
         }
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(parent, null);
         return new FormatTableRecordWriter(
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
                 options.targetFileRowNum(),
-                pathFactory.createDataFilePathFactory(parent, null),
+                new FormatTableFilePathFactory(
+                        dataFilePathFactory,
+                        options.fileFormatString(),
+                        options.fileSuffixIncludeCompression(),
+                        options.formatTableFileCompression(),
+                        options.toConfiguration()
+                                .get(CoreOptions.FORMAT_TABLE_FILE_SUFFIX_ENABLED)),
                 writeRowType,
                 options.formatTableFileCompression());
     }

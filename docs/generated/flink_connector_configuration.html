@@ -249,6 +249,18 @@ under the License.
             <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
         </tr>
         <tr>
+            <td><h5>sink.striped-bucket-write.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, a fixed-bucket table stripes each bucket's writes across multiple writer subtasks so that write parallelism can exceed the bucket count without rescaling the table.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.striped-bucket-write.writers-per-bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Sets how many writer subtasks write each bucket. Set to -1 to let every writer subtask write every bucket. Only takes effect when 'sink.striped-bucket-write.enabled' is true.</td>
+        </tr>
+        <tr>
             <td><h5>sink.clustering.sample-factor</h5></td>
             <td style="word-wrap: break-word;">100</td>
             <td>Integer</td>
@@ -271,6 +283,18 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Sink committer memory to control heap memory of global committer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-offheap-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Task off-heap memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-managed-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Managed memory resource budget for the committer slot sharing group. Must be positive and requires sink.committer-memory.</td>
         </tr>
         <tr>
             <td><h5>sink.committer-operator-chaining</h5></td>
@@ -324,7 +348,7 @@ under the License.
             <td><h5>sink.use-managed-memory-allocator</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
+            <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator. This option selects the allocator and declares the managed memory weight. For append-only table, rows are buffered in managed memory only when 'write-buffer-for-append' is also set to true; otherwise rows are written directly to the file format writers and the managed memory stays unused.</td>
         </tr>
         <tr>
             <td><h5>sink.writer-coordinator.cache-expire-after-access</h5></td>
@@ -379,6 +403,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Sink writer memory to control heap memory of writer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-offheap-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Task off-heap memory resource budget for the writer slot sharing group. Must be positive and requires sink.writer-memory.</td>
         </tr>
         <tr>
             <td><h5>sink.writer-refresh-detectors</h5></td>

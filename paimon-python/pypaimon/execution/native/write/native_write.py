@@ -21,6 +21,7 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.table import _native_variant_write_supported
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -50,6 +51,12 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                 and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
             or table.options.video_frame_fields()):
+        return None
+    # Rust 0.5.0 emits zero sequence bounds for ordinary bucketed append files.
+    # Java compaction needs advancing ranges to preserve their append order.
+    if not table.is_primary_key_table and table.bucket_mode() == BucketMode.HASH_FIXED:
+        return None
+    if not _native_variant_write_supported(table):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:

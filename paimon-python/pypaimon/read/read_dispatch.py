@@ -249,6 +249,8 @@ def plan_scan(self, *, _file_scanner_base=False) -> Plan:
 
 def configure_indexed_read(table):
     """Keep explicit preferences; otherwise prefer the available Native reader."""
+    if not table.options.native_read_enabled():
+        return table
     from pypaimon.common.options.core_options import CoreOptions
     options = table.options.options
     if not any(options.contains(option) for option in (
@@ -407,6 +409,9 @@ def create_streaming_scan(scan, poll_interval_ms=1000, prefetch_enabled=True,
 
 def native_plan_requested(scan) -> bool:
     """Resolve Native planning preference without loading a disabled backend."""
+    from pypaimon.common.options.core_options import CoreOptions
+    if scan.table.options.options.contains(CoreOptions.SCAN_NATIVE_PLAN_ENABLED):
+        return scan.table.options.native_plan_enabled()
     if scan.table.options.native_plan_enabled():
         return True
     if not scan.table.options.native_read_enabled():

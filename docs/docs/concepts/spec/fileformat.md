@@ -403,79 +403,61 @@ Limitations:
 
 ### Video
 
-`.video` stores complete encoded videos and frame runs, without BLOB entry headers, length
-trailers, or per-entry CRC. On-disk order:
+`.video` stores complete encoded videos followed by six Delta-Varint arrays.
+A span maps consecutive table rows to consecutive frames in one video.
 
 ```
-+----------------------------+
-| Encoded Video Payload 1    |  Raw complete video bytes
-+----------------------------+
-| Encoded Video Payload 2    |
-+----------------------------+
-| ...                        |
-+----------------------------+
-| Keyframe Index 1           |  Video metadata ranges and keyframe entries
-+----------------------------+
-| Keyframe Index 2           |
-+----------------------------+
-| Physical Length Index      |  Delta-Varint video lengths
-+----------------------------+
-| Keyframe-Index Length Index |  Delta-Varint block lengths per video (0 = scan fallback)
-+----------------------------+
-| Run Length Index           |  Delta-Varint logical row counts
-+----------------------------+
-| Run Reference Index        |  Delta-Varint physical video ordinals
-+----------------------------+
-| Run First-Frame Index      |  Delta-Varint frame ordinals
-+----------------------------+
-| Physical Index Length      |  4 bytes (Little Endian)
-| Keyframe Length-Index Size |  4 bytes (Little Endian)
-| Run-Length Index Length    |  4 bytes (Little Endian)
-| Run-Reference Index Length |  4 bytes (Little Endian)
-| First-Frame Index Length   |  4 bytes (Little Endian)
-| Magic Number               |  4 bytes (0x4F454449, Little Endian)
-| Version                    |  1 byte
-+----------------------------+
++------------------------------+
+| Encoded Video Payload 1..N   | Complete video bytes, concatenated
++------------------------------+
+| Video Length Index           | Delta-Varint video byte lengths
+| Moov Offset Index            | Delta-Varint moov offsets relative to each video payload
+| Moov Length Index            | Delta-Varint moov byte lengths; 0 means no hint
+| Span Row Count Index         | Delta-Varint logical row counts
+| Span Video Reference Index   | Delta-Varint video ordinals; -1 NULL, -2 placeholder
+| Span First Frame Index       | Delta-Varint starting presentation-order frame ordinals
++------------------------------+
+| Video Length Index Size      | 4 bytes, little endian
+| Moov Offset Index Size       | 4 bytes, little endian
+| Moov Length Index Size       | 4 bytes, little endian
+| Span Row Count Index Size    | 4 bytes, little endian
+| Span Video Ref Index Size    | 4 bytes, little endian
+| Span First Frame Index Size  | 4 bytes, little endian
+| Magic Number                 | 4 bytes, little endian; 0x4F454449
+| Version                      | 1 byte; 1
++------------------------------+
 ```
 
-Run arrays have equal lengths. Non-negative references select a video; `-1` means NULL and `-2`
-means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
-`run_first_frame + r - s`; gaps start new runs.
+The footer is 29 bytes. Its six sizes are the encoded byte lengths of the arrays.
+Video lengths sum to the payload region size; their prefix sums locate each video.
+The three video arrays have equal entry counts. Moov ranges must fit within their
+video payload; absent hints use `(0, 0)`. The three span arrays have equal entry counts. Row `r` in a span beginning at row
+`s` maps to `first_frame + r - s` in the referenced video. A gap starts a new span.
+One video can be referenced by multiple spans.
 
-Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
+For example, videos of 1,000 and 2,000 bytes start at offsets 0 and 1,000.
+Span arrays `[3, 2]`, `[0, 1]`, and `[10, 20]` map rows 0–2 to video 0 frames
+10–12, and rows 3–4 to video 1 frames 20–21.
 
-| Field | Size |
-| --- | ---: |
-| Version (`1`) | 1 byte |
-| Magic (`0x564944454F4B4649`) | 8 bytes |
-| Metadata-range count | 4 bytes |
-| Keyframe count | 8 bytes |
-| Metadata `(offset, length)` pairs | 16 bytes each |
-| Keyframe pages | Variable |
+MP4 `moov` contains sample timing, sync flags, sizes and locations. Readers use
+the stored range to fetch it and derive frame locations; no keyframe index or
+metadata bytes are duplicated. Invalid hints fall back to container discovery.
 
-Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
-and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
-`21 + 16 * metadata_count + p * 98308`.
-Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
-The index covers the first video stream; its time base remains in the video.
-
-Readers validate each accessed page and its adjacent page boundaries; writers validate all pages.
-Metadata ranges are limited to 65,536; keyframe count and total index size have no configured limit.
-
-An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
+A little-endian `VideoFrameDescriptor` identifies one frame:
 
 | Field | Size | Description |
 | --- | ---: | --- |
-| Version | 1 byte | Descriptor version, currently `1` |
+| Version | 1 byte | `1` |
 | Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
 | URI length | 4 bytes | UTF-8 URI byte length |
-| URI | variable | URI of the containing `.video` file |
-| Offset | 8 bytes | Start of the complete encoded-video payload |
-| Length | 8 bytes | Encoded-video payload length |
+| URI | variable | Containing file |
+| Offset | 8 bytes | Video payload offset in the file |
+| Length | 8 bytes | Complete video payload length |
 | Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
-| Keyframe-index offset | 8 bytes | Index offset in the `.video` file, or `-1` |
-| Keyframe-index length | 8 bytes | Index length, or `0` |
+| Moov offset | 8 bytes | Relative to the video payload |
+| Moov length | 8 bytes | Moov byte length; 0 means no hint |
 
 A `.video` file serves one scalar BLOB field; references are file-local. `.blob` is unchanged.
+This layout replaces the previous v1 layout; existing `.video` files must be reimported.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).
