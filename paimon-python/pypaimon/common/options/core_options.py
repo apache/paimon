@@ -1946,6 +1946,13 @@ class CoreOptions:
     def _index_columns(columns) -> List[str]:
         return [] if columns is None else [column.strip() for column in str(columns).split(',')]
 
+    @staticmethod
+    def _field_index_option_keys(index_type: str, column: str):
+        field = "fields.%s." % column
+        family = "vector" if CoreOptions._is_vector_index_type(index_type) else index_type
+        return (field + "index-options", field + "global-index.%s.index-options" % family,
+                field + "pk-%s.index.options" % family)
+
     def global_index_options(self, index_type: Optional[str], column: str) -> Options:
         """Resolve the same implementation and field options for either table mode."""
         values = dict(self.options.to_map())
@@ -1954,10 +1961,9 @@ class CoreOptions:
         vector = self._is_vector_index_type(index_type)
         prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
-        shared_key = field_prefix + "index-options"
-        shared = values.get(shared_key) is not None
-        option_key = shared_key if shared else field_prefix + "pk-" + (
-            "vector" if vector else index_type) + ".index.options"
+        keys = self._field_index_option_keys(index_type, column)
+        option_key = next((key for key in keys if values.get(key) is not None), keys[-1])
+        shared = option_key == keys[0]
         serialized = values.get(option_key)
         if serialized is not None and str(serialized).strip():
             try:
@@ -1980,7 +1986,7 @@ class CoreOptions:
                 values[qualified] = str(value)
                 if vector and qualified.startswith(prefix):
                     short_key = qualified[len(prefix):]
-                    if shared:
+                    if shared or option_key == keys[1] or short_key == "sharding":
                         values[field_prefix + short_key] = str(value)
         return Options(values)
 

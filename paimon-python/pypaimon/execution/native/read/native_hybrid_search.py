@@ -22,6 +22,7 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.execution.native.table import (_native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.read.native_search_plan import _native_prefilter_options
+from pypaimon.execution.native.read.native_vector_search import _filesystem_vector_search_supported
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
@@ -38,7 +39,7 @@ def _native_builder(builder, executor=None):
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
             or not native_runtime_available()
-            or not _rest_catalog_supported(table)):
+            or not (_rest_catalog_supported(table) or _filesystem_vector_search_supported(table))):
         return None
     builder._validate_search()
     if executor is not None and not table.options.data_evolution_enabled():
@@ -107,6 +108,9 @@ def try_native_hybrid_routes(builder):
         execution._table = builder._table._copy_with_snapshot(snapshot)
         search = (execution._new_vector_search_builder(route) if route.is_vector() else
                   execution._new_full_text_search_builder(route))
+        # Capture the execution engine for separately executed routes, including
+        # range vector and full-text routes of a filesystem hybrid search.
+        search._native_hybrid_route = True
         routes.append(HybridSearchRouteBuilder(route, search))
     return routes
 

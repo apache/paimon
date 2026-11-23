@@ -424,7 +424,7 @@ class FileStoreTable(Table):
 
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
-                            options: Optional[dict] = None, *, execution="local",
+                            options: Optional[dict] = None, *, extra_fields=None, execution="local",
                             concurrency=None, ray_remote_args=None) -> int:
         from pypaimon.globalindex.create_global_index import \
             create_global_index
@@ -435,6 +435,7 @@ class FileStoreTable(Table):
             partition_filter=partition_filter,
             partitions=partitions,
             options=options,
+            extra_fields=extra_fields,
             execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args,
         )
 

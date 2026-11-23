@@ -230,12 +230,16 @@ class GlobalIndexBuildTest(
         'file.format': 'parquet',
     }
 
-    def test_centroid_sharding_requires_spark(self):
+    def test_centroid_sharding_requires_native_build(self):
         schema = pa.schema([('embedding', pa.list_(pa.float32()))])
-        table = self._create_table(pa_schema=schema, options={**self.table_options, 'ivf-pq.sharding': 'centroid'})
-        with self.assertRaisesRegex(NotImplementedError, "built with Spark"):
-            GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
-        GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.sharding': 'range'})
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options, 'fields.embedding.sharding': 'centroid', 'write.native.enabled': 'false',
+        })
+        with self.assertRaisesRegex(NotImplementedError, "pypaimon-rust"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq').build()
+        self.assertEqual([], GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'sharding': 'range'}).build())
+        with self.assertRaisesRegex(ValueError, "extra_fields requires a centroid-sharded vector index"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'sharding': 'range'}, extra_fields={})
 
     def test_centroid_bitmaps_share_the_primary_vector_index_definition(self):
         schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
@@ -251,11 +255,13 @@ class GlobalIndexBuildTest(
         vector_id = table.field_dict['embedding'].id
         status_id = table.field_dict['status'].id
         partition = GenericRow([], [])
+        from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
+        source = DataEvolutionIndexSourceMeta(1, table.table_schema.id).serialize()
 
         def entry(name, rows, metadata, fields=None):
             return IndexManifestEntry(0, partition, 0, IndexFileMeta(
                 'ivf-flat', name, 100, rows,
-                global_index_meta=GlobalIndexMeta(0, 0, vector_id, fields, metadata)))
+                global_index_meta=GlobalIndexMeta(0, 0, vector_id, fields, metadata, source)))
 
         centroid_files = []
         for role, rows, number, payload in (
