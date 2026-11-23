@@ -26,7 +26,6 @@ import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParserUtils.withOrigin
@@ -105,9 +104,10 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
 
   /** Create a CREATE TABLE LIKE logical command. */
   override def visitCreateTableLike(ctx: CreateTableLikeContext): LogicalPlan = withOrigin(ctx) {
-    sparkCreateTableLikeCommand(ctx).copy(
-      targetTable = toTableIdentifier(typedVisit[Seq[String]](ctx.target)),
-      sourceTable = toTableIdentifier(typedVisit[Seq[String]](ctx.source)))
+    PaimonCreateTableLikeStatement(
+      typedVisit[Seq[String]](ctx.target),
+      typedVisit[Seq[String]](ctx.source),
+      sparkCreateTableLikeCommand(ctx))
   }
 
   /** Create a CREATE OR REPLACE TAG logical command. */
@@ -310,20 +310,6 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)
-
-  private def toTableIdentifier(identifier: Seq[String]): TableIdentifier = {
-    identifier match {
-      case Seq(table) =>
-        TableIdentifier(table)
-      case Seq(database, table) =>
-        TableIdentifier(table, Some(database))
-      case parts =>
-        TableIdentifier(
-          parts.last,
-          Some(parts.slice(1, parts.length - 1).mkString(".")),
-          Some(parts.head))
-    }
-  }
 
   private def sparkCreateTableLikeCommand(
       ctx: CreateTableLikeContext): SparkCreateTableLikeCommand = {

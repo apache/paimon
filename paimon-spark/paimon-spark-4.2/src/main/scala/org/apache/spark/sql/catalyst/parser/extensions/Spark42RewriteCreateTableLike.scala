@@ -45,8 +45,8 @@ case class Spark42RewriteCreateTableLike(spark: SparkSession) extends Rule[Logic
           ifNotExists) =>
       rewriter
         .rewrite(
-          toV1Parts(target),
-          toV1Parts(source.multipartIdentifier),
+          target,
+          source.multipartIdentifier,
           provider,
           // Spark builds the same storage format for its v1 fallback.
           HiveSerDe.buildStorageFormat(
@@ -57,17 +57,5 @@ case class Spark42RewriteCreateTableLike(spark: SparkSession) extends Rule[Logic
           ifNotExists
         )
         .getOrElse(c)
-  }
-
-  /**
-   * Joins the parts between the first and the last into one database name when there are more than
-   * three, as `PaimonSqlExtensionsAstBuilder` does for the names it parses.
-   */
-  private def toV1Parts(parts: Seq[String]): Seq[String] = {
-    if (parts.length <= 3) {
-      parts
-    } else {
-      Seq(parts.head, parts.slice(1, parts.length - 1).mkString("."), parts.last)
-    }
   }
 }
