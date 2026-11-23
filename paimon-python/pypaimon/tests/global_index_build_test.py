@@ -48,6 +48,7 @@ from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,
 )
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
@@ -57,6 +58,8 @@ from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer imp
 )
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
@@ -233,6 +236,53 @@ class GlobalIndexBuildTest(
         with self.assertRaisesRegex(NotImplementedError, "built with Spark"):
             GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
         GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.sharding': 'range'})
+
+    def test_centroid_bitmaps_share_the_primary_vector_index_definition(self):
+        schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options,
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+            'read.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false',
+        })
+        self._write_arrow(table, pa.table({'embedding': [[1.0, 2.0]], 'status': ['ready']},
+                                          schema=schema))
+        vector_id = table.field_dict['embedding'].id
+        status_id = table.field_dict['status'].id
+        partition = GenericRow([], [])
+
+        def entry(name, rows, metadata, fields=None):
+            return IndexManifestEntry(0, partition, 0, IndexFileMeta(
+                'ivf-flat', name, 100, rows,
+                global_index_meta=GlobalIndexMeta(0, 0, vector_id, fields, metadata)))
+
+        centroid_files = []
+        for role, rows, number, payload in (
+            (b'R', 0, 1, b'l2'),
+            (b'S', 1, 0, struct.pack('>i', 1)),
+            (b'B', 1, 0, b''),
+        ):
+            header = struct.pack('>8sBci', b'PAIMCENT', 1, role, number)
+            centroid_files.append(entry(role.decode('ascii'), rows, header + payload, [status_id]))
+
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.commit([CommitMessage((), 0, [], index_adds=centroid_files)])
+        finally:
+            commit.close()
+
+        self.assertEqual(0, table.create_global_index('embedding', 'ivf-flat'))
+        self.assertEqual(3, table.drop_global_index('embedding', 'ivf-flat', dry_run=True))
+
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "overlapping row range"):
+                commit.commit([CommitMessage((), 0, [], index_adds=[entry('range', 1, b'{}')])])
+        finally:
+            commit.close()
+        self.assertEqual(3, table.drop_global_index('embedding', 'ivf-flat'))
+        self.assertEqual([], IndexFileHandler(table).scan(None))
 
     def test_native_vector_build_preserves_field_option_formats(self):
         schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])

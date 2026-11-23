@@ -252,7 +252,7 @@ public class IndexManifestFileHandler {
         }
 
         private List<Integer> overlapFieldIds(GlobalIndexMeta meta) {
-            return CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+            return CentroidIndexMeta.hasBitmapFields(meta)
                     ? Collections.singletonList(meta.indexFieldId())
                     : meta.getIndexedFieldIds();
         }

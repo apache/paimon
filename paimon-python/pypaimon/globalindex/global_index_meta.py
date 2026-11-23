@@ -32,6 +32,9 @@ class GlobalIndexMeta:
     index_meta: Optional[bytes] = None
     source_meta: Optional[bytes] = None
 
+    def has_centroid_bitmap_fields(self) -> bool:
+        return bool(self.extra_field_ids) and _is_centroid_index(self.index_meta)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GlobalIndexMeta):
             return False
@@ -83,9 +86,13 @@ class GlobalIndexIOMeta:
         return hash((self.file_name, self.file_size, self.external_path))
 
 
-def range_vector_index_file(io_metas: List[GlobalIndexIOMeta]) -> GlobalIndexIOMeta:
+def _is_centroid_index(metadata: Optional[bytes]) -> bool:
     # Paimon Core prefixes routed manifest metadata with this layout marker.
-    if any(meta.metadata and meta.metadata.startswith(b"PAIMCENT") for meta in io_metas):
+    return metadata is not None and metadata.startswith(b"PAIMCENT")
+
+
+def range_vector_index_file(io_metas: List[GlobalIndexIOMeta]) -> GlobalIndexIOMeta:
+    if any(_is_centroid_index(meta.metadata) for meta in io_metas):
         raise NotImplementedError("Centroid-sharded vector indexes require the Java reader.")
     assert len(io_metas) == 1, "Expected exactly one index file per shard"
     return io_metas[0]

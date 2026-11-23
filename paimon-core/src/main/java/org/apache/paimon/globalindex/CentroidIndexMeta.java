@@ -26,7 +26,6 @@ import org.apache.paimon.index.IndexPathFactory;
 import javax.annotation.Nullable;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -36,11 +35,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public final class CentroidIndexMeta {
     private static final byte[] MAGIC = {'P', 'A', 'I', 'M', 'C', 'E', 'N', 'T'};
     private static final byte VERSION = 1;
-    private static final byte SCALAR_INDEX_VERSION = 2;
-    private static final byte ROUTER = 1;
-    private static final byte SHARD = 2;
-    private static final byte SCALAR_INDEX = 3;
-    private static final int HEADER_SIZE = MAGIC.length + 2 + 3 * Integer.BYTES;
+    private static final byte ROUTER = 'R';
+    private static final byte SHARD = 'S';
+    private static final byte BITMAP = 'B';
+    private static final int HEADER_SIZE = MAGIC.length + 2 + Integer.BYTES;
 
     private CentroidIndexMeta() {}
 
@@ -64,15 +62,15 @@ public final class CentroidIndexMeta {
         return isWrapped(meta) && role(meta) == ROUTER;
     }
 
-    public static boolean hasScalarIndexes(@Nullable byte[] meta) {
-        return isWrapped(meta)
-                && meta.length >= HEADER_SIZE
-                && meta[MAGIC.length] == SCALAR_INDEX_VERSION;
+    /** Whether the index definition includes Bitmap fields, even in an all-null range. */
+    public static boolean hasBitmapFields(GlobalIndexMeta meta) {
+        int[] fields = meta.extraFieldIds();
+        return fields != null && fields.length > 0 && isWrapped(meta.indexMeta());
     }
 
     public static boolean isScalarIndex(IndexFileMeta file) {
         byte[] meta = checkNotNull(file.globalIndexMeta()).indexMeta();
-        return isWrapped(meta) && role(meta) == SCALAR_INDEX;
+        return isWrapped(meta) && role(meta) == BITMAP;
     }
 
     /** Scalar sections belong to the primary vector index for create and drop operations. */
@@ -80,63 +78,38 @@ public final class CentroidIndexMeta {
         return meta.getIndexedFieldIds().equals(fieldIds)
                 || (fieldIds.size() == 1
                         && meta.indexFieldId() == fieldIds.get(0)
-                        && hasScalarIndexes(meta.indexMeta()));
+                        && hasBitmapFields(meta));
     }
 
     private static byte role(byte[] meta) {
         checkArgument(meta.length >= HEADER_SIZE, "Truncated centroid metadata.");
         byte version = meta[MAGIC.length];
-        checkArgument(
-                version == VERSION || version == SCALAR_INDEX_VERSION,
-                "Unsupported centroid metadata version: %s.",
-                version);
+        checkArgument(version == VERSION, "Unsupported centroid metadata version: %s.", version);
         byte role = meta[MAGIC.length + 1];
         checkArgument(
-                role == ROUTER
-                        || role == SHARD
-                        || (version == SCALAR_INDEX_VERSION && role == SCALAR_INDEX),
-                "Invalid centroid file role.");
+                role == ROUTER || role == SHARD || role == BITMAP, "Invalid centroid file role.");
         return role;
     }
 
-    public static ResultEntry router(ResultEntry file, String modelId, int nlist) {
-        return router(file, modelId, nlist, false);
+    public static ResultEntry router(ResultEntry file, int nlist) {
+        return wrap(file, ROUTER, nlist);
     }
 
-    public static ResultEntry router(ResultEntry file, String modelId, int nlist, boolean bitmap) {
-        return wrap(file, modelId, bitmap ? SCALAR_INDEX_VERSION : VERSION, ROUTER, nlist);
+    public static ResultEntry shard(ResultEntry file, int centroid) {
+        return wrap(file, SHARD, centroid);
     }
 
-    public static ResultEntry shard(ResultEntry file, String modelId, int centroid) {
-        return shard(file, modelId, centroid, false);
+    public static ResultEntry scalarIndex(ResultEntry file, int centroid) {
+        return wrap(file, BITMAP, centroid);
     }
 
-    public static ResultEntry shard(
-            ResultEntry file, String modelId, int centroid, boolean bitmap) {
-        return wrap(file, modelId, bitmap ? SCALAR_INDEX_VERSION : VERSION, SHARD, centroid);
-    }
-
-    public static ResultEntry scalarIndex(ResultEntry file, String modelId, int centroid) {
-        return wrap(file, modelId, SCALAR_INDEX_VERSION, SCALAR_INDEX, centroid);
-    }
-
-    private static ResultEntry wrap(
-            ResultEntry file, String modelId, byte version, byte role, int countOrId) {
-        checkArgument(!modelId.isEmpty() && countOrId >= 0, "Invalid centroid descriptor.");
-        byte[] id = modelId.getBytes(StandardCharsets.UTF_8);
+    private static ResultEntry wrap(ResultEntry file, byte role, int countOrId) {
+        checkArgument(countOrId >= 0, "Invalid centroid descriptor.");
         byte[] payload = file.meta();
         ByteBuffer out =
                 ByteBuffer.allocate(
-                        Math.addExact(
-                                Math.addExact(HEADER_SIZE, id.length),
-                                payload == null ? 0 : payload.length));
-        out.put(MAGIC)
-                .put(version)
-                .put(role)
-                .putInt(countOrId)
-                .putInt(id.length)
-                .putInt(payload == null ? -1 : payload.length)
-                .put(id);
+                        Math.addExact(HEADER_SIZE, payload == null ? 0 : payload.length));
+        out.put(MAGIC).put(VERSION).put(role).putInt(countOrId);
         if (payload != null) {
             out.put(payload);
         }
@@ -159,23 +132,13 @@ public final class CentroidIndexMeta {
         ByteBuffer in = ByteBuffer.wrap(meta);
         in.position(MAGIC.length + 2);
         int countOrId = in.getInt();
-        int idLength = in.getInt();
-        int payloadLength = in.getInt();
-        checkArgument(
-                countOrId >= 0
-                        && idLength > 0
-                        && idLength <= in.remaining()
-                        && payloadLength >= -1
-                        && in.remaining() - idLength == Math.max(0, payloadLength),
-                "Invalid centroid metadata lengths.");
-        String id = new String(meta, in.position(), idLength, StandardCharsets.UTF_8);
-        in.position(in.position() + idLength);
+        checkArgument(countOrId >= 0, "Invalid centroid descriptor.");
         byte[] payload = null;
-        if (payloadLength >= 0) {
-            payload = new byte[payloadLength];
+        if (in.hasRemaining()) {
+            payload = new byte[in.remaining()];
             in.get(payload);
         }
         return new CentroidIndexFile(
-                path, size, rows, payload, id, role == ROUTER, role == SCALAR_INDEX, countOrId);
+                path, size, rows, payload, role == ROUTER, role == BITMAP, countOrId);
     }
 }

@@ -126,11 +126,6 @@ public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexRead
         this.totalRowCount = totalRowCount;
     }
 
-    boolean hasJointLayout() throws IOException {
-        ensureLoaded();
-        return nativeMeta.nlist() == 64 && "l2".equals(nativeMeta.metric());
-    }
-
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
