@@ -87,6 +87,12 @@ under the License.
             <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in blob-descriptor-field, blob-view-field, or video-frame-field are also treated as BLOB fields.</td>
         </tr>
         <tr>
+            <td><h5>blob-transfer-metrics.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Collect additional Blob copy duration, failed-copy payload bytes and terminal HTTP 503 metrics when a metric registry is provided.</td>
+        </tr>
+        <tr>
             <td><h5>blob-view-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

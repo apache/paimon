@@ -146,7 +146,12 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     public BaseAppendFileStoreWrite withMetricRegistry(MetricRegistry metricRegistry) {
         super.withMetricRegistry(metricRegistry);
         if (blobContext != null) {
-            blobFetchMetrics = new BlobFetchMetrics(metricRegistry, tableName);
+            blobFetchMetrics =
+                    new BlobFetchMetrics(
+                            metricRegistry,
+                            tableName,
+                            options.toConfiguration()
+                                    .get(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED));
             blobContext = blobContext.withBlobFetchMetricReporter(blobFetchMetrics);
         }
         return this;
