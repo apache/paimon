@@ -27,6 +27,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from pypaimon.write import backend_dispatch as dispatch
+from pypaimon.table.bucket_mode import BucketMode
 
 
 @pytest.mark.parametrize('result', [None, [], False, 0])
@@ -58,7 +59,8 @@ def test_fork_error_is_never_retried_by_python():
 
 def test_native_write_error_cannot_trigger_python_replay():
     failure = OSError('write may already have created a file')
-    table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True))
+    table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True),
+                            bucket_mode=lambda: BucketMode.BUCKET_UNAWARE)
     native = SimpleNamespace(table=table, commit_user='writer', static_partition=None,
                              stream=False, write_arrow_batch=Mock(side_effect=failure))
     with patch('pypaimon.read.merge_engine_support.check_sequence_field_supported'), \

@@ -65,7 +65,7 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
             table =
                     table.copy(
                             Collections.singletonMap(
-                                    "global-index.external-path", firstRoot + "," + secondRoot));
+                                    "global-index.external-paths", firstRoot + "," + secondRoot));
         }
         Options options = new Options();
         options.setString("btree-index.records-per-range", "1");

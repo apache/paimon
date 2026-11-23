@@ -105,22 +105,22 @@ public class CoreOptionsTest {
         Options options = new Options();
         CoreOptions core = new CoreOptions(options);
         assertThat(core.globalIndexExternalPaths()).isEmpty();
-        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, "");
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
         assertThat(core.globalIndexExternalPaths()).isEmpty();
         for (String value :
                 new String[] {"file:///a", " file:///a/ ", "file:///a,", "file:///a,,"}) {
-            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
             assertThat(core.globalIndexExternalPaths())
-                    .as("global-index.external-path=%s", value)
+                    .as("global-index.external-paths=%s", value)
                     .containsExactly(new Path("file:///a"));
         }
         for (String value :
                 new String[] {
                     "file:///a, file:///b", "file:///a,file:///b,", "file:///a,file:///b,,"
                 }) {
-            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
             assertThat(core.globalIndexExternalPaths())
-                    .as("global-index.external-path=%s", value)
+                    .as("global-index.external-paths=%s", value)
                     .containsExactly(new Path("file:///a"), new Path("file:///b"));
         }
         for (String value :
@@ -136,11 +136,47 @@ public class CoreOptionsTest {
                     "file:///a,/b",
                     "file:///a, ,file:///b"
                 }) {
-            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
             assertThatThrownBy(core::globalIndexExternalPaths)
-                    .as("global-index.external-path=%s", value)
+                    .as("global-index.external-paths=%s", value)
                     .isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    @Test
+    void testLegacyGlobalIndexExternalPath() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.globalIndexExternalPath()).isNull();
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, "");
+        assertThat(core.globalIndexExternalPath()).isNull();
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", "file:///index,archive", "file:///a,", "file:///a,,"}) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
+            assertThat(core.globalIndexExternalPath()).isEqualTo(new Path(value));
+            assertThat(core.globalIndexExternalPaths()).containsExactly(new Path(value));
+        }
+    }
+
+    @Test
+    void testGlobalIndexExternalPathsPrecedence() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        Path legacy = new Path("file:///index,archive");
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, legacy.toString());
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a, file:///b");
+        assertThat(core.globalIndexExternalPaths())
+                .containsExactly(new Path("file:///a"), new Path("file:///b"));
+        assertThat(core.globalIndexExternalPath()).isEqualTo(legacy);
+
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a,,file:///b");
+        assertThatThrownBy(core::globalIndexExternalPaths)
+                .isInstanceOf(IllegalArgumentException.class);
+        options.remove(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS);
+        assertThat(core.globalIndexExternalPaths()).containsExactly(legacy);
     }
 
     @Test

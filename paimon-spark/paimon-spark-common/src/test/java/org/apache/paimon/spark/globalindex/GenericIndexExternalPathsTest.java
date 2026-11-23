@@ -61,7 +61,7 @@ class GenericIndexExternalPathsTest extends TableTestBase {
                         .option("file.format", "avro")
                         .option("row-tracking.enabled", "true")
                         .option("data-evolution.enabled", "true")
-                        .option("global-index.external-path", roots.get(0) + "," + roots.get(1))
+                        .option("global-index.external-paths", roots.get(0) + "," + roots.get(1))
                         .build(),
                 false);
         FileStoreTable table = getTableDefault();

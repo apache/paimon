@@ -74,17 +74,28 @@ class GlobalIndexBuilderUtilsTest {
     private CoreOptions coreOptions;
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testFileLocationsWithDifferentReaderOptions(boolean external) throws Exception {
+    @ValueSource(strings = {"internal", "single", "multiple"})
+    void testFileLocationsWithDifferentReaderOptions(String placement) throws Exception {
         Path root = new Path(tempDir.toUri());
-        List<Path> roots = Arrays.asList(new Path(root, "a"), new Path(root, "b"));
-        if (external) {
+        boolean external = !placement.equals("internal");
+        List<Path> roots;
+        if (placement.equals("single")) {
+            roots = Collections.singletonList(new Path(root, "index,archive"));
             coreOptions
                     .toConfiguration()
-                    .set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, roots.get(0) + "," + roots.get(1));
+                    .set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, roots.get(0).toString());
+        } else {
+            roots = Arrays.asList(new Path(root, "a"), new Path(root, "b"));
+        }
+        if (placement.equals("multiple")) {
+            coreOptions
+                    .toConfiguration()
+                    .set(
+                            CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS,
+                            roots.get(0) + "," + roots.get(1));
         }
         IndexPathFactory writerPaths =
-                createNonPartFactory(root, external ? roots : Collections.emptyList())
+                createNonPartFactory(root, coreOptions.globalIndexExternalPaths())
                         .globalIndexFileFactory();
         GlobalIndexFileReadWrite writer = new GlobalIndexFileReadWrite(fileIO, writerPaths);
         List<ResultEntry> entries = new ArrayList<>();
@@ -104,7 +115,8 @@ class GlobalIndexBuilderUtilsTest {
         }
         if (external) {
             for (Path externalRoot : roots) {
-                assertThat(Collections.frequency(parents, externalRoot)).isEqualTo(3);
+                assertThat(Collections.frequency(parents, externalRoot))
+                        .isEqualTo(6 / roots.size());
             }
         } else {
             assertThat(parents).containsOnly(new Path(root, "index"));

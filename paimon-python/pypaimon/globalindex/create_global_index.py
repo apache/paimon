@@ -198,13 +198,8 @@ class GlobalIndexBuilder:
         # Python placement uses table options; native builds also receive build
         # overrides. Validate both before selecting a backend or creating files.
         for options in (self._table.options, self._core_options):
-            path = options.global_index_external_path()
-            if path is not None and ',' in path:
-                raise ValueError(
-                    "PyPaimon global index build only supports a single "
-                    "'global-index.external-path' directory; comma-separated "
-                    "paths are not supported."
-                )
+            options.validate_index_write_path()
+            options.global_index_external_path()
 
     def _validate_unaware_bucket_table(self) -> None:
         # Global index files live in bucket 0 and are keyed by the table-wide

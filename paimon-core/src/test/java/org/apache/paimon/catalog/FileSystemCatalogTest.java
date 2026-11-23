@@ -413,6 +413,64 @@ public class FileSystemCatalogTest extends CatalogTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    public void testMigrateLegacyGlobalIndexExternalPath(boolean removeLegacyOption)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_db", "legacy_index_path");
+        java.nio.file.Path legacyRoot = tempFile.resolve("index,archive");
+        java.nio.file.Path firstRoot = tempFile.resolve("index-a");
+        java.nio.file.Path secondRoot = tempFile.resolve("index-b");
+        java.nio.file.Path unrelated = Files.createDirectory(tempFile.resolve("index"));
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option("bucket", "-1")
+                        .option(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                                legacyRoot.toUri().toString())
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Path oldIndexPath = table.store().pathFactory().globalIndexFileFactory().newPath();
+        assertThat(oldIndexPath.getParent()).isEqualTo(new Path(legacyRoot.toUri()));
+        fileIO.mkdirs(oldIndexPath.getParent());
+        fileIO.overwriteFileUtf8(oldIndexPath, "legacy-index");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<SchemaChange> changes = new ArrayList<>();
+        changes.add(
+                SchemaChange.setOption(
+                        CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
+                        firstRoot.toUri() + ", " + secondRoot.toUri()));
+        if (removeLegacyOption) {
+            changes.add(SchemaChange.removeOption(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key()));
+        }
+        catalog.alterTable(identifier, changes, false);
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.coreOptions().globalIndexExternalPaths())
+                .containsExactly(new Path(firstRoot.toUri()), new Path(secondRoot.toUri()));
+        assertThat(read(table, null, null, null, null))
+                .extracting(row -> row.getInt(0))
+                .containsExactly(1);
+        assertThat(fileIO.readFileUtf8(oldIndexPath)).isEqualTo("legacy-index");
+        Files.createDirectories(firstRoot);
+        Files.createDirectories(secondRoot);
+
+        catalog.dropTable(identifier, false);
+        assertThat(legacyRoot).doesNotExist();
+        assertThat(firstRoot).doesNotExist();
+        assertThat(secondRoot).doesNotExist();
+        assertThat(unrelated).exists();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     public void testDropTableWithInvalidOptionsAndExternalPaths(boolean cacheEnabled)
             throws Exception {
         Identifier identifier = Identifier.create("test_db", "legacy_table");
@@ -421,7 +479,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         java.nio.file.Path oldMainPath = Files.createDirectory(tempFile.resolve("old-main-data"));
         java.nio.file.Path newMainPath = Files.createDirectory(tempFile.resolve("new-main-data"));
         java.nio.file.Path oldBranchPath =
-                Files.createDirectory(tempFile.resolve("old-branch-index"));
+                Files.createDirectory(tempFile.resolve("old-branch-index,archive"));
         java.nio.file.Path newBranchPath =
                 Files.createDirectory(tempFile.resolve("new-branch-index"));
         java.nio.file.Path unrelatedPath = Files.createDirectory(tempFile.resolve("unrelated"));
@@ -436,9 +494,11 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Map<String, String> branchOptions = new HashMap<>(legacySchema.options());
         branchOptions.put(
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), oldBranchPath.toUri().toString());
-        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
+        // An older engine ignores the new key and can still write to the legacy root.
         branchOptions.put(
-                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), newBranchPath.toUri().toString());
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(), newBranchPath.toUri().toString());
+        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
+        branchOptions.remove(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key());
         writeLegacySchema(branchSchemaManager, legacySchema, 1, branchOptions);
 
         assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())

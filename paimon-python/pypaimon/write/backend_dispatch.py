@@ -94,6 +94,9 @@ def _initialize_python_write(owner, table, commit_user, static_partition, stream
 
 def _prepare_write(table, commit_user, static_partition, stream,
                    restore_snapshot_id, fixed_bucket, bucket_plan):
+    from pypaimon.table.bucket_mode import BucketMode
+    if table.bucket_mode() == BucketMode.HASH_DYNAMIC:
+        table.options.validate_index_write_path()
     from pypaimon.read.merge_engine_support import check_sequence_field_supported
     check_sequence_field_supported(table)
     if table.options.native_write_enabled():
@@ -252,6 +255,9 @@ def prepare_native_commit(owner, messages, *, batch=False):
 
 
 def prepare_native_write_operation(operation, table, commit_user, *args, **kwargs):
+    # Validate before selecting a backend; fallback must not swallow this error.
+    if operation in ('delete', 'predicate_delete'):
+        table.options.validate_index_write_path()
     if not table.options.native_write_enabled():
         return None
     names = {
@@ -380,6 +386,7 @@ def create_row_id_update_execution(table, commit_user, commit_identifier, precom
 
 def create_row_id_delete_execution(table, precomputed=None):
     """Select one deleter, reusing captured metadata when supplied."""
+    table.options.validate_index_write_path()
     from pypaimon.write.update_validation import _authorize_update
     _authorize_update(table)
     from pypaimon.write.row_id_plan import CapturedRowIdPlan

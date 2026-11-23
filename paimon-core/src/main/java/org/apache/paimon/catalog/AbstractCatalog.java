@@ -416,6 +416,12 @@ public abstract class AbstractCatalog implements Catalog {
                         schema -> {
                             CoreOptions options = new CoreOptions(schema.options());
                             List<Path> paths = new ArrayList<>(options.globalIndexExternalPaths());
+                            // Older engines may have written to the single root even when the
+                            // schema also contains the newer list option.
+                            Path legacyIndexPath = options.globalIndexExternalPath();
+                            if (legacyIndexPath != null) {
+                                paths.add(legacyIndexPath);
+                            }
                             String strategy =
                                     schema.options().get(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
                             boolean template =

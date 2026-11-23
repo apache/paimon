@@ -1106,7 +1106,7 @@ public abstract class CatalogTestBase {
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
                 String.format(pathFormat, dataExternalPath.toUri(), secondDataPath.toUri()));
         options.put(
-                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
                 String.format(
                         pathFormat, globalIndexExternalPath.toUri(), secondIndexPath.toUri()));
         Schema schema =

@@ -67,6 +67,7 @@ class PythonTableDeleteByRowId:
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
+        table.options.validate_index_write_path()
         self.table: FileStoreTable = table
         self.file_io = table.file_io
         self._precomputed_anchor_ranges = _precomputed_anchor_ranges

@@ -263,7 +263,7 @@ class GenericIndexTopoBuilderTest {
         CoreOptions options =
                 new CoreOptions(
                         Collections.singletonMap(
-                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
                                 roots.get(0) + "," + roots.get(1)));
         FileStorePathFactory paths = table.store().pathFactory();
         when(paths.globalIndexFileFactory())

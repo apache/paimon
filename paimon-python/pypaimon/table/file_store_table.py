@@ -361,6 +361,8 @@ class FileStoreTable(Table):
             external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=self.options.index_file_in_data_file_dir(),
             global_index_external_path=self.options.global_index_external_path(),
+            global_index_external_paths_configured=self.options.options.contains(
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS),
         )
 
     def new_snapshot_commit(self):

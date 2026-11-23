@@ -789,7 +789,7 @@ class GlobalIndexBuildTest(
 
     def test_create_global_index_uses_external_path(self):
         external_root = 'file://%s' % os.path.join(
-            self.tempdir, 'global-index-external')
+            self.tempdir, 'global-index-external,archive')
         options = dict(self.table_options)
         options['global-index.external-path'] = external_root
         table = self._create_table(options=options)
@@ -813,7 +813,7 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
-    def test_create_global_index_rejects_multiple_external_paths_before_build(self):
+    def test_create_global_index_rejects_external_paths_option_before_build(self):
         from pypaimon.globalindex.index_dispatch import build_global_index
 
         table = self._create_table()
@@ -821,7 +821,7 @@ class GlobalIndexBuildTest(
             {'id': [1], 'name': ['a'], 'age': [10], 'city': ['x']},
             schema=self.pa_schema,
         ))
-        option = 'global-index.external-path'
+        option = 'global-index.external-paths'
         root_a = 'file://%s' % os.path.join(self.tempdir, 'external-a')
         root_b = 'file://%s' % os.path.join(self.tempdir, 'external-b')
         snapshot = table.snapshot_manager().get_latest_snapshot()
@@ -831,11 +831,11 @@ class GlobalIndexBuildTest(
             for name in dirs + files
         }
 
-        for paths in (root_a + ',' + root_b, root_a + ', ' + root_b + ','):
+        for paths in ('', root_a, root_a + ',' + root_b, root_a + ', ' + root_b + ','):
             for native in ('false', 'true'):
                 for source in ('table', 'build', 'table-with-build-override'):
                     with self.subTest(paths=paths, native=native, source=source):
-                        table_options = {'write.native.enabled': native}
+                        table_options = {'write.native.enabled': native, 'global-index.external-path': root_a}
                         build_options = {}
                         if source == 'build':
                             build_options[option] = paths
@@ -854,7 +854,7 @@ class GlobalIndexBuildTest(
                             ) as write_builder:
                                 with self.assertRaisesRegex(
                                     ValueError,
-                                    'global-index.external-path.*comma-separated',
+                                    "does not support 'global-index.external-paths'",
                                 ):
                                     configured.create_global_index('id', options=build_options)
                                 build.assert_not_called()
