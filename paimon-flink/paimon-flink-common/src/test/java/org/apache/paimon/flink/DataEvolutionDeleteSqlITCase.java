@@ -65,14 +65,24 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMaterializeDeletionVectorsProcedure() throws Exception {
+    public void testCompactAndMaterializeDeletionVectorsProcedure() throws Exception {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         createTable();
         sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
+        sql("INSERT INTO T VALUES (7, 'seven', 'A'), (8, 'eight', 'A'), (9, 'nine', 'A')");
         sql("INSERT INTO T VALUES (4, 'four', 'B'), (5, 'five', 'B'), (6, 'six', 'B')");
         sql("DELETE FROM T WHERE id IN (2, 4)");
 
         FileStoreTable table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isEqualTo(2L);
+
+        List<Row> rowsWithIds = sql("SELECT id, _ROW_ID FROM `T$row_tracking` ORDER BY id");
+        // Force separate bitmap/old-index work in the same partition through the parallel stage.
+        sql(
+                "CALL sys.compact(`table` => 'default.T', options => "
+                        + "'compaction.min.file-num=2,deletion-vector.index-file.target-size=1 b')");
+        assertThat(sql("SELECT id, _ROW_ID FROM `T$row_tracking` ORDER BY id"))
+                .isEqualTo(rowsWithIds);
         assertThat(deletionVectorCardinality(table)).isEqualTo(2L);
 
         sql("CALL sys.materialize_deletion_vectors(`table` => 'default.T')");
@@ -84,7 +94,10 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                         Row.of(1, "one", "A"),
                         Row.of(3, "three", "A"),
                         Row.of(5, "five", "B"),
-                        Row.of(6, "six", "B"));
+                        Row.of(6, "six", "B"),
+                        Row.of(7, "seven", "A"),
+                        Row.of(8, "eight", "A"),
+                        Row.of(9, "nine", "A"));
     }
 
     @Test
