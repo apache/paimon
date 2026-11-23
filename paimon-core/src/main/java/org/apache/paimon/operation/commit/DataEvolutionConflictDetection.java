@@ -310,7 +310,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<DataFileMeta> partitionUpdates = updates.get(index.partition());
             if (partitionUpdates == null
                     || meta == null
-                    || !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+                    || !CentroidIndexMeta.hasBitmapFields(meta)
                     || !CentroidIndexMeta.isRoutingModel(meta.indexMeta())
                     || deletedIndexes.contains(file.fileName())) {
                 continue;

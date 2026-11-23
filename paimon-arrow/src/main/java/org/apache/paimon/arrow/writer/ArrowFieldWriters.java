@@ -52,6 +52,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IntArrayList;
 
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.BaseVariableWidthVector;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
@@ -123,12 +125,12 @@ public class ArrowFieldWriters {
             if (segments.length == 1) {
                 byte[] heapMemory = segments[0].getHeapMemory();
                 if (heapMemory != null) {
-                    ((VarCharVector) fieldVector)
-                            .setSafe(
-                                    rowIndex,
-                                    heapMemory,
-                                    binaryString.getOffset(),
-                                    binaryString.getSizeInBytes());
+                    setBytes(
+                            (VarCharVector) fieldVector,
+                            rowIndex,
+                            heapMemory,
+                            binaryString.getOffset(),
+                            binaryString.getSizeInBytes());
                     return;
                 }
             }
@@ -136,6 +138,30 @@ public class ArrowFieldWriters {
             // Else copy new byte array
             ((VarCharVector) fieldVector).setSafe(rowIndex, binaryString.toBytes());
         }
+    }
+
+    /**
+     * Writes a value at {@code index}. When the value is the next one in sequence and fits in the
+     * current buffers, this skips the capacity loops and hole filling of {@code setSafe}, which
+     * cost more than the copy for short values.
+     */
+    private static void setBytes(
+            BaseVariableWidthVector vector, int index, byte[] value, int start, int length) {
+        int lastSet = vector.getLastSet();
+        if (index == lastSet + 1) {
+            ArrowBuf offsets = vector.getOffsetBuffer();
+            long nextOffsetPosition = (long) (index + 1) * BaseVariableWidthVector.OFFSET_WIDTH;
+            if (nextOffsetPosition + BaseVariableWidthVector.OFFSET_WIDTH <= offsets.capacity()
+                    && (index >> 3) < vector.getValidityBuffer().capacity()) {
+                long startOffset =
+                        offsets.getInt((long) index * BaseVariableWidthVector.OFFSET_WIDTH);
+                if (startOffset + length <= vector.getDataBuffer().capacity()) {
+                    vector.set(index, value, start, length);
+                    return;
+                }
+            }
+        }
+        vector.setSafe(index, value, start, length);
     }
 
     /** Writer for BOOLEAN. */
@@ -196,7 +222,8 @@ public class ArrowFieldWriters {
 
         @Override
         protected void doWrite(int rowIndex, DataGetters getters, int pos) {
-            ((VarBinaryVector) fieldVector).setSafe(rowIndex, getters.getBinary(pos));
+            byte[] value = getters.getBinary(pos);
+            setBytes((VarBinaryVector) fieldVector, rowIndex, value, 0, value.length);
         }
     }
 

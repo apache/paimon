@@ -1276,7 +1276,11 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to remove the whole row in aggregation engine when -D records are received.");
+                            "Whether to remove the whole row in aggregation engine when -D records are received. "
+                                    + "Records after a -D start a new aggregate only if the -D is merged together "
+                                    + "with the older records of the same key. If the -D and later records are "
+                                    + "merged without them first, for example when written in the same commit, "
+                                    + "the older aggregate is kept.");
 
     @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
@@ -3083,6 +3087,14 @@ public class CoreOptions implements Serializable {
                                     + "(e.g. invalid URI or HTTP errors other than 404). "
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
                                     + "When false, the write fails when the descriptor is read.");
+
+    public static final ConfigOption<Boolean> BLOB_TRANSFER_METRICS_ENABLED =
+            key("blob-transfer-metrics.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Collect additional Blob copy duration, failed-copy payload bytes and "
+                                    + "terminal HTTP 503 metrics when a metric registry is provided.");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")

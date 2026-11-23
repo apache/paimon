@@ -90,6 +90,11 @@ def build_global_index(request, partition_filter, *, execution="local", concurre
             ray_remote_args=ray_remote_args)
         if messages is not None:
             return messages
+    if request._centroid_sharding or request._multi_vector:
+        feature = 'Centroid-sharded vector indexes' if request._centroid_sharding else 'MultiVector indexes'
+        raise NotImplementedError(
+            '%s require write.native.enabled and a supported pypaimon-rust runtime and table.'
+            % feature)
     from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
     return PythonGlobalIndexBuilder(request).build(
         partition_filter, execution=execution, concurrency=concurrency,

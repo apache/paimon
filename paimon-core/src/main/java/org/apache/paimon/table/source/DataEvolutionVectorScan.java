@@ -162,7 +162,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         for (Map.Entry<Pair<Range, String>, List<IndexFileMeta>> entry : rangeGroups.entrySet()) {
             List<IndexFileMeta> files = entry.getValue();
             GlobalIndexMeta meta = checkNotNull(files.get(0).globalIndexMeta());
-            if (!hasExtraFields(meta) || CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
+            if (!hasExtraFields(meta) || CentroidIndexMeta.hasBitmapFields(meta)) {
                 vectorCoverage.add(meta.rowRange());
             }
             // An all-null range still supplies coverage, but has no vectors to search or score.
@@ -352,7 +352,7 @@ public class DataEvolutionVectorScan implements VectorScan {
     }
 
     private boolean canServeScalarFilter(GlobalIndexMeta meta) {
-        return !CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())
+        return !CentroidIndexMeta.hasBitmapFields(meta)
                 && (!isPrimaryColumn(meta, vectorColumn.id()) || hasExtraFields(meta));
     }
 

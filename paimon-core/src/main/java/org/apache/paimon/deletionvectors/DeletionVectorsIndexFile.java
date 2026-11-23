@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,6 +171,14 @@ public class DeletionVectorsIndexFile extends IndexFile {
     }
 
     public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input) {
+        try {
+            return createWriter().writeWithRolling(input);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write deletion vectors.", e);
+        }
+    }
+
+    public List<IndexFileMeta> writeWithRolling(Iterator<Map.Entry<String, DeletionVector>> input) {
         try {
             return createWriter().writeWithRolling(input);
         } catch (IOException e) {

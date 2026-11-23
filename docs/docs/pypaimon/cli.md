@@ -149,6 +149,7 @@ paimon table explain demo.people --where "id = 2"
 | Show schemas, snapshots, and partitions | [Table metadata](./cli-query#table-get) |
 | Create a table or import local files | [Create and change tables](./cli-tables) |
 | Alter a schema or table options | [Table alter](./cli-tables#table-alter) |
+| Roll back a table | [Table rollback](./cli-versions#table-rollback) |
 
 ## Catalog Commands
 

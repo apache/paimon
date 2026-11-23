@@ -283,14 +283,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return this;
     }
 
-    /** Applies a row-ID selection against the snapshot on which it was evaluated. */
+    /** Applies a single-snapshot search result, pinning its source snapshot when available. */
     public DataEvolutionBatchScan withGlobalIndexResult(
-            GlobalIndexResult globalIndexResult, Snapshot snapshot) {
+            GlobalIndexResult globalIndexResult, @Nullable Snapshot snapshot) {
         Preconditions.checkArgument(
                 table.coreOptions().startupMode() != CoreOptions.StartupMode.INCREMENTAL,
                 "A single-snapshot global-index result cannot replace an incremental scan.");
         withGlobalIndexResult(globalIndexResult);
-        batchScan.withStartingSnapshot(snapshot);
+        if (snapshot != null) {
+            batchScan.withStartingSnapshot(snapshot);
+        }
         return this;
     }
 
@@ -377,7 +379,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
     /** Plan complete data splits while deferring index evaluation to readers. */
     private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
-                || table.coreOptions().startupMode() == CoreOptions.StartupMode.INCREMENTAL
                 || filter == null
                 // Partition-only scans may apply LIMIT/TopN before deferred index filtering.
                 || !batchScan.snapshotReader().hasNonPartitionFilter()
@@ -532,8 +533,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
-        // Historical endpoints are resolved by batchScan, separately from automatic index lookup.
-        if (incremental || filter == null) {
+        if (filter == null) {
             return Optional.empty();
         }
         if (!options.globalIndexEnabled()) {

@@ -80,14 +80,7 @@ public class DataEvolutionRowIdRewriteSink extends FlinkSink<DataEvolutionCompac
 
     private DataStreamSink<?> commitWritten(
             DataStream<Committable> written, String initialCommitUser) {
-        written =
-                written.transform(
-                                "Data Evolution Row ID Rewrite Commit Preparation : "
-                                        + table.name(),
-                                new CommittableTypeInfo(),
-                                new DataEvolutionCommitPreparationOperator.Factory(
-                                        table, snapshot, true))
-                        .forceNonParallel();
+        written = DataEvolutionCommitPreparationOperator.prepare(written, table, snapshot, true);
         return doCommit(written, initialCommitUser);
     }
 

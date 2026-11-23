@@ -245,6 +245,32 @@ Scans below expressions using `input_file_name()`, `input_file_block_start()`, o
 `input_file_block_length()` are skipped: these functions need the source reader's
 task-local file context, which is not carried through a shuffle.
 
+### TopN with NaN File Statistics
+
+Spark sorts `NaN` above numeric values. In Spark 3.5.9, descending
+`ORDER BY ... LIMIT` can miss `NaN` when the Paimon scan skips a file
+based on a finite maximum recorded for a column that contains `NaN`.
+This can affect older PyPaimon files. It has also been observed in new
+Parquet files written by the PyPaimon native batch writer with
+`pypaimon-rust` 0.5.0.
+
+For an affected snapshot, add `isnan(score)` as the first descending
+sort key. This keeps TopN in Spark and preserves the descending order
+with `NaN` first. Replace the table name and snapshot ID with the ones
+you want to read.
+
+```sql
+SELECT score
+FROM lake.audit.legacy_nan_scores VERSION AS OF 2
+ORDER BY isnan(score) DESC, score DESC
+LIMIT 1;
+```
+
+Use `EXPLAIN EXTENDED` to check for `TakeOrderedAndProject` and verify
+that the Paimon `BatchScan` has no `TopN:` annotation. Spark can select
+candidates per partition before combining them, avoiding an
+`Exchange SinglePartition` over the full input before sorting.
+
 ### Filter Pushdown
 
 It is highly recommended to specify partition and primary key filters

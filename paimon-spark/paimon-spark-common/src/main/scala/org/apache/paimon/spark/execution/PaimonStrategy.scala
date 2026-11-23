@@ -449,7 +449,15 @@ case class LateralVectorSearchExec(
   private def createSearchContext(
       rightProjection: UnsafeProjection,
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
-    PaimonBaseScan.checkIncrementalSearch(innerTable)
+    val metaColumnsOnly =
+      VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name))
+    val coreOptions = CoreOptions.fromMap(innerTable.options())
+    // Metadata-only results return directly, without the row scan's snapshot validation.
+    require(
+      !metaColumnsOnly || !coreOptions.dataEvolutionEnabled() ||
+        coreOptions.startupMode() != CoreOptions.StartupMode.INCREMENTAL,
+      "Spark index search requires a single snapshot for Data Evolution tables."
+    )
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(
@@ -490,8 +498,7 @@ case class LateralVectorSearchExec(
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
-    val batchSize =
-      Math.max(1, new CoreOptions(innerTable.options()).vectorSearchLateralJoinBatchSize())
+    val batchSize = Math.max(1, coreOptions.vectorSearchLateralJoinBatchSize())
 
     LateralVectorSearchContext(
       readBuilder,
@@ -501,8 +508,7 @@ case class LateralVectorSearchExec(
       scoreMetadataColumns,
       sparkRow,
       rowIdOrdinal = resultRowType.getFieldIndex(SpecialFields.ROW_ID.name()),
-      metaColumnsOnly =
-        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)),
+      metaColumnsOnly = metaColumnsOnly,
       projectionInputOrdinals = vectorSearchOutput.map {
         attr =>
           if (attr.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN) {

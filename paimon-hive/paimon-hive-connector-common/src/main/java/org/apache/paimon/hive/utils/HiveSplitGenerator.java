@@ -38,6 +38,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -139,7 +140,8 @@ public class HiveSplitGenerator {
             FileStoreTable table, JobConf jobConf, String locations) {
         List<String> belonging = new ArrayList<>();
         String foreign = null;
-        for (String location : locations.split(",")) {
+        for (String escapedLocation : StringUtils.split(locations)) {
+            String location = StringUtils.unEscapeString(escapedLocation);
             // Hive create dummy file for empty table or partition. If this location doesn't
             // belong to this table, nothing to do.
             if (location.startsWith(table.location().toString())) {

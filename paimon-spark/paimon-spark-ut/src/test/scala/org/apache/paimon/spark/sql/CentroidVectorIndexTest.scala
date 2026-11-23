@@ -25,10 +25,127 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.source.RawVectorSearchSplit
 import org.apache.paimon.vector.index.VectorTrainingModelIO
 
+import org.apache.commons.io.FileUtils
+
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+
 import scala.collection.JavaConverters._
 
 /** End-to-end centroid build over nonzero, disjoint source row-ID ranges. */
 class CentroidVectorIndexTest extends PaimonSparkTestBase {
+
+  test("centroid interchange tables carry empty files and canonical metrics") {
+    val bitmapTable = "centroid_bitmap"
+    val metricsTable = "centroid_metrics"
+    withTable(bitmapTable, metricsTable) {
+      val properties =
+        """'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+          |'file.format'='parquet', 'vector-index.search-mode'='detail',
+          |'global-index.column-update-action'='THROW_ERROR'""".stripMargin
+      spark.sql(s"""CREATE TABLE $bitmapTable (id INT, v ARRAY<FLOAT>, status INT, p INT)
+                   |PARTITIONED BY (p) TBLPROPERTIES ($properties)""".stripMargin)
+      // Use a nonzero build schema ID in the manifest.
+      spark.sql(s"ALTER TABLE $bitmapTable ADD COLUMNS (note STRING)")
+      spark.sql(s"""INSERT INTO $bitmapTable VALUES
+                   |(0, array(1.0f,0.0f), 0, 0, NULL),
+                   |(1, array(1.0f,0.0f), 9, 0, NULL),
+                   |(2, array(1.0f,0.0f), NULL, 0, NULL),
+                   |(3, array(1.0f,0.0f), 0, 0, NULL)""".stripMargin)
+      spark.sql(s"INSERT INTO $bitmapTable VALUES (4, NULL, 9, 1, NULL)")
+      val paddedL2 = "\u00a0l2\u00a0"
+      spark
+        .sql(
+          s"""CALL sys.create_global_index(table=>'$dbName0.$bitmapTable', index_column=>'v',
+             |index_type=>'ivf-flat', extra_fields=>'{"status":"bitmap"}',
+             |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=$paddedL2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1,ivf-flat.train.sample-ratio=1')""".stripMargin)
+        .collect()
+
+      spark.sql(s"""CREATE TABLE $metricsTable
+                   |(id INT, pq ARRAY<FLOAT>, cos ARRAY<FLOAT>, ip ARRAY<FLOAT>)
+                   |TBLPROPERTIES ($properties)""".stripMargin)
+      spark.sql(s"""INSERT INTO $metricsTable SELECT id, v, v, v FROM (
+                   |SELECT CAST(id AS INT) AS id,
+                   |array(CAST(CASE id WHEN 0 THEN 1 WHEN 1 THEN 10 ELSE 0 END AS FLOAT),
+                   |CAST(CASE id WHEN 0 THEN 0 WHEN 1 THEN 0.1 ELSE 100 + id END AS FLOAT)) AS v
+                   |FROM range(0, 512, 1, 1))""".stripMargin)
+      Seq(
+        ("pq", "ivf-pq", "l2", 1),
+        ("cos", "ivf-flat", "cosine", 2),
+        ("ip", "ivf-flat", "inner_product", 2)).foreach {
+        case (column, kind, metric, outer) =>
+          val local = if (kind == "ivf-pq") "64,ivf-pq.pq.m=1" else "1"
+          spark
+            .sql(
+              s"""CALL sys.create_global_index(table=>'$dbName0.$metricsTable',
+                 |index_column=>'$column', index_type=>'$kind',
+                 |options=>'$kind.sharding=centroid,$kind.dimension=2,$kind.metric=$metric,$kind.centroid.nlist=$outer,$kind.nlist=$local,$kind.train.sample-ratio=1')""".stripMargin)
+            .collect()
+      }
+
+      val table = loadTable(bitmapTable)
+      val files = table
+        .store()
+        .newIndexFileHandler()
+        .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+        .asScala
+        .map(_.indexFile())
+      val routers = files.filter(CentroidIndexMeta.isRoutingModel)
+      assert(routers.map(_.fileSize() == 0).toSet == Set(true, false))
+      assert(routers.forall(
+        file =>
+          new String(file.globalIndexMeta().indexMeta().drop(14), StandardCharsets.UTF_8) == "l2"))
+      val shards = files.filterNot(
+        file => CentroidIndexMeta.isRoutingModel(file) || CentroidIndexMeta.isScalarIndex(file))
+      assert(shards.count(_.rowCount() == 0) == 1)
+      assert(
+        shards
+          .filter(_.rowCount() > 0)
+          .forall(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(14) == 1))
+      assert(
+        files
+          .filter(CentroidIndexMeta.isScalarIndex)
+          .map(_.globalIndexMeta().indexMeta().length)
+          .toSeq == Seq(14))
+
+      sys.env.get("PAIMON_JAVA_CENTROID_FIXTURE").foreach {
+        directory =>
+          Seq(bitmapTable, metricsTable).foreach {
+            name =>
+              FileUtils.copyDirectory(
+                new File(tempDBDir, s"$dbName0.db/$name"),
+                new File(directory, s"$dbName0.db/$name"))
+          }
+      }
+    }
+  }
+
+  test("centroid build rejects an invalid metric for an all-null range") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                  |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (0, NULL)")
+      val snapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+
+      val error = intercept[Exception] {
+        spark
+          .sql(
+            s"""CALL sys.create_global_index(table=>'$dbName0.T', index_column=>'v',
+               |index_type=>'ivf-flat',
+               |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=cosne')""".stripMargin)
+          .collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](error)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(
+            e => Option(e.getMessage).exists(_.contains("Unsupported distance metric: cosne"))))
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == snapshotId)
+    }
+  }
 
   test("centroid bitmap fields pre-filter top K and follow the vector definition") {
     withTable("T") {
@@ -416,6 +533,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L), (448L, 448L)))
       assert(routers.size == 5)
       assert(indexes.count(_.globalIndexMeta().rowRangeStart() == 448L) == 1)
+      assert(routers.exists(f => f.globalIndexMeta().rowRangeStart() == 448L && f.fileSize() == 0L))
       assert(nearest(200) == 200)
 
       def fileRanges = indexes.map(f => f.fileName() -> f.globalIndexMeta().rowRange()).toMap
@@ -552,12 +670,9 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           .map(_.indexFile())
           .find(f => CentroidIndexMeta.isRoutingModel(f))
           .get
-        val meta = CentroidIndexMeta
-          .file(model, table.store().pathFactory().globalIndexFileFactory())
-          .asInstanceOf[CentroidIndexFile]
         val path = table.store().pathFactory().globalIndexFileFactory().toPath(model)
         val in = table.fileIO().newInputStream(path)
-        try VectorTrainingModelIO.read(in, model.fileSize(), meta.modelId())
+        try VectorTrainingModelIO.read(in, model.fileSize())
         finally in.close()
       }
       val fourTasks = buildModel()

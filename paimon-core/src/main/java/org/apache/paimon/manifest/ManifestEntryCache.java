@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -217,6 +218,41 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
             return ((MultiplePartitionPredicate) predicate).extractSinglePartition();
         }
         return Optional.empty();
+    }
+
+    /** Visits binary views of cached entries without constructing data-file metadata objects. */
+    public void scan(
+            Path path,
+            long fileSize,
+            @Nullable PartitionPredicate partitionFilter,
+            Consumer<ManifestEntry> consumer)
+            throws IOException {
+        ManifestEntrySegments segments = (ManifestEntrySegments) cache.getIfPresents(path);
+        if (segments == null) {
+            if (cacheMetrics != null) {
+                cacheMetrics.increaseMissedObject();
+            }
+            segments = createSegments(path, fileSize);
+            cache.put(path, segments);
+        } else if (cacheMetrics != null) {
+            cacheMetrics.increaseHitObject();
+        }
+        ProjectedManifestEntry entry = ProjectedManifestEntry.fullProjection().createEntry();
+        try {
+            for (RichSegments segment : segments.segments()) {
+                if (partitionFilter == null || partitionFilter.test(segment.partition())) {
+                    SimpleObjectsCache.forEachRow(
+                            formatSerializer.get(),
+                            segment.segments(),
+                            row -> {
+                                ManifestEntrySerializer.checkFormatIdentifier(row.getInt(0));
+                                consumer.accept(entry.replace(row));
+                            });
+                }
+            }
+        } finally {
+            entry.clear();
+        }
     }
 
     private OptionalInt extractSpecifiedBucket(@Nullable BucketFilter filter) {

@@ -1740,8 +1740,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCentroidIndexChecksContiguousSourceRange() {
-        byte[] meta =
-                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        byte[] meta = CentroidIndexMeta.router(new ResultEntry("model", 0, null), 2).meta();
         IndexManifestEntry index = centroidRouter("first", 10, 19, 1, meta);
         List<SimpleFileEntry> data =
                 Arrays.asList(
@@ -1808,10 +1807,7 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.APPEND))
                 .isEmpty();
-        byte[] bitmapMeta =
-                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2, true)
-                        .meta();
-        IndexManifestEntry bitmapIndex = centroidRouter("first", 10, 19, 1, bitmapMeta);
+        IndexManifestEntry bitmapIndex = centroidRouter("first", 10, 19, 1, meta, 0);
         assertThat(
                         detection.checkConflicts(
                                 concurrent,
@@ -1860,7 +1856,7 @@ class ConflictDetectionTest {
     }
 
     private IndexManifestEntry centroidRouter(
-            String name, long from, long to, long snapshot, byte[] meta) {
+            String name, long from, long to, long snapshot, byte[] meta, int... extraFields) {
         IndexFileMeta file =
                 new IndexFileMeta(
                         "ivf-pq",
@@ -1873,7 +1869,7 @@ class ConflictDetectionTest {
                                 from,
                                 to,
                                 1,
-                                CentroidIndexMeta.hasScalarIndexes(meta) ? new int[] {0} : null,
+                                extraFields.length == 0 ? null : extraFields,
                                 meta,
                                 new org.apache.paimon.index.DataEvolutionIndexSourceMeta(snapshot)
                                         .serialize()));

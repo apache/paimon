@@ -871,6 +871,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
+        assertThat(results)
+                .singleElement()
+                .satisfies(entry -> assertThat(entry.meta()).containsExactly('{', '}'));
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);

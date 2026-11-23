@@ -52,13 +52,7 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
         DataStream<Committable> written = doWrite(input, initialCommitUser, null);
         if (table.coreOptions().deletionVectorsEnabled()) {
             written =
-                    written.transform(
-                                    "Data Evolution Compact Deletion Vector Rewriter : "
-                                            + table.name(),
-                                    new CommittableTypeInfo(),
-                                    new DataEvolutionCommitPreparationOperator.Factory(
-                                            table, snapshot))
-                            .forceNonParallel();
+                    DataEvolutionCommitPreparationOperator.prepare(written, table, snapshot, false);
         }
         return doCommit(written, initialCommitUser);
     }

@@ -476,6 +476,10 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
                                         table.snapshotManager().snapshot(2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("cannot replace an incremental scan");
+        assertThatThrownBy(
+                        () -> diffScan.withGlobalIndexResult(GlobalIndexResult.createEmpty(), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cannot replace an incremental scan");
         ReadBuilder latest = table.newReadBuilder();
         List<Split> selected =
                 latest.newScan()

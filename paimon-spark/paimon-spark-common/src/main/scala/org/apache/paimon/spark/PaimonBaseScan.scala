@@ -80,9 +80,6 @@ abstract class PaimonBaseScan(table: InnerTable)
       throw new UnsupportedOperationException(
         "Cannot push down vector search, hybrid search and full-text search simultaneously.")
     }
-    if (globalSearchCount > 0) {
-      PaimonBaseScan.checkIncrementalSearch(table)
-    }
     pushedVectorSearch
       .map(
         search =>
@@ -213,22 +210,13 @@ abstract class PaimonBaseScan(table: InnerTable)
 
 object PaimonBaseScan {
 
-  private[spark] def checkIncrementalSearch(table: InnerTable): Unit = {
-    val options = CoreOptions.fromMap(table.options())
-    require(
-      !options
-        .dataEvolutionEnabled() || options.startupMode() != CoreOptions.StartupMode.INCREMENTAL,
-      "Spark index search requires a single snapshot for Data Evolution tables."
-    )
-  }
-
   private case class SearchResult(result: GlobalIndexResult, snapshot: Snapshot)
 
   private[spark] def withSearchResult(
       scan: InnerTableScan,
       result: GlobalIndexResult,
       snapshot: Snapshot): InnerTableScan = scan match {
-    case dataEvolution: DataEvolutionBatchScan if snapshot != null =>
+    case dataEvolution: DataEvolutionBatchScan =>
       dataEvolution.withGlobalIndexResult(result, snapshot)
     case _ => scan.withGlobalIndexResult(result)
   }

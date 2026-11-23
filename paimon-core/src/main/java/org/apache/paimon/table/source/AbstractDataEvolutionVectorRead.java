@@ -211,7 +211,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     private GlobalIndexer createGlobalIndexer(String indexType, GlobalIndexMeta meta) {
-        if (meta.extraFieldIds() == null || CentroidIndexMeta.hasScalarIndexes(meta.indexMeta())) {
+        if (meta.extraFieldIds() == null || CentroidIndexMeta.hasBitmapFields(meta)) {
             return createGlobalIndexer(indexType);
         }
         return GlobalIndexer.createForRead(

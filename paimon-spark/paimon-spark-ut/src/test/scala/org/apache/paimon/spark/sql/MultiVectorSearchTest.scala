@@ -217,22 +217,14 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
       spark.sql("CREATE TABLE Q (id INT, v ARRAY<DOUBLE>)")
       spark.sql("INSERT INTO Q VALUES (1, array(1D, 0D)), (2, array(0D, 1D))")
       def search(expr: String) =
-        s"""SELECT q.id, r.id FROM Q AS q, LATERAL (
-           | SELECT id FROM vector_search('T', 'chunks', $expr, 1)) AS r ORDER BY q.id""".stripMargin
+        s"""SELECT q.id, r.id, r.__paimon_search_score FROM Q AS q, LATERAL (
+           | SELECT id, __paimon_search_score FROM vector_search('T', 'chunks', $expr, 1)) AS r ORDER BY q.id""".stripMargin
       Seq("q.v", "CAST(q.v AS ARRAY<FLOAT>)").foreach {
         expr =>
+          val rows = spark.sql(search(expr)).collect()
           assert(
-            spark.sql(search(expr)).collect().map(r => (r.getInt(0), r.getInt(1))).toSeq ==
-              Seq((1, 1), (2, 2)))
-          val scored = spark
-            .sql(s"""SELECT q.id, r.id, r.__paimon_search_score FROM Q AS q, LATERAL (
-                    | SELECT id, __paimon_search_score
-                    | FROM vector_search('T', 'chunks', $expr, 1)) AS r
-                    | ORDER BY q.id""".stripMargin)
-            .collect()
-            .map(r => (r.getInt(0), r.getInt(1), r.getFloat(2)))
-            .toSeq
-          assert(scored == Seq((1, 1, 1f), (2, 2, 1f)))
+            rows.map(r => (r.getInt(0), r.getInt(1), r.getFloat(2))).toSeq ==
+              Seq((1, 1, 1f), (2, 2, 1f)))
       }
       val error = intercept[IllegalArgumentException] {
         spark.sql(search("CAST(q.v AS ARRAY<INT>)")).queryExecution.analyzed

@@ -64,7 +64,9 @@ def test_search_factories_keep_captured_configuration(tmp_path, kind, phase, nat
     with patch('pypaimon.execution.python.read.search.factories.' + python_name,
                return_value=python_execution) as python_factory, \
             patch('pypaimon.execution.native.read.native_search_plan.' + native_name,
-                  return_value=native_execution) as native_factory:
+                  return_value=native_execution) as native_factory, \
+            patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+                  return_value=False):
         if phase == 'scan':
             selected = (builder.new_full_text_scan() if kind == 'full-text'
                         else builder.new_vector_search_scan())
@@ -137,7 +139,9 @@ for name in ['scan', 'read_plan', 'read_batch_plan']:
     getattr(native, name).return_value = expected
 constructors = {name: Mock(return_value=native) for name in [
     'native_vector_scan', 'native_vector_read', 'native_full_text_scan', 'native_full_text_read']}
-with patch.multiple(native_search_plan, **constructors):
+with patch.multiple(native_search_plan, **constructors), \
+        patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+              return_value=False):
     operations = [
         lambda: vector.new_vector_search_scan().scan(),
         lambda: vector.new_vector_search_read().read_plan(object()),

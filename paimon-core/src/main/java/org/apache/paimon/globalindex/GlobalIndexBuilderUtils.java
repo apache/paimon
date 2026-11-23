@@ -201,8 +201,7 @@ public class GlobalIndexBuilderUtils {
                 continue;
             }
             if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)
-                    && !(extraFieldIds == null
-                            && CentroidIndexMeta.hasScalarIndexes(meta.indexMeta()))) {
+                    && !(extraFieldIds == null && CentroidIndexMeta.hasBitmapFields(meta))) {
                 continue;
             }
             entries.add(entry);
