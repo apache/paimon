@@ -88,13 +88,30 @@ public class CDCSourceTableManagerTest {
     public void testMissingTableIsNotCached() throws Exception {
         CDCSource.TableManager tableManager = createTableManager(1, 1, 1);
         catalog.dropTable(IDENTIFIER, false);
-        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isFalse();
-        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isFalse();
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNull();
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNull();
 
         catalog.createTable(
                 IDENTIFIER, Schema.newBuilder().column("v0", DataTypes.BIGINT()).build(), false);
-        assertThat(tableManager.isTableAvailable(IDENTIFIER)).isTrue();
-        assertThat(tableManager.getTableSchema(IDENTIFIER, 0L).id()).isZero();
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L).id()).isZero();
+    }
+
+    @Test
+    public void testCachedSchemaSkipsAvailabilityLookup() throws Exception {
+        Identifier anotherIdentifier = Identifier.create(DATABASE, "another_table");
+        catalog.createTable(
+                anotherIdentifier,
+                Schema.newBuilder().column("v0", DataTypes.BIGINT()).build(),
+                false);
+        CountingCatalog countingCatalog = new CountingCatalog(catalog);
+        // The table cache is smaller than the schema cache, as with the default sizes.
+        CDCSource.TableManager tableManager = createTableManager(countingCatalog, 1, 2, 1);
+
+        tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L);
+        tableManager.getTableSchemaIfAvailable(anotherIdentifier, 0L);
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNotNull();
+
+        assertThat(countingCatalog.getTableCount(IDENTIFIER)).isEqualTo(1);
     }
 
     @Test
@@ -112,7 +129,7 @@ public class CDCSourceTableManagerTest {
                     }
                 };
         CDCSource.TableManager tableManager = createTableManager(failingCatalog, 1, 1, 1);
-        assertThatThrownBy(() -> tableManager.isTableAvailable(IDENTIFIER))
+        assertThatThrownBy(() -> tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("catalog unavailable");
     }

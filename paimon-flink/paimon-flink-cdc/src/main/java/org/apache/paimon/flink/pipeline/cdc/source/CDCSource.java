@@ -173,12 +173,30 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                 return null;
             }
 
+            return getTableSchema(identifier, schemaId, false);
+        }
+
+        /**
+         * Returns null if the table no longer exists or is not a file store table. The catalog is
+         * only consulted when the schema is not cached.
+         */
+        public @Nullable TableSchema getTableSchemaIfAvailable(
+                Identifier identifier, long schemaId) {
+            return getTableSchema(identifier, schemaId, true);
+        }
+
+        private @Nullable TableSchema getTableSchema(
+                Identifier identifier, long schemaId, boolean ignoreUnavailable) {
             Tuple2<Identifier, Long> cacheKey = Tuple2.of(identifier, schemaId);
             if (tableSchemaMap.containsKey(cacheKey)) {
                 return tableSchemaMap.get(cacheKey);
             }
 
-            TableSchema tableSchema = loadTableSchema(identifier, schemaId);
+            FileStoreTable table = getTable(identifier, ignoreUnavailable);
+            if (table == null) {
+                return null;
+            }
+            TableSchema tableSchema = table.schemaManager().schema(schemaId);
             tableSchemaMap.put(cacheKey, tableSchema);
             return tableSchema;
         }
@@ -204,10 +222,6 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                     TableId.tableId(identifier.getDatabaseName(), identifier.getTableName()),
                     convertPaimonSchemaToFlinkCDCSchema(getTableSchema(identifier, lastSchemaId)),
                     convertPaimonSchemaToFlinkCDCSchema(getTableSchema(identifier, schemaId)));
-        }
-
-        public boolean isTableAvailable(Identifier identifier) {
-            return getTable(identifier, true) != null;
         }
 
         private FileStoreTable getTable(Identifier identifier) {
@@ -238,10 +252,6 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             // earlier lookup found it missing.
             tableMap.put(identifier, (FileStoreTable) table);
             return (FileStoreTable) table;
-        }
-
-        private TableSchema loadTableSchema(Identifier identifier, long schemaId) {
-            return getTable(identifier).schemaManager().schema(schemaId);
         }
 
         private TableRead loadTableRead(Identifier identifier, TableSchema schema) {

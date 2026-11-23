@@ -946,8 +946,9 @@ public class CDCSourceSplitReaderTest {
         }
 
         @Override
-        public boolean isTableAvailable(Identifier identifier) {
-            return true;
+        public @Nullable TableSchema getTableSchemaIfAvailable(
+                Identifier identifier, long schemaId) {
+            return getTableSchema(identifier, schemaId);
         }
 
         @Override

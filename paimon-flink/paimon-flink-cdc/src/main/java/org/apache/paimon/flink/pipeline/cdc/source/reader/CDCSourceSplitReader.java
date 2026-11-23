@@ -226,14 +226,15 @@ public class CDCSourceSplitReader
         Identifier identifier = nextSplit.getIdentifier();
         currentSplitId = nextSplit.splitId();
         // Reader state can contain splits for a table removed while the job was stopped.
-        if (!tableManager.isTableAvailable(identifier)) {
+        TableSchema tableSchema =
+                tableManager.getTableSchemaIfAvailable(identifier, nextSplit.getSchemaId());
+        if (tableSchema == null) {
             LOG.info(
                     "Skipping split {} because table {} no longer exists or is not a file store table.",
                     currentSplitId,
                     identifier);
             return false;
         }
-        TableSchema tableSchema = tableManager.getTableSchema(identifier, nextSplit.getSchemaId());
         List<SchemaChangeEvent> schemaChangeEvents =
                 tableManager.generateSchemaChangeEventList(
                         identifier, nextSplit.getLastSchemaId(), nextSplit.getSchemaId());
