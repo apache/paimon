@@ -121,6 +121,32 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
+  test("centroid build rejects an invalid metric for an all-null range") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                  |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (0, NULL)")
+      val snapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+
+      val error = intercept[Exception] {
+        spark
+          .sql(
+            s"""CALL sys.create_global_index(table=>'$dbName0.T', index_column=>'v',
+               |index_type=>'ivf-flat',
+               |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=cosne')""".stripMargin)
+          .collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](error)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(
+            e => Option(e.getMessage).exists(_.contains("Unsupported distance metric: cosne"))))
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == snapshotId)
+    }
+  }
+
   test("centroid bitmap fields pre-filter top K and follow the vector definition") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, status STRING)

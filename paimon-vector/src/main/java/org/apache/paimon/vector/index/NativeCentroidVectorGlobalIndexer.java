@@ -81,6 +81,12 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
     @Override
     public ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String name, byte[] payload)
             throws IOException {
+        checkArgument(
+                "l2".equals(buildMetric)
+                        || "cosine".equals(buildMetric)
+                        || "inner_product".equals(buildMetric),
+                "Unsupported distance metric: %s",
+                buildMetric);
         try (OutputStream out = io.newOutputStream(name)) {
             out.write(payload);
         }
