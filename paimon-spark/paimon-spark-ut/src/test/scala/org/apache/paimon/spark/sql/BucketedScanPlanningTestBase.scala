@@ -69,7 +69,17 @@ abstract class BucketedScanPlanningTestBase
     sql("INSERT INTO t_ordered SELECT id, concat('v', cast(id AS STRING)) FROM range(100)")
   }
 
-  private def eventScan(df: DataFrame): BatchScanExec = {
+  /**
+   * Whether the scan itself groups the read units of a bucket into one partition. Since Spark 4.2
+   * (SPARK-55092), a scan keeps one partition per read unit and Spark groups them only where a
+   * distribution is required.
+   */
+  protected def scanGroupsReadUnits: Boolean = true
+
+  /** Partitions of the events side after Spark grouped its read units. */
+  protected def groupedPartitions(df: DataFrame): Int = eventScan(df).inputRDD.getNumPartitions
+
+  protected def eventScan(df: DataFrame): BatchScanExec = {
     collect(df.queryExecution.executedPlan) {
       case batch: BatchScanExec
           if batch.scan.isInstanceOf[PaimonScan] && batch.output.exists(_.name == "seq") =>
@@ -121,6 +131,9 @@ abstract class BucketedScanPlanningTestBase
     }
   }
 
+  // 8 read units of one bucket, which a plain scan groups only if the scan itself does
+  private def plainScanPartitions: Int = if (scanGroupsReadUnits) 1 else 8
+
   test("Table, session and read options select the scan layout") {
     withTable("t_events") {
       createEvents()
@@ -130,7 +143,7 @@ abstract class BucketedScanPlanningTestBase
         val tableDefault = sql("SELECT id, seq FROM t_events")
         tableDefault.collect()
         checkLayout(eventScan(tableDefault).scan.asInstanceOf[PaimonScan], grouped = true)
-        assert(eventScan(tableDefault).inputRDD.getNumPartitions == 1)
+        assert(eventScan(tableDefault).inputRDD.getNumPartitions == plainScanPartitions)
 
         spark.conf.set(preserveGrouping, "false")
         val sessionOverride = sql("SELECT id, seq FROM t_events")
@@ -144,7 +157,7 @@ abstract class BucketedScanPlanningTestBase
           .select("id", "seq")
         readOverride.collect()
         checkLayout(eventScan(readOverride).scan.asInstanceOf[PaimonScan], grouped = true)
-        assert(eventScan(readOverride).inputRDD.getNumPartitions == 1)
+        assert(eventScan(readOverride).inputRDD.getNumPartitions == plainScanPartitions)
       }
     }
   }
@@ -278,7 +291,8 @@ abstract class BucketedScanPlanningTestBase
           checkAnswer(df, (0L until 80L).map(seq => Row(42L, seq)))
           val batch = eventScan(df)
           assert(batch.scan.asInstanceOf[PaimonScan].inputPartitions.size == 8)
-          assert(batch.inputRDD.getNumPartitions == (if (partial) 8 else 1))
+          assert(batch.inputRDD.getNumPartitions == (if (scanGroupsReadUnits && !partial) 1 else 8))
+          assert(groupedPartitions(df) == (if (partial) 8 else 1))
           assert(numShuffles(df) == 0)
         }
       }

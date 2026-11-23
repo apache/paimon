@@ -116,8 +116,9 @@ changing a session option later affects newly created scans.
 In grouped mode, Paimon preserves complete splits and can provide multiple read units for the
 same bucket. Spark may group those units into one task per bucket. When a supported join uses
 `spark.sql.sources.v2.bucketing.partiallyClusteredDistribution.enabled=true`, Spark can use
-multiple tasks for a bucket. This is a join optimization; enabling grouped mode can still reduce
-the parallelism of a plain scan or TopN query.
+multiple tasks for a bucket. This is a join optimization. On Spark 4.1 and earlier, enabling
+grouped mode can still reduce the parallelism of a plain scan or TopN query; since Spark 4.2,
+Spark groups the read units of a bucket only where an operator such as a join requires it.
 
 Grouped mode requires Spark 3.3 or later and a supported fixed-bucket layout. If Spark V2
 bucketing is disabled, or the scan cannot report a supported bucket layout, Paimon uses regular
