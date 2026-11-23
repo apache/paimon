@@ -245,30 +245,31 @@ Scans below expressions using `input_file_name()`, `input_file_block_start()`, o
 `input_file_block_length()` are skipped: these functions need the source reader's
 task-local file context, which is not carried through a shuffle.
 
-### TopN on Older PyPaimon Snapshots
+### TopN with NaN File Statistics
 
-Spark sorts `NaN` above all numeric values. In Spark 3.5.9, a descending
-`ORDER BY ... LIMIT` on a floating-point column can miss `NaN` if an older
-PyPaimon writer recorded a finite file maximum for a file containing `NaN`.
-The Paimon scan can skip that file based on its recorded maximum.
+Spark sorts `NaN` above numeric values. In Spark 3.5.9, descending
+`ORDER BY ... LIMIT` can miss `NaN` when the Paimon scan skips a file
+based on a finite maximum recorded for a column that contains `NaN`.
+This can affect older PyPaimon files. It has also been observed in new
+Parquet files written by the PyPaimon native batch writer with
+`pypaimon-rust` 0.5.0.
 
-For an affected snapshot, repartition the query input before sorting to keep
-TopN in Spark above the shuffle. Replace the table name and snapshot ID in
-this example with the ones you want to read.
+For an affected snapshot, add `isnan(score)` as the first descending
+sort key. This keeps TopN in Spark and preserves the descending order
+with `NaN` first. Replace the table name and snapshot ID with the ones
+you want to read.
 
 ```sql
-CREATE OR REPLACE TEMP VIEW scores_for_sort AS
-SELECT /*+ REPARTITION(1) */ score
-FROM lake.audit.legacy_nan_scores VERSION AS OF 2;
-
 SELECT score
-FROM scores_for_sort
-ORDER BY score DESC
+FROM lake.audit.legacy_nan_scores VERSION AS OF 2
+ORDER BY isnan(score) DESC, score DESC
 LIMIT 1;
 ```
 
-Use `EXPLAIN EXTENDED` to check that the `TopN:` annotation disappears from
-the Paimon `BatchScan`. The hint shuffles the candidate rows into one partition.
+Use `EXPLAIN EXTENDED` to check for `TakeOrderedAndProject` and verify
+that the Paimon `BatchScan` has no `TopN:` annotation. Spark can select
+candidates per partition before combining them, avoiding an
+`Exchange SinglePartition` over the full input before sorting.
 
 ### Filter Pushdown
 
