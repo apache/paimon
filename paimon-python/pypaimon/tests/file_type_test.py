@@ -126,7 +126,7 @@ class FileTypeClassifyTest(unittest.TestCase):
             FileType.parse_whitelist("data"))
         self.assertEqual(set(FileType), FileType.parse_whitelist("*"))
 
-    def test_parse_whitelist(self):
+    def test_parse_whitelist_values_and_empty_inputs(self):
         self.assertEqual(
             set(FileType),
             FileType.parse_whitelist(
