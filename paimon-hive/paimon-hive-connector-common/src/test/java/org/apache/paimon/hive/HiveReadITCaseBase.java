@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -498,6 +499,40 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
                         "20\t400\t400",
                         "30\t500\t500");
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testArraySubscriptOutsideBounds() throws Exception {
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        conf.set(CoreOptions.BUCKET, -1);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.ARRAY(DataTypes.INT())},
+                        new String[] {"id", "arr"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        identifier);
+        writeData(
+                table,
+                Arrays.asList(
+                        GenericRow.of(1, new GenericArray(new Integer[] {10, null, 30})),
+                        GenericRow.of(2, new GenericArray(new int[0])),
+                        GenericRow.of(3, null)));
+        createExternalTable();
+
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT id, arr[-1], arr[0], arr[1], arr[2], arr[3], arr[4] FROM "
+                                        + externalTable))
+                .containsExactlyInAnyOrder(
+                        "1\tNULL\t10\tNULL\t30\tNULL\tNULL",
+                        "2\tNULL\tNULL\tNULL\tNULL\tNULL\tNULL",
+                        "3\tNULL\tNULL\tNULL\tNULL\tNULL\tNULL");
     }
 
     private void writeData(Table table, List<InternalRow> data) throws Exception {

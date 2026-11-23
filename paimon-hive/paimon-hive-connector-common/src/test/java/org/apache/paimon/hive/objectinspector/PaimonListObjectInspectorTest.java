@@ -18,12 +18,20 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.hadoop.hive.ql.udf.generic.GenericUDF;
+import org.apache.hadoop.hive.ql.udf.generic.GenericUDFIndex;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorFactory;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 
@@ -31,6 +39,54 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonListObjectInspector}. */
 public class PaimonListObjectInspectorTest {
+
+    @ParameterizedTest
+    @ValueSource(ints = {Integer.MIN_VALUE, -1, 3, 4, Integer.MAX_VALUE})
+    public void testHiveArraySubscriptOutsideBounds(int index) throws Exception {
+        PaimonListObjectInspector inspector = new PaimonListObjectInspector(DataTypes.INT());
+        Integer[] values = new Integer[] {10, null, 30};
+        assertThat(
+                        ObjectInspectorFactory.getStandardListObjectInspector(
+                                        PrimitiveObjectInspectorFactory.javaIntObjectInspector)
+                                .getListElement(Arrays.asList(values), index))
+                .isNull();
+        try (GenericUDFIndex udf = new GenericUDFIndex()) {
+            udf.initialize(
+                    new ObjectInspector[] {
+                        inspector, PrimitiveObjectInspectorFactory.javaIntObjectInspector
+                    });
+            GenericArray array = new GenericArray(values);
+            assertThat(evaluate(udf, array, 0)).isEqualTo(10);
+            assertThat(evaluate(udf, array, 1)).isNull();
+            assertThat(evaluate(udf, array, 2)).isEqualTo(30);
+            assertThat(evaluate(udf, array, index)).isNull();
+            assertThat(evaluate(udf, BinaryArray.fromPrimitiveArray(new int[] {10, 20, 30}), index))
+                    .isNull();
+            assertThat(evaluate(udf, null, index)).isNull();
+        }
+    }
+
+    @Test
+    public void testHiveSubscriptOfEmptyArray() throws Exception {
+        try (GenericUDFIndex udf = new GenericUDFIndex()) {
+            udf.initialize(
+                    new ObjectInspector[] {
+                        new PaimonListObjectInspector(DataTypes.INT()),
+                        PrimitiveObjectInspectorFactory.javaIntObjectInspector
+                    });
+            assertThat(evaluate(udf, new GenericArray(new int[0]), 0)).isNull();
+            assertThat(evaluate(udf, BinaryArray.fromPrimitiveArray(new int[0]), 0)).isNull();
+        }
+    }
+
+    private static Object evaluate(GenericUDFIndex udf, InternalArray array, int index)
+            throws Exception {
+        return udf.evaluate(
+                new GenericUDF.DeferredObject[] {
+                    new GenericUDF.DeferredJavaObject(array),
+                    new GenericUDF.DeferredJavaObject(index)
+                });
+    }
 
     @Test
     public void testCategoryAndTypeName() {
