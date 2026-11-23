@@ -338,6 +338,8 @@ public class FileStoreLookupFunctionTest {
             writer.write(GenericRow.of(1, 2, 4L));
             commit(writer.prepareCommit(true, 3));
         }
+        // An async refresh is pending here; the pre-truncate cache must stay hidden meanwhile.
+        assertThat(lookupFunction.lookup(key)).extracting(row -> row.getLong(2)).doesNotContain(3L);
         CommonTestUtils.waitUtil(
                 () -> lookupFunction.lookup(key).stream().anyMatch(row -> row.getLong(2) == 4L),
                 Duration.ofSeconds(10),
