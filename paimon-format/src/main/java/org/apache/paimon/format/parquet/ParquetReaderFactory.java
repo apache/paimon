@@ -199,8 +199,17 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         ParquetInputFile inputFile =
                 ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
+        // No withRange: the full-file range ([0, fileSize)) filters no row group by midpoint in
+        // the normal case, so it is equivalent to NO_FILTER — but a non-NO_FILTER metadata filter
+        // makes the vendored ParquetFileReader.readFooter apply Parquet 1.16.0's midpoint-based
+        // row group filter while parsing. When the footer lists a column chunk that is physically
+        // stored near the end of the file, that filter can compute a row-group midpoint outside
+        // the file and drop a valid row group. The resulting truncated footer is shared with
+        // createReader (NO_FILTER) through the path-keyed metadata cache, so a later unfiltered
+        // read would silently miss the dropped group. Keep both paths on NO_FILTER so the cached
+        // footer is identical regardless of which path loaded it.
         ParquetReadOptions.Builder readOptionsBuilder =
-                ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
+                ParquetUtil.getParquetReadOptionsBuilder(conf);
         ParquetInputStream inputStream = inputFile.newStream();
         ParquetFileReader reader = null;
         try {
@@ -258,10 +267,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             throws IOException {
         ParquetInputFile inputFile =
                 ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
-        // No withRange: the full-file range ([0, fileSize)) filters no row group by midpoint, so
-        // it is equivalent to NO_FILTER — but a non-NO_FILTER metadata filter makes the vendored
-        // ParquetFileReader.readFooter skip the selective parse (which does not apply the
-        // filter), silently disabling the selective parser for every production read.
         ParquetReadOptions.Builder readOptionsBuilder =
                 ParquetUtil.getParquetReadOptionsBuilder(conf);
 

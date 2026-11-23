@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -29,17 +30,28 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Range;
 
+import org.apache.parquet.format.ColumnChunk;
+import org.apache.parquet.format.FileMetaData;
+import org.apache.parquet.format.RowGroup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import shaded.parquet.org.apache.thrift.protocol.TCompactProtocol;
+import shaded.parquet.org.apache.thrift.transport.TIOStreamTransport;
+import shaded.parquet.org.apache.thrift.transport.TMemoryBuffer;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -116,6 +128,54 @@ class ParquetReaderFactoryFooterCacheTest {
         assertThat(cache.lookups.get()).isEqualTo(2);
     }
 
+    /**
+     * candidateRowRanges and createReader share the path-keyed footer cache, so they must parse the
+     * footer with the same metadata filter. candidateRowRanges used to read with the full-file
+     * range (a non-NO_FILTER filter) while createReader used NO_FILTER: for a file whose footer
+     * lists a column chunk that is physically stored near the end, Parquet 1.16.0's midpoint-based
+     * range filter computes a row-group midpoint outside the file and drops the valid row group.
+     * The truncated footer was cached, so a later unfiltered read returned no rows even though a
+     * direct read returned all of them.
+     */
+    @Test
+    void testCachedFooterMatchesDirectReadWithReorderedColumnChunks() throws Exception {
+        Path file = writeFileWithNameChunkFirstInFooter();
+        LocalFileIO fileIO = LocalFileIO.create();
+        long fileSize = fileIO.getFileSize(file);
+
+        // selective parser disabled: full footers go through the shared cache
+        Options conf = new Options();
+
+        RowType idType =
+                new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.BIGINT())));
+        Predicate idEquals2 = new PredicateBuilder(idType).equal(0, 2L);
+
+        // seed the shared cache via candidateRowRanges with id = 2
+        FileMetadataCache cache = new FileMetadataCache();
+        FormatReaderContext candidateContext =
+                new FormatReaderContext(fileIO, file, fileSize, null, null, cache);
+        List<Range> ranges =
+                new ParquetReaderFactory(conf, idType, 1024, Collections.singletonList(idEquals2))
+                        .candidateRowRanges(candidateContext);
+
+        // the candidate ranges cover the matching row (row index 1 == id 2)
+        assertThat(ranges).isNotNull().isNotEmpty();
+        assertThat(ranges.stream().anyMatch(range -> range.from <= 1 && range.to >= 1)).isTrue();
+
+        // the same unfiltered id projection, read directly and with the seeded cache: both reads
+        // must see the full row group and return [1, 2, 3]
+        assertThat(
+                        readAll(
+                                new ParquetReaderFactory(conf, idType, 1024, null),
+                                new FormatReaderContext(fileIO, file, fileSize, null, null, null)))
+                .containsExactly(1L, 2L, 3L);
+        assertThat(
+                        readAll(
+                                new ParquetReaderFactory(conf, idType, 1024, null),
+                                new FormatReaderContext(fileIO, file, fileSize, null, null, cache)))
+                .containsExactly(1L, 2L, 3L);
+    }
+
     private List<Object> readAll(ParquetReaderFactory factory, FormatReaderContext context)
             throws IOException {
         return readAll(factory, context, row -> row.getLong(0));
@@ -157,6 +217,89 @@ class ParquetReaderFactoryFooterCacheTest {
             writer.close();
         }
         return file;
+    }
+
+    /**
+     * Writes a file with BIGINT id and STRING name columns, then rewrites its footer so the row
+     * group lists the "name" chunk first and gives it a data-page offset near the end of the file,
+     * even though the chunks are physically stored in schema order (id first). With the first chunk
+     * in footer order anchored near the end, Parquet 1.16.0's midpoint-based range filter computes
+     * a row-group midpoint outside the file and drops the (valid) row group.
+     */
+    private Path writeFileWithNameChunkFirstInFooter() throws Exception {
+        RowType fileType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.BIGINT()),
+                                new DataField(1, "name", DataTypes.STRING())));
+        Path original = new Path(tempDir.toUri().toString(), "reordered-data.parquet");
+        FileFormat format = FileFormat.fromIdentifier("parquet", new Options());
+        try (PositionOutputStream out = LocalFileIO.create().newOutputStream(original, false)) {
+            FormatWriter writer = format.createWriterFactory(fileType).create(out, "zstd");
+            writer.addElement(GenericRow.of(1L, BinaryString.fromString("a")));
+            writer.addElement(GenericRow.of(2L, BinaryString.fromString("b")));
+            writer.addElement(GenericRow.of(3L, BinaryString.fromString("c")));
+            writer.close();
+        }
+
+        byte[] bytes = Files.readAllBytes(java.nio.file.Paths.get(original.toUri()));
+        int fileLen = bytes.length;
+        int footerLength =
+                (bytes[fileLen - 8] & 0xff)
+                        | ((bytes[fileLen - 7] & 0xff) << 8)
+                        | ((bytes[fileLen - 6] & 0xff) << 16)
+                        | ((bytes[fileLen - 5] & 0xff) << 24);
+        int footerStart = fileLen - 8 - footerLength;
+
+        FileMetaData fileMetaData = new FileMetaData();
+        fileMetaData.read(
+                new TCompactProtocol(
+                        new TIOStreamTransport(
+                                new ByteArrayInputStream(
+                                        Arrays.copyOfRange(
+                                                bytes, footerStart, footerStart + footerLength)))));
+
+        RowGroup rowGroup = fileMetaData.getRow_groups().get(0);
+        List<ColumnChunk> columns = rowGroup.getColumns();
+        ColumnChunk nameChunk = null;
+        for (ColumnChunk column : columns) {
+            if (column.getMeta_data().getPath_in_schema().get(0).equals("name")) {
+                nameChunk = column;
+                break;
+            }
+        }
+        if (nameChunk == null) {
+            throw new IllegalStateException("name column chunk not found in the footer");
+        }
+        columns.remove(nameChunk);
+        columns.add(0, nameChunk);
+        // a dictionary page would make getOffset use its (real) earlier offset; drop it and anchor
+        // the chunk near the end of the file
+        nameChunk.getMeta_data().unsetDictionary_page_offset();
+        nameChunk.getMeta_data().setData_page_offset(fileLen - 8);
+
+        byte[] newFooter = writeFooter(fileMetaData);
+        byte[] rewritten = new byte[footerStart + newFooter.length + 8];
+        System.arraycopy(bytes, 0, rewritten, 0, footerStart);
+        System.arraycopy(newFooter, 0, rewritten, footerStart, newFooter.length);
+        int footerIndex = footerStart + newFooter.length;
+        rewritten[footerIndex] = (byte) (newFooter.length & 0xff);
+        rewritten[footerIndex + 1] = (byte) ((newFooter.length >> 8) & 0xff);
+        rewritten[footerIndex + 2] = (byte) ((newFooter.length >> 16) & 0xff);
+        rewritten[footerIndex + 3] = (byte) ((newFooter.length >> 24) & 0xff);
+        System.arraycopy(bytes, fileLen - 4, rewritten, footerIndex + 4, 4);
+
+        Path path = new Path(tempDir.toUri().toString(), "reordered-footer.parquet");
+        try (PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false)) {
+            out.write(rewritten);
+        }
+        return path;
+    }
+
+    private static byte[] writeFooter(FileMetaData fileMetaData) throws Exception {
+        TMemoryBuffer buffer = new TMemoryBuffer(4096);
+        fileMetaData.write(new TCompactProtocol(buffer));
+        return Arrays.copyOf(buffer.getArray(), buffer.length());
     }
 
     /** Observes whether the cache is consulted, without changing its behavior. */
