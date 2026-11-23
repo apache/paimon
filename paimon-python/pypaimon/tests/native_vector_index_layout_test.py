@@ -54,7 +54,7 @@ def vector_layout_runtime():
     sdk = pytest.importorskip('pypaimon_rust.datafusion')
     if not (hasattr(sdk.VectorSearchBuilder, 'with_multi_vector')
             and hasattr(sdk.GlobalIndexBuildPlan, 'replacement_messages')):
-        pytest.skip('Requires the vector layout APIs from paimon-rust main')
+        pytest.skip('Requires centroid and MultiVector APIs in pypaimon-rust')
 
 
 @pytest.fixture

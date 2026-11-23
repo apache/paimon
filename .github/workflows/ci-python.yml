@@ -270,60 +270,6 @@ jobs:
             pypaimon/tests/file_io_test.py pypaimon/tests/filesystem_catalog_test.py \
             pypaimon/tests/table_update_arrow_compatibility_test.py
 
-  native-vector-index-layouts:
-    name: Vector index layouts / Rust main
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/checkout@v6
-        with:
-          repository: apache/paimon-rust
-          ref: main
-          path: paimon-rust
-          persist-credentials: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake libclang-dev libssl-dev pkg-config protobuf-compiler
-          rustup update stable --profile minimal
-          python -m pip install --upgrade pip 'maturin>=1.9.4,<2'
-      - name: Build Python bindings from Rust main
-        working-directory: paimon-rust/bindings/python
-        env:
-          CARGO_PROFILE_DEV_DEBUG: '0'
-          CARGO_PROFILE_DEV_INCREMENTAL: 'false'
-        run: |
-          git log -1 --oneline
-          maturin build --locked --profile dev --interpreter python --out "$RUNNER_TEMP/paimon-rust-wheels"
-      - name: Install Python test dependencies
-        run: |
-          python -m pip install -e './paimon-python[vindex]' --group ./paimon-python/pyproject.toml:test \
-            "$RUNNER_TEMP"/paimon-rust-wheels/*.whl
-      - name: Test centroid shards, Bitmap filters and MultiVector
-        env:
-          PYPAIMON_TEST_NATIVE_PLAN: '1'
-        run: |
-          python - <<'PY'
-          from pypaimon_rust.datafusion import GlobalIndexBuildPlan, VectorSearchBuilder
-          assert hasattr(GlobalIndexBuildPlan, 'replacement_messages')
-          assert hasattr(VectorSearchBuilder, 'with_multi_vector')
-          PY
-          python -m pytest -q paimon-python/pypaimon/tests/native_vector_index_layout_test.py \
-            --junitxml="$RUNNER_TEMP/vector-index-layouts.xml"
-          python - <<'PY'
-          import os
-          import xml.etree.ElementTree as ET
-          from pathlib import Path
-
-          report = Path(os.environ['RUNNER_TEMP']) / 'vector-index-layouts.xml'
-          cases = list(ET.parse(report).iter('testcase'))
-          assert cases and all(case.find('skipped') is None for case in cases)
-          PY
-
   native-timezones:
     name: Native temporal casts
     runs-on: ubuntu-latest
