@@ -109,7 +109,9 @@ class DeltaRowLevelOpsTest extends PaimonSparkTestBase {
 
       // A partition-only (metadata only) condition falls back to the V1 command to drop whole
       // files instead of writing deletion vectors.
-      assert(explainContains("DELETE FROM T WHERE pt = 'a'").contains("DeleteFromPaimonTable"))
+      val metadataOnlyPlan = explainContains("DELETE FROM T WHERE pt = 'a'")
+      assert(metadataOnlyPlan.contains("DeleteFromPaimonTable"))
+      assert(metadataOnlyPlan.contains("TruncatePaimonTableWithFilter"))
       sql("DELETE FROM T WHERE pt = 'a'")
       checkAnswer(sql("SELECT id, pt FROM T"), Row(3, "b") :: Nil)
     }

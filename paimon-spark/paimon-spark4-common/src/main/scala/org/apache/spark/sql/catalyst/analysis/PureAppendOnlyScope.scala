@@ -25,9 +25,9 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
 
 /**
- * Shared scope predicates for the Spark 4.1 Resolution-batch row-level rewrite rules
- * ([[Spark41UpdateTableRewrite]] for UPDATE + metadata-only DELETE reverse-optimization,
- * [[Spark41MergeIntoRewrite]] for MERGE).
+ * Shared scope predicates for the row-level rewrite rules of Spark 4.1
+ * ([[Spark41UpdateTableRewrite]], [[Spark41MergeIntoRewrite]], [[Spark41DeleteMetadataRestore]])
+ * and Spark 4.2 (`Spark42RowLevelCommandRewrite`), including [[MetadataOnlyDeleteRestore]].
  *
  * These rules intercept operations against Paimon tables that are valid for Spark's V2
  * copy-on-write rewrite (no primary key, data evolution, deletion vectors, or fixed-length
@@ -35,9 +35,7 @@ import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
  * (unaware-bucket deletion-vector append tables, see [[targetsV2DeltaTable]]). Tables that violate
  * these constraints go through Paimon's postHoc V1 commands or Spark's built-in analysis path.
  *
- * Kept as a mix-in trait so the two rewrite objects stay single-responsibility (one rule per Spark
- * row-level command, mirroring Spark's own `RewriteUpdateTable` / `RewriteMergeIntoTable` layout)
- * while sharing exactly one definition of the scope.
+ * Kept as a mix-in trait so the rules share exactly one definition of the scope.
  */
 trait PureAppendOnlyScope {
 

@@ -75,7 +75,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // Three companion rules in `paimon-spark4-common` fix each case:
     //   - `Spark41UpdateTableRewrite`  — transcribes `RewriteUpdateTable` output (ReplaceData)
     //   - `Spark41MergeIntoRewrite`    — transcribes `RewriteMergeIntoTable` output (non-delta)
-    //   - `Spark41DeleteMetadataRestore` — reverses Spark's ReplaceData back to
+    //   - `Spark41DeleteMetadataRestore` — reverses Spark's ReplaceData / WriteDelta back to
     //     `DeleteFromPaimonTableCommand` for metadata-only deletes so truncate folding kicks in
     //
     // All three use `transformDown` + `AnalysisHelper.allowInvokingTransformsInAnalyzer` to
