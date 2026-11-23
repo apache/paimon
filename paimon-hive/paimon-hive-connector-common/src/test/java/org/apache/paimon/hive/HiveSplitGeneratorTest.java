@@ -24,12 +24,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.hive.mapred.PaimonInputSplit;
 import org.apache.paimon.hive.utils.HiveSplitGenerator;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -179,6 +182,60 @@ public class HiveSplitGeneratorTest {
 
         InputSplit[] splits = generateSplits(table, PLAIN_PARTITION_DIR);
         assertThat(splits).hasSize(1);
+    }
+
+    @Test
+    public void testGenerateSplitsForCommaPartitionValue() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(CoreOptions.BUCKET, -1);
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        SCHEMA_FIELDS,
+                        2,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        options.toMap(),
+                        "");
+        FileStoreTable table = createFileStoreTable(schema);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("a,b")));
+            write.write(
+                    GenericRow.of(
+                            2, BinaryString.fromString("b"), BinaryString.fromString("plain")));
+            commit.commit(write.prepareCommit());
+        }
+        org.apache.hadoop.fs.Path commaPath = new org.apache.hadoop.fs.Path(tablePath + "/pt=a,b");
+        org.apache.hadoop.fs.Path plainPath =
+                new org.apache.hadoop.fs.Path(tablePath + "/pt=plain");
+        assertThat(fileIO.exists(new Path(commaPath.toString()))).isTrue();
+
+        JobConf jobConf = new JobConf();
+        org.apache.hadoop.mapred.FileInputFormat.setInputPaths(jobConf, commaPath, plainPath);
+        assertThat(jobConf.get(FileInputFormat.INPUT_DIR)).contains("\\,");
+        assertThat(org.apache.hadoop.mapred.FileInputFormat.getInputPaths(jobConf))
+                .containsExactly(commaPath, plainPath);
+        InputSplit[] splits = HiveSplitGenerator.generateSplits(table, jobConf, 1);
+        assertThat(splits).hasSize(2);
+        assertThat(Arrays.stream(splits).map(split -> ((PaimonInputSplit) split).getPath()))
+                .containsExactlyInAnyOrder(commaPath, plainPath);
+        List<Integer> ids = new ArrayList<>();
+        for (InputSplit split : splits) {
+            try (RecordReaderIterator<InternalRow> reader =
+                    new RecordReaderIterator<>(
+                            table.newReadBuilder()
+                                    .newRead()
+                                    .createReader(((PaimonInputSplit) split).split()))) {
+                while (reader.hasNext()) {
+                    ids.add(reader.next().getInt(0));
+                }
+            }
+        }
+        assertThat(ids).containsExactlyInAnyOrder(1, 2);
     }
 
     @Test
