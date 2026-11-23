@@ -37,6 +37,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
@@ -92,22 +93,37 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
             Function<V, R> convertor)
             throws IOException {
         List<R> entries = new ArrayList<>();
-        RandomAccessInputView view = createInputView(segments);
-        BinaryRow binaryRow = new BinaryRow(formatSerializer.getArity());
         Filter<InternalRow> readFilter = filters.readFilter();
         Filter<V> readVFilter = filters.readVFilter();
+        forEachRow(
+                formatSerializer,
+                segments,
+                row -> {
+                    if (readFilter.test(row)) {
+                        V value = projectedSerializer.fromRow(row);
+                        if (readVFilter.test(value)) {
+                            entries.add(convertor.apply(value));
+                        }
+                    }
+                });
+        return entries;
+    }
+
+    /** Visits reusable binary rows backed by cached segments. The consumer must not retain rows. */
+    public static void forEachRow(
+            InternalRowSerializer formatSerializer,
+            Segments segments,
+            Consumer<InternalRow> consumer)
+            throws IOException {
+        RandomAccessInputView view = createInputView(segments);
+        BinaryRow binaryRow = new BinaryRow(formatSerializer.getArity());
         while (true) {
             try {
                 formatSerializer.mapFromPages(binaryRow, view);
-                if (readFilter.test(binaryRow)) {
-                    V v = projectedSerializer.fromRow(binaryRow);
-                    if (readVFilter.test(v)) {
-                        entries.add(convertor.apply(v));
-                    }
-                }
             } catch (EOFException e) {
-                return entries;
+                return;
             }
+            consumer.accept(binaryRow);
         }
     }
 
