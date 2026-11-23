@@ -24,8 +24,8 @@ under the License.
 # Centroid Vector Index
 
 Centroid sharding groups indexed vectors by an outer routing model within each
-row-ID range. Spark supports this layout for `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`,
-and `diskann`.
+row-ID range. Spark and PyPaimon support this layout for `ivf-flat`, `ivf-pq`,
+`ivf-sq`, `ivf-rq`, and `diskann`.
 
 ## Build in Spark
 
@@ -236,7 +236,8 @@ build must be retried. Updates to unindexed columns and appends outside the sour
 ranges can proceed. When a row-ID reassignment moves a whole range by a constant
 offset, the router and shards can be reused with the updated manifest range.
 
-Centroid searches use a Java reader with the vector plugin and a matching native
-library with centroid model APIs. Install the vector plugin in Spark builds too.
+Spark builds and Java searches require the vector plugin and a matching native
+library with centroid model APIs. PyPaimon delegates builds and searches to
+`pypaimon-rust`. See the [PyPaimon guide](../../pypaimon/multimodal-search#centroid-shards-and-bitmap-filters).
 Tables that used an earlier centroid development format need a drop and rebuild.
 Measure model-loading cost and total index size alongside recall, latency, and file reads.

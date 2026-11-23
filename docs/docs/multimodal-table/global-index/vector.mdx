@@ -347,8 +347,8 @@ for SQL ordering and Java/Python score access.
 
 ### Search a List of Vectors
 
-On a Data Evolution table, Spark SQL, Flink SQL and Java can search a column containing multiple
-embeddings per row. The native `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`
+On a Data Evolution append table, Spark SQL, Flink SQL, Java, and PyPaimon can search a column
+containing multiple embeddings per row. The native `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`
 indexes support these columns with range sharding and cosine similarity.
 Omitting the metric selects `cosine`. Index creation rejects any other metric.
 The column can be `ARRAY<VECTOR<FLOAT, d>>` or `ARRAY<ARRAY<FLOAT>>`. For the latter,
@@ -395,8 +395,9 @@ before applying the post-filter.
 By default, it requests up to four times the final limit per query vector per shard.
 Set `refine_factor` to select that multiplier for any of the five indexes. Uncovered rows
 included by the search mode are scored with the same MaxSim formula. Java exposes matrix queries through
-`newVectorSearchBuilder().withMultiVector(float[][])`. For independent top-K results
-per vector, use `newBatchVectorSearchBuilder().withVectors(float[][])`.
+`newVectorSearchBuilder().withMultiVector(float[][])`. PyPaimon uses
+`new_vector_search_builder().with_multi_vector(vectors)` with a compatible native runtime.
+For independent top-K results per vector, use the batch vector search builder.
 
 ## Search Options
 
@@ -522,9 +523,9 @@ CALL sys.create_global_index(
 Pass the same option keys to Python's `create_global_index(..., options={...})`.
 Use full 768-dimensional query vectors when searching either of these indexes.
 
-## Centroid-Based Sharding in Spark
+## Centroid-Based Sharding
 
-[Centroid Vector Index](./centroid-vector) covers Spark builds, probe options, the
+[Centroid Vector Index](./centroid-vector) covers Spark and PyPaimon builds, probe options, the
 index manifest and router file formats, and the Bitmap filters attached to each shard.
 
 ## Per-Field Options

@@ -514,8 +514,10 @@ def test_append_and_unrelated_column_changes_do_not_invalidate_staged_index(rest
     table = _create(catalog, options={'commit.native.enabled': str(native_commit).lower()})
     _append(table, ROWS)
     messages = _build(table, kind)
-    assert all(struct.unpack('>iiq', file.global_index_meta.source_meta) == (0x44454958, 1, 1)
-               for file in _message_files(messages))
+    for file in _message_files(messages):
+        source = DataEvolutionIndexSourceMeta.deserialize(file.global_index_meta.source_meta)
+        assert source.scan_snapshot_id == 1
+        assert source.source_schema_id in (None, table.table_schema.id)
     updater = table.new_batch_write_builder().new_update()
     _commit(table, updater.update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'id': pa.array([10], pa.int32())})))
     _append(table, [{'id': 6, 'name': 'a', 'pt': 0}])

@@ -16,6 +16,7 @@
 # under the License.
 
 import uuid
+from collections import defaultdict
 from io import BytesIO
 from typing import List, Optional
 
@@ -24,6 +25,7 @@ import fastavro
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.centroid_index_groups import centroid_routers
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
@@ -256,6 +258,17 @@ class IndexManifestFile:
         delete_files = {(e.index_file.index_type, e.index_file.file_name) for e in deletes}
         survivors = [e for e in previous
                      if (e.index_file.index_type, e.index_file.file_name) not in delete_files]
+        if any(_is_centroid_entry(entry) for entry in deletes):
+            centroid_routers(survivors)
+        routers = centroid_routers(adds)
+        if routers:
+            ordinary_adds = [entry for entry in adds if not _is_centroid_entry(entry)]
+            _validate_retained_global_index_files(routers, ordinary_adds)
+            for ranges in _global_index_ranges(routers).values():
+                for retained, added in zip(ranges, ranges[1:]):
+                    if _row_ranges_intersect(retained.index_file.global_index_meta,
+                                             added.index_file.global_index_meta):
+                        _raise_global_index_overlap(retained, added)
         _validate_retained_global_index_files(survivors, adds)
         combined = _combine_hash_indexes(survivors, adds, deletes)
         if not combined:
@@ -342,39 +355,53 @@ def _validate_retained_global_index_files(
     retained_entries: List[IndexManifestEntry],
     added_entries: List[IndexManifestEntry],
 ) -> None:
-    for retained in retained_entries:
-        retained_file = retained.index_file
-        retained_meta = retained_file.global_index_meta
-        if retained_meta is None or not _is_global_index(retained_file.index_type):
+    additions = _global_index_ranges(added_entries)
+    if not additions:
+        return
+    for key, ranges in _global_index_ranges(retained_entries).items():
+        candidates = iter(additions.get(key, ()))
+        added = next(candidates, None)
+        for retained in ranges:
+            retained_meta = retained.index_file.global_index_meta
+            while (added is not None
+                   and added.index_file.global_index_meta.row_range_end < retained_meta.row_range_start):
+                added = next(candidates, None)
+            if added is None:
+                break
+            if _row_ranges_intersect(retained_meta, added.index_file.global_index_meta):
+                _raise_global_index_overlap(retained, added)
+
+
+def _global_index_ranges(entries):
+    groups = defaultdict(list)
+    for entry in entries:
+        file = entry.index_file
+        meta = file.global_index_meta
+        if entry.kind != _ADD or meta is None or not _is_global_index(file.index_type):
             continue
+        # A centroid group has the same range and fields as its router.
+        if meta.is_centroid_index() and not meta.is_centroid_router():
+            continue
+        extra = () if meta.has_centroid_bitmap_fields() else tuple(meta.extra_field_ids or ())
+        groups[tuple(entry.partition.values), file.index_type, meta.index_field_id, extra].append(entry)
+    for ranges in groups.values():
+        ranges.sort(key=lambda entry: entry.index_file.global_index_meta.row_range_start)
+    return groups
 
-        for added in added_entries:
-            added_file = added.index_file
-            added_meta = added_file.global_index_meta
-            if (
-                added.kind != _ADD
-                or added_meta is None
-                or added_file.index_type != retained_file.index_type
-                or retained_meta.index_field_id != added_meta.index_field_id
-                or _can_keep_existing_global_index(retained_meta, added_meta)
-            ):
-                continue
 
-            raise RuntimeError(
-                "Trying to add global index file %s of type %s for index field %s"
-                " with row range [%s, %s], but previous file %s still exists"
-                " with overlapping row range [%s, %s]. Remove the previous file first."
-                % (
-                    added_file.file_name,
-                    added_file.index_type,
-                    added_meta.index_field_id,
-                    added_meta.row_range_start,
-                    added_meta.row_range_end,
-                    retained_file.file_name,
-                    retained_meta.row_range_start,
-                    retained_meta.row_range_end,
-                )
-            )
+def _raise_global_index_overlap(retained, added):
+    retained_file = retained.index_file
+    retained_meta = retained_file.global_index_meta
+    added_file = added.index_file
+    added_meta = added_file.global_index_meta
+    raise RuntimeError(
+        "Trying to add global index file %s of type %s for index field %s"
+        " with row range [%s, %s], but previous file %s still exists"
+        " with overlapping row range [%s, %s]. Remove the previous file first."
+        % (added_file.file_name, added_file.index_type, added_meta.index_field_id,
+           added_meta.row_range_start, added_meta.row_range_end, retained_file.file_name,
+           retained_meta.row_range_start, retained_meta.row_range_end)
+    )
 
 
 def _combine_hash_indexes(retained_entries, added_entries, deleted_entries):
@@ -403,18 +430,9 @@ def _is_global_index(index_type: str) -> bool:
     return index_type not in (IndexManifestFile.DELETION_VECTORS_INDEX, _HASH_INDEX)
 
 
-def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
-    # The caller has already matched the index type and primary field.
-    return (
-        _index_definition_extra_field_ids(retained_meta) != _index_definition_extra_field_ids(added_meta)
-        or not _row_ranges_intersect(retained_meta, added_meta)
-    )
-
-
-def _index_definition_extra_field_ids(global_index_meta) -> Optional[List[int]]:
-    if global_index_meta.has_centroid_bitmap_fields():
-        return None
-    return global_index_meta.extra_field_ids or None
+def _is_centroid_entry(entry: IndexManifestEntry) -> bool:
+    meta = entry.index_file.global_index_meta
+    return meta is not None and meta.is_centroid_index()
 
 
 def _row_ranges_intersect(left, right) -> bool:

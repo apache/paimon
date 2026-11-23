@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 
+CENTROID_INDEX_MAGIC = b"PAIMCENT"
+
+
 @dataclass
 class GlobalIndexMeta:
     """Schema for global index metadata."""
@@ -33,7 +36,13 @@ class GlobalIndexMeta:
     source_meta: Optional[bytes] = None
 
     def has_centroid_bitmap_fields(self) -> bool:
-        return bool(self.extra_field_ids) and _is_centroid_index(self.index_meta)
+        return bool(self.extra_field_ids) and self.is_centroid_index()
+
+    def is_centroid_index(self) -> bool:
+        return _is_centroid_index(self.index_meta)
+
+    def is_centroid_router(self) -> bool:
+        return self.index_meta is not None and self.index_meta.startswith(CENTROID_INDEX_MAGIC + b"\x01R")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GlobalIndexMeta):
@@ -88,11 +97,11 @@ class GlobalIndexIOMeta:
 
 def _is_centroid_index(metadata: Optional[bytes]) -> bool:
     # Paimon Core prefixes routed manifest metadata with this layout marker.
-    return metadata is not None and metadata.startswith(b"PAIMCENT")
+    return metadata is not None and metadata.startswith(CENTROID_INDEX_MAGIC)
 
 
 def range_vector_index_file(io_metas: List[GlobalIndexIOMeta]) -> GlobalIndexIOMeta:
     if any(_is_centroid_index(meta.metadata) for meta in io_metas):
-        raise NotImplementedError("Centroid-sharded vector indexes require the Java reader.")
+        raise NotImplementedError("Centroid-sharded vector indexes require table-level search with pypaimon-rust.")
     assert len(io_metas) == 1, "Expected exactly one index file per shard"
     return io_metas[0]
