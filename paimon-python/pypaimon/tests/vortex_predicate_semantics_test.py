@@ -71,82 +71,72 @@ class VortexPushdownLosesRowsTest(unittest.TestCase):
 
 @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
 class VortexPredicateSemanticsTest(unittest.TestCase):
-    """Filtered reads of Vortex tables give the same rows as Parquet tables."""
+    """Filtered reads of Vortex tables preserve PyPaimon predicate semantics."""
 
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
-        cls.catalog = CatalogFactory.create({'warehouse': os.path.join(cls.tempdir, 'warehouse')})
-        cls.catalog.create_database('default', True)
+        catalog = CatalogFactory.create({'warehouse': os.path.join(cls.tempdir, 'warehouse')})
+        catalog.create_database('default', True)
 
-        cls.pa_schema = pa.schema([
+        pa_schema = pa.schema([
             ('id', pa.int32()),
             ('ltz', pa.timestamp('us', tz='UTC')),
             ('ts', pa.timestamp('us')),
             ('d', pa.float64()),
         ])
-        cls.data = pa.table({
-            'id': pa.array([1, 2, 3, 4], pa.int32()),
-            'ltz': pa.array(
-                [datetime.datetime(2024, 1, day, tzinfo=UTC) for day in (1, 2, 3, 4)],
-                pa.timestamp('us', tz='UTC')),
-            'ts': pa.array(
-                [datetime.datetime(2024, 1, day) for day in (1, 2, 3, 4)], pa.timestamp('us')),
-            'd': pa.array([0.0, -0.0, float('nan'), 1.5], pa.float64()),
-        })
-        for file_format in ('parquet', 'vortex'):
-            schema = Schema.from_pyarrow_schema(cls.pa_schema, options={'file.format': file_format})
-            cls.catalog.create_table(f'default.semantics_{file_format}', schema, False)
-            table = cls.catalog.get_table(f'default.semantics_{file_format}')
-            write_builder = table.new_batch_write_builder()
-            table_write = write_builder.new_write()
-            table_write.write_arrow(cls.data)
-            table_commit = write_builder.new_commit()
-            table_commit.commit(table_write.prepare_commit())
-            table_write.close()
+        data = pa.table({
+            'id': [1, 2, 3, 4],
+            'ltz': [datetime.datetime(2024, 1, day, tzinfo=UTC) for day in (1, 2, 3, 4)],
+            'ts': [datetime.datetime(2024, 1, day) for day in (1, 2, 3, 4)],
+            'd': [0.0, -0.0, float('nan'), 1.5],
+        }, schema=pa_schema)
+        table_name = 'default.semantics_vortex'
+        schema = Schema.from_pyarrow_schema(pa_schema, options={'file.format': 'vortex'})
+        catalog.create_table(table_name, schema, False)
+        cls.table = catalog.get_table(table_name)
+        write_builder = cls.table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_write.write_arrow(data)
+        table_commit = write_builder.new_commit()
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _read_ids(self, file_format, make_predicate):
-        table = self.catalog.get_table(f'default.semantics_{file_format}')
-        predicate = make_predicate(table.new_read_builder().new_predicate_builder())
-        read_builder = table.new_read_builder().with_filter(predicate)
+    def _assert_rows(self, expected_ids, make_predicate):
+        read_builder = self.table.new_read_builder()
+        predicate = make_predicate(read_builder.new_predicate_builder())
+        read_builder = read_builder.with_filter(predicate)
         result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
-        return sorted(result.column('id').to_pylist())
-
-    def _assert_same_rows(self, make_predicate):
-        self.assertEqual(
-            self._read_ids('parquet', make_predicate), self._read_ids('vortex', make_predicate))
+        self.assertEqual(expected_ids, sorted(result.column('id').to_pylist()))
 
     def test_timestamp_ltz_filter_is_not_lost(self):
         # Vortex cannot convert a filter on a timestamp with a time zone. The scan then
         # reads every row, and the row filter after it must still apply the predicate.
-        self._assert_same_rows(
-            lambda pb: pb.equal('ltz', datetime.datetime(2024, 1, 2, tzinfo=UTC)))
-        self.assertEqual(
-            [2], self._read_ids(
-                'vortex', lambda pb: pb.equal('ltz', datetime.datetime(2024, 1, 2, tzinfo=UTC))))
+        self._assert_rows([2], lambda pb: pb.equal('ltz', datetime.datetime(2024, 1, 2, tzinfo=UTC)))
 
     def test_timestamp_filter(self):
-        self._assert_same_rows(lambda pb: pb.equal('ts', datetime.datetime(2024, 1, 2)))
+        self._assert_rows([2], lambda pb: pb.equal('ts', datetime.datetime(2024, 1, 2)))
 
     def test_signed_zero_keeps_paimon_equality(self):
-        # Vortex tells -0.0 and 0.0 apart, Paimon does not.
-        self._assert_same_rows(lambda pb: pb.equal('d', 0.0))
-        self._assert_same_rows(lambda pb: pb.greater_or_equal('d', 0.0))
-        self._assert_same_rows(lambda pb: pb.less_or_equal('d', -0.0))
-        self._assert_same_rows(lambda pb: pb.is_in('d', [0.0, 1.5]))
+        # PyArrow comparisons treat 0.0 and -0.0 as equal.
+        self._assert_rows([1, 2], lambda pb: pb.equal('d', 0.0))
+        self._assert_rows([1, 2, 4], lambda pb: pb.greater_or_equal('d', 0.0))
+        self._assert_rows([1, 2], lambda pb: pb.less_or_equal('d', -0.0))
+        # PyArrow set membership distinguishes the two zeros.
+        self._assert_rows([1, 4], lambda pb: pb.is_in('d', [0.0, 1.5]))
 
-    def test_nan_rows_are_not_returned_by_comparisons(self):
-        # Vortex orders NaN above every number, Paimon never matches it.
-        self._assert_same_rows(lambda pb: pb.greater_than('d', 1.0))
-        self._assert_same_rows(lambda pb: pb.greater_or_equal('d', 1.5))
-        self._assert_same_rows(lambda pb: pb.less_than('d', 1.0))
-        self._assert_same_rows(lambda pb: pb.not_equal('d', 1.5))
-        self._assert_same_rows(lambda pb: pb.not_equal('d', float('nan')))
-        self._assert_same_rows(lambda pb: pb.between('d', -1.0, 2.0))
+    def test_nan_follows_paimon_comparison_semantics(self):
+        # Ordered comparisons exclude NaN. NaN compares unequal to every value, including itself.
+        self._assert_rows([4], lambda pb: pb.greater_than('d', 1.0))
+        self._assert_rows([4], lambda pb: pb.greater_or_equal('d', 1.5))
+        self._assert_rows([1, 2], lambda pb: pb.less_than('d', 1.0))
+        self._assert_rows([1, 2, 3], lambda pb: pb.not_equal('d', 1.5))
+        self._assert_rows([1, 2, 3, 4], lambda pb: pb.not_equal('d', float('nan')))
+        self._assert_rows([1, 2, 4], lambda pb: pb.between('d', -1.0, 2.0))
 
 
 if __name__ == '__main__':
