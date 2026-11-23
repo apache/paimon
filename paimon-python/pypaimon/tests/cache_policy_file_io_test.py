@@ -248,16 +248,39 @@ class CachePolicyFileIOTest(unittest.TestCase):
     def test_vortex_writer_selects_write_options(self):
         from unittest.mock import MagicMock
         from pypaimon.execution.python.write.format_file_writer import write_vortex_file
+        from pypaimon.filesystem import vortex_utils
 
-        fake = types.ModuleType("vortex")
-        fake.array = MagicMock(return_value="array")
-        fake.store = types.SimpleNamespace(from_url=MagicMock())
-        io = CachePolicyFileIO.create(
-            TABLE_ROOT, _options(**{"io-cache.policy": "read"}), _RecordingFactory())
-        with patch.dict("sys.modules", {"vortex": fake}):
-            write_vortex_file(io, TABLE_ROOT + "/bucket-0/data-a.vortex", [])
-        self.assertIn("origin-endpoint", fake.store.from_url.call_args.kwargs["endpoint"])
-        fake.store.from_url.return_value.write.assert_called_once_with("array")
+        for policy, endpoint, compact, edition in (
+                ("read", "origin-endpoint", False, None),
+                ("write", "cache-endpoint", True, "core2026.08.3")):
+            with self.subTest(policy=policy):
+                fake = types.ModuleType("vortex")
+                fake.array = MagicMock(return_value="array")
+                fake.store = types.SimpleNamespace(from_url=MagicMock())
+                fake_io = types.ModuleType("vortex.io")
+                fake_io.VortexWriteOptions = MagicMock()
+                options = MagicMock()
+                fake_io.VortexWriteOptions.default.return_value = options
+                fake_io.VortexWriteOptions.compact.return_value = options
+                options.with_edition.return_value = options
+                io = CachePolicyFileIO.create(
+                    TABLE_ROOT, _options(**{"io-cache.policy": policy}), _RecordingFactory())
+                with patch.dict("sys.modules", {"vortex": fake, "vortex.io": fake_io}), \
+                        patch.object(vortex_utils, "_store_cache", {}):
+                    write_vortex_file(io, TABLE_ROOT + "/bucket-0/data-a.vortex", [],
+                                      compact=compact, edition=edition)
+                self.assertIn(endpoint, fake.store.from_url.call_args.kwargs["endpoint"])
+                options.write.assert_called_once_with(
+                    "array", "database/table/bucket-0/data-a.vortex",
+                    store=fake.store.from_url.return_value)
+                if compact:
+                    fake_io.VortexWriteOptions.compact.assert_called_once_with()
+                else:
+                    fake_io.VortexWriteOptions.default.assert_called_once_with()
+                if edition:
+                    options.with_edition.assert_called_once_with(edition)
+                else:
+                    options.with_edition.assert_not_called()
 
     def test_vortex_options_resolve_policy_inside_local_block_cache(self):
         from pypaimon.filesystem.caching_file_io import CachingFileIO
