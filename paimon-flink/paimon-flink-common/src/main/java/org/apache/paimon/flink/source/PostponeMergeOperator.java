@@ -247,24 +247,17 @@ final class PostponeMergeOperator extends AbstractStreamOperator<RowData>
         private final MutableObjectIterator<BinaryRow> iterator;
         private final BinaryRow reuse = new BinaryRow(CARRIER_TYPE.getFieldCount());
         @Nullable private BinaryRow next;
-        private boolean exhausted;
 
         private SortedCarriers(MutableObjectIterator<BinaryRow> iterator) {
             this.iterator = iterator;
         }
 
         private boolean hasNext() {
-            if (exhausted) {
-                return false;
-            }
             if (next == null) {
                 try {
                     next = iterator.next(reuse);
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to read sorted postpone carriers.", e);
-                }
-                if (next == null) {
-                    exhausted = true;
                 }
             }
             return next != null;
