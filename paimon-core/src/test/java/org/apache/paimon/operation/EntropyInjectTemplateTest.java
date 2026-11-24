@@ -219,13 +219,20 @@ public class EntropyInjectTemplateTest {
     }
 
     @Test
-    public void testRemoveOrphanFilesIsNotSupported() throws Exception {
+    public void testOrphanCleanupDoesNotReachExpandedTemplatePath() throws Exception {
         FileStoreTable table = createTable("t1");
         write(table, 1, "a");
 
-        assertThatThrownBy(() -> new LocalOrphanFilesClean(table))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
+        Set<String> files = sharedTableFiles("t1");
+        assertThat(files).hasSize(1);
+        java.nio.file.Path committedFile = sharedRoot.resolve(files.iterator().next());
+        java.nio.file.Path orphan = committedFile.resolveSibling("orphan.parquet");
+        Files.copy(committedFile, orphan);
+        long cutoff = Files.getLastModifiedTime(orphan).toMillis() + 1;
+
+        CleanOrphanFilesResult result = new LocalOrphanFilesClean(table, cutoff).clean();
+        assertThat(result.getDeletedFilesPath()).isEmpty();
+        assertThat(orphan).exists();
     }
 
     @ParameterizedTest
