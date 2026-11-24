@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.Lock.AcquireMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -63,6 +64,14 @@ public class RemoveUnexistingManifests {
      * @return {@code true} if a repair snapshot was committed
      */
     public boolean execute() {
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl)
+                        table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
+            return commit.runWithLock(() -> repairManifests(commit), AcquireMode.REQUIRED);
+        }
+    }
+
+    private boolean repairManifests(FileStoreCommitImpl commit) {
         FileIO fileIO = table.fileIO();
         Snapshot latest = table.snapshotManager().latestSnapshot();
         if (latest == null) {
@@ -101,16 +110,10 @@ public class RemoveUnexistingManifests {
         Pair<String, Long> baseManifestList = manifestList.write(existingManifestFiles);
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
 
-        try (FileStoreCommitImpl fileStoreCommit =
-                (FileStoreCommitImpl)
-                        table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
-            boolean result =
-                    fileStoreCommit.replaceManifestList(
-                            latest, totalRecordCount, baseManifestList, deltaManifestList);
-            if (!result) {
-                throw new RuntimeException(
-                        "Failed, snapshot conflict, maybe multiple jobs is running to commit snapshots.");
-            }
+        if (!commit.replaceManifestList(
+                latest, totalRecordCount, baseManifestList, deltaManifestList)) {
+            throw new RuntimeException(
+                    "Failed, snapshot conflict, maybe multiple jobs is running to commit snapshots.");
         }
         return true;
     }

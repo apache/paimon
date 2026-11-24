@@ -43,4 +43,17 @@ public interface BlobFetchMetricReporter {
     void recordFetchFailureNullWritten(Throwable throwable);
 
     void recordFetchFailure(Throwable throwable);
+
+    /** Whether to time and count payload copies. Legacy reporters remain disabled. */
+    default boolean isTransferMetricsEnabled() {
+        return false;
+    }
+
+    /**
+     * Records one payload-copy attempt, excluding stream open, seek, close and Blob framing.
+     * Written bytes count only writes which returned normally. The side effects of a throwing write
+     * are unknown. A completed copy does not imply a committed Paimon snapshot.
+     */
+    default void recordTransfer(
+            long readBytes, long writtenBytes, long durationNanos, boolean completed) {}
 }

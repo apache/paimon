@@ -464,17 +464,17 @@ public class ESIndexGlobalIndexWriter
 
             byte[] meta = buildMeta(segFiles);
 
-            String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
+            String filePath = fileWriter.newFilePath(FILE_NAME_PREFIX);
             // Stream the archive directly to the output stream — DO NOT materialise the entire
             // archive in memory. For real DiskBBQ output (1M × 768-dim vectors ≈ 3 GB per shard)
             // a ByteArrayOutputStream-backed approach hits both heap and DirectByteBuffer limits
             // (java.nio.Bits.reserveMemory OOM at Files.readAllBytes).
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 packDirectoryStream(segFiles, out);
                 out.flush();
             }
 
-            return Collections.singletonList(new ResultEntry(fileName, docCount, meta));
+            return Collections.singletonList(new ResultEntry(filePath, docCount, meta));
         } catch (IOException e) {
             RuntimeException wrapped = new RuntimeException("Failed to finish ES index build", e);
             failure = wrapped;

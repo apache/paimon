@@ -45,6 +45,8 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -224,7 +226,7 @@ class PkFullTextIndexFileTest {
         Path directory = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(directory, fileName);
             }
 
@@ -236,6 +238,11 @@ class PkFullTextIndexFileTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }
@@ -257,12 +264,12 @@ class PkFullTextIndexFileTest {
                 @Override
                 public List<ResultEntry> finish() {
                     try {
-                        String fileName = fileWriter.newFileName("full-text");
-                        try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+                        String filePath = fileWriter.newFilePath("full-text");
+                        try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                             out.write(1);
                         }
                         return Collections.singletonList(
-                                new ResultEntry(fileName, rowIds.size(), new byte[] {2}));
+                                new ResultEntry(filePath, rowIds.size(), new byte[] {2}));
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }

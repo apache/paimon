@@ -362,18 +362,14 @@ class RawFullTextReadImpl {
 
             List<IndexFileMeta> indexFiles = new ArrayList<>(resultEntries.size());
             for (ResultEntry entry : resultEntries) {
-                byte[] bytes = fileWriter.fileBytes(entry.fileName());
+                String fileName = new Path(entry.filePath()).getName();
+                byte[] bytes = fileWriter.fileBytes(fileName);
                 GlobalIndexMeta meta =
                         new GlobalIndexMeta(
                                 rowRangeStart, rowRangeEnd, fieldId, null, entry.meta());
                 indexFiles.add(
                         new IndexFileMeta(
-                                indexType,
-                                entry.fileName(),
-                                bytes.length,
-                                entry.rowCount(),
-                                meta,
-                                null));
+                                indexType, fileName, bytes.length, entry.rowCount(), meta, null));
             }
             return new IndexFullTextSearchSplit(column, rowRangeStart, rowRangeEnd, indexFiles);
         }
@@ -409,12 +405,14 @@ class RawFullTextReadImpl {
         }
 
         @Override
-        public String newFileName(String prefix) {
-            return "raw-" + column + "-" + prefix + "-" + id + "-" + files.size() + ".index";
+        public String newFilePath(String prefix) {
+            return path("raw-" + column + "-" + prefix + "-" + id + "-" + files.size() + ".index")
+                    .toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) {
+        public PositionOutputStream newOutputStream(String filePath) {
+            String fileName = new Path(filePath).getName();
             return new MemoryPositionOutputStream(bytes -> files.put(fileName, bytes));
         }
 
@@ -440,13 +438,18 @@ class RawFullTextReadImpl {
         }
 
         @Override
-        public Path toPath(String fileName) {
+        public Path toPath(String fileName, @Nullable String externalPath) {
             RawFullTextIndex rawIndex = rawIndex(fileName);
             return rawIndex.path(fileName);
         }
 
         @Override
         public Path newPath() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Path newPathFromName(String fileName) {
             throw new UnsupportedOperationException();
         }
 

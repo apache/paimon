@@ -24,8 +24,12 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.classic.{ClassicConversions, Dataset => ClassicDataset, ExpressionUtils}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
+import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.internal.SessionResourceLoader
+import org.apache.spark.storage.StorageLevel
+
+import scala.util.control.NonFatal
 
 /**
  * This class is used to implement the conversion from sql-api to classic one. Make sure this is the
@@ -46,6 +50,24 @@ class Classic4Api extends ClassicApi with ClassicConversions {
 
   override def createDataset(spark: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
     ClassicDataset.ofRows(spark, logicalPlan)
+  }
+
+  override def createDiskCachedDataset(
+      spark: SparkSession,
+      logicalPlan: LogicalPlan): (Dataset[Row], () => Unit) = {
+    val input = ClassicDataset.ofRows(spark, logicalPlan)
+    val relation = InMemoryRelation(StorageLevel.DISK_ONLY, input.queryExecution, None)
+    try {
+      // Optimizer alias elimination must not change consumer attribute identities.
+      val cachedRelation = relation.withOutput(input.queryExecution.analyzed.output)
+      (
+        ClassicDataset.ofRows(spark, cachedRelation),
+        () => relation.cacheBuilder.clearCache(blocking = true))
+    } catch {
+      case NonFatal(e) =>
+        relation.cacheBuilder.clearCache(blocking = true)
+        throw e
+    }
   }
 
   override def recacheByPlan(spark: SparkSession, plan: LogicalPlan): Unit = {

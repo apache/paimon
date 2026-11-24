@@ -73,6 +73,7 @@ import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -322,10 +323,54 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         ReadBuilder read =
                 distributedTable(table).newReadBuilder().withFilter(b.startsWith(1, str("a")));
         List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).hasSize(2).allMatch(split -> split instanceof IndexQuerySplit);
+        assertThat(splits).hasSize(3).allMatch(split -> split instanceof IndexQuerySplit);
         // The first range still has both files needed for column merging.
         assertThat(((IndexQuerySplit) splits.get(0)).dataSplit().dataFiles()).hasSize(2);
-        assertThat(read(read, splits)).hasSize(200);
+        assertThat(read(read, splits)).hasSize(300);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    public void testEagerIndexQueryUsesDataSnapshotAfterConcurrentAppend(String mode)
+            throws Exception {
+        write(100);
+        createIndex("btree", "f1");
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+        SnapshotReader snapshotReader = spy(table.newSnapshotReader());
+        SnapshotManager snapshotManager = spy(snapshotReader.snapshotManager());
+        doReturn(snapshotManager).when(snapshotReader).snapshotManager();
+        AtomicBoolean appended = new AtomicBoolean();
+        doAnswer(
+                        invocation -> {
+                            // Commit when the data scan selects its snapshot. The old eager path
+                            // has already evaluated the index by this point.
+                            if (appended.compareAndSet(false, true)) {
+                                appendRows(100, 200);
+                            }
+                            return invocation.callRealMethod();
+                        })
+                .when(snapshotManager)
+                .latestSnapshot();
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate predicate = predicates.in(1, Arrays.asList(str("a50"), str("a150")));
+        List<Split> splits =
+                table.newScan(ignored -> snapshotReader).withFilter(predicate).plan().splits();
+        long snapshotId = table.latestSnapshot().get().id();
+        assertThat(splits)
+                .isNotEmpty()
+                .allSatisfy(
+                        split -> {
+                            assertThat(split).isInstanceOf(IndexedSplit.class);
+                            assertThat(((IndexedSplit) split).dataSplit().snapshotId())
+                                    .isEqualTo(snapshotId);
+                        });
+        ReadBuilder read = table.newReadBuilder().withFilter(predicate);
+        assertThat(read(read, splits)).containsExactlyInAnyOrder(50, 150);
     }
 
     @ParameterizedTest
@@ -932,8 +977,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
             indexes.add(
                     new IndexFileMeta(
                             "fm",
-                            entry.fileName(),
-                            io.fileSize(entry.fileName()),
+                            new Path(entry.filePath()).getName(),
+                            io.fileSize(entry.filePath()),
                             entry.rowCount(),
                             new GlobalIndexMeta(
                                     100,
@@ -1063,8 +1108,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
             indexes.add(
                     new IndexFileMeta(
                             "fm",
-                            entry.fileName(),
-                            io.fileSize(entry.fileName()),
+                            new Path(entry.filePath()).getName(),
+                            io.fileSize(entry.filePath()),
                             entry.rowCount(),
                             new GlobalIndexMeta(
                                     0, 99, table.rowType().getField("f1").id(), null, entry.meta()),

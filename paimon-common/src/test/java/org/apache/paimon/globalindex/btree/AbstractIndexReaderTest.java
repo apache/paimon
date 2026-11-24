@@ -126,21 +126,20 @@ public abstract class AbstractIndexReaderTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return "test-btree-" + UUID.randomUUID() + prefix;
+                    public String newFilePath(String prefix) {
+                        return new Path(
+                                        new Path(tempPath.toUri()),
+                                        "test-btree-" + UUID.randomUUID() + prefix)
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(
-                                new Path(new Path(tempPath.toUri()), fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
-        fileReader =
-                meta ->
-                        fileIO.newInputStream(
-                                new Path(new Path(tempPath.toUri()), meta.filePath()));
+        fileReader = meta -> fileIO.newInputStream(meta.filePath());
         options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
         globalIndexer =
@@ -350,12 +349,9 @@ public abstract class AbstractIndexReaderTest {
         Assertions.assertEquals(1, results.size());
 
         ResultEntry resultEntry = results.get(0);
-        String fileName = resultEntry.fileName();
+        Path filePath = new Path(resultEntry.filePath());
         return new GlobalIndexIOMeta(
-                new Path(new Path(tempPath.toUri()), fileName),
-                fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.rowCount(),
-                resultEntry.meta());
+                filePath, fileIO.getFileSize(filePath), resultEntry.rowCount(), resultEntry.meta());
     }
 
     protected List<Long> filter(Predicate<Object> filter) {

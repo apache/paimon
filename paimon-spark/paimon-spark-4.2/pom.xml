@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : 4.2 : 2.13</name>
 
     <properties>
-        <spark.version>4.2.0</spark.version>
+        <spark.version>4.2.1</spark.version>
         <scala.binary.version>2.13</scala.binary.version>
         <scala.version>2.13.18</scala.version>
     </properties>
@@ -102,6 +102,19 @@ under the License.
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-hive_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>

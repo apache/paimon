@@ -687,7 +687,6 @@ public class SparkCatalog extends SparkBaseCatalog
         List<String> blobFields = CoreOptions.blobField(properties);
         Set<String> blobDescriptorFields = new CoreOptions(properties).blobDescriptorField();
         List<String> blobViewFields = CoreOptions.blobViewField(properties);
-        Set<String> vectorFields = CoreOptions.fromMap(properties).vectorField();
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -731,6 +730,7 @@ public class SparkCatalog extends SparkBaseCatalog
             normalizedProperties.put(
                     CoreOptions.BUCKET_KEY.key(), resolveColumnNameList(bucketKey, fieldNames));
         }
+        Set<String> vectorFields = CoreOptions.vectorField(properties, fieldNames);
 
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()

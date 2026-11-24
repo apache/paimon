@@ -53,15 +53,20 @@ public class DecimalUtils {
         if (v1.isCompact()
                 && v2.isCompact()
                 && v1.scale() == v2.scale()
+                && scale == v1.scale()
                 && Decimal.isCompact(precision)) {
-            assert scale == v1.scale(); // no need to rescale
             try {
                 long ls =
                         Math.addExact(v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
-                return Decimal.fromUnscaledLong(ls, precision, scale);
+                if (ls < POW10[precision] && ls > -POW10[precision]) {
+                    return Decimal.fromUnscaledLong(ls, precision, scale);
+                }
             } catch (ArithmeticException e) {
                 // overflow, fall through
             }
+            // ls is the exact unscaled result at the target scale: beyond the precision
+            // bound the BigDecimal path below would return null anyway
+            return null;
         }
         BigDecimal bd = v1.toBigDecimal().add(v2.toBigDecimal());
         return fromBigDecimal(bd, precision, scale);
@@ -71,16 +76,21 @@ public class DecimalUtils {
         if (v1.isCompact()
                 && v2.isCompact()
                 && v1.scale() == v2.scale()
+                && scale == v1.scale()
                 && Decimal.isCompact(precision)) {
-            assert scale == v1.scale(); // no need to rescale
             try {
                 long ls =
                         Math.subtractExact(
                                 v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
-                return fromUnscaledLong(ls, precision, scale);
+                if (ls < POW10[precision] && ls > -POW10[precision]) {
+                    return fromUnscaledLong(ls, precision, scale);
+                }
             } catch (ArithmeticException e) {
                 // overflow, fall through
             }
+            // ls is the exact unscaled result at the target scale: beyond the precision
+            // bound the BigDecimal path below would return null anyway
+            return null;
         }
         BigDecimal bd = v1.toBigDecimal().subtract(v2.toBigDecimal());
         return fromBigDecimal(bd, precision, scale);

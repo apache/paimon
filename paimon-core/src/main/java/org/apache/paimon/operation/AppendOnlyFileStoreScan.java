@@ -70,14 +70,16 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             boolean fileIndexReadEnabled,
             boolean fileIndexReadIgnoreUnknownType,
             boolean deletionVectorsEnabled,
-            boolean dataEvolutionEnabled) {
+            boolean dataEvolutionEnabled,
+            String tableName) {
         super(
                 manifestsReader,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                scanManifestParallelism);
+                scanManifestParallelism,
+                tableName);
         this.bucketSelectConverter = bucketSelectConverter;
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());

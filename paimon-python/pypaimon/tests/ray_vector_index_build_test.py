@@ -85,18 +85,23 @@ def test_build_messages_do_not_publish_or_include_later_appends(table, ray_clust
     assert table.create_index("embedding", "ivf-flat", options=OPTIONS, execution="ray") == 1
 
 
-def _write_then_fail(context, shard, name):
+def _write_then_fail(context, shard, output):
     if shard[1].from_:
         time.sleep(0.3)
     from pypaimon.execution.python.globalindex.ray_index_build import _build_shard
-    message = _build_shard(context, shard, name)
+    message = _build_shard(context, shard, output)
     if not shard[1].from_:
         raise RuntimeError("failed after writing an index file")
     return message
 
 
-def test_worker_failure_drains_and_cleans_all_outputs(table, ray_cluster):
+def test_python_worker_failure_cleans_rotated_outputs(table, ray_cluster, tmp_path):
     add_rows(table, VECTORS)
+    roots = [tmp_path / name for name in ('index-a', 'index-b')]
+    writer_table = table.raw_table.copy({
+        'write.native.enabled': 'false',
+        'global-index.external-paths': ','.join(root.as_uri() for root in roots),
+    })
     before = table.raw_table.snapshot_manager().get_latest_snapshot().id
     # Pass a real serialized worker function; a failure after finish() must also
     # clean files whose commit messages were never delivered to the driver.
@@ -107,14 +112,14 @@ def test_worker_failure_drains_and_cleans_all_outputs(table, ray_cluster):
 
     with patch.object(ray, "remote", remote):
         with pytest.raises(Exception, match="failed after writing"):
-            table.create_index("embedding", "ivf-flat", options=OPTIONS,
-                               execution="ray", concurrency=2)
+            writer_table.create_global_index("embedding", "ivf-flat", options=OPTIONS,
+                                             execution="ray", concurrency=2)
     assert table.raw_table.snapshot_manager().get_latest_snapshot().id == before
     assert not index_files(table)
-    root = table.raw_table.path_factory().global_index_path_factory().global_index_root_path()
-    from pathlib import Path
-    assert not list(Path(root).glob("*.index"))
-    assert table.create_index("embedding", "ivf-flat", options=OPTIONS, execution="ray") == 2
+    assert all(not list(root.glob("*.index")) for root in roots)
+    assert writer_table.create_global_index("embedding", "ivf-flat", options=OPTIONS, execution="ray") == 2
+    assert {entry.external_path.rsplit('/', 1)[0] for entry in index_files(table)} == {
+        root.as_uri() for root in roots}
 
 
 @pytest.mark.parametrize("kwargs,match", [
@@ -154,7 +159,7 @@ def _inspect_jindo_context(context_refs):
     # Nested object refs postpone deserialization until the worker has installed
     # the SDK stand-in. Only Config/connect are replaced, not serialization.
     with _jindo_sdk_stub():
-        builder, field, table_read, index_path = ray.get(context_refs[0])
+        builder, field, table_read = ray.get(context_refs[0])
         assert isinstance(builder, PythonGlobalIndexBuilder)
         handler = builder._table.file_io.filesystem.handler
         assert table_read.table.file_io is builder._table.file_io
@@ -162,7 +167,7 @@ def _inspect_jindo_context(context_refs):
         assert handler._known_file_size("oss://bucket/object") is None
         handler.register_file_size("object", 456)
         return (os.getpid(), handler._jindo_fs.pid, handler._known_file_size("oss://bucket/object"),
-                handler.root_path, handler._jindo_fs.config["fs.oss.securityToken"], index_path)
+                handler.root_path, handler._jindo_fs.config["fs.oss.securityToken"])
 
 
 def test_jindo_build_context_reconstructs_on_worker(table, ray_cluster):
@@ -184,10 +189,10 @@ def test_jindo_build_context_reconstructs_on_worker(table, ray_cluster):
     original.register_file_size("object", 123)
     with patch.object(table.raw_table, "file_io", file_io):
         # This is the exact tuple broadcast by build_vector_index.
-        context = ray.put((PythonGlobalIndexBuilder(builder), field, reader, "oss://bucket/index"))
+        context = ray.put((PythonGlobalIndexBuilder(builder), field, reader))
         result = ray.get(ray.remote(_inspect_jindo_context).remote([context]))
-    worker_pid, client_pid, size, root, token, index_path = result
+    worker_pid, client_pid, size, root, token = result
     assert worker_pid != os.getpid()
     assert client_pid == worker_pid
-    assert (size, root, token, index_path) == (456, "oss://bucket/", "test-token", "oss://bucket/index")
+    assert (size, root, token) == (456, "oss://bucket/", "test-token")
     assert original._known_file_size("oss://bucket/object") == 123

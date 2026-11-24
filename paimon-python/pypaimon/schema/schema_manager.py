@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import re
 from collections import Counter
 from typing import List, Optional
 
@@ -29,15 +30,18 @@ from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
 from pypaimon.schema.data_type_casts import can_execute_cast, supports_cast
-from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
+from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType, DataField,
                                         DataType, MapType, MultisetType, RowType,
+                                        VectorType,
                                         is_array_blob_type, is_blob_file_field,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.default_value import validate_default_value
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
                                            SetOption, UpdateColumnComment,
+                                           UpdateColumnDefaultValue,
                                            UpdateColumnNullability,
                                            UpdateColumnPosition,
                                            UpdateColumnType, UpdateComment)
@@ -174,6 +178,18 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
         if isinstance(change, RenameColumn) and len(change.field_names) == 1:
             rename_mappings[change.field_names[0]] = change.new_name
     return rename_mappings
+
+
+def _handle_update_column_default_value(
+    change: UpdateColumnDefaultValue, new_fields: List[DataField]
+):
+    def update_func(field: DataField, depth: int) -> DataField:
+        validate_default_value(field.type, change.new_default_value)
+        return DataField(
+            field.id, field.name, field.type, field.description,
+            change.new_default_value
+        )
+    _update_nested_column(new_fields, change.field_names, update_func)
 
 
 def _handle_update_column_comment(
@@ -922,6 +938,55 @@ def _handle_add_column(
     _modify_nested_column(new_fields, change.field_names, update_last)
 
 
+def _external_atomic_type_key(type_name: str):
+    """Canonical SQL aliases and parameters, following Java DataTypeJsonParser.
+
+    Keep aliases and defaults aligned with parseTypeByKeyword() and the type parsers in
+    paimon-api/src/main/java/org/apache/paimon/types/DataTypeJsonParser.java.
+    """
+    name = ' '.join(type_name.upper().split())
+    ltz = re.fullmatch(r'TIMESTAMP(?:\s*\(\s*(\d+)\s*\)\s*| )WITH LOCAL TIME ZONE', name)
+    if ltz:
+        name = 'TIMESTAMP_LTZ' + ('({})'.format(ltz.group(1)) if ltz.group(1) else '')
+    without_zone = re.fullmatch(r'(TIME(?:STAMP)?)(?:\s*\(\s*(\d+)\s*\)\s*| )WITHOUT TIME ZONE', name)
+    if without_zone:
+        name = without_zone.group(1) + ('({})'.format(without_zone.group(2)) if without_zone.group(2) else '')
+
+    parsed = re.fullmatch(r'([A-Z_]+(?: [A-Z_]+)*)(?:\s*\(\s*(\d+(?:\s*,\s*\d+)*)\s*\))?', name)
+    if parsed is None:
+        return name
+    root = {'INTEGER': 'INT', 'NUMERIC': 'DECIMAL', 'DEC': 'DECIMAL',
+            'DOUBLE PRECISION': 'DOUBLE'}.get(parsed.group(1), parsed.group(1))
+    parameters = tuple(int(value) for value in parsed.group(2).split(',')) if parsed.group(2) else ()
+    if not parameters and root in ('STRING', 'BYTES'):
+        return ('VARCHAR' if root == 'STRING' else 'VARBINARY'), (2147483647,)
+    if not parameters:
+        parameters = {'DECIMAL': (10, 0), 'TIME': (0,), 'TIMESTAMP': (6,), 'TIMESTAMP_LTZ': (6,),
+                      'CHAR': (1,), 'VARCHAR': (1,), 'BINARY': (1,), 'VARBINARY': (1,)}.get(root, ())
+    elif root == 'DECIMAL' and len(parameters) == 1:
+        parameters += (0,)
+    return root, parameters
+
+
+def _external_schema_type_key(data_type: DataType):
+    """Compare logical types and field metadata without depending on field IDs."""
+    if data_type is None:
+        return None
+    prefix = (type(data_type), data_type.nullable)
+    if isinstance(data_type, AtomicType):
+        return prefix + (_external_atomic_type_key(data_type.type),)
+    if isinstance(data_type, RowType):
+        return prefix + (tuple((field.name, _external_schema_type_key(field.type),
+                                field.description, field.default_value) for field in data_type.fields),)
+    if isinstance(data_type, (ArrayType, MultisetType)):
+        return prefix + (_external_schema_type_key(data_type.element),)
+    if isinstance(data_type, VectorType):
+        return prefix + (_external_schema_type_key(data_type.element), data_type.length)
+    if isinstance(data_type, MapType):
+        return prefix + (_external_schema_type_key(data_type.key), _external_schema_type_key(data_type.value))
+    return prefix + (data_type,)
+
+
 class SchemaManager:
 
     def __init__(self, file_io: FileIO, table_path: str, branch: str = DEFAULT_MAIN_BRANCH):
@@ -967,6 +1032,22 @@ class SchemaManager:
             if schema is not None:
                 schemas.append(schema)
         return schemas
+
+    @staticmethod
+    def check_schema_for_external_table(existing: Schema, schema: Schema) -> None:
+        if schema.fields and (
+                _external_schema_type_key(RowType(True, schema.fields))
+                != _external_schema_type_key(RowType(True, existing.fields))):
+            raise ValueError("External table fields do not match the existing schema.")
+        for key in ('partition_keys', 'primary_keys'):
+            provided = getattr(schema, key)
+            if provided and provided != getattr(existing, key):
+                raise ValueError(
+                    "External table {} do not match the existing schema.".format(key.replace('_', ' ')))
+        for key, value in schema.options.items():
+            if key not in ('owner', CoreOptions.PATH.key()) and (
+                    key not in existing.options or existing.options[key] != value):
+                raise ValueError("External table option '{}' does not match the existing schema.".format(key))
 
     def create_table(self, schema: Schema) -> TableSchema:
         while True:
@@ -1161,6 +1242,8 @@ class SchemaManager:
                     change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnComment):
                 _handle_update_column_comment(change, new_fields)
+            elif isinstance(change, UpdateColumnDefaultValue):
+                _handle_update_column_default_value(change, new_fields)
             elif isinstance(change, UpdateColumnPosition):
                 _apply_move(new_fields, None, change.move)
             else:

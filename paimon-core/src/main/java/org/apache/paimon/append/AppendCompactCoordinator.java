@@ -151,8 +151,7 @@ public class AppendCompactCoordinator {
 
         if (!isStreaming) {
             try {
-                ManifestEntry entry = filesIterator.next();
-                batchRemainFiles = entry != null;
+                batchRemainFiles = filesIterator.hasNext();
             } catch (EndOfScanException e) {
                 batchRemainFiles = false;
             }
@@ -264,6 +263,14 @@ public class AppendCompactCoordinator {
                     toCompact.clear();
                     packed = Collections.singletonList(all);
                 }
+            }
+
+            // a batch job plans each file once, so files left over by packing never reach
+            // COMPACT_AGE; compact them now (issue 5130)
+            if (!isStreaming && toCompact.size() > 1) {
+                packed = new ArrayList<>(packed);
+                packed.add(new ArrayList<>(toCompact));
+                toCompact.clear();
             }
 
             return packed;
@@ -403,6 +410,7 @@ public class AppendCompactCoordinator {
 
         @Nullable private Long nextSnapshot = null;
         @Nullable private Iterator<ManifestEntry> currentIterator;
+        @Nullable private ManifestEntry nextEntry;
 
         public FilesIterator(
                 FileStoreTable table,
@@ -455,8 +463,21 @@ public class AppendCompactCoordinator {
                             .readFileIterator();
         }
 
+        public boolean hasNext() {
+            if (nextEntry == null) {
+                // Keep the lookahead entry for the next batch.
+                nextEntry = next();
+            }
+            return nextEntry != null;
+        }
+
         @Nullable
         public ManifestEntry next() {
+            if (nextEntry != null) {
+                ManifestEntry entry = nextEntry;
+                nextEntry = null;
+                return entry;
+            }
             while (true) {
                 if (currentIterator == null) {
                     assignNewIterator();

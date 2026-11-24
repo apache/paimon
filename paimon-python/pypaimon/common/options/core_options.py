@@ -413,6 +413,29 @@ class CoreOptions:
         )
     )
 
+    VORTEX_COMPACT_ENCODINGS: ConfigOption[bool] = (
+        ConfigOptions.key("vortex.compact-encodings")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether Python writers use the compact Vortex encodings, which make files smaller "
+            "and reads somewhat slower. Java writers always use the default encodings.")
+    )
+
+    VORTEX_WRITE_EDITION: ConfigOption[str] = (
+        ConfigOptions.key("vortex.write.edition")
+        .string_type()
+        .default_value("core2025.10.0")
+        .with_description(
+            "The Vortex edition that writers use. An edition sets the encodings and layouts that "
+            "a file can contain, and each edition has a minimum Vortex version that can read it. "
+            "The default, core2025.10.0, is readable by Paimon 2.0 and 2.1 in Java and in "
+            "PyPaimon. Set a newer edition, for example core2026.08.3, only after all readers of the table use a "
+            "Vortex version that reads it. After a file is written with a newer edition, older "
+            "readers cannot read it, so a roll back of the readers then also needs a rewrite of "
+            "these files.")
+    )
+
     MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
         ConfigOptions.key("mosaic.num-buckets")
         .int_type()
@@ -423,8 +446,8 @@ class CoreOptions:
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
-        .default_value("none")
-        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+        .default_value("truncate(16)")
+        .with_description("Metadata statistics mode: none, counts, full or truncate(N).")
     )
 
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
@@ -723,7 +746,7 @@ class CoreOptions:
     SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("scan.native-plan.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Plan splits via the native (pypaimon_rust) planner "
                           "instead of the Python manifest scanner; the pypaimon "
                           "reader still reads the files.")
@@ -732,16 +755,16 @@ class CoreOptions:
     READ_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("read.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Read data via pypaimon_rust and return PyArrow batches. "
-                          "This also enables native split planning; unsupported "
+                          "This also requests native split planning unless explicitly disabled; unsupported "
                           "routes fall back to pypaimon.")
     )
 
     COMMIT_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("commit.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
     )
@@ -749,7 +772,7 @@ class CoreOptions:
     WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("write.native.enabled")
         .boolean_type()
-        .default_value(False)
+        .default_value(True)
         .with_description("Write Arrow data via pypaimon_rust when the table and "
                           "writer API are supported. Unsupported routes use Python "
                           "before any native data is written.")
@@ -976,8 +999,18 @@ class CoreOptions:
     SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description("Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                          "setting also serves as a fallback for scalar prefilters.")
+    )
+
+    SCALAR_INDEX_PREFILTER_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.prefilter.search-mode")
+        .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description("Search mode for scalar index queries.")
+        .with_description("Search mode for scalar prefilters in vector and full-text search. If unset, "
+                          "use an explicit scalar-index.search-mode, then an explicit "
+                          "global-index.search-mode, then fast.")
     )
 
     VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
@@ -994,14 +1027,11 @@ class CoreOptions:
         .with_description("Search mode for full-text index queries.")
     )
 
-    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
-        ConfigOptions.key("global-index.external-path")
+    GLOBAL_INDEX_EXTERNAL_PATHS: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-paths")
         .string_type()
         .no_default_value()
-        .with_description(
-            "Global index root directory. If not set, global index files are "
-            "stored under the table index directory."
-        )
+        .with_description("Comma-separated global index root directories.")
     )
 
     GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
@@ -1448,11 +1478,14 @@ class CoreOptions:
             return [str(column).strip() for column in value if str(column).strip()]
         return []
 
+    def vortex_compact_encodings(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_COMPACT_ENCODINGS, default)
+
+    def vortex_write_edition(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_WRITE_EDITION, default)
+
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
-
-    def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
@@ -1816,7 +1849,18 @@ class CoreOptions:
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def scalar_index_search_mode(self):
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST)
+
+    def scalar_scan_search_mode(self):
         return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def scalar_prefilter_search_mode(self):
+        option = CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE
+        if self.options.to_map().get(option.key()) is not None:
+            return self.options.get(option)
+        return self._family_index_search_mode(
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE, option.default_value())
 
     def vector_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
@@ -1824,22 +1868,27 @@ class CoreOptions:
     def full_text_index_search_mode(self):
         return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
 
-    def _family_index_search_mode(self, option):
+    def _family_index_search_mode(self, option, default=None):
         if self.options.contains(option):
-            return self.options.get(option)
+            return self.options.get(option, default)
         global_mode = self.global_index_search_mode()
-        return global_mode if global_mode is not None else self.options.get(option)
+        return global_mode if global_mode is not None else self.options.get(option, default)
 
-    def global_index_external_path(self, default=None):
-        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+    def global_index_external_paths(self) -> List[str]:
+        """Return configured index roots, with a legacy single-URI fallback."""
+        if self.options.contains(self.GLOBAL_INDEX_EXTERNAL_PATHS):
+            values = (self.options.get(self.GLOBAL_INDEX_EXTERNAL_PATHS) or '').split(',')
+            return [path for path in map(str.strip, values) if path]
+
+        value = self.options.to_map().get("global-index.external-path")
         if value is None:
-            return None
+            return []
         value = str(value).strip()
         if not value:
-            return None
+            return []
         if not urlparse(value).scheme:
             raise ValueError("scheme should not be null: %s" % value)
-        return value
+        return [value]
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
@@ -1899,6 +1948,13 @@ class CoreOptions:
     def _index_columns(columns) -> List[str]:
         return [] if columns is None else [column.strip() for column in str(columns).split(',')]
 
+    @staticmethod
+    def _field_index_option_keys(index_type: str, column: str):
+        field = "fields.%s." % column
+        family = "vector" if CoreOptions._is_vector_index_type(index_type) else index_type
+        return (field + "index-options", field + "global-index.%s.index-options" % family,
+                field + "pk-%s.index.options" % family)
+
     def global_index_options(self, index_type: Optional[str], column: str) -> Options:
         """Resolve the same implementation and field options for either table mode."""
         values = dict(self.options.to_map())
@@ -1907,10 +1963,9 @@ class CoreOptions:
         vector = self._is_vector_index_type(index_type)
         prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
-        shared_key = field_prefix + "index-options"
-        shared = values.get(shared_key) is not None
-        option_key = shared_key if shared else field_prefix + "pk-" + (
-            "vector" if vector else index_type) + ".index.options"
+        keys = self._field_index_option_keys(index_type, column)
+        option_key = next((key for key in keys if values.get(key) is not None), keys[-1])
+        shared = option_key == keys[0]
         serialized = values.get(option_key)
         if serialized is not None and str(serialized).strip():
             try:
@@ -1933,7 +1988,7 @@ class CoreOptions:
                 values[qualified] = str(value)
                 if vector and qualified.startswith(prefix):
                     short_key = qualified[len(prefix):]
-                    if shared:
+                    if shared or option_key == keys[1] or short_key == "sharding":
                         values[field_prefix + short_key] = str(value)
         return Options(values)
 

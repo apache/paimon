@@ -62,11 +62,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int fieldCount;
+    private final GenericRow nullBlobRow;
     private final int rowIdIndex;
-    private final int seqNumIndex;
-    private final int blobIndex;
-    private final boolean keepPlaceholders;
     private final Object blobPlaceholder;
     private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
@@ -81,12 +78,17 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             int blobIndex,
             boolean keepPlaceholders)
             throws IOException {
-        this.fieldCount = readRowType.getFieldCount();
+        this.nullBlobRow = new GenericRow(readRowType.getFieldCount());
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
-        this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
-        this.blobIndex = blobIndex;
-        this.keepPlaceholders = keepPlaceholders;
+        int seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        // Set seq num as -1 to mark this row as an all-placeholder row.
+        if (seqNumIndex >= 0) {
+            nullBlobRow.setField(seqNumIndex, -1L);
+        }
         this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
+        if (keepPlaceholders) {
+            nullBlobRow.setField(blobIndex, blobPlaceholder);
+        }
         this.blobGetter =
                 InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
@@ -116,6 +118,29 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             sequenceGroups
                     .computeIfAbsent(file.maxSequenceNumber(), ignored -> new ArrayList<>())
                     .add(file);
+        }
+
+        // Disjoint files cannot supply competing versions of the same row. Read them as a
+        // single group even when their sequence numbers differ, rather than advancing one
+        // full logical range (including placeholders) per sequence number for every output row.
+        if (sequenceGroups.size() > 1) {
+            List<DataFileMeta> sortedFiles = new ArrayList<>(files);
+            sortedFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+            boolean disjoint = true;
+            for (int i = 1; i < sortedFiles.size(); i++) {
+                if (sortedFiles.get(i - 1).nonNullRowIdRange().to
+                        >= sortedFiles.get(i).nonNullFirstRowId()) {
+                    disjoint = false;
+                    break;
+                }
+            }
+            if (disjoint) {
+                long maxSeq = sequenceGroups.keySet().iterator().next();
+                sequenceGroups.clear();
+                // The group sequence is only used for synthetic gaps. Actual rows retain their
+                // file sequence, and unresolved placeholders still become null (or are kept).
+                sequenceGroups.put(maxSeq, sortedFiles);
+            }
         }
 
         for (Map.Entry<Long, List<DataFileMeta>> entry : sequenceGroups.entrySet()) {
@@ -235,18 +260,10 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     }
 
     private InternalRow nullBlobRow(long rowId) {
-        GenericRow row = new GenericRow(fieldCount);
-        if (keepPlaceholders) {
-            row.setField(blobIndex, blobPlaceholder);
-        }
         if (rowIdIndex >= 0) {
-            row.setField(rowIdIndex, rowId);
+            nullBlobRow.setField(rowIdIndex, rowId);
         }
-        // Set seq num as -1 to mark this row as an all-placeholder null
-        if (seqNumIndex >= 0) {
-            row.setField(seqNumIndex, -1L);
-        }
-        return row;
+        return nullBlobRow;
     }
 
     private boolean isPlaceHolder(InternalRow row) {

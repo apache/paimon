@@ -27,6 +27,17 @@ from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptio
 from pypaimon.common.options.options_utils import OptionsUtils
 
 
+def _native_variant_write_supported(table, columns=None):
+    """Rust 0.5.0 omits Java-required field IDs inside shredded VARIANTs."""
+    if not table.options.variant_shredding_schema():
+        return True
+    from pypaimon.schema.data_types import AtomicType
+
+    names = set(table.field_names if columns is None else columns)
+    return not any(field.name in names and isinstance(field.type, AtomicType) and field.type.type == 'VARIANT'
+                   for field in table.fields)
+
+
 def _native_blob_view_supported(table, read_names) -> bool:
     """Resolve Blob views natively only when Python itself can resolve them."""
     if (not (table.options.blob_view_fields() & set(read_names))
@@ -63,6 +74,19 @@ def _catalog_metastore(loader) -> Optional[str]:
     if type(loader) is RESTCatalogLoader:
         return 'rest'
     return None
+
+
+def _filesystem_vector_table_supported(table):
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.filesystem.local_file_io import LocalFileIO
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    if type(table) is not FileStoreTable or type(table.file_io) is not LocalFileIO:
+        return False
+    environment = table.catalog_environment
+    return (type(environment) is CatalogEnvironment
+            and _catalog_metastore(environment.catalog_loader) == 'filesystem'
+            and table.options.file_format() == 'parquet')
 
 
 def _option_value_to_string(value) -> str:

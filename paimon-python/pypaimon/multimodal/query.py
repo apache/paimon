@@ -597,7 +597,12 @@ class _PreFilterQuery(ScanQuery):
                     raise ValueError("Score column name conflicts with a projected column: %s" % self._score_column)
                 table = table.append_column(self._score_column, pa.array(scores, type=pa.float64()))
             if self._sort_by_score:
-                order = sorted(range(len(row_ids)), key=lambda i: (-scores[i], row_ids[i]))
+                if isinstance(self, VectorQuery):
+                    from pypaimon.globalindex.vector_search_result import vector_score_order
+
+                    order = sorted(range(len(row_ids)), key=lambda i: vector_score_order((row_ids[i], scores[i])))
+                else:
+                    order = sorted(range(len(row_ids)), key=lambda i: (-scores[i], row_ids[i]))
                 table = table.take(pa.array(order, type=pa.int64()))
         if added_row_id:
             table = table.select([i for i, name in enumerate(table.column_names) if name != SpecialFields.ROW_ID.name])

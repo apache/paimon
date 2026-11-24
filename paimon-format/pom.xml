@@ -358,7 +358,6 @@ under the License.
                                     <include>org.apache.parquet:parquet-format-structures</include>
                                     <include>org.apache.parquet:parquet-jackson</include>
                                     <include>commons-pool:commons-pool</include>
-                                    <include>org.locationtech.jts:jts-core</include>
 
                                     <!-- Arrow schema metadata encoding -->
                                     <include>com.google.flatbuffers:flatbuffers-java</include>

@@ -22,10 +22,10 @@ import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadUtils;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.vector.VectorIndexInput;
 import org.apache.paimon.index.vector.VectorIndexMetadata;
@@ -34,17 +34,21 @@ import org.apache.paimon.index.vector.VectorSearchBatchResult;
 import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.predicate.BatchVectorSearch;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -61,8 +65,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <p>Each shard has exactly one vector index file. The reader lazily opens the index and performs
  * vector similarity search.
  */
-public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
+public class NativeVectorGlobalIndexReader extends AbstractVectorGlobalIndexReader {
 
+    static final int JOINT_INNER_PROBES = 16;
+    // 64K native hits occupy 768 KiB of row IDs and distances before JNI copies.
+    private static final int MAX_RETRY_HITS = 64 * 1024;
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
     private static final String MAX_INITIAL_FILTER_EXPANSION_FACTOR_PARAMETER =
@@ -77,70 +84,119 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final ExecutorService executor;
+    private final String expectedIndexType;
+    private final boolean multiVector;
+    private final long totalRowCount;
 
     private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
-    private SeekableInputStream openStream;
+    private volatile SeekableInputStream openStream;
 
     public NativeVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
             ExecutorService executor) {
+        this(fileReader, ioMetas, fieldType, executor, null, -1);
+    }
+
+    NativeVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            DataType fieldType,
+            ExecutorService executor,
+            String expectedIndexType) {
+        this(fileReader, ioMetas, fieldType, executor, expectedIndexType, -1);
+    }
+
+    NativeVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            DataType fieldType,
+            ExecutorService executor,
+            String expectedIndexType,
+            long totalRowCount) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
+        this.expectedIndexType = expectedIndexType;
+        this.multiVector = VectorIndexUtils.isMultiVector(fieldType);
+        this.totalRowCount = totalRowCount;
     }
 
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    try {
-                        ensureLoaded();
-                        return Optional.ofNullable(search(vectorSearch));
-                    } catch (IOException e) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Failed vector index search: field=%s, limit=%d",
-                                        vectorSearch.fieldName(), vectorSearch.limit()),
-                                e);
-                    }
-                },
-                executor);
+        if (ioMeta.rowCount() == 0) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        return CompletableFuture.supplyAsync(() -> searchShard(vectorSearch), executor);
+    }
+
+    private Optional<ScoredGlobalIndexResult> searchShard(VectorSearch query) {
+        try {
+            ensureLoaded();
+            SearchScope scope = SearchScope.of(query.includeRowIds(), query.limit());
+            return Optional.ofNullable(
+                    multiVector ? searchRows(query, scope) : search(query, false, scope));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed vector index search: field=%s, limit=%d",
+                            query.fieldName(), query.limit()),
+                    e);
+        }
     }
 
     @Override
     public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
-            BatchVectorSearch batchVectorSearch) {
+            BatchVectorSearch batch) {
+        if (ioMeta.rowCount() == 0) {
+            return CompletableFuture.completedFuture(
+                    Collections.nCopies(batch.vectorCount(), Optional.empty()));
+        }
         return CompletableFuture.supplyAsync(
-                () -> {
-                    try {
-                        ensureLoaded();
-                        return searchBatch(batchVectorSearch);
-                    } catch (IOException e) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Failed batch vector index search: field=%s, limit=%d, vectorCount=%d",
-                                        batchVectorSearch.fieldName(),
-                                        batchVectorSearch.limit(),
-                                        batchVectorSearch.vectorCount()),
-                                e);
-                    }
-                },
+                () ->
+                        searchShardBatch(
+                                batch, false, SearchScope.of(batch.includeRowIds(), batch.limit())),
                 executor);
     }
 
-    private List<Optional<ScoredGlobalIndexResult>> searchBatch(BatchVectorSearch batchVectorSearch)
+    List<Optional<ScoredGlobalIndexResult>> searchShardBatch(
+            BatchVectorSearch batch, boolean joint, SearchScope scope) {
+        if (ioMeta.rowCount() == 0) {
+            return Collections.nCopies(batch.vectorCount(), Optional.empty());
+        }
+        try {
+            ensureLoaded();
+            if (multiVector) {
+                List<Optional<ScoredGlobalIndexResult>> results =
+                        new ArrayList<>(batch.vectorCount());
+                for (int i = 0; i < batch.vectorCount(); i++) {
+                    results.add(Optional.ofNullable(searchRows(batch.forIndex(i), scope)));
+                }
+                return results;
+            }
+            return searchBatch(batch, joint, scope);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed batch vector index search: field=%s, limit=%d, vectorCount=%d",
+                            batch.fieldName(), batch.limit(), batch.vectorCount()),
+                    e);
+        }
+    }
+
+    private List<Optional<ScoredGlobalIndexResult>> searchBatch(
+            BatchVectorSearch batchVectorSearch, boolean joint, SearchScope scope)
             throws IOException {
         int n = batchVectorSearch.vectorCount();
         // Single vector: reuse the scalar path; no batching benefit.
         if (n == 1) {
             List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
-            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0))));
+            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0), joint, scope)));
             return results;
         }
 
@@ -151,13 +207,12 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         int dim = nativeMeta.dimension();
         String metric = nativeMeta.metric();
 
-        SearchScope scope =
-                resolveScope(batchVectorSearch.includeRowIds(), batchVectorSearch.limit());
-        if (scope == null) {
+        if (scope.effectiveK == 0) {
             return emptyResults(n);
         }
         VectorSearchParams searchParams =
-                batchSearchParams(batchVectorSearch.options(), scope.effectiveK);
+                batchSearchParams(
+                        shardOptions(batchVectorSearch.options(), joint), scope.effectiveK);
 
         // Flatten query vectors into one contiguous array for a single native call.
         float[] queries = new float[n * dim];
@@ -173,34 +228,134 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         // result i corresponds to vectors[i], matching input order.
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            results.add(
+            Optional<ScoredGlobalIndexResult> found =
                     buildScoredResult(
-                            batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric));
+                            batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric);
+            if (joint && incomplete(found, batchVectorSearch.limit())) {
+                found = Optional.ofNullable(search(batchVectorSearch.forIndex(i), false, scope));
+            }
+            results.add(found);
         }
         return results;
     }
 
-    private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
+    private ScoredGlobalIndexResult search(
+            VectorSearch vectorSearch, boolean joint, SearchScope scope) throws IOException {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         String metric = nativeMeta.metric();
 
-        SearchScope scope = resolveScope(vectorSearch.includeRowIds(), limit);
-        if (scope == null) {
+        if (scope.effectiveK == 0) {
             return null;
         }
+        Map<String, String> options =
+                shardOptions(vectorSearch.options(), joint && scope.filterBytes == null);
         VectorSearchResult result =
-                scope.filterBytes != null
-                        ? vectorReader.search(
-                                queryVector,
-                                searchParams(vectorSearch.options(), scope.effectiveK),
-                                scope.filterBytes)
-                        : vectorReader.search(
-                                queryVector,
-                                searchParams(vectorSearch.options(), scope.effectiveK));
+                searchVector(
+                        queryVector, searchParams(options, scope.effectiveK), scope.filterBytes);
 
-        return buildScoredResult(result.ids(), result.distances(), metric).orElse(null);
+        Optional<ScoredGlobalIndexResult> found =
+                buildScoredResult(result.ids(), result.distances(), metric);
+        return joint && incomplete(found, limit)
+                ? search(vectorSearch, false, scope)
+                : found.orElse(null);
+    }
+
+    private ScoredGlobalIndexResult searchRows(VectorSearch query, SearchScope scope)
+            throws IOException {
+        validateSearchVector(query.vector());
+
+        RoaringNavigableMap64 remaining = query.includeRowIds();
+        long vectors = nativeMeta.totalVectors();
+        int requested = (int) Math.min(scope.effectiveK, vectors);
+        if (requested == 0) {
+            return null;
+        }
+        float[] normalized = new float[query.vector().length];
+        NativeVectorGlobalIndexer.normalizeCosine(query.vector(), normalized);
+        byte[] filter = scope.filterBytes;
+        Map<Long, Float> scores = new HashMap<>();
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        while (requested > 0) {
+            VectorSearchParams params = searchParams(query.options(), requested);
+            VectorSearchResult found = searchVector(normalized, params, filter);
+            long[] ids = found.ids();
+            float[] distances = found.distances();
+            int previousRows = scores.size();
+            int hits = 0;
+            for (int i = 0; i < ids.length; i++) {
+                if (ids[i] >= 0) {
+                    rows.add(ids[i]);
+                    scores.merge(ids[i], 1.0f - distances[i], Math::max);
+                    hits++;
+                }
+            }
+            // Automatic IVF may stop probing once it has as many hits as allowed row IDs.
+            // Those hits can still include several embeddings from the same row.
+            long expected =
+                    remaining == null
+                            ? requested
+                            : Math.min(requested, remaining.getLongCardinality());
+            if (scores.size() >= query.limit() || hits < expected || hits == vectors) {
+                break;
+            }
+            // A full Roaring range needs a container per 65536 row IDs. For an unknown range
+            // or one with fewer vectors than containers, widen the unfiltered search instead.
+            if (remaining == null && (totalRowCount < 0 || (totalRowCount >>> 16) > vectors)) {
+                int next = (int) Math.min(Math.min(vectors, Integer.MAX_VALUE), 2L * requested);
+                if (next == requested) {
+                    break;
+                }
+                requested = next;
+                continue;
+            }
+            // Excluding a matching row skips all its vectors in the next search.
+            if (remaining == query.includeRowIds()) {
+                remaining = new RoaringNavigableMap64();
+                if (query.includeRowIds() == null) {
+                    remaining.addRange(new Range(0, totalRowCount - 1));
+                } else {
+                    remaining.or(query.includeRowIds());
+                }
+            }
+            remaining.andNot(rows);
+            long missing = Math.min(query.limit() - scores.size(), remaining.getLongCardinality());
+            int added = scores.size() - previousRows;
+            if (missing == 0 || added == 0) {
+                break;
+            }
+            // Native top-K counts embeddings. Estimate the next page from the distinct rows
+            // in this one, growing at most twofold and bounding temporary result arrays.
+            long estimate = missing == 1 ? 1 : (missing * hits + added - 1) / added;
+            long cap = Math.min(vectors, Math.max(query.limit(), MAX_RETRY_HITS));
+            requested = (int) Math.min(estimate, Math.min(2L * requested, cap));
+            filter = remaining.serialize();
+        }
+        if (scores.isEmpty()) {
+            return null;
+        }
+        return ScoredGlobalIndexResult.create(rows, scores::get).topK(query.limit());
+    }
+
+    VectorSearchResult searchVector(
+            float[] vector, VectorSearchParams params, @Nullable byte[] filter) {
+        return filter == null
+                ? vectorReader.search(vector, params)
+                : vectorReader.search(vector, params, filter);
+    }
+
+    private static boolean incomplete(Optional<ScoredGlobalIndexResult> found, int limit) {
+        return !found.isPresent() || found.get().results().getLongCardinality() < limit;
+    }
+
+    private static Map<String, String> shardOptions(Map<String, String> options, boolean joint) {
+        if (!joint) {
+            return options;
+        }
+        Map<String, String> widened = new HashMap<>(options);
+        widened.put(NPROBE_PARAMETER, String.valueOf(JOINT_INNER_PROBES));
+        return widened;
     }
 
     static Optional<ScoredGlobalIndexResult> buildScoredResult(
@@ -249,27 +404,30 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         return results;
     }
 
-    /** Resolves filter bytes and effective top-K; returns null when the filter selects no rows. */
-    private static SearchScope resolveScope(RoaringNavigableMap64 includeRowIds, int limit)
-            throws IOException {
-        if (includeRowIds == null) {
-            return new SearchScope(null, limit);
-        }
-        long cardinality = includeRowIds.getLongCardinality();
-        if (cardinality == 0) {
-            return null;
-        }
-        return new SearchScope(includeRowIds.serialize(), (int) Math.min(limit, cardinality));
-    }
-
-    /** Resolved filter state for a query. {@code filterBytes} is null when no filter is set. */
-    private static final class SearchScope {
+    /** The serialized filter and effective top-K for one search, shared by its shard reads. */
+    static final class SearchScope {
         private final byte[] filterBytes;
-        private final int effectiveK;
+        final int effectiveK;
 
         private SearchScope(byte[] filterBytes, int effectiveK) {
             this.filterBytes = filterBytes;
             this.effectiveK = effectiveK;
+        }
+
+        static SearchScope of(RoaringNavigableMap64 includeRowIds, int limit) {
+            if (includeRowIds == null) {
+                return new SearchScope(null, limit);
+            }
+            long cardinality = includeRowIds.getLongCardinality();
+            if (cardinality == 0) {
+                return new SearchScope(null, 0);
+            }
+            try {
+                return new SearchScope(
+                        includeRowIds.serialize(), (int) Math.min(limit, cardinality));
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot serialize the vector row-ID filter.", e);
+            }
         }
     }
 
@@ -356,29 +514,43 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         } else if (fieldType instanceof ArrayType) {
             validFieldType = ((ArrayType) fieldType).getElementType() instanceof FloatType;
         }
-        if (!validFieldType) {
+        if (!validFieldType && !multiVector) {
             throw new IllegalArgumentException(
                     "Vector index requires VectorType<FLOAT> or ArrayType<FLOAT>, but field type is: "
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
-        if (queryDim != nativeMeta.dimension()) {
+        int dimension = nativeMeta.dimension();
+        if (multiVector) {
+            VectorIndexUtils.validateQuery(new float[][] {(float[]) vector});
+        }
+        if (queryDim != dimension) {
             throw new IllegalArgumentException(
                     String.format(
                             "Query vector dimension mismatch: index expects %d, but got %d",
-                            nativeMeta.dimension(), queryDim));
+                            dimension, queryDim));
         }
     }
 
     private void ensureLoaded() throws IOException {
-        if (vectorReader == null) {
+        if (openStream == null) {
             synchronized (this) {
-                if (vectorReader == null) {
+                if (openStream == null) {
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     VectorIndexReader reader = null;
                     try {
                         reader = new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
                         nativeMeta = reader.metadata();
+                        if (multiVector && !"cosine".equals(nativeMeta.metric())) {
+                            throw new IOException("Multivector index requires cosine similarity.");
+                        }
+                        if (expectedIndexType != null
+                                && !expectedIndexType.equals(
+                                        nativeMeta.indexType().replace('_', '-'))) {
+                            throw new IOException(
+                                    "Index file type differs from manifest index type: "
+                                            + ioMeta.filePath());
+                        }
                         reader.optimizeForSearch();
                         vectorReader = reader;
                         openStream = in;
@@ -529,89 +701,5 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             }
             return true;
         }
-    }
-
-    // =================== unsupported =====================
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
-            FieldRef fieldRef, Object literal) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
-            FieldRef fieldRef, List<Object> literals) {
-        return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
-            FieldRef fieldRef, List<Object> literals) {
-        return CompletableFuture.completedFuture(Optional.empty());
     }
 }

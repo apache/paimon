@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="356" viewBox="0 0 780 356" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">MaxSim for one candidate row</title>
+<desc id="desc">The row stores embeddings [1, 0] and [0, 1]. The first query vector [1, 0] has cosine similarities 1 and 0. The second query vector [0, 1] has similarities 0 and 1. MaxSim sums the best match for each query vector, so the row scores 2.</desc>
+<rect x="1" y="1" width="778" height="354" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+  <text x="24" y="45" font-size="28" font-weight="700">MaxSim for one candidate row</text>
+  <text x="24" y="75" font-size="19" fill="#526277">Cosine similarities against the two embeddings in the sample row with id 1</text>
+
+  <rect x="24" y="106" width="732" height="58" fill="#f5f7fb"/>
+  <rect x="223" y="164" width="171" height="52" fill="#f2ecfb"/>
+  <rect x="394" y="216" width="171" height="52" fill="#f2ecfb"/>
+  <rect x="565" y="164" width="191" height="104" fill="#e7f5f1"/>
+  <g fill="none" stroke="#d7dfeb">
+    <rect x="24" y="106" width="732" height="162"/>
+    <path d="M223 106 V268 M394 106 V268 M565 106 V268 M24 164 H756 M24 216 H756"/>
+  </g>
+
+  <g font-size="20" font-weight="700">
+    <text x="44" y="142">Query vector</text>
+    <g text-anchor="middle">
+      <text x="308.5" y="142">[1, 0]</text>
+      <text x="479.5" y="142">[0, 1]</text>
+      <text x="660.5" y="142">Best match</text>
+    </g>
+  </g>
+  <g font-size="22">
+    <text x="44" y="198">q₁ = [1, 0]</text>
+    <text x="44" y="250">q₂ = [0, 1]</text>
+    <g text-anchor="middle">
+      <text x="308.5" y="198" fill="#7046a4" font-weight="700">1</text>
+      <text x="479.5" y="198" fill="#526277">0</text>
+      <text x="308.5" y="250" fill="#526277">0</text>
+      <text x="479.5" y="250" fill="#7046a4" font-weight="700">1</text>
+      <text x="660.5" y="198" fill="#14766b" font-weight="700">1</text>
+      <text x="660.5" y="250" fill="#14766b" font-weight="700">1</text>
+    </g>
+  </g>
+
+  <rect x="24" y="292" width="732" height="42" rx="8" fill="#e7f5f1"/>
+  <text x="44" y="320" font-size="22" font-weight="700" fill="#14766b">MaxSim score = 1 + 1 = 2</text>
+</g>
+</svg>

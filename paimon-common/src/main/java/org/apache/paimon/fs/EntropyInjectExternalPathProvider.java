@@ -57,7 +57,7 @@ public class EntropyInjectExternalPathProvider implements ExternalPathProvider {
         return new Path(externalTablePaths.get(position), filePathWithHashDirs);
     }
 
-    public String computeHash(String fileName) {
+    public static String computeHash(String fileName) {
         HashCode hashCode = HASH_FUNC.hashString(fileName, StandardCharsets.UTF_8);
         String hashAsBinaryString = Integer.toBinaryString(hashCode.asInt() | Integer.MIN_VALUE);
         String hash =
@@ -71,7 +71,7 @@ public class EntropyInjectExternalPathProvider implements ExternalPathProvider {
      * @param hash 10011001100110011001
      * @return 1001/1001/1001/10011001 with depth 3 and length 4
      */
-    private String dirsFromHash(String hash) {
+    private static String dirsFromHash(String hash) {
         StringBuilder hashWithDirs = new StringBuilder();
 
         for (int i = 0; i < ENTROPY_DIR_DEPTH * ENTROPY_DIR_LENGTH; i += ENTROPY_DIR_LENGTH) {

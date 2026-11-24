@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.PartitionEntryScanner;
 import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
@@ -71,6 +72,20 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
         }
 
         List<PartitionEntry> partitions = scan.readPartitionEntries();
+        return selectExpiredPartitions(partitions, predicate);
+    }
+
+    public List<PartitionEntry> selectExpiredPartitions(
+            PartitionEntryScanner scan, LocalDateTime expirationTime) {
+        PartitionValuesTimePredicate predicate = new PartitionValuesTimePredicate(expirationTime);
+        if (!retainLatest) {
+            return scan.withPartitionFilter(predicate).scan();
+        }
+        return selectExpiredPartitions(scan.scan(), predicate);
+    }
+
+    private List<PartitionEntry> selectExpiredPartitions(
+            List<PartitionEntry> partitions, PartitionValuesTimePredicate predicate) {
         List<PartitionEntry> expired =
                 partitions.stream()
                         .filter(entry -> predicate.test(entry.partition()))

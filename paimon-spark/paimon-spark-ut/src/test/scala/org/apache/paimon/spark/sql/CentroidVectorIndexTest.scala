@@ -1,0 +1,1022 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.sql
+
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
+import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta}
+import org.apache.paimon.index.IndexFileMeta
+import org.apache.paimon.manifest.ManifestCommittable
+import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.globalindex.CentroidBitmapFieldAppender
+import org.apache.paimon.table.sink.CommitCallback
+import org.apache.paimon.table.source.{RawVectorSearchSplit, VectorSearchBuilderImpl}
+import org.apache.paimon.vector.index.VectorTrainingModelIO
+
+import org.apache.commons.io.FileUtils
+import org.apache.spark.sql.Row
+
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+
+import scala.collection.JavaConverters._
+
+/** End-to-end centroid build over nonzero, disjoint source row-ID ranges. */
+class CentroidVectorIndexTest extends PaimonSparkTestBase {
+
+  private def runSql(statement: String): Seq[Row] = spark.sql(statement).collect().toSeq
+
+  test("centroid interchange tables omit empty shards and carry canonical metrics") {
+    val bitmapTable = "centroid_bitmap"
+    val metricsTable = "centroid_metrics"
+    withTable(bitmapTable, metricsTable) {
+      val properties =
+        """'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+          |'file.format'='parquet', 'vector-index.search-mode'='detail',
+          |'global-index.column-update-action'='THROW_ERROR'""".stripMargin
+      spark.sql(s"""CREATE TABLE $bitmapTable (id INT, v ARRAY<FLOAT>, status INT, p INT)
+                   |PARTITIONED BY (p) TBLPROPERTIES ($properties)""".stripMargin)
+      // Use a nonzero build schema ID in the manifest.
+      spark.sql(s"ALTER TABLE $bitmapTable ADD COLUMNS (note STRING)")
+      spark.sql(s"""INSERT INTO $bitmapTable VALUES
+                   |(0, array(1.0f,0.0f), 0, 0, NULL),
+                   |(1, array(1.0f,0.0f), 9, 0, NULL),
+                   |(2, array(1.0f,0.0f), NULL, 0, NULL),
+                   |(3, array(1.0f,0.0f), 0, 0, NULL)""".stripMargin)
+      spark.sql(s"INSERT INTO $bitmapTable VALUES (4, NULL, 9, 1, NULL)")
+      val paddedL2 = "\u00a0l2\u00a0"
+      spark
+        .sql(
+          s"""CALL sys.create_global_index(table=>'$dbName0.$bitmapTable', index_column=>'v',
+             |index_type=>'ivf-flat', extra_fields=>'{"id":"bitmap","status":"bitmap"}',
+             |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=$paddedL2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1,ivf-flat.train.sample-ratio=1')""".stripMargin)
+        .collect()
+
+      spark.sql(s"""CREATE TABLE $metricsTable
+                   |(id INT, pq ARRAY<FLOAT>, cos ARRAY<FLOAT>, ip ARRAY<FLOAT>)
+                   |TBLPROPERTIES ($properties)""".stripMargin)
+      spark.sql(s"""INSERT INTO $metricsTable SELECT id, v, v, v FROM (
+                   |SELECT CAST(id AS INT) AS id,
+                   |array(CAST(CASE id WHEN 0 THEN 1 WHEN 1 THEN 10 ELSE 0 END AS FLOAT),
+                   |CAST(CASE id WHEN 0 THEN 0 WHEN 1 THEN 0.1 ELSE 100 + id END AS FLOAT)) AS v
+                   |FROM range(0, 512, 1, 1))""".stripMargin)
+      Seq(
+        ("pq", "ivf-pq", "l2", 1),
+        ("cos", "ivf-flat", "cosine", 2),
+        ("ip", "ivf-flat", "inner_product", 2)).foreach {
+        case (column, kind, metric, outer) =>
+          val local = if (kind == "ivf-pq") "64,ivf-pq.pq.m=1" else "1"
+          spark
+            .sql(
+              s"""CALL sys.create_global_index(table=>'$dbName0.$metricsTable',
+                 |index_column=>'$column', index_type=>'$kind',
+                 |options=>'$kind.sharding=centroid,$kind.dimension=2,$kind.metric=$metric,$kind.centroid.nlist=$outer,$kind.nlist=$local,$kind.train.sample-ratio=1')""".stripMargin)
+            .collect()
+      }
+
+      val table = loadTable(bitmapTable)
+      val files = table
+        .store()
+        .newIndexFileHandler()
+        .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+        .asScala
+        .map(_.indexFile())
+      val routers = files.filter(CentroidIndexMeta.isRoutingModel)
+      assert(routers.map(_.fileSize() == 0).toSet == Set(true, false))
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      assert(
+        routers.forall(file => table.fileIO().getFileSize(paths.toPath(file)) == file.fileSize()))
+      assert(
+        routers
+          .map(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(10))
+          .toSet == Set(0, 2))
+      assert(routers.forall(
+        file =>
+          new String(file.globalIndexMeta().indexMeta().drop(14), StandardCharsets.UTF_8) == "l2"))
+      val shards = files.filterNot(
+        file => CentroidIndexMeta.isRoutingModel(file) || CentroidIndexMeta.isScalarIndex(file))
+      assert(shards.size == 1)
+      assert(shards.head.rowCount() == 4)
+      assert(ByteBuffer.wrap(shards.head.globalIndexMeta().indexMeta()).getInt(14) == 1)
+      assert(
+        files
+          .filter(CentroidIndexMeta.isScalarIndex)
+          .map(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(10))
+          .toSet == Set(0, 2))
+
+      sys.env.get("PAIMON_JAVA_CENTROID_FIXTURE").foreach {
+        directory =>
+          Seq(bitmapTable, metricsTable).foreach {
+            name =>
+              FileUtils.copyDirectory(
+                new File(tempDBDir, s"$dbName0.db/$name"),
+                new File(directory, s"$dbName0.db/$name"))
+          }
+      }
+    }
+  }
+
+  test("centroid build rejects an invalid metric for an all-null range") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                  |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (0, NULL)")
+      val snapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+
+      val error = intercept[Exception] {
+        spark
+          .sql(
+            s"""CALL sys.create_global_index(table=>'$dbName0.T', index_column=>'v',
+               |index_type=>'ivf-flat',
+               |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=cosne')""".stripMargin)
+          .collect()
+      }
+      assert(
+        Iterator
+          .iterate[Throwable](error)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(
+            e => Option(e.getMessage).exists(_.contains("Unsupported distance metric: cosne"))))
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == snapshotId)
+    }
+  }
+
+  test("centroid bitmap fields pre-filter top K and follow the vector definition") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, status STRING)
+                  |TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.row-count-per-shard'='128',
+                  |'vector-index.search-mode'='detail',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT cast(id AS INT),
+                  |array(cast(IF(id < 32, id, id + 1000) AS FLOAT), 0.0f),
+                  |IF(id % 2 = 0, 'red', 'blue'),
+                  |CASE WHEN id = 48 THEN NULL ELSE 'busy' END FROM range(64)""".stripMargin)
+      def build(extraFields: String = "", sharding: String = "centroid"): Unit = {
+        val extra = if (extraFields.isEmpty) "" else s", extra_fields => '$extraFields'"
+        spark
+          .sql(
+            s"""CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+               |index_type=>'ivf-flat', options=>'ivf-flat.sharding=$sharding,ivf-flat.dimension=2,
+               |ivf-flat.metric=l2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1'$extra)""".stripMargin
+              .replace("\n", ""))
+          .collect()
+      }
+      def files: Seq[IndexFileMeta] = {
+        val table = loadTable("T")
+        table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .asScala
+          .map(_.indexFile())
+          .toSeq
+      }
+      def nearest(predicate: String, probes: Int = 2): Seq[Int] =
+        spark
+          .sql(
+            s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+               |map('centroid.nprobe','$probes','ivf.nprobe','1')) WHERE $predicate""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      build()
+      assert(nearest("status IS NULL").isEmpty)
+
+      def assertBuildRejected(
+          fields: String,
+          message: String,
+          sharding: String = "centroid"): Unit = {
+        val previousFiles = files.map(_.fileName()).toSet
+        val error = intercept[Exception](build(fields, sharding))
+        assert(
+          Iterator
+            .iterate[Throwable](error)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(e => Option(e.getMessage).exists(_.contains(message))))
+        assert(files.map(_.fileName()).toSet == previousFiles)
+      }
+      assertBuildRejected("""{"status":"btree"}""", "Unsupported index type")
+      assertBuildRejected("""{"status":"bitmap","status":"bitmap"}""", "Duplicate field")
+      assertBuildRejected("""{"status":"bitmap"}""", "requires centroid sharding", "range")
+
+      build("""{"tenant":"bitmap","status":"bitmap"}""")
+      assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
+      val table = loadTable("T")
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      val bitmaps = files.filter(CentroidIndexMeta.isScalarIndex).map {
+        file => CentroidIndexMeta.file(file, paths).asInstanceOf[CentroidIndexFile]
+      }
+      assert(bitmaps.size == 2)
+      assert(
+        bitmaps.map(_.fieldId()).toSet ==
+          Set(table.rowType().getField("tenant").id(), table.rowType().getField("status").id()))
+      assert(bitmaps.forall(_.rowCount() == 64))
+      val coveredPlan = table
+        .newVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVector(Array(0f, 0f))
+        .withLimit(1)
+        .newVectorScan()
+        .scan()
+      assert(!coveredPlan.splits().asScala.exists(_.isInstanceOf[RawVectorSearchSplit]))
+      assert(nearest("tenant IN ('red', 'green') AND status IS NULL") == Seq(48))
+      assert(nearest("tenant = 'blue' AND status IS NULL").isEmpty)
+      assert(nearest("status IS NULL", probes = 1).isEmpty)
+
+      build("""{"status":"bitmap"}""")
+      assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
+      assert(files.count(CentroidIndexMeta.isScalarIndex) == 1)
+      assert(files.forall(_.globalIndexMeta().extraFieldIds().length == 1))
+      assert(nearest("status IS NULL") == Seq(48))
+      for (inReader <- Seq(false, true)) {
+        spark.sql(
+          s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled'='$inReader')")
+        assert(
+          spark.sql("SELECT id FROM T WHERE status IS NULL").collect().map(_.getInt(0)).toSeq ==
+            Seq(48))
+      }
+
+      intercept[Exception] {
+        spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      }
+      assert(nearest("status IS NULL") == Seq(48))
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='IGNORE')")
+      intercept[Exception] {
+        spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      }
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='DROP_PARTITION_INDEX')")
+      spark.sql("UPDATE T SET status = 'ready' WHERE id = 48").collect()
+      assert(files.isEmpty)
+
+      build("""{"status":"bitmap"}""")
+      assert(nearest("status = 'ready'") == Seq(48))
+      val centroidFiles = files.map(_.fileName()).toSet
+      spark.sql("INSERT INTO T VALUES (64, array(2000.0f, 0.0f), 'red', 'new')").collect()
+      build(sharding = "range")
+      assert(centroidFiles.subsetOf(files.map(_.fileName()).toSet))
+      assert(files.size == centroidFiles.size + 1)
+      assert(nearest("status = 'ready'") == Seq(48))
+      spark
+        .sql("""CALL sys.drop_global_index(table=>'test.T',index_column=>'v',
+               |index_type=>'ivf-flat')""".stripMargin)
+        .collect()
+      assert(files.isEmpty)
+    }
+  }
+
+  test("add_global_index_fields extends centroid Bitmaps in the selected partition") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, priority INT, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'deletion-vectors.enabled'='true', 'vector-index.search-mode'='fast',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, array(0.0f, 0.0f), 'bulk', 0, 0)")
+      spark.sql("""INSERT INTO T VALUES
+                  |(10, array(0.0f, 0.0f), 'bulk', 0, 1),
+                  |(11, array(101.0f, 0.0f), 'legacy', 7, 1),
+                  |(12, array(20.0f, 0.0f), NULL, 0, 1),
+                  |(13, NULL, 'legacy', 7, 1),
+                  |(14, array(1.0f, 0.0f), 'bulk', 0, 1),
+                  |(15, array(200.0f, 0.0f), 'bulk', 0, 1)""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (2, array(1.0f, 0.0f), 'bulk', 0, 0)")
+      spark.sql("INSERT INTO T VALUES (16, NULL, 'legacy', 7, 1)")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"tenant":"bitmap","priority":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1,ivf-flat.train.sample-ratio=1')""".stripMargin)
+      spark.sql("ALTER TABLE T ADD COLUMNS (region STRING, tier INT)")
+      spark.sql("UPDATE T SET region = 'apac' WHERE id IN (12, 13, 14)").collect()
+      spark.sql("DELETE FROM T WHERE id = 14").collect()
+
+      def filesByPartition: Map[Int, Set[IndexFileMeta]] = {
+        val table = loadTable("T")
+        table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .asScala
+          .groupBy(_.partition().getInt(0))
+          .map { case (partition, entries) => partition -> entries.map(_.indexFile()).toSet }
+          .toMap
+      }
+
+      def addFields(): Unit = {
+        assert(
+          runSql("""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+                   |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap","tier":"bitmap","tenant":"bitmap"}',
+                   |partitions=>'p=1')""".stripMargin).head.getBoolean(0))
+      }
+
+      val table = loadTable("T")
+      val beforeSnapshot = table.snapshotManager().latestSnapshot()
+      val before = filesByPartition
+      addFields()
+      val after = filesByPartition
+      assert(after(0) == before(0))
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      val beforeFiles = before(1).map(f => (paths.toPath(f), f.fileSize()))
+      val afterFiles = after(1).map(f => (paths.toPath(f), f.fileSize()))
+      assert(beforeFiles.subsetOf(afterFiles))
+      assert(before(1).count(CentroidIndexMeta.isScalarIndex) == 2)
+      val fields = Seq("tenant", "priority", "region", "tier").map(table.rowType().getField(_).id())
+      val newFiles = after(1).filterNot(f => beforeFiles.contains((paths.toPath(f), f.fileSize())))
+      assert(newFiles.size == 2)
+      assert(newFiles.forall(CentroidIndexMeta.isScalarIndex))
+      val newFieldIds = newFiles.map(
+        f => CentroidIndexMeta.file(f, paths).asInstanceOf[CentroidIndexFile].fieldId())
+      assert(newFieldIds == fields.drop(2).toSet)
+      assert(after(1).forall(_.globalIndexMeta().extraFieldIds().toSeq == fields))
+
+      val combinedFilter = "(region = 'apac' OR (tenant = 'legacy' AND priority = 7))"
+      val query =
+        s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+           |map('centroid.nprobe','2','ivf.nprobe','1'))
+           |WHERE p = 1 AND $combinedFilter""".stripMargin
+      assert(runSql(query).map(_.getInt(0)) == Seq(12))
+      assert(
+        runSql(query.replace(combinedFilter, "tenant = 'legacy' AND priority = 7"))
+          .map(_.getInt(0)) == Seq(11))
+      assert(
+        runSql(query.replace(combinedFilter, "region = 'apac' AND tier IS NULL"))
+          .map(_.getInt(0)) == Seq(12))
+
+      sys.env.get("PAIMON_JAVA_CENTROID_FIXTURE").foreach {
+        directory =>
+          FileUtils.copyDirectory(
+            new File(tempDBDir, s"$dbName0.db/T"),
+            new File(directory, s"$dbName0.db/centroid_appended_bitmap"))
+      }
+
+      val historical = table
+        .newVectorSearchBuilder()
+        .asInstanceOf[VectorSearchBuilderImpl]
+        .withSnapshot(beforeSnapshot)
+        .withVectorColumn("v")
+        .withVector(Array(0.0f, 0.0f))
+        .withOption("centroid.nprobe", "2")
+        .withLimit(1)
+        .withFilter(new PredicateBuilder(table.rowType())
+          .isNull(table.rowType().getFieldIndex("tenant")))
+      assert(
+        historical
+          .newVectorRead()
+          .read(historical.newVectorScan().scan())
+          .results()
+          .getLongCardinality() == 1)
+
+      val addedSnapshot = table.snapshotManager().latestSnapshotId()
+      addFields()
+      assert(table.snapshotManager().latestSnapshotId() == addedSnapshot)
+      assert(filesByPartition == after)
+      intercept[Exception] {
+        runSql("UPDATE T SET region = 'eu' WHERE id = 12")
+      }
+      assert(runSql(query).map(_.getInt(0)) == Seq(12))
+      runSql("ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='IGNORE')")
+      addFields()
+      assert(table.snapshotManager().latestSnapshotId() == addedSnapshot)
+      assert(filesByPartition == after)
+    }
+  }
+
+  test("add_global_index_fields rejects an existing Bitmap whose field type changed") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (v ARRAY<FLOAT>, flag INT, tag STRING) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (array(0.0f, 0.0f), 7, 'active')")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |extra_fields=>'{"flag":"bitmap","tag":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1')""".stripMargin)
+
+      def add(field: String): Boolean = {
+        val call =
+          s"""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+             |index_type=>'ivf-flat', extra_fields=>'{"$field":"bitmap"}')""".stripMargin
+        runSql(call).head.getBoolean(0)
+      }
+
+      assert(add("flag"))
+      runSql("ALTER TABLE T ALTER COLUMN flag TYPE BIGINT")
+      val widenedSnapshot = loadTable("T").snapshotManager().latestSnapshotId()
+      val failure = intercept[Exception](add("flag"))
+      val message = "Bitmap field 'flag' has changed type. Rebuild the centroid index."
+      assert(
+        Iterator
+          .iterate[Throwable](failure)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains(message))))
+      assert(add("tag"))
+      assert(loadTable("T").snapshotManager().latestSnapshotId() == widenedSnapshot)
+    }
+  }
+
+  test("centroid Bitmap append checks source snapshots and survives callback failure") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (id INT, v ARRAY<FLOAT>, status INT, region STRING)
+          |TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, array(0.0f, 0.0f), 10, 'old')")
+      val create =
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1'""".stripMargin
+      runSql(s"$create)")
+      val add =
+        """CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}')""".stripMargin
+      val unsupported = intercept[Exception](runSql(add))
+      assert(
+        Iterator
+          .iterate[Throwable](unsupported)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains("index with Bitmap fields"))))
+      runSql(s"""$create, extra_fields=>'{"status":"bitmap"}')""")
+
+      val table = loadTable("T")
+      val handler = table.store().newIndexFileHandler()
+      def currentFiles: Set[IndexFileMeta] = handler
+        .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+        .asScala
+        .map(_.indexFile())
+        .toSet
+      val before = currentFiles
+      val messages = CentroidBitmapFieldAppender.build(
+        spark,
+        table,
+        "ivf-flat",
+        table.rowType().getField("v"),
+        Seq(table.rowType().getField("region")).asJava,
+        null)
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      runSql("UPDATE T SET region = 'new' WHERE id = 1")
+      val commit = table.newCommit("stale-bitmap-append")
+      try {
+        val failure = intercept[Exception](commit.commit(messages))
+        assert(
+          Iterator
+            .iterate[Throwable](failure)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(
+              e => Option(e.getMessage).exists(_.contains("Centroid index source rows changed"))))
+      } finally {
+        commit.close()
+      }
+      assert(currentFiles == before)
+      assert(before.forall(file => table.fileIO().exists(paths.toPath(file))))
+
+      val callback = classOf[FailingCentroidBitmapAppendCallback].getName
+      runSql(s"ALTER TABLE T SET TBLPROPERTIES ('commit.callbacks'='$callback')")
+      val publishedFailure = intercept[Exception](runSql(add))
+      assert(
+        Iterator
+          .iterate[Throwable](publishedFailure)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).contains("Injected Bitmap post-commit failure")))
+      assert(currentFiles.forall(file => table.fileIO().exists(paths.toPath(file))))
+      assert(runSql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1)
+                      |WHERE region = 'new'""".stripMargin).map(_.getInt(0)) == Seq(1))
+      assert(runSql(add).head.getBoolean(0))
+    }
+  }
+
+  test("distributed centroid search applies the shard bitmap before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, status STRING, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql(
+        """INSERT INTO T VALUES
+          |(0, array(0.0f, 0.0f), 'near', 0), (1, array(1.0f, 0.0f), NULL, 0),
+          |(2, array(0.0f, 0.0f), 'near', 1), (3, array(2.0f, 0.0f), NULL, 1)""".stripMargin)
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1',
+               |extra_fields => '{"status":"bitmap"}')""".stripMargin)
+        .collect()
+      withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+        val ids = spark
+          .sql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+                 |map('centroid.nprobe','1','ivf.nprobe','1')) WHERE status IS NULL""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+        assert(ids.toSeq == Seq(1))
+      }
+    }
+  }
+
+  test("centroid field bitmaps apply cross-column OR before top K") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant_id INT, status STRING, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.thread-num'='1',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("""INSERT INTO T VALUES
+                  |(0, array(0.0f, 0.0f), 7, 'private', 0),
+                  |(1, array(1.0f, 0.0f), NULL, 'public', 0),
+                  |(2, array(2.0f, 0.0f), 42, NULL, 0),
+                  |(3, array(3.0f, 0.0f), 42, 'public', 0),
+                  |(4, array(4.0f, 0.0f), NULL, NULL, 0),
+                  |(5, array(0.1f, 0.0f), 7, 'private', 1)""".stripMargin)
+      spark
+        .sql("""CALL sys.create_global_index(
+               |table => 'test.T', index_column => 'v', index_type => 'ivf-flat',
+               |options => 'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1',
+               |extra_fields => '{"tenant_id":"bitmap","status":"bitmap"}')""".stripMargin)
+        .collect()
+
+      def nearest(predicate: String, limit: Int = 1): Seq[Int] =
+        spark
+          .sql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),$limit,
+                  |map('centroid.nprobe','1','ivf.nprobe','1')) WHERE $predicate ORDER BY id""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      val crossColumnOr = "tenant_id = 42 OR status = 'public'"
+      for (distributed <- Seq(false, true)) {
+        withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> distributed.toString) {
+          assert(nearest(crossColumnOr) == Seq(1))
+          assert(nearest("status = 'public' OR tenant_id = 42", 4) == Seq(1, 2, 3))
+          assert(nearest(s"($crossColumnOr) AND status IS NULL") == Seq(2))
+          assert(
+            nearest("(tenant_id = 42 AND status IS NULL) OR status = 'public'", 3) ==
+              Seq(1, 2, 3))
+          assert(nearest("tenant_id = 99 OR status = 'public'") == Seq(1))
+          assert(nearest("tenant_id = 99 OR status = 'missing'").isEmpty)
+          assert(nearest("tenant_id = 42 OR id = 0") == Seq(0))
+          assert(nearest("status LIKE 'priv%' OR tenant_id = 42") == Seq(0))
+        }
+      }
+    }
+  }
+
+  private def build(): Unit = {
+    spark
+      .sql(
+        """CALL sys.create_global_index(
+          |table => 'test.T', index_column => 'v', index_type => 'ivf-pq',
+          |partitions => 'p=0',
+          |options => 'ivf-pq.sharding=centroid,ivf-pq.centroid.nlist=4,ivf-pq.pq.m=1')""".stripMargin)
+      .collect()
+  }
+
+  private def nearest(id: Int): Int = {
+    spark
+      .sql(s"""SELECT id FROM vector_search(
+              |'T', 'v', array($id.0f, ${id % 17}.0f), 1,
+              |map('ivf.nprobe', '1'))""".stripMargin)
+      .collect()
+      .head
+      .getInt(0)
+  }
+
+  test("automatic inner product routing preserves maximum scores under query scaling") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT cast(id AS INT), array(cast(
+                  |(CASE WHEN id<32 THEN 1 WHEN id<64 THEN 2 WHEN id<96 THEN 4 ELSE 100 END)
+                  |+ 0.001 * (id % 32) AS FLOAT), 0.0f) FROM range(128)""".stripMargin)
+      spark.sql(
+        """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+          |index_type=>'ivf-flat', options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,
+          |ivf-flat.centroid.nlist=4,ivf-flat.nlist=1,
+          |ivf-flat.train.sample-ratio=1')""".stripMargin.replace("\n", ""))
+      Seq("1.0f", "100.0f").foreach {
+        q =>
+          val ids = spark
+            .sql(s"""SELECT id FROM vector_search('T','v',array($q,0.0f),10)
+                    |ORDER BY id""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSeq
+          assert(ids == (118 until 128))
+      }
+    }
+  }
+
+  test("cosine refinement uses the build metric for scalar and batch search") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true',
+                  |'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (0,cast(NULL AS ARRAY<FLOAT>),0)")
+      spark.sql(
+        """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+          |index_type=>'ivf-pq',partitions=>'p=0',
+          |options=>'ivf-pq.sharding=centroid,ivf-pq.dimension=2,ivf-pq.pq.m=1')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES
+                  |(1,array(1.0f,0.0f),1),(2,array(10.0f,10.0f),1) AS x(id,v,p)""".stripMargin)
+      // The empty marker still covers p=0. It must not supply its inner-product metric
+      // to an exact search over p=1, with either the default L2 or an explicit cosine metric.
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('vector-index.search-mode'='detail')")
+      def rawNearest(): Int = spark
+        .sql("SELECT id FROM vector_search('T','v',array(1.0f,0.0f),1)")
+        .collect()
+        .head
+        .getInt(0)
+      assert(rawNearest() == 1)
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('fields.v.metric'='cosine')")
+      assert(rawNearest() == 1)
+      val rawBatch = loadTable("T")
+        .newBatchVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVectors(Array(Array(1.0f, 0.0f), Array(0.0f, 1.0f)))
+        .withLimit(1)
+        .executeBatchLocal()
+      assert(rawBatch.get(0).results().toArray(1).toSeq == Seq(1L))
+      assert(rawBatch.get(1).results().toArray(1).toSeq == Seq(2L))
+      spark.sql("ALTER TABLE T UNSET TBLPROPERTIES ('fields.v.metric')")
+      spark.sql(
+        """CALL sys.create_global_index(table=>'test.T',index_column=>'v',
+          |index_type=>'ivf-pq',partitions=>'p=1',options=>'ivf-pq.sharding=centroid,ivf-pq.dimension=2,
+          |ivf-pq.distance.metric=cosine,ivf-pq.centroid.nlist=1,
+          |ivf-pq.nlist=1,ivf-pq.pq.m=1')""".stripMargin
+          .replace("\n", ""))
+      val query = Array(1.0f, 0.0f)
+      val ids = spark
+        .sql("""SELECT id FROM vector_search('T','v',array(1.0f,0.0f),1,
+               |map('ivf.refine_factor','2'))""".stripMargin)
+        .collect()
+      assert(ids.map(_.getInt(0)).toSeq == Seq(1))
+      val batch = loadTable("T")
+        .newBatchVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVectors(Array(query, Array(0.0f, 1.0f)))
+        .withLimit(1)
+        .withOption("ivf.refine_factor", "2")
+        .executeBatchLocal()
+      assert(batch.get(0).results().toArray(1).toSeq == Seq(1L))
+      assert(batch.get(1).results().toArray(1).toSeq == Seq(2L))
+    }
+  }
+
+  test("centroid build routes absolute IDs, preserves raw coverage and atomically rebuilds") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p)
+                  |TBLPROPERTIES (
+                  |'bucket' = '-1',
+                  |'row-tracking.enabled' = 'true',
+                  |'data-evolution.enabled' = 'true',
+                  |'deletion-vectors.enabled' = 'true',
+                  |'vector-index.search-mode' = 'detail',
+                  |'ivf-pq.dimension' = '2',
+                  |'ivf-pq.metric' = 'l2',
+                  |'global-index.thread-num' = '1',
+                  |'global-index.row-count-per-shard' = '64',
+                  |'global-index.build.max-parallelism' = '2')""".stripMargin)
+      def insert(from: Int, to: Int, partition: Int): Unit = {
+        spark.sql(s"""INSERT INTO T SELECT cast(id AS INT),
+                     |array(cast(id AS FLOAT), cast(id % 17 AS FLOAT)), $partition
+                     |FROM range($from, $to)""".stripMargin)
+      }
+      insert(-64, 0, 2)
+      insert(0, 128, 0)
+      insert(128, 256, 1)
+      insert(256, 384, 0)
+      build()
+      val table = loadTable("T")
+      def indexes: Seq[IndexFileMeta] =
+        table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-pq")
+          .asScala
+          .map(_.indexFile())
+          .toSeq
+
+      val firstFiles = indexes.map(_.fileName()).toSet
+      val byRange = indexes.groupBy(
+        f => (f.globalIndexMeta().rowRangeStart(), f.globalIndexMeta().rowRangeEnd()))
+      assert(byRange.keySet == Set((64L, 191L), (320L, 447L)))
+      byRange.values.foreach {
+        group =>
+          assert(group.size == 5)
+          assert(group.count(CentroidIndexMeta.isRoutingModel) == 1)
+      }
+      assert(nearest(300) == 300)
+      // Partition 1 lies inside the indexed partition's min/max envelope, but is unindexed.
+      assert(nearest(200) == 200)
+
+      build()
+      assert(indexes.size == 10)
+      assert(indexes.map(_.fileName()).toSet.intersect(firstFiles).isEmpty)
+      assert(nearest(300) == 300)
+      assert(nearest(200) == 200)
+
+      def filteredIds(): Seq[Int] =
+        spark
+          .sql("""SELECT id FROM vector_search('T', 'v', array(300.0f, 11.0f), 1,
+                 |map('ivf.nprobe', '4')) WHERE id = 300""".stripMargin)
+          .collect()
+          .map(_.getInt(0))
+          .toSeq
+
+      // Post-filtering before the scalar index exists must preserve absolute IDs.
+      assert(filteredIds() == Seq(300))
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
+        .collect()
+      val btreeRanges = table
+        .store()
+        .newIndexFileHandler()
+        .scan(table.snapshotManager().latestSnapshot(), "btree")
+        .asScala
+        .filter(_.partition().getInt(0) == 0)
+        .map(_.indexFile().globalIndexMeta().rowRange())
+        .toSet
+      assert(btreeRanges == indexes.map(_.globalIndexMeta().rowRange()).toSet)
+      assert(filteredIds() == Seq(300))
+      spark.sql("DELETE FROM T WHERE p = 0 AND id = 300")
+      assert(nearest(300) != 300)
+
+      spark.sql("INSERT INTO T VALUES (999, CAST(NULL AS ARRAY<FLOAT>), 3)")
+      spark
+        .sql("""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+               |index_type => 'ivf-pq',
+               |options => 'ivf-pq.sharding=centroid,ivf-pq.centroid.nlist=4,ivf-pq.pq.m=1')""".stripMargin)
+        .collect()
+      val routers = indexes.filter(CentroidIndexMeta.isRoutingModel)
+      assert(
+        routers
+          .map(f => (f.globalIndexMeta().rowRangeStart(), f.globalIndexMeta().rowRangeEnd()))
+          .toSet ==
+          Set((0L, 63L), (64L, 191L), (192L, 319L), (320L, 447L), (448L, 448L)))
+      assert(routers.size == 5)
+      assert(indexes.count(_.globalIndexMeta().rowRangeStart() == 448L) == 1)
+      assert(routers.exists(f => f.globalIndexMeta().rowRangeStart() == 448L && f.fileSize() == 0L))
+      assert(nearest(200) == 200)
+
+      def fileRanges = indexes.map(f => f.fileName() -> f.globalIndexMeta().rowRange()).toMap
+      val before = fileRanges
+      assert(new DataEvolutionRowIdReassigner(table).reassign().reassigned)
+      val after = fileRanges
+      assert(after.keySet == before.keySet)
+      assert(after != before)
+      assert(nearest(301) == 301)
+      assert(nearest(300) != 300)
+    }
+  }
+  Seq(true, false).foreach {
+    centroidFirst =>
+      test(
+        s"range and centroid partitions share vector search with centroid built first=$centroidFirst") {
+        withTable("T") {
+          spark.sql(
+            """CREATE TABLE T (id INT, v ARRAY<FLOAT>, p INT) PARTITIONED BY (p)
+              |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+              |'data-evolution.enabled'='true', 'vector-index.search-mode'='detail',
+              |'fields.v.dimension'='2', 'fields.v.metric'='l2',
+              |'global-index.thread-num'='1', 'global-index.row-count-per-shard'='32')""".stripMargin)
+          Seq(0, 1, 2).foreach {
+            part =>
+              val first = if (part == 2) 5000 else 0
+              spark.sql(s"""INSERT INTO T SELECT CAST(id + ${part * 128} AS INT),
+                           |array(CAST(IF(id = 0, $first, 1000 + id) AS FLOAT), 0.0f), $part
+                           |FROM range(0, 128, 1, 1)""".stripMargin)
+          }
+          // Give the routed layout two disjoint ranges so the SQL query opens readers on workers.
+          spark.sql("INSERT INTO T VALUES (9000, array(9000.0f,0.0f), 0)")
+          val builds = Seq(("centroid", 0), ("range", 1))
+          (if (centroidFirst) builds else builds.reverse).foreach {
+            case (layout, part) =>
+              spark
+                .sql(
+                  s"""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+                     |index_type => 'ivf-pq', partitions => 'p=$part',
+                     |options => 'ivf-pq.sharding=$layout,ivf-pq.centroid.nlist=2,ivf-pq.nlist=2,ivf-pq.pq.m=1')""".stripMargin)
+                .collect()
+          }
+
+          val ids = spark
+            .sql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),2,
+                   |map('ivf.nprobe','2','centroid.nprobe','2'))""".stripMargin)
+            .collect()
+            .map(_.getInt(0))
+            .toSet
+          assert(ids == Set(0, 128))
+
+          val table = loadTable("T")
+          val local = table
+            .newVectorSearchBuilder()
+            .withVectorColumn("v")
+            .withVector(Array(0.0f, 0.0f))
+            .withLimit(2)
+            .withOption("centroid.nprobe", "2")
+            .withOption("ivf.nprobe", "2")
+            .executeLocal()
+          assert(local.results().toArray(2).toSet == Set(0L, 128L))
+          val batch = table
+            .newBatchVectorSearchBuilder()
+            .withVectorColumn("v")
+            .withVectors(Array(Array(0.0f, 0.0f), Array(5000.0f, 0.0f)))
+            .withLimit(2)
+            .withOption("centroid.nprobe", "2")
+            .withOption("ivf.nprobe", "2")
+            .executeBatchLocal()
+          assert(batch.get(0).results().toArray(2).toSet == Set(0L, 128L))
+          assert(batch.get(1).results().contains(256L))
+        }
+      }
+  }
+
+  test("a large centroid range uses the map slots when built with a singleton range") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (v ARRAY<FLOAT>, p INT) PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'global-index.row-count-per-shard'='16',
+                  |'global-index.build.max-parallelism'='2')""".stripMargin)
+      spark.sql("""INSERT INTO T PARTITION(p=0) SELECT array(cast(id AS FLOAT),1.0f)
+                  |FROM range(256)""".stripMargin)
+      spark.sql("INSERT INTO T PARTITION(p=1) VALUES (array(1.0f,1.0f))")
+
+      val sc = spark.sparkContext
+      val group = s"centroid-skew-${System.nanoTime()}"
+      sc.setJobGroup(group, group)
+      try {
+        spark
+          .sql("""CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+                 |index_type=>'ivf-flat', options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,
+                 |ivf-flat.centroid.nlist=2')""".stripMargin.replace("\n", ""))
+          .collect()
+      } finally {
+        sc.clearJobGroup()
+      }
+      val tracker = sc.statusTracker
+      val mapWidths = tracker
+        .getJobIdsForGroup(group)
+        .flatMap(id => tracker.getJobInfo(id).toSeq.flatMap(_.stageIds))
+        .distinct
+        .flatMap(id => tracker.getStageInfo(id).toSeq)
+        .filter(_.name.startsWith("mapPartitionsWithIndex at CentroidGlobalIndexTopoBuilder"))
+        .map(_.numTasks)
+      assert(mapWidths.sorted.toSeq == Seq(1, 2))
+    }
+  }
+
+  test("distributed training preserves the model across sparse splits and different task counts") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+          |'deletion-vectors.enabled'='true', 'vector-index.search-mode'='fast',
+          |'fields.v.index-options'='{"sharding":"centroid"}', 'ivf-flat.dimension'='2', 'ivf-flat.metric'='l2',
+          |'global-index.row-count-per-shard'='32',
+          |'global-index.build.max-parallelism'='4')""".stripMargin)
+      spark.sql("""INSERT INTO T SELECT cast(id AS INT),
+                  |CASE WHEN id = 4 OR id >= 192 THEN array(cast(id AS FLOAT), 1.0f)
+                  |ELSE cast(NULL AS ARRAY<FLOAT>) END FROM range(256)""".stripMargin)
+      spark.sql("DELETE FROM T WHERE id = 200")
+      def buildModel(): Array[Byte] = {
+        spark.sql(
+          """CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+            |index_type => 'ivf-flat',
+            |options => 'ivf-flat.centroid.nlist=2,ivf-flat.train.sample-ratio=0.125')""".stripMargin)
+        val table = loadTable("T")
+        val model = table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .asScala
+          .map(_.indexFile())
+          .find(f => CentroidIndexMeta.isRoutingModel(f))
+          .get
+        val path = table.store().pathFactory().globalIndexFileFactory().toPath(model)
+        val in = table.fileIO().newInputStream(path)
+        try VectorTrainingModelIO.read(in, model.fileSize())
+        finally in.close()
+      }
+      val fourTasks = buildModel()
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('global-index.build.max-parallelism'='2')")
+      assert(fourTasks.sameElements(buildModel()))
+      def nearest(id: Int): Int =
+        spark
+          .sql(s"""SELECT id FROM vector_search('T','v',array($id.0f,1.0f),1,
+                  |map('centroid.nprobe','2'))""".stripMargin)
+          .collect()
+          .head
+          .getInt(0)
+      assert(nearest(4) == 4)
+      assert(nearest(255) == 255)
+      assert(nearest(200) != 200)
+    }
+  }
+
+  Seq("ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann").foreach {
+    kind =>
+      test(s"$kind centroid SQL build, read, filter and range rebuild") {
+        withTable("T") {
+          spark.sql(s"""CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                       |TBLPROPERTIES ('bucket'='-1', 'row-tracking.enabled'='true',
+                       |'data-evolution.enabled'='true', 'deletion-vectors.enabled'='true',
+                       |'vector-index.search-mode'='fast', 'fields.v.dimension'='4',
+                       |'fields.v.metric'='l2', 'global-index.row-count-per-shard'='64',
+                       |'global-index.build.max-parallelism'='2')""".stripMargin)
+          spark.sql(
+            """INSERT INTO T SELECT cast(id AS INT),
+              |array(cast(id AS FLOAT), cast(id % 17 AS FLOAT),
+              |cast(id % 23 AS FLOAT), cast(id % 31 AS FLOAT)) FROM range(0, 256)""".stripMargin)
+          def create(layout: String): Unit = {
+            val pq = if (kind == "ivf-pq" || kind == "diskann") s",$kind.pq.m=1" else ""
+            spark
+              .sql(
+                s"""CALL sys.create_global_index(table => 'test.T', index_column => 'v',
+                   |index_type => '$kind', options => '$kind.sharding=$layout,$kind.centroid.nlist=4$pq')""".stripMargin)
+              .collect()
+          }
+          def nearest(mode: String): Array[Int] = {
+            val opts =
+              if (kind == "diskann" && mode == "centroid-based")
+                "map('centroid.nprobe','4','diskann.l_search','256')"
+              else if (kind == "diskann") "map('diskann.l_search','256')"
+              else if (mode == "centroid-based") "map('centroid.nprobe','2','ivf.nprobe','3')"
+              else "map('ivf.nprobe','4')"
+            spark
+              .sql(s"""SELECT id FROM vector_search('T','v',array(200.0f,13.0f,16.0f,14.0f),1,
+                      |$opts) WHERE id >= 192""".stripMargin)
+              .collect()
+              .map(_.getInt(0))
+          }
+          create("centroid")
+          val table = loadTable("T")
+          val files = table
+            .store()
+            .newIndexFileHandler()
+            .scan(table.snapshotManager().latestSnapshot(), kind)
+            .asScala
+            .map(_.indexFile())
+          assert(files.size == 5 && files.count(f => CentroidIndexMeta.isRoutingModel(f)) == 1)
+          assert(nearest("centroid-based").toSeq == Seq(200))
+          val centroids = files
+            .filterNot(f => CentroidIndexMeta.isRoutingModel(f))
+            .map(
+              f =>
+                CentroidIndexMeta
+                  .file(f, table.store().pathFactory().globalIndexFileFactory())
+                  .asInstanceOf[CentroidIndexFile]
+                  .centroid())
+          assert(centroids.toSet == Set(0, 1, 2, 3))
+          spark
+            .sql(s"""CALL sys.drop_global_index(table => 'test.T', index_column => 'v',
+                    |index_type => '$kind')""".stripMargin)
+            .collect()
+          spark.sql(s"ALTER TABLE T SET TBLPROPERTIES ('$kind.sharding'='centroid')")
+          create("range")
+          val rangeFiles = table
+            .store()
+            .newIndexFileHandler()
+            .scan(table.snapshotManager().latestSnapshot(), kind)
+            .asScala
+          assert(rangeFiles.nonEmpty)
+          assert(
+            rangeFiles.forall(
+              f => !CentroidIndexMeta.isWrapped(f.indexFile().globalIndexMeta().indexMeta())))
+          assert(nearest("range-based").toSeq == Seq(200))
+        }
+      }
+  }
+
+}
+
+class FailingCentroidBitmapAppendCallback extends CommitCallback {
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (context.snapshot.commitUser().startsWith("global-index-add-fields-")) {
+      throw new RuntimeException("Injected Bitmap post-commit failure")
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
+}

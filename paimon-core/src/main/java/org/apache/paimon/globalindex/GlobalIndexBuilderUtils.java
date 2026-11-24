@@ -49,14 +49,18 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -65,9 +69,28 @@ public class GlobalIndexBuilderUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderUtils.class);
 
+    /** Validates composite and multivector indexes before planning any shards to build. */
+    public static void validateIndexFields(String type, List<DataField> fields, Options options) {
+        if (fields.size() > 1) {
+            try {
+                GlobalIndexer.create(type, fields, options);
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                type,
+                                fields.stream().map(DataField::name).collect(Collectors.toList())),
+                        e);
+            }
+        } else if (fields.size() == 1
+                && CoreOptions.isVectorIndexType(type)
+                && VectorIndexUtils.isMultiVector(fields.get(0).type())) {
+            GlobalIndexer.create(type, fields, options);
+        }
+    }
+
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             int indexFieldId,
@@ -75,15 +98,7 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries)
             throws IOException {
         return toIndexFileMetas(
-                fileIO,
-                indexPathFactory,
-                options,
-                range,
-                indexFieldId,
-                null,
-                indexType,
-                entries,
-                null);
+                fileIO, options, range, indexFieldId, null, indexType, entries, null);
     }
 
     /**
@@ -91,10 +106,11 @@ public class GlobalIndexBuilderUtils {
      * index column (e.g. the first column in {@code CREATE ... INDEX ON (a, b, c)}) and is stored
      * as {@code indexFieldId}; the remaining columns go into {@code extraFieldIds}. Callers must
      * pass {@code fields} in the intended column order.
+     *
+     * <p>The entries already contain their allocated full paths.
      */
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             List<DataField> fields,
@@ -104,7 +120,6 @@ public class GlobalIndexBuilderUtils {
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
-                indexPathFactory,
                 options,
                 range,
                 fields.get(0).id(),
@@ -132,6 +147,25 @@ public class GlobalIndexBuilderUtils {
         return Range.sortAndMergeOverlap(dataRange.exclude(indexedRanges), true);
     }
 
+    public static Set<IndexManifestEntry> indexesWithIncompatibleSchema(
+            FileStoreTable table, List<IndexManifestEntry> currentIndexes) {
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
+        return currentIndexes.stream()
+                .filter(entry -> !schema.isCompatible(entry.indexFile()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    public static List<Range> rowRangesToBuild(
+            Snapshot snapshot,
+            List<IndexManifestEntry> currentIndexes,
+            Collection<IndexManifestEntry> indexesToRefresh) {
+        List<Range> ranges = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
+        for (IndexManifestEntry entry : indexesToRefresh) {
+            ranges.add(entry.indexFile().globalIndexMeta().rowRange());
+        }
+        return Range.sortAndMergeOverlap(ranges, true);
+    }
+
     public static List<IndexManifestEntry> currentIndexEntries(
             FileStoreTable table,
             Snapshot snapshot,
@@ -157,7 +191,8 @@ public class GlobalIndexBuilderUtils {
             if (meta.indexFieldId() != indexFieldId) {
                 continue;
             }
-            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)) {
+            if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)
+                    && !(extraFieldIds == null && CentroidIndexMeta.hasBitmapFields(meta))) {
                 continue;
             }
             entries.add(entry);
@@ -237,18 +272,24 @@ public class GlobalIndexBuilderUtils {
             }
         }
 
-        Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
+        return groupSplitsByRange(partitionSplitRanges);
+    }
+
+    /** Group planned splits into maximal contiguous row-ID ranges within each partition. */
+    public static <T extends Split> Map<BinaryRow, Map<Range, List<T>>> groupSplitsByRange(
+            Map<BinaryRow, List<Pair<Range, T>>> partitionSplitRanges) {
+        Map<BinaryRow, Map<Range, List<T>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, T>>> partitionEntry :
                 partitionSplitRanges.entrySet()) {
-            List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
+            List<Pair<Range, T>> splitRanges = partitionEntry.getValue();
             splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
+                    Comparator.comparingLong((Pair<Range, T> e) -> e.getKey().from)
                             .thenComparingLong(e -> e.getKey().to));
 
-            Map<Range, List<Split>> partitionRanges = new LinkedHashMap<>();
+            Map<Range, List<T>> partitionRanges = new LinkedHashMap<>();
             Range current = null;
-            List<Split> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, Split> entry : splitRanges) {
+            List<T> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, T> entry : splitRanges) {
                 Range splitRange = entry.getKey();
                 if (current == null) {
                     current = splitRange;
@@ -565,7 +606,6 @@ public class GlobalIndexBuilderUtils {
 
     private static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
-            IndexPathFactory indexPathFactory,
             CoreOptions options,
             Range range,
             int indexFieldId,
@@ -574,10 +614,12 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries,
             @Nullable byte[] sourceMeta)
             throws IOException {
+        boolean isExternalPath = !options.globalIndexExternalPaths().isEmpty();
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
-            String fileName = entry.fileName();
-            long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
+            Path filePath = new Path(entry.filePath());
+            String fileName = filePath.getName();
+            long fileSize = fileIO.getFileSize(filePath);
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(
                             range.from,
@@ -587,12 +629,7 @@ public class GlobalIndexBuilderUtils {
                             entry.meta(),
                             sourceMeta);
 
-            Path externalPathDir = options.globalIndexExternalPath();
-            String externalPathString = null;
-            if (externalPathDir != null) {
-                Path externalPath = new Path(externalPathDir, fileName);
-                externalPathString = externalPath.toString();
-            }
+            String externalPathString = isExternalPath ? filePath.toString() : null;
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
                             indexType,
@@ -609,11 +646,21 @@ public class GlobalIndexBuilderUtils {
     public static GlobalIndexWriter createIndexWriter(
             FileStoreTable table, String indexType, List<DataField> indexFields, Options options)
             throws IOException {
-        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
-        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+        return createIndexWriter(
+                createGlobalIndexFileReadWrite(table), indexType, indexFields, options);
     }
 
-    private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
+    public static GlobalIndexWriter createIndexWriter(
+            GlobalIndexFileReadWrite fileReadWrite,
+            String indexType,
+            List<DataField> indexFields,
+            Options options)
+            throws IOException {
+        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexFields, options);
+        return globalIndexer.createWriter(fileReadWrite);
+    }
+
+    public static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         return new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory);
     }

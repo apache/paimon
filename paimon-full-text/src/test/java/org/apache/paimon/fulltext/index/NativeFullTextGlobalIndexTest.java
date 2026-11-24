@@ -75,13 +75,13 @@ public class NativeFullTextGlobalIndexTest {
     private GlobalIndexFileWriter createFileWriter(Path path) {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID();
+            public String newFilePath(String prefix) {
+                return new Path(path, prefix + "-" + UUID.randomUUID()).toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                return fileIO.newOutputStream(new Path(path, fileName), false);
+            public PositionOutputStream newOutputStream(String filePath) throws IOException {
+                return fileIO.newOutputStream(new Path(filePath), false);
             }
         };
     }
@@ -90,11 +90,10 @@ public class NativeFullTextGlobalIndexTest {
         return meta -> fileIO.newInputStream(meta.filePath());
     }
 
-    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
-            throws IOException {
+    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results) throws IOException {
         assertThat(results).hasSize(1);
         ResultEntry result = results.get(0);
-        Path filePath = new Path(path, result.fileName());
+        Path filePath = new Path(result.filePath());
         return Collections.singletonList(
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta()));
     }
@@ -128,7 +127,7 @@ public class NativeFullTextGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(3);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -189,7 +188,7 @@ public class NativeFullTextGlobalIndexTest {
         List<ResultEntry> results = writer.finish();
         assertThat(serializedOptions(results.get(0).meta())).containsEntry("tokenizer", "jieba");
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -227,7 +226,7 @@ public class NativeFullTextGlobalIndexTest {
                 .containsEntry("tokenizer", "icu/split");
 
         try (NativeFullTextGlobalIndexReader reader =
-                createReader(createFileReader(), toIOMetas(results, indexPath))) {
+                createReader(createFileReader(), toIOMetas(results))) {
             for (String query : new String[] {"中文", "RUST", "world", "beta", "getusername"}) {
                 Optional<ScoredGlobalIndexResult> searchResult =
                         reader.visitFullTextSearch(
@@ -255,7 +254,7 @@ public class NativeFullTextGlobalIndexTest {
         writer.write(BinaryString.fromString("Foo bar baz"), 1);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -281,7 +280,7 @@ public class NativeFullTextGlobalIndexTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results.get(0).rowCount()).isEqualTo(3);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -326,7 +325,7 @@ public class NativeFullTextGlobalIndexTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results.get(0).rowCount()).isEqualTo(numDocs);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -356,7 +355,7 @@ public class NativeFullTextGlobalIndexTest {
         }
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -381,7 +380,7 @@ public class NativeFullTextGlobalIndexTest {
         writer.write(BinaryString.fromString("paimon"), 2);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         RoaringNavigableMap64 includeRowIds = new RoaringNavigableMap64();
@@ -409,7 +408,7 @@ public class NativeFullTextGlobalIndexTest {
         writer.write(BinaryString.fromString("Native full-text search"), 1);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
         FullTextSearch search = new FullTextSearch("text", matchQuery("paimon"), 10);
 
@@ -439,7 +438,7 @@ public class NativeFullTextGlobalIndexTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader =
@@ -464,7 +463,7 @@ public class NativeFullTextGlobalIndexTest {
         writer.write(BinaryString.fromString("paimon vector"), 1);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {

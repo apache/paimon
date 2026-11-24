@@ -21,6 +21,7 @@ from typing import Optional
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
+from pypaimon.management.java_string import is_blank
 
 
 class ResourcePaths:
@@ -33,6 +34,7 @@ class ResourcePaths:
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
     MODELS = "models"
+    SEMANTIC_VIEWS = "semantic-views"
     TAGS = "tags"
     BRANCHES = "branches"
     FORWARD = "forward"
@@ -45,6 +47,8 @@ class ResourcePaths:
         if prefix:
             prefix = urllib.parse.quote_plus(prefix, safe="*~", errors="replace")
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
+        # Semantic view requests preserve encoded dot segments in the HTTP client.
+        self._semantic_view_base_path = "/{}/{}".format(self.V1, self._escape_dot_segment(prefix)).rstrip("/")
 
     @classmethod
     def for_catalog_properties(
@@ -131,6 +135,24 @@ class ResourcePaths:
         return "{}/{}".format(
             self.models(database_name), RESTUtil.encode_string(model_name)
         )
+
+    @staticmethod
+    def _escape_dot_segment(segment: str) -> str:
+        return segment.replace(".", "%2E") if segment in (".", "..") else segment
+
+    def _semantic_view_segment(self, name: str, label: str) -> str:
+        if not isinstance(name, str) or is_blank(name):
+            raise ValueError("{} cannot be blank".format(label))
+        # Requests leaves '~' unescaped on the wire, so sign it in that form.
+        return self._escape_dot_segment(RESTUtil.encode_string(name).replace("%7E", "~"))
+
+    def semantic_views(self, database_name: str) -> str:
+        database = self._semantic_view_segment(database_name, "Database name")
+        return "{}/{}/{}/{}".format(self._semantic_view_base_path, self.DATABASES, database, self.SEMANTIC_VIEWS)
+
+    def semantic_view(self, database_name: str, view_name: str) -> str:
+        view = self._semantic_view_segment(view_name, "Semantic view name")
+        return "{}/{}".format(self.semantic_views(database_name), view)
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

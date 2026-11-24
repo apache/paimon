@@ -19,6 +19,8 @@
 
 from typing import NamedTuple
 
+from pypaimon.globalindex.vindex_options import is_multi_vector_type
+
 
 class _VectorSearchTypes(NamedTuple):
     scan: type
@@ -27,6 +29,10 @@ class _VectorSearchTypes(NamedTuple):
 
 
 def _vector_search_types(request):
+    if (getattr(request, '_multi_vector', None) is not None
+            or is_multi_vector_type(getattr(request._vector_column, 'type', None))):
+        raise NotImplementedError(
+            'MultiVector search requires read.native.enabled and a supported pypaimon-rust runtime and table.')
     if request._is_primary_key_vector_search():
         from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
         from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead

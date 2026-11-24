@@ -67,6 +67,18 @@ object PaimonUtils {
     SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
   }
 
+  /** Runs failure cleanup on interruption too, preserving the original exception. */
+  def withFailureCleanup[T](block: => T)(cleanup: => Unit): T = {
+    SparkUtils.tryWithSafeFinallyAndFailureCallbacks(block)(catchBlock = cleanup)
+  }
+
+  /** Creates a command-local disk cache, retaining AQE; the caller must invoke its cleanup. */
+  def createDiskCachedDataset(
+      sparkSession: SparkSession,
+      logicalPlan: LogicalPlan): (Dataset[Row], () => Unit) = {
+    SparkShimLoader.shim.classicApi.createDiskCachedDataset(sparkSession, logicalPlan)
+  }
+
   /**
    * Parse a read-only query, preferring [[ParserInterface.parseQuery]] which rejects non-query
    * statements at parse time. `parseQuery` was added in Spark 3.3, so on Spark 3.2 (where it is

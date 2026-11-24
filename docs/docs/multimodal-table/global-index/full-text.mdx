@@ -308,9 +308,9 @@ BM25 statistics are always those of the full corpus:
   why it is opt-in; prefer an index that answers the predicate exactly, such as
   Bitmap or FM for `contains`.
 - Rows whose filter columns are not covered by a scalar index follow
-  `scalar-index.search-mode`:
+  [`scalar-index.prefilter.search-mode`](./manage-indexes#coverage-and-freshness):
 
-| `scalar-index.search-mode` | Rows without an index on the filter columns |
+| `scalar-index.prefilter.search-mode` | Rows without an index on the filter columns |
 |---|---|
 | `fast` (default) | Excluded from the search; a warning is logged |
 | `full` / `detail` | Decided by reading their filter columns |

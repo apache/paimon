@@ -18,9 +18,11 @@
 import os
 import tempfile
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 from pypaimon import CatalogFactory
+from pypaimon.catalog.catalog_exception import ColumnNotExistException
 from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
@@ -28,9 +30,11 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.options.options import Options
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
-                                        MapType, RowType)
+                                        MapType, MultisetType, RowType, VectorType)
+from pypaimon.schema.default_value import validate_default_value
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import RemoveOption, SchemaChange, SetOption
+from pypaimon.schema.schema_change import (RemoveOption, SchemaChange, SetOption,
+                                           UpdateColumnDefaultValue)
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -925,6 +929,429 @@ class TestColumnAndKeyValidation(unittest.TestCase):
             with self.subTest(**kwargs):
                 with self.assertRaisesRegex(ValueError, message):
                     self.catalog.create_table("default.t", self._schema(**kwargs), False)
+
+
+class TestExternalSchemaValidation(unittest.TestCase):
+
+    @staticmethod
+    def _schema(offset=0):
+        return Schema(
+            fields=[
+                DataField(offset + 9, 'id', AtomicType('INT', False), 'identifier', '0'),
+                DataField(offset + 20, 'pt', AtomicType('STRING', False)),
+                DataField(offset + 30, 'payload', MapType(
+                    True, RowType(False, [DataField(offset + 31, 'key', AtomicType('INT', False))]),
+                    ArrayType(True, MultisetType(False, RowType(True, [
+                        DataField(offset + 32, 'text', AtomicType('STRING'), 'nested value'),
+                    ]))))),
+                DataField(offset + 40, 'embedding', VectorType(True, AtomicType('FLOAT'), 3)),
+            ],
+            partition_keys=['pt'], primary_keys=['id', 'pt'],
+            options={'bucket': '1', 'file.format': 'parquet', 'owner': 'original'},
+        )
+
+    def test_accepts_different_field_ids_without_mutating_inputs(self):
+        existing, provided = self._schema(), self._schema(100)
+        before = deepcopy((existing, provided))
+
+        SchemaManager.check_schema_for_external_table(existing, provided)
+
+        self.assertEqual((existing, provided), before)
+
+    def test_accepts_omitted_definitions_and_owner_path_overrides(self):
+        existing = self._schema()
+        provided = Schema(options={'path': 'file:///registered', 'owner': 'new-owner'})
+
+        SchemaManager.check_schema_for_external_table(existing, provided)
+        SchemaManager.check_schema_for_external_table(
+            existing, Schema(options={'file.format': 'parquet'}))
+
+    def test_accepts_equivalent_logical_type_spellings(self):
+        cases = [
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(6)'),
+            ('TIMESTAMP WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(6)'),
+            ('TIMESTAMP_LTZ', 'TIMESTAMP(6) WITH LOCAL TIME ZONE'),
+            ('TIMESTAMP', 'TIMESTAMP(6)'),
+            ('TIMESTAMP(3) WITHOUT TIME ZONE', 'TIMESTAMP(3)'),
+            ('TIME', 'TIME(0)'),
+            ('TIME(3) WITHOUT TIME ZONE', 'TIME(3)'),
+            ('DECIMAL(12,2)', 'DECIMAL(12, 2)'),
+            ('NUMERIC(12)', 'DECIMAL(12, 0)'),
+            ('DEC', 'DECIMAL(10, 0)'),
+            ('DECIMAL', 'DECIMAL(10)'),
+            ('INTEGER', 'INT'),
+            ('DOUBLE PRECISION', 'DOUBLE'),
+            ('CHAR', 'CHAR(1)'),
+            ('VARCHAR', 'VARCHAR(1)'),
+            ('STRING', 'VARCHAR(2147483647)'),
+            ('BINARY', 'BINARY(1)'),
+            ('VARBINARY', 'VARBINARY(1)'),
+            ('BYTES', 'VARBINARY(2147483647)'),
+            (' decimal ( 12 , 02 ) ', 'DECIMAL(12, 2)'),
+        ]
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                existing = Schema(fields=[DataField(7, 'value', AtomicType(source))])
+                provided = Schema(fields=[DataField(0, 'value', AtomicType(target))])
+                before = deepcopy((existing, provided))
+                SchemaManager.check_schema_for_external_table(existing, provided)
+                SchemaManager.check_schema_for_external_table(provided, existing)
+                self.assertEqual((existing, provided), before)
+
+    def test_rejects_different_logical_types(self):
+        cases = [
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(3)'),
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP_LTZ(5)'),
+            ('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'TIMESTAMP(6)'),
+            ('DECIMAL(12, 2)', 'NUMERIC(12, 3)'),
+            ('DECIMAL(12, 0)', 'DECIMAL(13)'),
+            ('TIME', 'TIME(6)'),
+            ('VARCHAR', 'STRING'),
+            ('VARCHAR(10)', 'VARCHAR(11)'),
+            ('CHAR(10)', 'VARCHAR(10)'),
+            ('BINARY(10)', 'VARBINARY(10)'),
+            ('BYTES', 'BLOB'),
+        ]
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                existing = Schema(fields=[DataField(7, 'value', AtomicType(source))])
+                provided = Schema(fields=[DataField(0, 'value', AtomicType(target))])
+                with self.assertRaisesRegex(ValueError, 'External table fields'):
+                    SchemaManager.check_schema_for_external_table(existing, provided)
+
+    def test_rejects_conflicting_fields(self):
+        cases = [
+            ('count', lambda s: s.fields.pop()),
+            ('order', lambda s: s.fields.reverse()),
+            ('name', lambda s: setattr(s.fields[0], 'name', 'other')),
+            ('type', lambda s: setattr(s.fields[0], 'type', AtomicType('BIGINT', False))),
+            ('nullable', lambda s: setattr(s.fields[0].type, 'nullable', True)),
+            ('description', lambda s: setattr(s.fields[0], 'description', 'changed')),
+            ('default', lambda s: setattr(s.fields[0], 'default_value', '1')),
+            ('map-key', lambda s: setattr(s.fields[2].type.key.fields[0], 'name', 'other')),
+            ('nested', lambda s: setattr(
+                s.fields[2].type.value.element.element.fields[0].type, 'nullable', False)),
+            ('vector-length', lambda s: setattr(s.fields[3].type, 'length', 4)),
+            ('vector-element', lambda s: setattr(s.fields[3].type, 'element', AtomicType('DOUBLE'))),
+        ]
+        for name, change in cases:
+            with self.subTest(change=name):
+                existing, provided = self._schema(), self._schema(100)
+                change(provided)
+                with self.assertRaisesRegex(ValueError, 'External table fields'):
+                    SchemaManager.check_schema_for_external_table(existing, provided)
+
+    def test_rejects_conflicting_keys_and_options(self):
+        cases = [
+            (Schema(partition_keys=['id']), 'partition keys'),
+            (Schema(primary_keys=['pt', 'id']), 'primary keys'),
+            (Schema(options={'file.format': 'orc'}), "option 'file.format'"),
+            (Schema(options={'new.option': 'value'}), "option 'new.option'"),
+        ]
+        for provided, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    SchemaManager.check_schema_for_external_table(self._schema(), provided)
+
+
+class TestUpdateColumnDefaultValue(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.file_io = FileIO.get(self.temp_dir, Options({}))
+        self.table_path = f"{self.temp_dir}/test_db.db/defaults"
+        self.manager = SchemaManager(self.file_io, self.table_path)
+        self.manager.create_table(Schema(fields=[
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+            DataField(2, "info", RowType(True, [
+                DataField(3, "uid", AtomicType("INT")),
+            ])),
+            DataField(4, "values", ArrayType(True, AtomicType("INT"))),
+        ]))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _field(self, name):
+        for field in self.manager.latest().fields:
+            if field.name == name:
+                return field
+        raise AssertionError(name)
+
+    def test_sets_and_clears_default_value(self):
+        updated = self.manager.commit_changes([
+            UpdateColumnDefaultValue(["id"], "10"),
+            UpdateColumnDefaultValue(["name"], "'hello'"),
+        ])
+        self.assertEqual("10", updated.fields[0].default_value)
+        self.assertEqual("'hello'", updated.fields[1].default_value)
+
+        cleared = self.manager.commit_changes([
+            UpdateColumnDefaultValue(["id"], None),
+        ])
+        self.assertIsNone(cleared.fields[0].default_value)
+        self.assertEqual("'hello'", self._field("name").default_value)
+
+    def test_sets_nested_field_default(self):
+        updated = self.manager.commit_changes([
+            UpdateColumnDefaultValue(["info", "uid"], "7"),
+        ])
+        info = updated.fields[2]
+        self.assertEqual("7", info.type.fields[0].default_value)
+        self.assertIsNone(info.default_value)
+
+    def test_rejects_value_that_does_not_match_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Unsupported default value `nope`"):
+            self.manager.commit_changes([
+                UpdateColumnDefaultValue(["id"], "nope"),
+            ])
+        self.assertIsNone(self._field("id").default_value)
+        self.assertEqual(0, self.manager.latest().id)
+
+    def test_rejects_missing_column(self):
+        with self.assertRaises(ColumnNotExistException):
+            self.manager.commit_changes([
+                UpdateColumnDefaultValue(["missing"], "1"),
+            ])
+
+    def test_accepts_scalar_defaults_java_accepts(self):
+        cases = [
+            ("BOOLEAN", "yes"),
+            ("TINYINT", "127"),
+            ("TINYINT", "-128"),
+            ("SMALLINT", "32767"),
+            ("INT", "10."),
+            ("INT", ".5"),
+            ("BIGINT", "9223372036854775807"),
+            ("DECIMAL(10, 2)", "12345"),
+            ("DECIMAL(10, 2)", "+1.25e2"),
+            ("DOUBLE", "0x1.0p0"),
+            ("FLOAT", "1.25f"),
+            ("DOUBLE", "NaN"),
+            ("DOUBLE", "-Infinity"),
+            ("DOUBLE", " 1.5 "),
+            ("DATE", "2024-1-1"),
+            ("DATE", "0"),
+            ("DATE", "2147483647"),
+            ("DATE", "2024-01"),
+            ("DATE", "2024-01-01 12:00:00"),
+            ("DATE", "0000-02-29"),
+            ("TIME", "1:2:3"),
+            ("TIME", "0"),
+            ("TIME", "2147483647"),
+            ("TIMESTAMP(3)", "2024-01-01"),
+            ("TIMESTAMP(9)", "2024-01-01 12:00:00.123456789"),
+            ("TIMESTAMP(3)", "2024-1-1 1:2:3"),
+            ("TIMESTAMP(3)", "1700000000000"),
+            ("TIMESTAMP(3)", "9223372036854775807"),
+            # The epoch path supports precision 0, 3, 6 and 9; a bare
+            # TIMESTAMP has precision 6.
+            ("TIMESTAMP(0)", "1700000000000"),
+            ("TIMESTAMP(9)", "1700000000000"),
+            ("TIMESTAMP", "1700000000000"),
+            ("TIMESTAMP(3) NOT NULL", "1700000000000"),
+            # Other precisions still take string timestamps.
+            ("TIMESTAMP(2)", "2024-01-01 12:00:00.12"),
+            ("STRING", "hello"),
+            ("STRING", "''"),
+            ("STRING", "'abc"),
+            # Epoch fast paths: StringUtils.isNumeric allows a leading '-'.
+            ("DATE", "-1"),
+            ("DATE", "-2147483648"),
+            ("TIME", "-1"),
+            ("TIMESTAMP(3)", "-100"),
+            ("TIMESTAMP(3)", "-9223372036854775808"),
+            # DateTimeUtils.parseTime does not bound the components and takes
+            # an optional timezone suffix.
+            ("TIME", "24:00:00"),
+            ("TIME", "99:00:00"),
+            ("TIME", "12:99:00"),
+            ("TIME", "12:00:99"),
+            ("TIME", "12"),
+            ("TIME", "12:30"),
+            ("TIME", "12:00:00+01:00"),
+            ("TIME", "12:30+01"),
+            ("TIME", "12+01"),
+            ("TIME", "12:00:00.9999999999"),
+            # appendFraction has a minimum width of 0, so a bare '.' parses.
+            ("TIME", "12:00:00."),
+            ("TIMESTAMP(3)", "2024-01-01 12:00:00."),
+            ("TIMESTAMP(3)", "2024-01-01T12:00"),
+            # The SMART resolver clamps the day to the end of the month.
+            ("TIMESTAMP(3)", "2024-02-30"),
+            ("TIMESTAMP(3)", "2023-02-29"),
+            ("TIMESTAMP(3)", "2024-04-31"),
+            # It also reads 24:00 as midnight of the following day.
+            ("TIMESTAMP(3)", "2024-01-01 24:00:00"),
+            ("TIMESTAMP(3)", "2024-12-31 24:00:00.000"),
+            ("TIMESTAMP(3)", "2024-02-31 24:00:00."),
+            ("TIMESTAMP(3)", "2024-01-01T24:00"),
+            ("TIMESTAMP_LTZ(3)", "2024-01-01 24:00:00"),
+            ("TIMESTAMP(3) WITH LOCAL TIME ZONE", "2024-01-01 24:00:00"),
+            # 'yyyy' takes more than four digits only after a '+'.
+            ("TIMESTAMP(3)", "+12345-01-01"),
+            ("TIMESTAMP(3)", "+02024-01-01"),
+            ("TIMESTAMP(3)", "+999999999-12-31"),
+            ("TIMESTAMP(3)", "+999999999-12-30 24:00:00"),
+            # BigDecimal accepts digits from JDK 8 Character.digit, including
+            # Arabic-Indic and fullwidth. Out-of-precision values become a null
+            # default rather than failing. Exponent digits use the same set.
+            ("DECIMAL(10, 2)", "١.٢"),
+            ("DECIMAL(10, 2)", "١٢.٥"),
+            ("DECIMAL(10, 2)", "١e١"),
+            ("DECIMAL(10, 2)", "١e٠٢"),
+            ("DECIMAL(10, 2)", "１２.５"),
+            ("DECIMAL(10, 2)", "12345678901"),
+            ("DECIMAL(10, 2)", "1e100000"),
+            ("DECIMAL(10, 2)", "1e-100000"),
+            # A zero never needs a power of ten to rescale.
+            ("DECIMAL(10, 2)", "0e-2147483645"),
+            ("DECIMAL(10, 2)", "0e2147483645"),
+            ("DECIMAL(10, 2)", "1e" + "0" * 5000 + "2"),
+        ]
+        for type_name, value in cases:
+            with self.subTest(type_name=type_name, value=value):
+                validate_default_value(AtomicType(type_name), value)
+
+    def test_rejects_scalar_defaults_java_rejects(self):
+        cases = [
+            ("TINYINT", "128"),
+            ("SMALLINT", "32768"),
+            ("INT", "2147483648"),
+            ("INT", " 10 "),
+            ("INT", "10\n"),
+            ("INT", "１２"),
+            ("DOUBLE", "1_000"),
+            ("FLOAT", "inf"),
+            ("DOUBLE", "nan"),
+            ("DOUBLE", "\u00a01.5\u00a0"),
+            ("DECIMAL(10, 2)", "NaN"),
+            ("DECIMAL(10, 2)", "Infinity"),
+            ("DECIMAL(10, 2)", "1_000"),
+            ("DECIMAL(10, 2)", " 1.25 "),
+            # Python \d accepts digits JDK 8 Character.digit(char, 10) rejects:
+            # U+1D7D9 is a surrogate pair, and Sinhala U+0DE7 arrived after
+            # Unicode 6.2. The same applies when the digit is in the exponent.
+            ("DECIMAL(10, 2)", "𝟙"),
+            ("DECIMAL(10, 2)", "෧"),
+            ("DECIMAL(10, 2)", "1e𝟙"),
+            ("DECIMAL(10, 2)", "1e෧"),
+            # BigDecimal(String) needs the exponent and the scale in int range.
+            ("DECIMAL(10, 2)", "1e2147483648"),
+            ("DECIMAL(10, 2)", "1e-2147483648"),
+            ("DECIMAL(10, 2)", "1.5e-2147483647"),
+            ("DECIMAL(10, 2)", "0e-2147483648"),
+            ("DECIMAL(10, 2)", "1e12345678901"),
+            # setScale cannot build the power of ten needed to rescale these.
+            ("DECIMAL(10, 2)", "1e2147483647"),
+            ("DECIMAL(10, 2)", "1e-2147483646"),
+            ("DECIMAL(10, 2)", "1e536870918"),
+            ("DECIMAL(10, 2)", "1e-536870922"),
+            ("DATE", "2147483648"),
+            ("DATE", "2024-13"),
+            ("DATE", "2023-02-29 12:00:00"),
+            ("TIME", "2147483648"),
+            # parseTime searches the whole string for ':', so the offset's
+            # colon is taken as the second separator.
+            ("TIME", "12:30+01:00"),
+            ("TIME", "12+01:00"),
+            ("TIME", "12:30:00+01:00:00"),
+            ("TIMESTAMP(3)", "9223372036854775808"),
+            ("TIMESTAMP(3)", " 1700000000000 "),
+            ("TIMESTAMP(3)", "not-a-timestamp"),
+            ("TIMESTAMP_LTZ(3)", "1700000000000"),
+            # The type string Java writes for TIMESTAMP_LTZ has no epoch path.
+            ("TIMESTAMP(3) WITH LOCAL TIME ZONE", "1700000000000"),
+            # isNumeric rejects a bare sign, a '+' sign and out-of-range values.
+            ("DATE", "+1"),
+            ("DATE", "-"),
+            ("DATE", "-2147483649"),
+            ("TIMESTAMP(3)", "+1"),
+            ("TIMESTAMP(3)", "-9223372036854775809"),
+            # fromMillisToTimestamp throws for any other precision.
+            ("TIMESTAMP(2)", "1700000000000"),
+            ("TIMESTAMP(1)", "-1"),
+            ("TIMESTAMP(7)", "0"),
+            # Java strips a lone quote with substring(1, 0), which throws.
+            ("STRING", "'"),
+            ("CHAR(1)", "'"),
+            ("BYTES", "'"),
+            # TIMESTAMP still bounds month, day and the time components, and
+            # the formatter reads 'yyyy' as an era year, so 0000 fails.
+            ("TIMESTAMP(3)", "2024-13-01"),
+            ("TIMESTAMP(3)", "2024-01-32"),
+            ("TIMESTAMP(3)", "2024-01-00"),
+            ("TIMESTAMP(3)", "0000-01-01"),
+            ("TIMESTAMP(3)", "2024-01-01 25:00:00"),
+            ("TIMESTAMP(3)", "2024-01-01 12:60:00"),
+            ("TIMESTAMP(3)", "2024-01-01 12:00:60"),
+            # A space form needs hour:minute:second, 'T' needs hour:minute.
+            ("TIMESTAMP(3)", "2024-01-01 12:00"),
+            ("TIMESTAMP(3)", "2024-01"),
+            ("TIMESTAMP(3)", "2024-01-01\n"),
+            ("TIMESTAMP(3)", "2024-01-01 12:00:00.9999999999"),
+            # 24:00 is only midnight, and not past the last representable day.
+            ("TIMESTAMP(3)", "2024-01-01 24:00:01"),
+            ("TIMESTAMP(3)", "2024-01-01 24:00:00.001"),
+            ("TIMESTAMP(3)", "2024-01-01T24:01"),
+            ("TIMESTAMP(3)", "+999999999-12-31 24:00:00"),
+            # Years need '+' to exceed four digits and must fit an era year.
+            ("TIMESTAMP(3)", "12345-01-01"),
+            ("TIMESTAMP(3)", "+2024-01-01"),
+            ("TIMESTAMP(3)", "-2024-01-01"),
+            ("TIMESTAMP(3)", "+00000-01-01"),
+            ("TIMESTAMP(3)", "+1000000000-01-01"),
+            ("TIMESTAMP(3)", "+00000000000000002024-01-01"),
+            # The formatter only reads ASCII digits.
+            ("TIMESTAMP(3)", "２０２４-０１-０１ ００:００:００"),
+            ("TIMESTAMP(3)", "2024-01-01 ００:００:００"),
+            ("TIMESTAMP(3)", "2024-01-01 00:00:00.５"),
+            ("TIMESTAMP(3)", "٢٠٢٤-٠١-٠١"),
+            ("TIMESTAMP_LTZ(3)", "２０２４-０１-０１ ００:００:００"),
+        ]
+        for type_name, value in cases:
+            with self.subTest(type_name=type_name, value=value):
+                with self.assertRaisesRegex(
+                        RuntimeError, "Unsupported default value"):
+                    validate_default_value(AtomicType(type_name), value)
+
+    def test_invalid_defaults_do_not_commit_schema(self):
+        cases = [
+            ("INT", " 10 "),
+            ("DOUBLE", "1_000"),
+            ("DECIMAL(10, 2)", "NaN"),
+            ("TIMESTAMP(3)", "9223372036854775808"),
+            ("TIME", "12:30+01:00"),
+            ("TIMESTAMP(3)", "２０２４-０１-０１ ００:００:００"),
+            ("DECIMAL(10, 2)", "1e2147483648"),
+            ("DECIMAL(10, 2)", "𝟙"),
+            ("DECIMAL(10, 2)", "෧"),
+            ("TIMESTAMP(2)", "1700000000000"),
+            ("STRING", "'"),
+        ]
+        manager = SchemaManager(self.file_io, f"{self.temp_dir}/invalid_defaults")
+        manager.create_table(Schema(fields=[
+            DataField(i, f"c{i}", AtomicType(type_name))
+            for i, (type_name, _) in enumerate(cases)
+        ]))
+        for i, (type_name, value) in enumerate(cases):
+            with self.subTest(type_name=type_name, value=value):
+                with self.assertRaisesRegex(RuntimeError, "Unsupported default value"):
+                    manager.commit_changes([
+                        UpdateColumnDefaultValue([f"c{i}"], value),
+                    ])
+                self.assertEqual(0, manager.latest().id)
+                self.assertIsNone(manager.latest().fields[i].default_value)
+
+    def test_rejects_collection_defaults(self):
+        with self.assertRaisesRegex(RuntimeError, "scalar defaults only"):
+            self.manager.commit_changes([
+                UpdateColumnDefaultValue(["values"], "[1, 2]"),
+            ])
+        self.assertIsNone(self._field("values").default_value)
+        self.assertEqual(0, self.manager.latest().id)
 
 
 if __name__ == '__main__':

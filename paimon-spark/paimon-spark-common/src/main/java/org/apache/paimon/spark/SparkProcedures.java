@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.AddGlobalIndexFieldsProcedure;
 import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
@@ -74,6 +75,7 @@ import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToAsLatestProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
+import org.apache.paimon.spark.procedure.SortDataEvolutionProcedure;
 import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -118,12 +120,14 @@ public class SparkProcedures {
         procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("create_global_index", CreateGlobalIndexProcedure::builder);
+        procedureBuilders.put("add_global_index_fields", AddGlobalIndexFieldsProcedure::builder);
         procedureBuilders.put("drop_global_index", DropGlobalIndexProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("rename_branch", RenameBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put(
                 "materialize_deletion_vectors", MaterializeDeletionVectorsProcedure::builder);
+        procedureBuilders.put("sort_data_evolution", SortDataEvolutionProcedure::builder);
         procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
         procedureBuilders.put("compact_chain_table", CompactChainTableProcedure::builder);
         procedureBuilders.put("rescale", RescaleProcedure::builder);

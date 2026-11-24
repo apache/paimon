@@ -18,16 +18,162 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
+import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link org.apache.paimon.CoreOptions}. */
 public class CoreOptionsTest {
+
+    @Test
+    void testBlobTransferMetricsAreOptIn() {
+        Options options = new Options();
+        assertThat(options.get(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED)).isFalse();
+        options.set(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED, true);
+        assertThat(
+                        new CoreOptions(options)
+                                .toConfiguration()
+                                .get(CoreOptions.BLOB_TRANSFER_METRICS_ENABLED))
+                .isTrue();
+    }
+
+    @Test
+    void testDataFileExternalPathList() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.dataFileExternalPaths()).isNull();
+        assertThat(core.dataFileExternalPathList()).isEmpty();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, "");
+        assertThat(core.dataFileExternalPathList()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", " file:///a/ ", "file:///a,", "file:///a,,"}) {
+            options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, value);
+            assertThat(core.dataFileExternalPaths()).isEqualTo(value);
+            assertThat(core.dataFileExternalPathList()).containsExactly(new Path("file:///a"));
+        }
+        for (String value :
+                new String[] {
+                    "file:///a,s3://bucket/b",
+                    " file:///a , s3://bucket/b ",
+                    "file:///a,s3://bucket/b,",
+                    "file:///a,s3://bucket/b,,"
+                }) {
+            options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, value);
+            assertThat(core.dataFileExternalPaths()).isEqualTo(value);
+            assertThat(core.dataFileExternalPathList())
+                    .containsExactly(new Path("file:///a"), new Path("s3://bucket/b"));
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.ExternalPathStrategy.class)
+    void testCreateExternalPaths(CoreOptions.ExternalPathStrategy strategy) {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, strategy);
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.createExternalPaths()).isEmpty();
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, "");
+        assertThat(core.createExternalPaths()).isEmpty();
+
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, " file:///a , s3://bucket/b ,file:///c,");
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, "FILE");
+        assertThat(core.dataFileExternalPathList())
+                .containsExactly(
+                        new Path("file:///a"), new Path("s3://bucket/b"), new Path("file:///c"));
+        if (strategy == CoreOptions.ExternalPathStrategy.NONE) {
+            assertThat(core.createExternalPaths()).isEmpty();
+        } else if (strategy == CoreOptions.ExternalPathStrategy.SPECIFIC_FS) {
+            assertThat(core.createExternalPaths())
+                    .containsExactly(new Path("file:///a"), new Path("file:///c"));
+        } else {
+            assertThat(core.createExternalPaths()).isEqualTo(core.dataFileExternalPathList());
+        }
+    }
+
+    @Test
+    void testGlobalIndexExternalPaths() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", " file:///a/ ", "file:///a,", "file:///a,,"}) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
+            assertThat(core.globalIndexExternalPaths())
+                    .as("global-index.external-paths=%s", value)
+                    .containsExactly(new Path("file:///a"));
+        }
+        for (String value :
+                new String[] {
+                    "file:///a, file:///b", "file:///a,file:///b,", "file:///a,file:///b,,"
+                }) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
+            assertThat(core.globalIndexExternalPaths())
+                    .as("global-index.external-paths=%s", value)
+                    .containsExactly(new Path("file:///a"), new Path("file:///b"));
+        }
+        for (String value :
+                new String[] {
+                    ",",
+                    ",,",
+                    " ",
+                    "a",
+                    ",file:///a",
+                    "file:///a,,file:///b",
+                    ",file:///a,,file:///b,",
+                    "file:///a, ",
+                    "file:///a,/b",
+                    "file:///a, ,file:///b"
+                }) {
+            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, value);
+            assertThatThrownBy(core::globalIndexExternalPaths)
+                    .as("global-index.external-paths=%s", value)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void testLegacyGlobalIndexExternalPath() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        options.set("global-index.external-path", "");
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        for (String value :
+                new String[] {"file:///a", "file:///index,archive", "file:///a,", "file:///a,,"}) {
+            options.set("global-index.external-path", value);
+            assertThat(core.globalIndexExternalPaths()).containsExactly(new Path(value));
+        }
+    }
+
+    @Test
+    void testGlobalIndexExternalPathsPrecedence() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        Path legacy = new Path("file:///index,archive");
+        options.set("global-index.external-path", legacy.toString());
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a, file:///b");
+        assertThat(core.globalIndexExternalPaths())
+                .containsExactly(new Path("file:///a"), new Path("file:///b"));
+
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
+        assertThat(core.globalIndexExternalPaths()).isEmpty();
+        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a,,file:///b");
+        assertThatThrownBy(core::globalIndexExternalPaths)
+                .isInstanceOf(IllegalArgumentException.class);
+        options.remove(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS);
+        assertThat(core.globalIndexExternalPaths()).containsExactly(legacy);
+    }
 
     @Test
     void testCommitLastSafeSnapshotAndStrictMode() {
@@ -176,6 +322,52 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testPartitionMarkDoneActionTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.PARTITION_MARK_DONE_ACTION, " success-file , done-partition ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.partitionMarkDoneActions())
+                .containsExactlyInAnyOrder(
+                        CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE,
+                        CoreOptions.PartitionMarkDoneAction.DONE_PARTITION);
+    }
+
+    @Test
+    public void testVectorFieldTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.VECTOR_FIELD, " v1 , v2, v3 ");
+        // An exact field name such as " v3" wins over its trimmed form.
+        List<String> fieldNames = Arrays.asList("v1", "v2", " v3");
+
+        assertThat(new CoreOptions(conf).vectorField(fieldNames))
+                .containsExactlyInAnyOrder("v1", "v2", " v3");
+        assertThat(CoreOptions.vectorField(conf.toMap(), fieldNames))
+                .containsExactlyInAnyOrder("v1", "v2", " v3");
+    }
+
+    @Test
+    public void testNormalizeVectorField() {
+        List<String> fieldNames = Arrays.asList("v1", "v2", " v3");
+
+        assertThat(CoreOptions.normalizeVectorField(" v1 , v2 ", fieldNames)).isEqualTo("v1,v2");
+        // An exact field name such as " v3" is kept as written.
+        assertThat(CoreOptions.normalizeVectorField("v1, v3", fieldNames)).isEqualTo("v1, v3");
+        // Unknown names are kept as written, so validation reports them.
+        assertThat(CoreOptions.normalizeVectorField("v1, v4", fieldNames)).isEqualTo("v1, v4");
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testLegacyVectorField() {
+        Options conf = new Options();
+        conf.set(CoreOptions.VECTOR_FIELD, "v1, v2");
+
+        assertThat(new CoreOptions(conf).vectorField()).containsExactlyInAnyOrder("v1", " v2");
+        assertThat(CoreOptions.vectorField(conf.toMap())).containsExactlyInAnyOrder("v1", " v2");
+    }
+
+    @Test
     public void testIgnoreGlobalIndexColumnUpdateAction() {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
@@ -192,6 +384,12 @@ public class CoreOptionsTest {
         Options conf = new Options();
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(CoreOptions.SCALAR_INDEX_SEARCH_MODE.defaultValue())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.scalarPrefilterSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())
@@ -201,6 +399,10 @@ public class CoreOptionsTest {
 
         conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
         options = new CoreOptions(conf);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.scalarPrefilterSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
         assertThat(options.vectorIndexSearchMode())
@@ -212,12 +414,25 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
         conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
         options = new CoreOptions(conf);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.scalarPrefilterSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.scalarIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
         assertThat(options.fullTextIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+
+        conf.set(
+                CoreOptions.SCALAR_INDEX_PREFILTER_SEARCH_MODE,
+                CoreOptions.GlobalIndexSearchMode.FULL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarPrefilterSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.scalarScanSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
     }
 
     @Test

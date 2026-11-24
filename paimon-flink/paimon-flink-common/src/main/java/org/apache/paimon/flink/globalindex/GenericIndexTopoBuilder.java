@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
@@ -29,6 +30,7 @@ import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -75,6 +77,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createGlobalIndexFileReadWrite;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createShardIndexedSplits;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
@@ -229,7 +232,8 @@ public class GenericIndexTopoBuilder {
 
         Options mergedOptions = new Options(table.options(), userOptions);
         byte[] sourceMeta =
-                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
+                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId(), table.schema().id())
+                        .serialize();
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
@@ -355,8 +359,8 @@ public class GenericIndexTopoBuilder {
      * and emits a {@link Committable}. Each shard's split contains only the files relevant to this
      * shard, so no redundant I/O occurs.
      */
-    private static class BuildIndexOperator
-            extends BoundedOneInputOperator<IndexedSplit, Committable> {
+    @VisibleForTesting
+    static class BuildIndexOperator extends BoundedOneInputOperator<IndexedSplit, Committable> {
 
         private static final long serialVersionUID = 1L;
 
@@ -370,6 +374,7 @@ public class GenericIndexTopoBuilder {
         private final byte[] sourceMeta;
 
         private transient TableRead tableRead;
+        private transient GlobalIndexFileReadWrite fileReadWrite;
         private transient List<DataField> indexedFields;
         private transient InternalRow.FieldGetter[] indexFieldGetters;
         private transient int rowIdFieldIndex;
@@ -399,6 +404,7 @@ public class GenericIndexTopoBuilder {
         public void open() throws Exception {
             super.open();
             this.tableRead = readBuilder.newRead();
+            this.fileReadWrite = createGlobalIndexFileReadWrite(table);
             // The primary column followed by the extra columns, in index order. Field getters and
             // the writer projection both need the full ordered list.
             this.indexedFields = new ArrayList<>(1 + extraFields.size());
@@ -441,7 +447,7 @@ public class GenericIndexTopoBuilder {
             long startTime = System.currentTimeMillis();
 
             GlobalIndexWriter indexWriter =
-                    createIndexWriter(table, indexType, indexedFields, mergedOptions);
+                    createIndexWriter(fileReadWrite, indexType, indexedFields, mergedOptions);
 
             try {
                 long rowsSeen = 0;
@@ -485,12 +491,6 @@ public class GenericIndexTopoBuilder {
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
-                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
-                    LOG.warn(
-                            "rowCount mismatch: writer reported {} but caller saw {} rows",
-                            resultEntries.get(0).rowCount(),
-                            rowsSeen);
-                }
                 long elapsed = System.currentTimeMillis() - startTime;
                 LOG.info(
                         "Finished shard [{}, {}]: saw {} rows, "
@@ -548,7 +548,6 @@ public class GenericIndexTopoBuilder {
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexFields,

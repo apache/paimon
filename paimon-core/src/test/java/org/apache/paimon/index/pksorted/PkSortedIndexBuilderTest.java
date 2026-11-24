@@ -47,6 +47,8 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -137,7 +139,7 @@ class PkSortedIndexBuilderTest {
         List<GlobalIndexIOMeta> ioMetas =
                 Collections.singletonList(
                         new GlobalIndexIOMeta(
-                                pathFactory.toPath(payload.fileName()),
+                                pathFactory.toPath(payload),
                                 payload.fileSize(),
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
@@ -386,7 +388,7 @@ class PkSortedIndexBuilderTest {
         List<GlobalIndexIOMeta> ioMetas =
                 Collections.singletonList(
                         new GlobalIndexIOMeta(
-                                pathFactory.toPath(payload.fileName()),
+                                pathFactory.toPath(payload),
                                 payload.fileSize(),
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
@@ -448,7 +450,7 @@ class PkSortedIndexBuilderTest {
         Path path = new Path(directory.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(path, fileName);
             }
 
@@ -460,6 +462,11 @@ class PkSortedIndexBuilderTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

@@ -58,6 +58,8 @@ def test_native_phase_uses_dispatch_without_python_execution(search_table, phase
     target = 'try_native_hybrid_routes' if phase == 'routes' else 'rank_hybrid_results'
     with patch('pypaimon.execution.native.read.native_hybrid_search.' + target, return_value=expected) as native, \
             patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+                  return_value=False), \
             patch('pypaimon.execution.python.read.search.hybrid_search.route_builders',
                   side_effect=AssertionError('Python route planning')), \
             patch('pypaimon.execution.python.read.search.hybrid_search.rank',
@@ -74,6 +76,8 @@ def test_native_phase_failure_is_not_replayed_in_python(search_table, phase):
     builder = _builder(search_table)
     with patch('pypaimon.execution.native.read.native_hybrid_search.' + target, side_effect=failure), \
             patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+                  return_value=False), \
             patch('pypaimon.execution.python.read.search.hybrid_search.route_builders') as routes, \
             patch('pypaimon.execution.python.read.search.hybrid_search.rank') as rank:
         with pytest.raises(RuntimeError) as caught:

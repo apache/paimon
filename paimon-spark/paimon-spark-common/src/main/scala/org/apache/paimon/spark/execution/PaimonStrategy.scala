@@ -24,7 +24,7 @@ import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlo
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.{PaimonBaseScan, PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
@@ -57,6 +57,7 @@ import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.ArrayType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -582,10 +583,10 @@ case class LateralVectorSearchExec(
     primaryKeyResults.foreach(results => return searchPrimaryKeyRows(queries, results, context))
     val rowIdToMatches = createRowIdToMatches(queries, globalIndexResults)
     val batchGlobalIndexResult = createBatchGlobalIndexResult(globalIndexResults)
-    val scan = context.readBuilder
-      .newScan()
-      .withGlobalIndexResult(batchGlobalIndexResult)
-      .asInstanceOf[InnerTableScan]
+    val scan = PaimonBaseScan.withSearchResult(
+      context.readBuilder.newScan().asInstanceOf[InnerTableScan],
+      batchGlobalIndexResult,
+      context.vectorPlan.snapshot())
     val read = context.readBuilder.newRead()
 
     scan.plan().splits().asScala.iterator.flatMap {
@@ -808,7 +809,9 @@ case class LateralVectorSearchExec(
   private def toFloatArray(value: Any): Option[Array[Float]] = {
     value match {
       case null => None
-      case arrayData: ArrayData => Some(arrayData.toFloatArray())
+      case arrayData: ArrayData =>
+        val elementType = queryVectorExpr.dataType.asInstanceOf[ArrayType].elementType
+        Some(PaimonTableValuedFunctions.readQueryVector(arrayData, elementType))
       case _ =>
         throw new RuntimeException(s"Cannot extract query vector from expression value: $value")
     }

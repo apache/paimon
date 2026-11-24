@@ -21,10 +21,12 @@ import types
 import pyarrow as pa
 import pytest
 
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+from pypaimon.schema.table_schema import TableSchema
+from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.execution.python.write.writer.mosaic_writer_options import create_mosaic_writer_options
 
@@ -97,26 +99,17 @@ def test_write_mosaic_local_file_io_passes_writer_options(monkeypatch, tmp_path)
 def test_data_writer_passes_mosaic_writer_options(monkeypatch, tmp_path):
     fake_mosaic = types.SimpleNamespace(WriterOptions=_FakeWriterOptions)
     monkeypatch.setitem(sys.modules, "mosaic", fake_mosaic)
-    options = CoreOptions.from_dict({
+    schema = TableSchema(fields=[DataField(0, "id", AtomicType("INT"))], options={
         "file.format": "mosaic",
         "mosaic.num-buckets": "4",
         "mosaic.stats-columns": "id",
     })
     file_io = _FileIO()
-    table = types.SimpleNamespace(
-        file_io=file_io,
-        options=options,
-        is_primary_key_table=True,
-        table_schema=types.SimpleNamespace(id=0),
-        trimmed_primary_keys=["id"],
-        trimmed_primary_keys_fields=[DataField(0, "id", AtomicType("INT"))],
-        fields=[DataField(0, "id", AtomicType("INT"))],
-        path_factory=lambda: FileStorePathFactory(
-            str(tmp_path), [], '__DEFAULT_PARTITION__', 'mosaic', 'data-', 'changelog-', False, False, 'zstd'),
-    )
-    writer = AppendOnlyDataWriter(table, (), 0, 0, options)
+    table = FileStoreTable(file_io, Identifier("db", "mosaic_table"), str(tmp_path), schema)
+    writer = AppendOnlyDataWriter(table, (), 0, 0, table.options)
 
-    writer._write_data_to_file(pa.table({"id": pa.array([1], type=pa.int32())}))
+    writer.write(pa.record_batch({"id": pa.array([1], type=pa.int32())}))
+    writer.prepare_commit()
 
     assert isinstance(file_io.mosaic_options, _FakeWriterOptions)
     assert file_io.mosaic_options.kwargs["num_buckets"] == 4

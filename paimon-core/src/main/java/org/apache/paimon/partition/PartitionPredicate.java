@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -43,6 +44,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -51,6 +53,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -215,16 +218,21 @@ public interface PartitionPredicate extends Serializable {
      */
     class MultiplePartitionPredicate implements PartitionPredicate {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
+        private static final int MIN_PARTITIONS_FOR_RANGE_SEARCH = 64;
 
         private final Set<BinaryRow> partitions;
         private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
+        @Nullable private final PartitionRangeIndex partitionRangeIndex;
 
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
+            // For a single partition the combined bounds already describe its field values.
+            Object[][] partitionValues =
+                    partitions.size() > 1 ? new Object[partitions.size()][] : null;
             RowType partitionType = converter.rowType();
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
@@ -236,29 +244,46 @@ public interface PartitionPredicate extends Serializable {
                 serializers[i] = InternalSerializers.create(partitionType.getTypeAt(i));
                 collectors[i] = new FullSimpleColStatsCollector();
             }
+            int index = 0;
             for (BinaryRow part : partitions) {
                 Object[] fields = converter.convert(part);
+                if (partitionValues != null) {
+                    partitionValues[index++] = fields;
+                }
                 for (int i = 0; i < fields.length; i++) {
                     collectors[i].collect(fields[i], serializers[i]);
                 }
             }
             PredicateBuilder builder = new PredicateBuilder(partitionType);
+            SimpleColStats[] columnStats =
+                    partitions.size() >= MIN_PARTITIONS_FOR_RANGE_SEARCH
+                            ? new SimpleColStats[fieldNum]
+                            : null;
             for (int i = 0; i < collectors.length; i++) {
                 SimpleColStats stats = collectors[i].result();
+                if (columnStats != null) {
+                    columnStats[i] = stats;
+                }
                 Long nullCount = stats.nullCount();
                 checkArgument(nullCount != null, "nullCount cannot be null!");
                 if (nullCount == partitions.size()) {
                     min[i] = builder.isNull(i);
                     max[i] = builder.isNull(i);
                 } else {
-                    min[i] = builder.greaterOrEqual(i, checkNotNull(stats.min()));
-                    max[i] = builder.lessOrEqual(i, checkNotNull(stats.max()));
+                    Object minValue = checkNotNull(stats.min());
+                    Object maxValue = checkNotNull(stats.max());
+                    min[i] = builder.greaterOrEqual(i, minValue);
+                    max[i] = builder.lessOrEqual(i, maxValue);
                     if (nullCount > 0) {
                         min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
                         max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
                     }
                 }
             }
+            this.partitionRangeIndex =
+                    partitionValues == null
+                            ? null
+                            : new PartitionRangeIndex(partitionValues, converter, columnStats);
         }
 
         @Override
@@ -272,7 +297,10 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow minValues,
                 InternalRow maxValues,
                 InternalArray nullCounts) {
-            if (fieldNum == 0) {
+            if (fieldNum == 0
+                    || minValues.getFieldCount() < fieldNum
+                    || maxValues.getFieldCount() < fieldNum
+                    || (nullCounts.size() > 0 && nullCounts.size() < fieldNum)) {
                 return true;
             }
 
@@ -282,7 +310,9 @@ public interface PartitionPredicate extends Serializable {
                     return false;
                 }
             }
-            return true;
+            return partitionRangeIndex == null
+                    || rowCount <= 0
+                    || partitionRangeIndex.test(rowCount, minValues, maxValues, nullCounts);
         }
 
         public Optional<BinaryRow> extractSinglePartition() {
@@ -310,6 +340,324 @@ public interface PartitionPredicate extends Serializable {
         @Override
         public int hashCode() {
             return Objects.hash(partitions, fieldNum, Arrays.hashCode(min), Arrays.hashCode(max));
+        }
+
+        /** Checks partition tuples, with a lazy range index for each partition column. */
+        static final class PartitionRangeIndex implements Serializable {
+
+            private static final long serialVersionUID = 1L;
+            private static final int LINEAR_SCANS_BEFORE_SORT = 17;
+
+            private final Object[][] partitionValues;
+            private final RowDataToObjectArrayConverter converter;
+            @Nullable private final ColumnRangeIndex[] columns;
+
+            PartitionRangeIndex(
+                    Object[][] partitionValues,
+                    RowDataToObjectArrayConverter converter,
+                    @Nullable SimpleColStats[] columnStats) {
+                this.partitionValues = partitionValues;
+                this.converter = converter;
+                columns = columnStats == null ? null : new ColumnRangeIndex[columnStats.length];
+                if (columns != null) {
+                    for (int i = 0; i < columns.length; i++) {
+                        columns[i] =
+                                new ColumnRangeIndex(
+                                        i, converter.rowType().getTypeAt(i), columnStats[i]);
+                    }
+                }
+            }
+
+            boolean test(
+                    long rowCount,
+                    InternalRow minValues,
+                    InternalRow maxValues,
+                    InternalArray nullCounts) {
+                ManifestLookup lookup =
+                        new ManifestLookup(
+                                partitionValues,
+                                converter.convert(minValues),
+                                converter.convert(maxValues),
+                                nullCounts,
+                                rowCount);
+                if (columns == null) {
+                    return matches(lookup);
+                }
+
+                ColumnRangeIndex ready = null;
+                boolean trackRejections = false;
+                long requiredRejections = (long) partitionValues.length * LINEAR_SCANS_BEFORE_SORT;
+                for (ColumnRangeIndex column : columns) {
+                    if (!column.restrict(lookup)) {
+                        continue;
+                    }
+                    Object[][] sorted = column.sortedPartitions;
+                    if (sorted != null) {
+                        if (!column.selectCandidates(sorted, lookup)) {
+                            return false;
+                        }
+                    } else {
+                        trackRejections = true;
+                        if (column.rejectedPartitions >= requiredRejections
+                                && (ready == null
+                                        || column.rejectedPartitions > ready.rejectedPartitions)) {
+                            ready = column;
+                        }
+                    }
+                }
+
+                // Reuse a small candidate set instead of building another index for this lookup.
+                if (ready != null
+                        && (lookup.indexedField < 0
+                                || lookup.candidateCount() >= MIN_PARTITIONS_FOR_RANGE_SEARCH)
+                        && !ready.selectCandidates(ready.build(partitionValues), lookup)) {
+                    return false;
+                }
+
+                lookup.rejections = trackRejections ? new int[columns.length] : null;
+                boolean matches = matches(lookup);
+                if (lookup.rejections != null) {
+                    for (int i = 0; i < columns.length; i++) {
+                        if (lookup.rejections[i] > 0 && columns[i].sortedPartitions == null) {
+                            columns[i].recordRejections(lookup.rejections[i]);
+                        }
+                    }
+                }
+                return matches;
+            }
+
+            @Nullable
+            Object[][] sortedPartitions(int field) {
+                return columns == null ? null : columns[field].sortedPartitions;
+            }
+
+            private boolean matches(ManifestLookup lookup) {
+                if (lookup.indexedField >= 0) {
+                    lookup.clearBounds(lookup.indexedField);
+                }
+                return matchesAny(0, lookup.nullEnd, lookup)
+                        || matchesAny(lookup.start, lookup.end, lookup);
+            }
+
+            private boolean matchesAny(int start, int end, ManifestLookup lookup) {
+                int[] rejections = lookup.rejections;
+                for (int i = start; i < end; i++) {
+                    int rejectedField = firstMismatch(lookup.candidates[i], lookup);
+                    if (rejectedField < 0) {
+                        return true;
+                    }
+                    if (rejections != null) {
+                        // Only count work that reached this column in schema order.
+                        rejections[rejectedField]++;
+                    }
+                }
+                return false;
+            }
+
+            private int firstMismatch(Object[] partition, ManifestLookup lookup) {
+                for (int i = 0; i < partition.length; i++) {
+                    Object value = partition[i];
+                    if (value == null) {
+                        if (lookup.nulls[i] == 0) {
+                            return i;
+                        }
+                    } else if (lookup.nulls[i] == lookup.rowCount) {
+                        return i;
+                    } else if (lookup.lower[i] != null && lookup.upper[i] != null) {
+                        DataType type = converter.rowType().getTypeAt(i);
+                        if (compareLiteral(type, value, lookup.lower[i]) < 0
+                                || compareLiteral(type, value, lookup.upper[i]) > 0) {
+                            return i;
+                        }
+                    }
+                }
+                return -1;
+            }
+
+            private static final class ManifestLookup {
+
+                private final Object[] lower;
+                private final Object[] upper;
+                private final long[] nulls;
+                private final long rowCount;
+                @Nullable private int[] rejections;
+                private Object[][] candidates;
+                private int indexedField = -1;
+                private int nullEnd;
+                private int start;
+                private int end;
+
+                private ManifestLookup(
+                        Object[][] partitions,
+                        Object[] lower,
+                        Object[] upper,
+                        InternalArray nullCounts,
+                        long rowCount) {
+                    this.candidates = partitions;
+                    this.end = partitions.length;
+                    this.lower = lower;
+                    this.upper = upper;
+                    this.rowCount = rowCount;
+                    this.nulls = new long[lower.length];
+                    for (int i = 0; i < lower.length; i++) {
+                        nulls[i] =
+                                nullCounts.size() == 0 || nullCounts.isNullAt(i)
+                                        ? -1
+                                        : nullCounts.getLong(i);
+                    }
+                }
+
+                private void clearBounds(int field) {
+                    lower[field] = null;
+                    upper[field] = null;
+                }
+
+                private int candidateCount() {
+                    return nullEnd + (end - start);
+                }
+
+                private boolean consider(
+                        Object[][] sorted, int field, int nullEnd, int start, int end) {
+                    int count = nullEnd + (end - start);
+                    if (count == 0) {
+                        return false;
+                    }
+                    if (indexedField < 0 || count < candidateCount()) {
+                        candidates = sorted;
+                        indexedField = field;
+                        this.nullEnd = nullEnd;
+                        this.start = start;
+                        this.end = end;
+                    }
+                    return true;
+                }
+            }
+
+            private static final class ColumnRangeIndex implements Serializable {
+
+                private static final long serialVersionUID = 1L;
+
+                private final int field;
+                private final DataType type;
+                private final int nullCount;
+                @Nullable private final Object min;
+                @Nullable private final Object max;
+                private transient volatile long rejectedPartitions;
+                @Nullable private transient volatile Object[][] sortedPartitions;
+
+                private ColumnRangeIndex(int field, DataType type, SimpleColStats stats) {
+                    this.field = field;
+                    this.type = type;
+                    this.nullCount = checkNotNull(stats.nullCount()).intValue();
+                    this.min = stats.min();
+                    this.max = stats.max();
+                }
+
+                private boolean restrict(ManifestLookup lookup) {
+                    long manifestNulls = lookup.nulls[field];
+                    if (min != null
+                            && lookup.lower[field] != null
+                            && lookup.upper[field] != null
+                            && manifestNulls != lookup.rowCount
+                            && (compareLiteral(type, min, lookup.lower[field]) < 0
+                                    || compareLiteral(type, max, lookup.upper[field]) > 0)) {
+                        return true;
+                    }
+                    lookup.clearBounds(field);
+                    return (manifestNulls == 0 && nullCount != 0)
+                            || (manifestNulls == lookup.rowCount && min != null);
+                }
+
+                private synchronized void recordRejections(int count) {
+                    if (sortedPartitions == null) {
+                        rejectedPartitions += count;
+                    }
+                }
+
+                private synchronized Object[][] build(Object[][] partitions) {
+                    if (sortedPartitions == null) {
+                        sortedPartitions =
+                                min instanceof Integer
+                                        ? sortIntegerPartitions(partitions)
+                                        : sortPartitions(partitions);
+                    }
+                    return sortedPartitions;
+                }
+
+                private Object[][] sortIntegerPartitions(Object[][] partitions) {
+                    Object[][] sorted = new Object[partitions.length][];
+                    long[] order = new long[partitions.length - nullCount];
+                    int nextNull = 0;
+                    int nextKey = 0;
+                    for (int i = 0; i < partitions.length; i++) {
+                        Integer key = (Integer) partitions[i][field];
+                        if (key == null) {
+                            sorted[nextNull++] = partitions[i];
+                        } else {
+                            // Keep signed ordering and every tuple that shares a key.
+                            order[nextKey++] = ((long) key << Integer.SIZE) | i;
+                        }
+                    }
+                    Arrays.sort(order);
+                    for (int i = 0; i < order.length; i++) {
+                        sorted[nullCount + i] = partitions[(int) order[i]];
+                    }
+                    return sorted;
+                }
+
+                private Object[][] sortPartitions(Object[][] partitions) {
+                    Object[][] sorted = partitions.clone();
+                    if (nullCount == 0) {
+                        Arrays.sort(
+                                sorted,
+                                (left, right) -> compareLiteral(type, left[field], right[field]));
+                    } else {
+                        Comparator<Object> keys =
+                                Comparator.nullsFirst(
+                                        (left, right) -> compareLiteral(type, left, right));
+                        Arrays.sort(
+                                sorted, Comparator.comparing(partition -> partition[field], keys));
+                    }
+                    return sorted;
+                }
+
+                private boolean selectCandidates(Object[][] sorted, ManifestLookup lookup) {
+                    long manifestNulls = lookup.nulls[field];
+                    int nullEnd = manifestNulls == 0 ? 0 : nullCount;
+                    int start = nullCount;
+                    int end = nullCount;
+                    if (manifestNulls != lookup.rowCount) {
+                        Object lower = lookup.lower[field];
+                        Object upper = lookup.upper[field];
+                        if (lower != null && compareLiteral(type, min, lower) < 0) {
+                            start = findBound(sorted, lower, nullCount, false);
+                        }
+                        end = start;
+                        if (upper == null || compareLiteral(type, max, upper) <= 0) {
+                            end = sorted.length;
+                        } else if (start < sorted.length
+                                && compareLiteral(type, sorted[start][field], upper) <= 0) {
+                            end = findBound(sorted, upper, start + 1, true);
+                        }
+                    }
+                    return lookup.consider(sorted, field, nullEnd, start, end);
+                }
+
+                private int findBound(
+                        Object[][] sorted, Object value, int start, boolean afterEqual) {
+                    int end = sorted.length;
+                    while (start < end) {
+                        int middle = (start + end) >>> 1;
+                        int comparison = compareLiteral(type, sorted[middle][field], value);
+                        if (comparison < 0 || (afterEqual && comparison == 0)) {
+                            start = middle + 1;
+                        } else {
+                            end = middle;
+                        }
+                    }
+                    return start;
+                }
+            }
         }
     }
 

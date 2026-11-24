@@ -30,4 +30,10 @@ public final class NativeSession {
     public static native long newSession();
 
     public static native void free(long sessionPtr);
+
+    /**
+     * Selects the edition that writers of the session use, for example {@code core2025.10.0}. It
+     * replaces the selected edition of the same family. Throws for an unknown edition.
+     */
+    public static native void enableEdition(long sessionPtr, String edition);
 }

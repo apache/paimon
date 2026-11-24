@@ -28,6 +28,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -121,9 +122,24 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         Path path = getTableLocation(identifier);
-        uncheck(() -> fileIO.delete(path, true));
+        deleteDirectory(path);
+        // The drop cannot be retried once the table is gone, so attempt every external path.
+        RuntimeException failure = null;
         for (Path externalPath : externalPaths) {
-            uncheck(() -> fileIO.delete(externalPath, true));
+            try {
+                deleteDirectory(externalPath);
+            } catch (RuntimeException e) {
+                failure = ExceptionUtils.firstOrSuppressed(e, failure);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private void deleteDirectory(Path path) {
+        if (!uncheck(() -> fileIO.delete(path, true)) && uncheck(() -> fileIO.exists(path))) {
+            throw new RuntimeException(String.format("Failed to delete directory %s.", path));
         }
     }
 

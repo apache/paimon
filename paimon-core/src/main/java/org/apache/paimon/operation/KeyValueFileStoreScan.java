@@ -92,14 +92,16 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer,
             boolean fileIndexReadEnabled,
-            boolean fileIndexReadIgnoreUnknownType) {
+            boolean fileIndexReadIgnoreUnknownType,
+            String tableName) {
         super(
                 manifestsReader,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                scanManifestParallelism);
+                scanManifestParallelism,
+                tableName);
         this.bucketSelectConverter = bucketSelectConverter;
         // NOTE: don't add key prefix to field names because fieldKeyStatsConverters is used for
         // filter conversion

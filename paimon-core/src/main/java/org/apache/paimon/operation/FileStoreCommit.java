@@ -24,6 +24,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -44,6 +45,14 @@ public interface FileStoreCommit extends AutoCloseable {
 
     /** Use the materialize-DV row-id conflict strategy with snapshots from commit messages. */
     FileStoreCommit materializeDvRowIdCheck();
+
+    /**
+     * Check a range sort against its planning snapshot and invalidate overlapping global indexes.
+     */
+    FileStoreCommit dataEvolutionRangeSortCheck();
+
+    /** Whether this committer rejected its last range sort with this failure before publication. */
+    boolean isRangeSortConflict(RuntimeException failure);
 
     FileStoreCommit withOperation(Snapshot.Operation operation);
 
@@ -74,6 +83,13 @@ public interface FileStoreCommit extends AutoCloseable {
      */
     void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
 
+    /**
+     * Drop the partitions {@code partitionFilter} matches in the latest snapshot of each commit
+     * attempt; a null filter matches every partition. The {@link Snapshot.CommitKind} of generated
+     * snapshot is {@link Snapshot.CommitKind#OVERWRITE}.
+     */
+    void dropPartitions(PartitionPredicate partitionFilter, long commitIdentifier);
+
     void truncateTable(long commitIdentifier);
 
     /** Compact the manifest entries only. */
@@ -82,8 +98,11 @@ public interface FileStoreCommit extends AutoCloseable {
     /** Roll back to the target snapshot and materialize it as the latest snapshot. */
     boolean rollbackToAsLatest(Snapshot targetSnapshot);
 
-    /** Abort an unsuccessful commit. The data files will be deleted. */
-    void abort(List<CommitMessage> commitMessages);
+    /**
+     * Abort an unsuccessful commit. The data files will be deleted, with {@code threadNum} bounding
+     * the concurrent deletes as {@code file-operation.thread-num} does.
+     */
+    void abort(List<CommitMessage> commitMessages, int threadNum);
 
     /** With metrics to measure commits. */
     FileStoreCommit withMetrics(CommitMetrics metrics);

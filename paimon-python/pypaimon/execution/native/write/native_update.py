@@ -23,7 +23,7 @@ from datetime import date, datetime, time
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.execution.native.table import _native_query_auth_supported
+from pypaimon.execution.native.table import _native_query_auth_supported, _native_variant_write_supported
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
@@ -257,7 +257,8 @@ def _native_update_columns_supported(table, columns):
     if type(table) is not FileStoreTable:
         return False
     names = set(table.field_names if columns is None else columns)
-    return not names.intersection(table.options.video_frame_fields())
+    return (not names.intersection(table.options.video_frame_fields())
+            and _native_variant_write_supported(table, names))
 
 
 def _temporal_row_key_supported(value, data_type):
@@ -340,9 +341,10 @@ def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None, key_na
 
 def create_native_upsert(table, commit_user, data, keys, columns):
     """Prepare one core upsert from Arrow columns or named row values."""
-    if table.options.video_frame_fields() or not _native_update_columns_supported(table, columns):
-        # An upsert can append unmatched rows; packed video writing is still
-        # provided by the Python writer.
+    if (table.options.video_frame_fields() or not _native_update_columns_supported(table, columns)
+            or not _native_variant_write_supported(table)):
+        # Unmatched inserts write the full schema, including packed video or
+        # shredded VARIANT columns outside the selected update columns.
         return None
     native_table = _native_row_id_table(table)
     if native_table is None:

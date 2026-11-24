@@ -303,6 +303,19 @@ class JindoInputFile:
         return False
 
 
+class _JindoPythonFile(PythonFile):
+    """Keep positional reads on the SDK's pread path for Python FileIO callers."""
+
+    def __init__(self, source, mode="r"):
+        # PythonFile is initialized by its Cython __cinit__, not __init__.
+        self._range_source = source
+
+    def read_at(self, nbytes: int, offset: int):
+        if callable(getattr(self._range_source._stream, 'pread', None)):
+            return self._range_source.read_at(nbytes, offset)
+        return super().read_at(nbytes, offset)
+
+
 class JindoOutputFile:
     def __init__(self, jindo_stream, *, owner):
         self._stream = jindo_stream
@@ -510,7 +523,7 @@ class JindoFileSystemHandler(FileSystemHandler):
     def open_input_stream(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(
+        return _JindoPythonFile(
             JindoInputFile(jindo_stream, self._known_file_size(normalized),
                            owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")
@@ -518,7 +531,7 @@ class JindoFileSystemHandler(FileSystemHandler):
     def open_input_file(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(
+        return _JindoPythonFile(
             JindoInputFile(jindo_stream, self._known_file_size(normalized),
                            owner=self._jindo_fs, pread_max_size=self._pread_max_size),
             mode="r")

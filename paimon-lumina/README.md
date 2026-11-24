@@ -8,6 +8,15 @@ Alibaba Storage Service Team. It is accessed via JNI through the `lumina-jni` ar
 
 **Note:** Lumina native library only supports **x86_64 (AMD64)** architecture. It is not available on ARM (e.g., Apple Silicon, aarch64).
 
+### Upgrading with Paimon
+
+Deploy `paimon-lumina` and the Paimon engine connector/runtime from the same Paimon
+release. For snapshot or custom builds, build both from the same source revision.
+The Java writer interface for multiple external index paths requires an updated
+Lumina plugin, even when only one external directory is configured or the option
+is unset. Replace the old plugin JAR when upgrading Paimon; updating only
+`lumina-jni` is insufficient.
+
 ### Supported Index Types
 
 | Index Type | Description |
@@ -37,7 +46,7 @@ All options use the `lumina.` prefix as table properties.
 | `lumina.pretrain.sample_ratio` | double | 0.2 | Sample ratio for pretraining |
 | `lumina.diskann.build.ef_construction` | int | 1024 | Size of the dynamic candidate list during graph construction |
 | `lumina.diskann.build.neighbor_count` | int | 64 | Maximum number of neighbors per node in the graph |
-| `lumina.diskann.build.thread_count` | int | 32 | Number of threads used for DiskANN index building |
+| `lumina.diskann.build.thread_count` | int | 32 | Number of threads used for DiskANN index building. The build runs on Lumina's native executor, whose size is read from the `LUMINA_EXECUTOR_THREAD_COUNT` environment variable of the process (default 32); this option does not change it |
 | `lumina.diskann.search.list_size` | int | 1.5x topK | DiskANN search list size (auto-set to 1.5x topK if not specified) |
 | `lumina.diskann.search.beam_width` | int | 4 | Beam width for DiskANN search |
 | `lumina.encoding.pq.m` | int | 64 | Number of sub-quantizers for PQ encoding (auto-capped to dimension) |

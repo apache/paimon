@@ -28,7 +28,6 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
@@ -36,6 +35,9 @@ from pypaimon.table.row.row_kind import RowKind
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.execution.python.write.map_shared_shredding_writer import MapSharedShreddingWriter
+from pypaimon.execution.python.write.writer.metadata_stats import (
+    ValueStatsCollector, build_stats, column_stats,
+)
 from pypaimon.execution.python.write.writer.mosaic_writer_options import create_mosaic_writer_options
 from pypaimon.execution.python.write.writer.parquet_writer_options import create_parquet_writer_options
 from pypaimon.execution.python.write.writer.write_buffer import WriteBuffer
@@ -327,10 +329,10 @@ class DataWriter(ABC):
             self._write_data_to_file(pending.slice(0, split_row))
             self._buffer.reset(pending.slice(split_row))
 
-    def _write_file(self, file_path: str, data: pa.Table, file_format: str) -> Dict:
-        """Write contents without publishing metadata; return shredding statistics."""
+    def _write_file(self, file_path: str, data: pa.Table, file_format: str, stats_collector):
+        """Write the file and return its shredding statistics and optional Parquet metadata."""
         if file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            return self._write_parquet_data(file_path, data)
+            return self._write_parquet_data(file_path, data, stats_collector)
         elif file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -338,14 +340,16 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             write_blob_file(self.file_io, file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            write_vortex_file(self.file_io, file_path, data)
+            write_vortex_file(self.file_io, file_path, data,
+                              compact=self.options.vortex_compact_encodings(),
+                              edition=self.options.vortex_write_edition())
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             write_row_file(self.file_io, file_path, data, zstd_level=self.zstd_level)
         else:
             raise ValueError(f"Unsupported file format: {file_format}")
-        return {}
+        return {}, None
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
@@ -371,7 +375,9 @@ class DataWriter(ABC):
         # exists would make the retry write a second copy of rows the first meta
         # already covers.
         try:
-            shared_shredding_stats = self._write_file(file_path, data, self.file_format)
+            stats_collector = self._file_value_stats_collector(logical_data)
+            shared_shredding_stats, parquet_metadata = self._write_file(
+                file_path, data, self.file_format, stats_collector)
 
             if self._should_write_row_sidecar():
                 row_sidecar_name = f"{file_name}{self.ROW_SIDECAR_SUFFIX}"
@@ -384,7 +390,7 @@ class DataWriter(ABC):
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
 
-            statistics = self._data_file_statistics(logical_data)
+            statistics = self._data_file_statistics(logical_data, stats_collector, parquet_metadata)
             data_meta = self._create_data_file_meta(
                 file_name=file_name,
                 file_path=file_path,
@@ -393,6 +399,7 @@ class DataWriter(ABC):
                 max_key=GenericRow(statistics['max_key'], self.trimmed_primary_keys_fields),
                 key_stats=statistics['key_stats'],
                 value_stats=statistics['value_stats'],
+                value_stats_cols=statistics['value_stats_cols'],
                 min_sequence_number=statistics['min_seq'],
                 max_sequence_number=statistics['max_seq'],
                 extra_files=extra_files,
@@ -402,7 +409,7 @@ class DataWriter(ABC):
             if (self.changelog_producer == ChangelogProducer.INPUT
                     and not self._writes_changelog_before_merge()):
                 changelog_meta = self._write_changelog_file(
-                    data, is_external=external_path_str is not None, **statistics)
+                    logical_data, is_external=external_path_str is not None)
         except Exception:
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
@@ -411,7 +418,7 @@ class DataWriter(ABC):
 
         self._finish_data_file(data_meta, changelog_meta, shared_shredding_stats)
 
-    def _data_file_statistics(self, data):
+    def _data_file_statistics(self, data, collector, parquet_metadata):
         # min key & max key
 
         selected_table = data.select(self.trimmed_primary_keys)
@@ -421,27 +428,17 @@ class DataWriter(ABC):
         min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-        # key stats & value stats
-        value_stats_enabled = self.options.metadata_stats_enabled()
-        if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
-        else:
-            stats_fields = self.table.trimmed_primary_keys_fields
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_fields
-        }
+        # Keep key statistics independent of the value column modes.
         key_fields = self.trimmed_primary_keys_fields
-        key_stats = self._collect_value_stats(
-            data, key_fields, column_stats)
+        key_columns = {field.name: column_stats(data, field.name) for field in key_fields}
+        key_stats = build_stats(key_fields, [
+            (col['min_values'], col['max_values'], col['null_counts']) for col in key_columns.values()
+        ])
         if not self.options.primary_key_nullable() and not all(
                 count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
 
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(
-            data, value_fields, column_stats)
+        value_stats = collector.collect(data, key_columns, parquet_metadata=parquet_metadata)
 
         # Read the range without advancing it: the advance belongs with the
         # append below, so a retried flush derives the same range.
@@ -462,7 +459,21 @@ class DataWriter(ABC):
             max_seq = self.sequence_generator.current
         return dict(min_key=min_key, max_key=max_key, key_stats=key_stats,
                     value_stats=value_stats, min_seq=min_seq, max_seq=max_seq,
-                    value_stats_enabled=value_stats_enabled)
+                    value_stats_cols=collector.columns)
+
+    def _file_value_stats_collector(self, data, is_changelog=False):
+        fields = (self.table.fields if self.table.is_primary_key_table else
+                  PyarrowFieldParser.to_paimon_schema(data.schema))
+        return self._value_stats_collector(fields, is_changelog)
+
+    def _value_stats_collector(self, fields, is_changelog=False):
+        return ValueStatsCollector(
+            self.options, fields, self.table.table_schema.data_file_fields(self.write_cols),
+            level=0 if self.table.is_primary_key_table else None, changelog=is_changelog,
+            table_mode='none' if (self.bucket == BucketMode.POSTPONE_BUCKET.value
+                                  and self.file_format == CoreOptions.FILE_FORMAT_AVRO) else None,
+            file_format=self.changelog_file_format if is_changelog else self.file_format,
+        )
 
     def _writes_changelog_before_merge(self):
         return False
@@ -479,19 +490,23 @@ class DataWriter(ABC):
         if changelog_meta is not None:
             self.committed_changelog_files.append(changelog_meta)
 
-    def _write_parquet_data(self, path, data):
+    def _write_parquet_data(self, path, data, stats_collector):
         from pypaimon.execution.python.write.format_file_writer import parquet_write_data
         data = parquet_write_data(data)
         if self._map_shared_shredding.is_active():
-            return self._map_shared_shredding.write_parquet(
+            shredding_stats = self._map_shared_shredding.write_parquet(
                 self.file_io, path, data, self.compression, self.zstd_level)
+            return shredding_stats, None
+        metadata = []
+        options = self.parquet_writer_options
+        if stats_collector.needs_bounds():
+            options = dict(options, metadata_collector=metadata)
         self.file_io.write_parquet(
-            path, data, compression=self.compression, zstd_level=self.zstd_level,
-            **self.parquet_writer_options)
-        return {}
+            path, data, compression=self.compression, zstd_level=self.zstd_level, **options)
+        return {}, metadata[0] if metadata else None
 
     def _create_data_file_meta(self, file_name, file_path, row_count,
-                               min_key, max_key, key_stats, value_stats,
+                               min_key, max_key, key_stats, value_stats, value_stats_cols,
                                min_sequence_number, max_sequence_number,
                                extra_files=None, creation_time=None, delete_row_count=0):
         """Common metadata finalization for buffered and incremental files."""
@@ -507,7 +522,7 @@ class DataWriter(ABC):
             extra_files=extra_files if extra_files is not None else [],
             creation_time=creation_time if creation_time is not None else Timestamp.now().to_millis_timestamp(),
             delete_row_count=delete_row_count, file_source=0,
-            value_stats_cols=None if self.options.metadata_stats_enabled() else [],
+            value_stats_cols=value_stats_cols,
             external_path=file_path if self.external_path_provider is not None else None,
             first_row_id=None, write_cols=self.write_cols, file_path=file_path,
         )
@@ -548,9 +563,7 @@ class DataWriter(ABC):
             return data
         return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
-    def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
-                              min_seq, max_seq,
-                              value_stats_enabled, is_external) -> DataFileMeta:
+    def _write_changelog_file(self, data, is_external) -> DataFileMeta:
         """Write a complete changelog file and return its metadata.
 
         The caller publishes this metadata after success. A failure here leaves
@@ -568,25 +581,28 @@ class DataWriter(ABC):
                               CoreOptions.FILE_FORMAT_AVRO):
                 raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
                                  f"Supported formats: parquet, orc, avro.")
-            self._write_file(changelog_file_path, data, cl_fmt)
+            collector = self._file_value_stats_collector(data, is_changelog=True)
+            physical_data = self._apply_variant_shredding(data) if self._variant_shredding else data
+            _, parquet_metadata = self._write_file(changelog_file_path, physical_data, cl_fmt, collector)
+            statistics = self._data_file_statistics(data, collector, parquet_metadata)
 
             return DataFileMeta.create(
                 file_name=changelog_file_name,
                 file_size=self.file_io.get_file_size(changelog_file_path),
                 row_count=data.num_rows,
-                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-                key_stats=key_stats,
-                value_stats=value_stats,
-                min_sequence_number=min_seq,
-                max_sequence_number=max_seq,
+                min_key=GenericRow(statistics['min_key'], self.trimmed_primary_keys_fields),
+                max_key=GenericRow(statistics['max_key'], self.trimmed_primary_keys_fields),
+                key_stats=statistics['key_stats'],
+                value_stats=statistics['value_stats'],
+                min_sequence_number=statistics['min_seq'],
+                max_sequence_number=statistics['max_seq'],
                 schema_id=self.table.table_schema.id,
                 level=0,
                 extra_files=[],
                 creation_time=Timestamp.now().to_millis_timestamp(),
                 delete_row_count=self._count_delete_rows(data),
                 file_source=0,
-                value_stats_cols=None if value_stats_enabled else [],
+                value_stats_cols=statistics['value_stats_cols'],
                 external_path=changelog_external_path,
                 first_row_id=None,
                 write_cols=self.write_cols,
@@ -641,59 +657,6 @@ class DataWriter(ABC):
                 right = mid - 1
 
         return best_split
-
-    def _collect_value_stats(self, data: pa.Table, fields: List,
-                             column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
-        if not fields:
-            return SimpleStats.empty_stats()
-        
-        if column_stats is None or not column_stats:
-            column_stats = {
-                field.name: self._get_column_stats(data, field.name)
-                for field in fields
-            }
-        
-        min_stats = [column_stats[field.name]['min_values'] for field in fields]
-        max_stats = [column_stats[field.name]['max_values'] for field in fields]
-        null_counts = [column_stats[field.name]['null_counts'] for field in fields]
-        
-        return SimpleStats(
-            GenericRow(min_stats, fields),
-            GenericRow(max_stats, fields),
-            null_counts
-        )
-
-    @staticmethod
-    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
-        column_array = record_batch.column(column_name)
-        if column_array.null_count == len(column_array):
-            return {
-                "min_values": None,
-                "max_values": None,
-                "null_counts": column_array.null_count,
-            }
-        
-        column_type = column_array.type
-        supports_minmax = not (
-            pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
-        )
-        
-        if not supports_minmax:
-            return {
-                "min_values": None,
-                "max_values": None,
-                "null_counts": column_array.null_count,
-            }
-        
-        minmax = pc.min_max(column_array)
-        min_values = minmax["min"].as_py()
-        max_values = minmax["max"].as_py()
-        null_counts = column_array.null_count
-        return {
-            "min_values": min_values,
-            "max_values": max_values,
-            "null_counts": null_counts,
-        }
 
 
 class SequenceGenerator:

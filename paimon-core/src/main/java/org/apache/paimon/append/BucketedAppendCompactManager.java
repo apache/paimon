@@ -260,6 +260,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             super(metricsReporter, "");
             this.dvMaintainer = dvMaintainer;
             this.toCompact = new LinkedList<>(inputs);
+            // Iterating the priority queue does not preserve sequence order.
+            this.toCompact.sort(Comparator.comparingLong(DataFileMeta::minSequenceNumber));
             this.compactionFileSize = compactionFileSize;
             this.forceRewriteAllFiles = forceRewriteAllFiles;
             this.rewriter = rewriter;

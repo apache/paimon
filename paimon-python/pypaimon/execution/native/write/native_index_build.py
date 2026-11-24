@@ -17,7 +17,7 @@
 
 """Global-index builds delegated to Rust, retaining Python's commit API."""
 
-from pypaimon.execution.native.table import (_native_table, _options_to_native)
+from pypaimon.execution.native.table import (_filesystem_vector_table_supported, _native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
@@ -39,18 +39,30 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
             or table.options.query_auth_enabled
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
-            or not native_runtime_available()
-            or not _rest_catalog_supported(table)):
+            or not native_runtime_available()):
+        return None
+    native_vector = builder._centroid_sharding or builder._multi_vector
+    if not (_rest_catalog_supported(table) or (native_vector and _filesystem_vector_table_supported(table))):
         return None
     from pypaimon_rust.datafusion import GlobalIndexBuildBuilder
     if not GlobalIndexBuildBuilder.supports_index_type(builder._index_type):
         return None
+    if builder._centroid_sharding:
+        from pypaimon_rust.datafusion import GlobalIndexBuildPlan
+        if not hasattr(GlobalIndexBuildPlan, 'replacement_messages'):
+            return None
+    if builder._multi_vector:
+        from pypaimon_rust.datafusion import VectorSearchBuilder
+        if not hasattr(VectorSearchBuilder, 'with_multi_vector'):
+            return None
     # Keep build parameters separate from schema defaults: alias precedence is
     # resolved within each source, then explicit build parameters win.
     options = _build_options_to_native(builder._user_options)
     table_overrides = {key: None for key, value in builder._user_options.items() if value is None}
     parallelism = CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM.key()
     table_values = table.options.options.to_map()
+    if not builder._centroid_sharding and 'extra_fields' in table_values:
+        table_overrides['extra_fields'] = None
     if parallelism not in builder._user_options and isinstance(table_values.get(parallelism), (bool, float)):
         table_overrides[parallelism] = _build_options_to_native(
             {parallelism: table_values[parallelism]})[parallelism]
@@ -65,7 +77,11 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
         # Planning may authorize and capture inputs; its errors must not select
         # another engine or restart a build that may already have side effects.
         plan = native.plan()
-        return build_native_vector_index(table, plan, concurrency, ray_remote_args)
+        messages = build_native_vector_index(table, plan, concurrency, ray_remote_args)
+        replacements = getattr(plan, 'replacement_messages', None)
+        if replacements is not None:
+            messages.extend(from_native_commit_messages(table, replacements()))
+        return messages
     return from_native_commit_messages(table, native.build())
 
 

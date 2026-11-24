@@ -107,8 +107,8 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingleColumnWrite
         int count = vectors.size();
 
         try {
-            String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            String filePath = fileWriter.newFilePath(FILE_NAME_PREFIX);
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 // Header: dimension + count
                 ByteBuffer header = ByteBuffer.allocate(8);
                 header.order(ByteOrder.LITTLE_ENDIAN);
@@ -134,7 +134,7 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingleColumnWrite
                 out.flush();
             }
 
-            return Collections.singletonList(new ResultEntry(fileName, rowCount, null));
+            return Collections.singletonList(new ResultEntry(filePath, rowCount, null));
         } catch (IOException e) {
             throw new RuntimeException("Failed to write test vector index", e);
         }

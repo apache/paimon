@@ -18,17 +18,23 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
+import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorSearchParams;
+import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
@@ -47,6 +53,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -55,6 +63,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -112,6 +121,295 @@ public class NativeVectorGlobalIndexTest {
     }
 
     // =================== Tests that do NOT need native library =====================
+
+    @Test
+    public void testMultiVectorArrayRequiresExplicitBuildDimension() {
+        DataType type = new ArrayType(new ArrayType(new FloatType()));
+        String kind = "ivf-flat";
+        Map<String, String> options = Collections.singletonMap("metric", "cosine");
+        assertThatThrownBy(
+                        () ->
+                                new NativeVectorGlobalIndexWriter(
+                                        createFileWriter(indexPath), type, options, kind))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.dimension");
+    }
+
+    @Test
+    public void testIncompleteMultiVectorRowCannotBePublished() {
+        DataType type = new ArrayType(new ArrayType(new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.dimension", 2);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            GenericArray invalidRow =
+                    new GenericArray(
+                            new Object[] {
+                                new GenericArray(new float[] {1f, 0f}),
+                                new GenericArray(new float[] {1f})
+                            });
+            assertThatThrownBy(() -> writer.write(invalidRow, 7))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("dimension mismatch");
+            assertThatThrownBy(writer::finish).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    public void testNativeMultiVectorFileStoresRowIds() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Map<String, String> nativeOptions = new HashMap<>();
+        nativeOptions.put("index.type", "ivf_flat");
+        nativeOptions.put("metric", "cosine");
+        nativeOptions.put("nlist", "1");
+        float[] q = {1f, 0f};
+        Object x = BinaryVector.fromPrimitiveArray(q);
+        Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
+        long rowId = (1L << 32) + 7;
+        List<ResultEntry> files;
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            writer.write(new GenericArray(new Object[] {y, null, x, x}), rowId);
+            writer.write(new GenericArray(new Object[] {y}), 19);
+            writer.write(
+                    new GenericArray(
+                            new Object[] {BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f})}),
+                    42);
+            files = writer.finish();
+        }
+        GlobalIndexIOMeta meta = toIOMetas(files).get(0);
+        try (SeekableInputStream in = createFileReader().getInputStream(meta);
+                VectorIndexReader reader =
+                        new VectorIndexReader(
+                                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
+                                        in))) {
+            assertThat(reader.metadata().totalVectors()).isEqualTo(5);
+            assertThat(reader.search(q, VectorSearchParams.automatic(5)).ids())
+                    .containsExactlyInAnyOrder(rowId, rowId, rowId, 19L, 42L);
+        }
+        try (GlobalIndexReader reader =
+                new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
+                        .createReader(
+                                createFileReader(),
+                                Collections.singletonList(meta),
+                                rowId + 1,
+                                null,
+                                executor)) {
+            ScoredGlobalIndexResult hits =
+                    reader.visitVectorSearch(new VectorSearch(q, 2, fieldName)).get().get();
+            assertThat(hits.results().toArray(2)).containsExactly(19, rowId);
+            assertThat(hits.scoreGetter().score(rowId)).isEqualTo(1f);
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(rowId);
+            ScoredGlobalIndexResult filtered =
+                    reader.visitVectorSearch(
+                                    new VectorSearch(q, 2, fieldName).withIncludeRowIds(filter))
+                            .get()
+                            .get();
+            assertThat(filtered.results().toArray(2)).containsExactly(rowId);
+            assertThat(filtered.scoreGetter().score(rowId)).isEqualTo(1f);
+        }
+    }
+
+    @Test
+    public void testEmptyMultiVectorRangeDoesNotCreateAFile() throws Exception {
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        String kind = "ivf-flat";
+        Map<String, String> options =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, new Options(), kind, fieldName);
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, options, kind)) {
+            writer.write(null, 0);
+            writer.write(new GenericArray(new Object[0]), 1);
+            writer.write(new GenericArray(new Object[] {null}), 2);
+            assertThat(writer.finish()).isEmpty();
+            assertThat(fileIO.listStatus(indexPath)).isEmpty();
+        }
+    }
+
+    @Test
+    public void testMultiVectorCosineSearchAtExtremeScales() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 1);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        for (float storedScale : new float[] {1e-30f, 1e30f, 1f}) {
+            List<ResultEntry> files;
+            try (NativeVectorGlobalIndexWriter writer =
+                    new NativeVectorGlobalIndexWriter(
+                            createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+                for (int i = 0; i < 8; i++) {
+                    float x = i == 7 ? storedScale : -storedScale;
+                    writer.write(
+                            new GenericArray(
+                                    new Object[] {
+                                        BinaryVector.fromPrimitiveArray(new float[] {x, 0f})
+                                    }),
+                            i);
+                }
+                files = writer.finish();
+            }
+            try (GlobalIndexReader reader =
+                    new NativeVectorGlobalIndexer(type, nativeOptions, "ivf-flat")
+                            .createReader(
+                                    createFileReader(), toIOMetas(files), 8, null, executor)) {
+                for (float queryScale : new float[] {1e-30f, 1e30f, 1f}) {
+                    float[] query = {queryScale, 0f};
+                    ScoredGlobalIndexResult result =
+                            reader.visitVectorSearch(new VectorSearch(query, 1, fieldName))
+                                    .get()
+                                    .get();
+                    assertThat(result.results().toArray(1)).containsExactly(7);
+                    assertThat(result.scoreGetter().score(7)).isEqualTo(1f);
+                    assertThat(query).containsExactly(queryScale, 0f);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testMultiVectorSearchWidensDuplicateHeavyPages() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 16);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        type, options, "ivf-flat", fieldName);
+        List<ResultEntry> files;
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, "ivf-flat")) {
+            for (int row = 0; row < 64; row++) {
+                double angle = row / 64.0;
+                Object[] children = new Object[32];
+                Arrays.fill(
+                        children,
+                        BinaryVector.fromPrimitiveArray(
+                                new float[] {(float) Math.cos(angle), (float) Math.sin(angle)}));
+                writer.write(new GenericArray(children), row);
+            }
+            files = writer.finish();
+        }
+
+        List<Integer> widths = new ArrayList<>();
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(
+                        createFileReader(), toIOMetas(files), type, executor, "ivf-flat", 64) {
+                    @Override
+                    VectorSearchResult searchVector(
+                            float[] vector, VectorSearchParams params, byte[] filter) {
+                        widths.add(params.topK());
+                        return super.searchVector(vector, params, filter);
+                    }
+                }) {
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            long[] expected = new long[16];
+            for (int i = 0; i < expected.length; i++) {
+                expected[i] = 4 * i;
+                filter.add(expected[i]);
+            }
+            ScoredGlobalIndexResult result =
+                    reader.visitVectorSearch(
+                                    new VectorSearch(
+                                                    new float[] {1, 0},
+                                                    expected.length,
+                                                    fieldName,
+                                                    Collections.singletonMap(
+                                                            "ivf.max_initial_filter_expansion_factor",
+                                                            "1"))
+                                            .withIncludeRowIds(filter))
+                            .get()
+                            .get();
+            assertThat(result.results().toArray(expected.length)).containsExactly(expected);
+            assertThat(widths.get(0)).isEqualTo(expected.length);
+            assertThat(widths.size()).isLessThanOrEqualTo(8);
+        }
+    }
+
+    @Test
+    public void testMultiVectorParentFilter() throws Exception {
+        Assumptions.assumeTrue(isNativeAvailable());
+        DataType type = new ArrayType(new VectorType(2, new FloatType()));
+        String kind = "ivf-flat";
+        Options options = new Options();
+        options.setInteger("ivf-flat.nlist", 1);
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(type, options, kind, fieldName);
+        assertThat(nativeOptions.get("dimension")).isEqualTo("2");
+        float[] q = {1f, 0f};
+        try (NativeVectorGlobalIndexWriter writer =
+                new NativeVectorGlobalIndexWriter(
+                        createFileWriter(indexPath), type, nativeOptions, kind)) {
+            writer.write(null, 7);
+            writer.write(new GenericArray(new Object[] {null}), 19);
+            writer.write(new GenericArray(new Object[0]), 0);
+            Object x = BinaryVector.fromPrimitiveArray(q);
+            Object y = BinaryVector.fromPrimitiveArray(new float[] {0f, 1f});
+            Object opposite = BinaryVector.fromPrimitiveArray(new float[] {-1f, 0f});
+            writer.write(new GenericArray(new Object[] {x, x, x, null}), 23);
+            writer.write(new GenericArray(new Object[] {y, y, y}), 5);
+            writer.write(new GenericArray(new Object[] {opposite}), 11);
+            List<ResultEntry> files = writer.finish();
+            assertThat(files).hasSize(1);
+            assertThat(files.get(0).rowCount()).isEqualTo(6);
+            try (GlobalIndexReader reader =
+                    new NativeVectorGlobalIndexer(type, nativeOptions, kind)
+                            .createReader(
+                                    createFileReader(), toIOMetas(files), 24, null, executor)) {
+                Optional<ScoredGlobalIndexResult> hits =
+                        reader.visitVectorSearch(new VectorSearch(q, 3, fieldName)).get();
+                assertThat(hits.get().results().toArray(3)).containsExactly(5, 11, 23);
+                RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+                filter.add(5);
+                ScoredGlobalIndexResult filtered =
+                        reader.visitVectorSearch(
+                                        new VectorSearch(q, 1, fieldName).withIncludeRowIds(filter))
+                                .get()
+                                .get();
+                assertThat(filtered.results().toArray(1)).containsExactly(5);
+                assertThat(filtered.scoreGetter().score(5))
+                        .isCloseTo(0f, org.assertj.core.data.Offset.offset(0.00001f));
+                filter.add(23);
+                filter.add(19); // Null list inside the range.
+                AtomicInteger encodings = new AtomicInteger();
+                RoaringNavigableMap64 batchFilter =
+                        new RoaringNavigableMap64() {
+                            @Override
+                            public byte[] serialize() throws IOException {
+                                encodings.incrementAndGet();
+                                return super.serialize();
+                            }
+                        };
+                batchFilter.or(filter);
+                List<Optional<ScoredGlobalIndexResult>> batch =
+                        reader.visitBatchVectorSearch(
+                                        new BatchVectorSearch(
+                                                        new float[][] {q, {0f, 1f}}, 3, fieldName)
+                                                .withIncludeRowIds(batchFilter))
+                                .get();
+                assertThat(batch).hasSize(2);
+                for (Optional<ScoredGlobalIndexResult> result : batch) {
+                    assertThat(result.get().results().toArray(3)).containsExactly(5, 23);
+                }
+                assertThat(encodings.get()).isEqualTo(1);
+                assertThat(batch.get(0).get().scoreGetter().score(23)).isEqualTo(1f);
+                assertThat(batch.get(1).get().scoreGetter().score(5)).isEqualTo(1f);
+                assertThat(batchFilter.toArray(3)).containsExactly(5, 19, 23);
+            }
+        }
+    }
 
     @Test
     public void testDimensionMismatch() {
@@ -183,6 +481,12 @@ public class NativeVectorGlobalIndexTest {
 
     @Test
     public void testTrainingVectorCountUsesConfiguredSampleRatio() {
+        assertThat(NativeVectorGlobalIndexWriter.trainingCandidateCount(10000000000L, 0.6))
+                .isEqualTo(6000000000L);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.sampleIndex(
+                                5999999999L, 10000000000L, 6000000000L))
+                .isEqualTo(9999999998L);
         assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 1.0))
                 .isEqualTo(10_000);
         assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 0.25))
@@ -369,9 +673,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
@@ -420,11 +724,11 @@ public class NativeVectorGlobalIndexTest {
                                     vectorType, options, identifier, fieldName),
                             identifier);
             writeVectors(writer, vectors);
-            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish());
 
             try (NativeVectorGlobalIndexReader reader =
                     new NativeVectorGlobalIndexReader(
-                            createFileReader(indexPath), metas, vectorType, executor)) {
+                            createFileReader(), metas, vectorType, executor)) {
                 ScoredGlobalIndexResult result =
                         reader.visitVectorSearch(new VectorSearch(vectors[0], 2, fieldName))
                                 .join()
@@ -459,9 +763,9 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
 
@@ -508,8 +812,8 @@ public class NativeVectorGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(6);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
@@ -554,9 +858,12 @@ public class NativeVectorGlobalIndexTest {
             writer.write(vectors[i], i);
         }
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        assertThat(results)
+                .singleElement()
+                .satisfies(entry -> assertThat(entry.meta()).containsExactly('{', '}'));
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 (NativeVectorGlobalIndexReader)
                         indexer.createReader(fileReader, metas, vectors.length, null, executor)) {
@@ -590,9 +897,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -642,9 +949,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -697,9 +1004,9 @@ public class NativeVectorGlobalIndexTest {
         NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (NativeVectorGlobalIndexReader reader =
                 new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
@@ -761,26 +1068,25 @@ public class NativeVectorGlobalIndexTest {
     private GlobalIndexFileWriter createFileWriter(Path path) {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID();
+            public String newFilePath(String prefix) {
+                return new Path(path, prefix + "-" + UUID.randomUUID()).toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                return fileIO.newOutputStream(new Path(path, fileName), false);
+            public PositionOutputStream newOutputStream(String filePath) throws IOException {
+                return fileIO.newOutputStream(new Path(filePath), false);
             }
         };
     }
 
-    private GlobalIndexFileReader createFileReader(Path path) {
-        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    private GlobalIndexFileReader createFileReader() {
+        return meta -> fileIO.newInputStream(meta.filePath());
     }
 
-    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
-            throws IOException {
+    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results) throws IOException {
         assertThat(results).hasSize(1);
         ResultEntry result = results.get(0);
-        Path filePath = new Path(path, result.fileName());
+        Path filePath = new Path(result.filePath());
         return Collections.singletonList(
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta()));
     }

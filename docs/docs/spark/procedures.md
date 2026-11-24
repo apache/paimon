@@ -59,6 +59,7 @@ Choose a group, then use the page contents to jump to a procedure:
 ### Compaction and Cleanup
 
 [`compact`](./procedures/maintenance#compact),
+[`sort_data_evolution`](./procedures/maintenance#sort_data_evolution),
 [`compact_database`](./procedures/maintenance#compact_database),
 [`compact_chain_table`](./procedures/maintenance#compact_chain_table),
 [`compact_manifest`](./procedures/maintenance#compact_manifest),
@@ -106,6 +107,7 @@ Choose a group, then use the page contents to jump to a procedure:
 
 [`rewrite_file_index`](./procedures/indexes#rewrite_file_index),
 [`create_global_index`](./procedures/indexes#create_global_index),
+[`add_global_index_fields`](./procedures/indexes#add_global_index_fields),
 [`drop_global_index`](./procedures/indexes#drop_global_index),
 [`reassign_row_id`](./procedures/indexes#reassign_row_id)
 

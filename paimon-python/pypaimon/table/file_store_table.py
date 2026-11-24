@@ -360,7 +360,7 @@ class FileStoreTable(Table):
             external_path_strategy=self.options.data_file_external_paths_strategy(),
             external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=self.options.index_file_in_data_file_dir(),
-            global_index_external_path=self.options.global_index_external_path(),
+            global_index_external_paths=self.options.global_index_external_paths(),
         )
 
     def new_snapshot_commit(self):
@@ -424,7 +424,7 @@ class FileStoreTable(Table):
 
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
-                            options: Optional[dict] = None, *, execution="local",
+                            options: Optional[dict] = None, *, extra_fields=None, execution="local",
                             concurrency=None, ray_remote_args=None) -> int:
         from pypaimon.globalindex.create_global_index import \
             create_global_index
@@ -435,6 +435,7 @@ class FileStoreTable(Table):
             partition_filter=partition_filter,
             partitions=partitions,
             options=options,
+            extra_fields=extra_fields,
             execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args,
         )
 
@@ -452,7 +453,46 @@ class FileStoreTable(Table):
         )
 
     def copy(self, options: dict) -> 'FileStoreTable':
-        return self._copy(options, resolve_time_travel=True)
+        table = self._copy(options, resolve_time_travel=True)
+        if table.identifier == self.identifier:
+            return table
+
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        if any(key in table.table_schema.options for key in SCAN_KEYS):
+            return table
+
+        env = table.catalog_environment
+        if env.rest_table_response is not None:
+            from pypaimon.api.api_response import ErrorResponse
+            from pypaimon.catalog.catalog_exception import TableNotExistException
+
+            loader = env.catalog_loader
+            if loader is None:
+                from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+                loader = RESTCatalogLoader(env.catalog_context())
+            try:
+                schema = loader.load().load_table_metadata(table.identifier).schema
+            except TableNotExistException as exc:
+                if getattr(exc.__cause__, 'resource_type', None) != ErrorResponse.RESOURCE_TYPE_BRANCH:
+                    raise
+                # The copy can carry a branch identifier before that branch exists.
+                return table
+            location = schema.options.get(CoreOptions.PATH.key())
+            if location != table.table_path:
+                from pypaimon.common.file_io import _is_local_path
+                from pypaimon.filesystem.local_file_io import LocalFileIO
+
+                if not (location and _is_local_path(location) and _is_local_path(table.table_path)
+                        and LocalFileIO._to_file(location) == LocalFileIO._to_file(table.table_path)):
+                    raise ValueError("REST resolved a different table location. Reopen the table.")
+        else:
+            schema = table.schema_manager.latest()
+            if schema is None:
+                return table
+
+        # Refresh the schema while retaining the copy's FileIO and catalog binding.
+        target = FileStoreTable(table.file_io, table.identifier, table.table_path, schema, env)
+        return target._copy(table._applied_dynamic_options, resolve_time_travel=True)
 
     def copy_without_time_travel(self, options: dict) -> 'FileStoreTable':
         """Copy this table while preserving its already resolved schema."""

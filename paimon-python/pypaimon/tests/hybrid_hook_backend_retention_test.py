@@ -155,6 +155,8 @@ def test_failed_python_hook_does_not_change_standalone_phase_selection(search_ta
     del builder.rank
     expected_rank, expected_routes = object(), object()
     with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+                  return_value=False), \
             patch('pypaimon.execution.native.read.native_hybrid_search.rank_hybrid_results',
                   return_value=expected_rank) as native_rank, \
             patch('pypaimon.execution.native.read.native_hybrid_search.try_native_hybrid_routes',
@@ -193,6 +195,8 @@ def test_active_python_hook_does_not_change_another_threads_phase_selection(sear
         return expected_routes
 
     with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.read.native_vector_search._filesystem_vector_search_supported',
+                  return_value=False), \
             patch('pypaimon.execution.native.read.native_hybrid_search.rank_hybrid_results',
                   side_effect=native_rank) as rank, \
             patch('pypaimon.execution.native.read.native_hybrid_search.try_native_hybrid_routes',

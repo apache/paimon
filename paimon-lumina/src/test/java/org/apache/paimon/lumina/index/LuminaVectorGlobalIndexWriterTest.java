@@ -103,6 +103,28 @@ public class LuminaVectorGlobalIndexWriterTest {
         }
     }
 
+    @Test
+    public void testThreadCountIsPassedToBuildOptions() {
+        String key =
+                LuminaVectorIndexOptions.toLuminaKey(
+                        LuminaVectorIndexOptions.DISKANN_BUILD_THREAD_COUNT);
+        Options options = createDefaultOptions(2);
+        assertThat(buildOptions(options)).containsEntry(key, "32");
+
+        options.setInteger(LuminaVectorIndexOptions.DISKANN_BUILD_THREAD_COUNT.key(), 7);
+        assertThat(buildOptions(options)).containsEntry(key, "7");
+    }
+
+    private static Map<String, String> buildOptions(Options options) {
+        try (LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(
+                        createNoopFileWriter(),
+                        new VectorType(2, new FloatType()),
+                        new LuminaVectorIndexOptions(options))) {
+            return writerLuminaOptions(writer);
+        }
+    }
+
     private static Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger(LuminaVectorIndexOptions.DIMENSION.key(), dimension);
@@ -113,12 +135,12 @@ public class LuminaVectorGlobalIndexWriterTest {
     private static GlobalIndexFileWriter createNoopFileWriter() {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix;
+            public String newFilePath(String prefix) {
+                return "memory://test/" + prefix;
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) {
+            public PositionOutputStream newOutputStream(String filePath) {
                 throw new UnsupportedOperationException();
             }
         };
