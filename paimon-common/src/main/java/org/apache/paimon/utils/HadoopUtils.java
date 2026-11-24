@@ -110,7 +110,8 @@ public class HadoopUtils {
         for (String possibleHadoopConfPath : possibleHadoopConfPaths) {
             if (!StringUtils.isNullOrWhitespaceOnly(possibleHadoopConfPath)) {
                 foundHadoopConfiguration =
-                        addHadoopConfIfFound(result, possibleHadoopConfPath, options);
+                        addHadoopConfIfFound(result, possibleHadoopConfPath, options)
+                                || foundHadoopConfiguration;
             }
         }
 
