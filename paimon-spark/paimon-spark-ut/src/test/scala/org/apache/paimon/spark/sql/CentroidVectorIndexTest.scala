@@ -36,7 +36,7 @@ import scala.collection.JavaConverters._
 /** End-to-end centroid build over nonzero, disjoint source row-ID ranges. */
 class CentroidVectorIndexTest extends PaimonSparkTestBase {
 
-  test("centroid interchange tables carry empty files and canonical metrics") {
+  test("centroid interchange tables omit empty shards and carry canonical metrics") {
     val bitmapTable = "centroid_bitmap"
     val metricsTable = "centroid_metrics"
     withTable(bitmapTable, metricsTable) {
@@ -93,16 +93,18 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
         .map(_.indexFile())
       val routers = files.filter(CentroidIndexMeta.isRoutingModel)
       assert(routers.map(_.fileSize() == 0).toSet == Set(true, false))
+      assert(
+        routers
+          .map(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(10))
+          .toSet == Set(0, 2))
       assert(routers.forall(
         file =>
           new String(file.globalIndexMeta().indexMeta().drop(14), StandardCharsets.UTF_8) == "l2"))
       val shards = files.filterNot(
         file => CentroidIndexMeta.isRoutingModel(file) || CentroidIndexMeta.isScalarIndex(file))
-      assert(shards.count(_.rowCount() == 0) == 1)
-      assert(
-        shards
-          .filter(_.rowCount() > 0)
-          .forall(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(14) == 1))
+      assert(shards.size == 1)
+      assert(shards.head.rowCount() == 4)
+      assert(ByteBuffer.wrap(shards.head.globalIndexMeta().indexMeta()).getInt(14) == 1)
       assert(
         files
           .filter(CentroidIndexMeta.isScalarIndex)

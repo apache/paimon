@@ -70,7 +70,7 @@ class CentroidTableInteropTest {
         Path location = tablePath("centroid_bitmap");
         FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
         List<IndexFileMeta> files = indexFiles(table, "v", "ivf-flat");
-        assertThat(files).hasSize(5);
+        assertThat(files).hasSize(4);
 
         IndexFileMeta emptyRouter =
                 files.stream()
@@ -80,14 +80,17 @@ class CentroidTableInteropTest {
                         .get();
         assertThat(ByteBuffer.wrap(descriptor(emptyRouter)).getInt(10)).isZero();
         assertThat(metric(emptyRouter)).isEqualTo("l2");
-        IndexFileMeta emptyShard =
-                files.stream()
-                        .filter(file -> descriptor(file)[9] == 'S' && file.rowCount() == 0)
-                        .findFirst()
-                        .get();
-        assertThat(descriptor(emptyShard)).hasSize(14);
-        assertThat(payload(table, emptyShard))
-                .isEqualTo("PCEMPTY1".getBytes(StandardCharsets.US_ASCII));
+        assertThat(files)
+                .filteredOn(file -> CentroidIndexMeta.isRoutingModel(file) && file.fileSize() > 0)
+                .singleElement()
+                .satisfies(
+                        file ->
+                                assertThat(ByteBuffer.wrap(descriptor(file)).getInt(10))
+                                        .isEqualTo(2));
+        assertThat(files)
+                .filteredOn(file -> descriptor(file)[9] == 'S')
+                .singleElement()
+                .satisfies(file -> assertThat(file.rowCount()).isEqualTo(4));
         IndexFileMeta bitmap =
                 files.stream().filter(CentroidIndexMeta::isScalarIndex).findFirst().get();
         CentroidIndexFile bitmapFile =

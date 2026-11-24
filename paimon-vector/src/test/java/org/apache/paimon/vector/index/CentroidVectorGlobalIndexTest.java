@@ -293,7 +293,6 @@ class CentroidVectorGlobalIndexTest {
         }
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
         int[] centroidByRow = new int[256];
-        GlobalIndexIOMeta emptyMeta;
         try (VectorGlobalModelTrainer trainer = indexer.createGlobalModelTrainer()) {
             for (int i = 0; i < vectors.length; i++) {
                 trainer.write(vectors[i], BASE + 101L * i);
@@ -320,10 +319,8 @@ class CentroidVectorGlobalIndexTest {
                     assertThat(empty)
                             .extracting("tempVectorFile", "spillBuffer")
                             .containsOnlyNulls();
-                    ResultEntry result = empty.finish().get(0);
-                    Path path = new Path(result.filePath());
-                    emptyMeta = toIOMeta(io, directory, CentroidIndexMeta.shard(result, 0));
-                    assertThat(io.getFileSize(path)).isEqualTo(8);
+                    assertThat(empty.finish()).isEmpty();
+                    assertThat(io.listStatus(directory)).hasSize(1);
                 } finally {
                     ((Closeable) empty).close();
                 }
@@ -417,12 +414,12 @@ class CentroidVectorGlobalIndexTest {
                         BASE,
                         BASE + rowCount - 1)) {
             try (GlobalIndexReader empty =
-                    new NativeVectorGlobalIndexReader(
+                    indexer.createReader(
                             fileReader,
-                            Collections.singletonList(emptyMeta),
-                            new ArrayType(new FloatType()),
-                            executor,
-                            type)) {
+                            Collections.singletonList(router),
+                            rowCount,
+                            null,
+                            executor)) {
                 assertThat(empty.visitVectorSearch(new VectorSearch(vectors[0], 1, "v")).get())
                         .isEmpty();
                 assertThat(
@@ -551,6 +548,29 @@ class CentroidVectorGlobalIndexTest {
                     assertThat(opened.containsKey(file.filePath()))
                             .isEqualTo(((CentroidIndexFile) file).centroid() == expectedCentroid);
                 }
+            }
+
+            GlobalIndexIOMeta farShard = metas.get(1 + centroidByRow[200]);
+            try (GlobalIndexReader sparse =
+                    indexer.createReader(
+                            fileReader,
+                            Arrays.asList(router, farShard),
+                            rowCount,
+                            null,
+                            executor)) {
+                opened.clear();
+                assertThat(
+                                sparse.visitVectorSearch(
+                                                new VectorSearch(vectors[0], 1, "v", search))
+                                        .get(30, TimeUnit.SECONDS))
+                        .isEmpty();
+                assertThat(opened.keySet()).containsExactly(router.filePath());
+                assertThat(
+                                sparse.visitVectorSearch(new VectorSearch(vectors[0], 1, "v"))
+                                        .get(30, TimeUnit.SECONDS))
+                        .isPresent();
+                assertThat(opened.keySet())
+                        .containsExactlyInAnyOrder(router.filePath(), farShard.filePath());
             }
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
@@ -704,7 +724,7 @@ class CentroidVectorGlobalIndexTest {
     }
 
     @Test
-    void rejectsMissingShardsBeforeOpeningFiles() {
+    void rejectsOutOfRangeShardsBeforeOpeningFiles() {
         CentroidIndexFile router =
                 new CentroidIndexFile(
                         new Path("router"),
@@ -715,19 +735,19 @@ class CentroidVectorGlobalIndexTest {
                         false,
                         2);
         CentroidIndexFile shard =
-                new CentroidIndexFile(new Path("shard"), 100, 1, null, false, false, 0);
+                new CentroidIndexFile(new Path("shard"), 100, 1, null, false, false, 2);
         assertThatThrownBy(
                         () ->
                                 new NativeCentroidRoutedIndexReader(
                                         file -> {
-                                            throw new AssertionError("Opened an incomplete group.");
+                                            throw new AssertionError("Opened an invalid group.");
                                         },
                                         Arrays.asList(router, shard),
                                         new ArrayType(new FloatType()),
                                         null,
                                         "diskann"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("do not cover all routing centroids");
+                .hasMessageContaining("Invalid shard centroid 2");
     }
 
     @ParameterizedTest

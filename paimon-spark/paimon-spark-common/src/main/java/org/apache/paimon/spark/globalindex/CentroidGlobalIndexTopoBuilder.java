@@ -338,15 +338,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                             broadcast.value()));
             List<byte[]> results =
                     assigned.repartitionAndSortWithinPartitions(new HashPartitioner(parallelism))
-                            .mapPartitionsWithIndex(
-                                    (partition, input) ->
-                                            writeFiles(
-                                                    BuildContext.restore(contextBytes),
-                                                    input,
-                                                    partition,
-                                                    parallelism,
-                                                    nlist),
-                                    false)
+                            .mapPartitions(
+                                    input -> writeFiles(BuildContext.restore(contextBytes), input))
                             .collect();
             List<CommitMessage> messages = CommitMessageSerializer.deserializeAll(results);
             messages.add(writeRouter(context, indexer, payload, nlist));
@@ -527,10 +520,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
 
     private static Iterator<byte[]> writeFiles(
             BuildContext context,
-            Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows,
-            int partition,
-            int parallelism,
-            int nlist)
+            Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
         PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input =
@@ -542,9 +532,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             DataField field = context.extraFields().get(-1 - key);
             commits.add(context.finish(writeBitmap(context, io, input, key, field)));
         }
-        // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
-        // as well, without a second set of input tasks to shuffle sentinel records.
-        for (int centroid = partition; centroid < nlist; centroid += parallelism) {
+        while (input.hasNext()) {
+            int centroid = input.peek()._1();
             GlobalIndexSingleColumnWriter writer = indexer.createCentroidWriter(io);
             try {
                 while (input.hasNext() && input.peek()._1() == centroid) {
