@@ -125,11 +125,6 @@ public class FlinkCatalogTest extends FlinkCatalogTestBase {
                         FlinkCatalogTest.class.getClassLoader());
     }
 
-    /** The catalog for the tests that the base class of the Flink 2 profile brings along. */
-    protected Catalog catalog() {
-        return catalog;
-    }
-
     private ResolvedSchema createSchema() {
         return new ResolvedSchema(
                 Arrays.asList(

@@ -562,19 +562,10 @@ public class FlinkCatalog extends AbstractCatalog {
         mtOptions.set(MATERIALIZED_TABLE_DEFINITION_QUERY, mt.getDefinitionQuery());
         mtOptions.set(
                 MATERIALIZED_TABLE_INTERVAL_FRESHNESS, mt.getDefinitionFreshness().getInterval());
-        String timeUnit = MaterializedTableUtils.freshnessTimeUnit(mt.getDefinitionFreshness());
-        CoreOptions.MaterializedTableIntervalFreshnessTimeUnit freshnessTimeUnit;
-        try {
-            freshnessTimeUnit =
-                    CoreOptions.MaterializedTableIntervalFreshnessTimeUnit.valueOf(timeUnit);
-        } catch (IllegalArgumentException e) {
-            // Flink 2.3 has more time units than the four that Paimon stores, WEEK for example
-            throw new UnsupportedOperationException(
-                    "Materialized table freshness in "
-                            + timeUnit
-                            + " is not supported, use SECOND, MINUTE, HOUR or DAY.");
-        }
-        mtOptions.set(MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT, freshnessTimeUnit);
+        mtOptions.set(
+                MATERIALIZED_TABLE_INTERVAL_FRESHNESS_TIME_UNIT,
+                CoreOptions.MaterializedTableIntervalFreshnessTimeUnit.valueOf(
+                        MaterializedTableUtils.freshnessTimeUnit(mt.getDefinitionFreshness())));
         mtOptions.set(
                 MATERIALIZED_TABLE_LOGICAL_REFRESH_MODE,
                 CoreOptions.MaterializedTableRefreshMode.valueOf(
