@@ -66,4 +66,18 @@ class FormatTableCatalogTest {
         assertThat(catalog.isFormatTable("paimon")).isFalse();
         assertThat(catalog.isFormatTable("orcish")).isFalse();
     }
+
+    @Test
+    void sparkGetsTheHadoopCodecPaimonUses() {
+        assertThat(FormatTableCatalog.sparkCompression("zstd"))
+                .isEqualTo("org.apache.hadoop.io.compress.ZStandardCodec");
+        assertThat(FormatTableCatalog.sparkCompression("ZSTD"))
+                .isEqualTo("org.apache.hadoop.io.compress.ZStandardCodec");
+        assertThat(FormatTableCatalog.sparkCompression("BZIP2"))
+                .isEqualTo("org.apache.hadoop.io.compress.BZip2Codec");
+        assertThat(FormatTableCatalog.sparkCompression("gzip"))
+                .isEqualTo("org.apache.hadoop.io.compress.GzipCodec");
+        assertThat(FormatTableCatalog.sparkCompression("none")).isEqualTo("none");
+        assertThat(FormatTableCatalog.sparkCompression("lzo")).isEqualTo("lzo");
+    }
 }
