@@ -27,9 +27,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Schema in Iceberg's metadata.
@@ -92,6 +96,38 @@ public class IcebergSchema {
     @JsonIgnore
     public int highestFieldId() {
         return fields.stream().mapToInt(IcebergDataField::id).max().orElse(0);
+    }
+
+    /** Checks the IDs emitted for both named fields and synthetic collection fields. */
+    public void validateFieldIds() {
+        validateFieldIds(new IcebergStructType(fields), new HashSet<>());
+    }
+
+    private static void validateFieldIds(Object type, Set<Integer> ids) {
+        if (type instanceof IcebergStructType) {
+            for (IcebergDataField field : ((IcebergStructType) type).fields()) {
+                addFieldId(field.id(), ids);
+                validateFieldIds(field.type(), ids);
+            }
+        } else if (type instanceof IcebergListType) {
+            IcebergListType list = (IcebergListType) type;
+            addFieldId(list.elementId(), ids);
+            validateFieldIds(list.element(), ids);
+        } else if (type instanceof IcebergMapType) {
+            IcebergMapType map = (IcebergMapType) type;
+            addFieldId(map.keyId(), ids);
+            validateFieldIds(map.key(), ids);
+            addFieldId(map.valueId(), ids);
+            validateFieldIds(map.value(), ids);
+        }
+    }
+
+    private static void addFieldId(int id, Set<Integer> ids) {
+        checkArgument(
+                ids.add(id),
+                "Cannot publish Iceberg metadata with duplicate field ID %s. "
+                        + "Use a schema with unique Iceberg field IDs or disable metadata.iceberg.storage.",
+                id);
     }
 
     public String toJson() {

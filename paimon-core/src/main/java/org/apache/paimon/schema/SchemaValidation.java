@@ -32,6 +32,7 @@ import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -265,6 +266,7 @@ public class SchemaValidation {
         validateIcebergTimestampPrecisions(tableRowType, options);
         validateIcebergTimePrecisions(tableRowType, options);
         validateIcebergPublishableTypes(tableRowType, options);
+        validateIcebergFieldIds(schema, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -610,6 +612,14 @@ public class SchemaValidation {
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
             validateIcebergTimePrecisions(schema.logicalRowType(), options);
             validateIcebergPublishableTypes(schema.logicalRowType(), options);
+            validateIcebergFieldIds(schema, options);
+        }
+    }
+
+    private static void validateIcebergFieldIds(TableSchema schema, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            IcebergSchema.create(schema).validateFieldIds();
         }
     }
 

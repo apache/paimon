@@ -53,6 +53,12 @@ support the table's file format, format version, and column types.
 | `MAP`          | `map`             |
 | `ROW`          | `struct`          |
 
+Nested collection fields must have unique Iceberg field IDs. Some shapes, such as
+`MAP<ARRAY<INT>, ARRAY<INT>>`, generate the same synthetic ID for fields in the key and value.
+These schemas are rejected while Iceberg metadata is enabled, including when enabling
+publication on a table whose schema history contains such a type. Existing tables remain
+readable through Paimon; set `metadata.iceberg.storage` to `disabled` to continue writing them.
+
 :::info
 
 **Note on Timestamp Types:**
