@@ -603,7 +603,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[1970-01-01T09:30:10, 1970-01-01T09:30:10.240, 1970-01-01T09:30:10.123Z]");
+                        "+I[1970-01-01T09:30:10, 1970-01-01T09:30:10.240, "
+                                + DateTimeUtils.timestampToTimestampWithLocalZone(
+                                                DateTimeUtils.parseTimestampData(
+                                                        "1970-01-01 09:30:10.123", 6),
+                                                TimeZone.getDefault())
+                                        .toLocalDateTime()
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                + "Z"
+                                + "]");
     }
 
     @Test
