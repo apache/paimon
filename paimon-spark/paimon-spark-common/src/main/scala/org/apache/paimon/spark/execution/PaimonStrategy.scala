@@ -26,7 +26,7 @@ import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAn
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.{PaimonBaseScan, PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
-import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
+import org.apache.paimon.spark.catalyst.analysis.{PaimonResolvePartitionSpec, ResolvedPaimonView}
 import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
 import org.apache.paimon.spark.catalyst.optimizer.RepartitionLateralVectorSearchInput
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
@@ -206,16 +206,19 @@ case class PaimonStrategy(spark: SparkSession)
         case r: ResolvedTable
             if r.table.isInstanceOf[SparkTable] &&
               r.catalog.isInstanceOf[SparkBaseCatalog] =>
-          // Spark 4.2 moved partition descriptions to a separate logical command.
+          val table = r.table.asInstanceOf[SparkTable]
+          // Before Spark 4.2 the partition spec is a field of DescribeRelation. Spark 4.2 plans
+          // DESCRIBE ... PARTITION as DescribeTablePartition, see Spark42DescribePartitionStrategy.
           val partitionSpec = d.getClass.getMethods
             .find(_.getName == "partitionSpec")
             .map(_.invoke(d).asInstanceOf[Map[String, String]])
-            .getOrElse(Map.empty)
+            .filter(_.nonEmpty)
+            .map(spec => PaimonResolvePartitionSpec.resolveFullSpec(table, spec))
           PaimonDescribeTableExec(
             d.output,
             r.catalog.asInstanceOf[SparkBaseCatalog],
             r.identifier,
-            r.table.asInstanceOf[SparkTable],
+            table,
             partitionSpec,
             d.isExtended) :: Nil
         case _ => Nil

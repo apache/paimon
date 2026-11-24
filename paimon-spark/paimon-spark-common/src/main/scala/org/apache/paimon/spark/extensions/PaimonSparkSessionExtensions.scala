@@ -28,6 +28,7 @@ import org.apache.paimon.spark.execution.adaptive.DisablePostponeCarrierShuffleC
 import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.SparkStrategy
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 /** Spark session extension to extends the syntax and adds the rules. */
@@ -129,6 +130,14 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
+    if (org.apache.spark.SPARK_VERSION >= "4.2") {
+      // DescribeTablePartition exists only in Spark 4.2 and later.
+      val strategy = Class
+        .forName("org.apache.paimon.spark.execution.Spark42DescribePartitionStrategy")
+        .getConstructor(classOf[org.apache.spark.sql.SparkSession])
+      extensions.injectPlannerStrategy(
+        spark => strategy.newInstance(spark).asInstanceOf[SparkStrategy])
+    }
     // old compatible
     extensions.injectPlannerStrategy(spark => OldCompatibleStrategy(spark))
 

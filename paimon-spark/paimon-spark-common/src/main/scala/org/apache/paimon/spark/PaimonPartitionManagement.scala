@@ -307,11 +307,16 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
     table match {
       case fileStoreTable: FileStoreTable =>
+        // The table's own scan, so a read's fallback branch, time travel and query auth apply.
+        // Reading only the partition columns keeps query auth from asking for every column.
+        // Level 0 is listed as in CatalogUtils.listPartitionsFromFileSystem, except by the branch
+        // scans of a fallback table.
         val partitionEntry = fileStoreTable
-          .newSnapshotReader()
-          .withMode(ScanMode.ALL)
+          .newScan()
+          .withReadType(partitionRowType)
+          .withLevelFilter(_ => true)
           .withPartitionFilter(toPartitionPredicate(ident))
-          .partitionEntries()
+          .listPartitionEntries()
           .asScala
           .headOption
 

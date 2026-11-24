@@ -408,6 +408,27 @@ public class SparkPartitionMetadataAuthTest {
     }
 
     @Test
+    public void testDescribePartitionNeedsOnlyPartitionColumns(@TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            createTable(spark, false);
+            setPolicy(spark, false, "no-rules", "region,dt");
+            // Finding a partition by its values reads no column other than its keys. EXTENDED is
+            // left out: on Spark 4 it also reports table statistics, which plan a full scan.
+            assertThat(
+                            spark.sql("DESCRIBE T PARTITION (region = 'CN', dt = '20250810')")
+                                    .collectAsList())
+                    .isNotEmpty();
+            assertThatThrownBy(
+                            () ->
+                                    spark.sql("DESCRIBE T PARTITION (region = 'CN', dt = 'none')")
+                                            .collectAsList())
+                    .hasStackTraceContaining("PARTITIONS_NOT_FOUND");
+            assertDenied(spark, "SELECT payload FROM T");
+        }
+    }
+
+    @Test
     public void testAppendPartitionMetadataWithTypedAndNullValues(@TempDir Path warehouse)
             throws IOException {
         try (SparkSession spark = createSession(warehouse)) {
