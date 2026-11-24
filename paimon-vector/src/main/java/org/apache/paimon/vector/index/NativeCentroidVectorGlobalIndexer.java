@@ -87,8 +87,10 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
                         || "inner_product".equals(buildMetric),
                 "Unsupported distance metric: %s",
                 buildMetric);
-        try (OutputStream out = io.newOutputStream(filePath)) {
-            out.write(payload);
+        if (payload.length > 0) {
+            try (OutputStream out = io.newOutputStream(filePath)) {
+                out.write(payload);
+            }
         }
         return new ResultEntry(filePath, 0, metric().getBytes(StandardCharsets.UTF_8));
     }

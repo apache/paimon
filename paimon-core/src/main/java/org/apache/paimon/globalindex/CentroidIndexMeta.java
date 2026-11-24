@@ -62,6 +62,19 @@ public final class CentroidIndexMeta {
         return isWrapped(meta) && role(meta) == ROUTER;
     }
 
+    /** An all-null range has a router descriptor but no physical file. */
+    public static boolean isEmptyRouter(IndexFileMeta file) {
+        GlobalIndexMeta meta = file.globalIndexMeta();
+        return file.fileSize() == 0
+                && file.rowCount() == 0
+                && meta != null
+                && isEmptyRouter(meta.indexMeta());
+    }
+
+    public static boolean isEmptyRouter(@Nullable byte[] meta) {
+        return isRoutingModel(meta) && ByteBuffer.wrap(meta).getInt(MAGIC.length + 2) == 0;
+    }
+
     /** Whether the index definition includes Bitmap fields, even in an all-null range. */
     public static boolean hasBitmapFields(GlobalIndexMeta meta) {
         int[] fields = meta.extraFieldIds();

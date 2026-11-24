@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -801,7 +802,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             indexFilesToDelete.addAll(commitMessage.newFilesIncrement().newIndexFiles());
             indexFilesToDelete.addAll(commitMessage.compactIncrement().newIndexFiles());
             for (IndexFileMeta file : indexFilesToDelete) {
-                filesToDelete.add(indexPathFactory.toPath(file));
+                if (!CentroidIndexMeta.isEmptyRouter(file)) {
+                    filesToDelete.add(indexPathFactory.toPath(file));
+                }
             }
         }
         deleteConcurrently(filesToDelete, threadNum);

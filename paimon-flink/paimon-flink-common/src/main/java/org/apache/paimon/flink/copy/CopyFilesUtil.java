@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -92,6 +93,7 @@ public class CopyFilesUtil {
                                 () -> indexFileHandler.readManifestWithIOException(indexManifest));
                 if (indexManifestEntries != null) {
                     indexManifestEntries.stream()
+                            .filter(entry -> !CentroidIndexMeta.isEmptyRouter(entry.indexFile()))
                             .map(indexFileHandler::filePath)
                             .forEach(fileList::add);
                 }

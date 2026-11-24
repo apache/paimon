@@ -31,7 +31,8 @@ row-ID range. Spark and PyPaimon support this layout for `ivf-flat`, `ivf-pq`,
 
 Use Spark to build centroid indexes on [Data Evolution append tables](../data-evolution)
 without a primary key. Enable row tracking and Data Evolution and set `bucket=-1`.
-Each source row-ID range in a partition gets a router and one shard per populated centroid.
+Each source row-ID range with vectors gets a router and one shard per populated centroid.
+All-null ranges record coverage in the index manifest.
 
 The examples use a 768-dimensional `embedding` column and two optional scalar
 filter columns.
@@ -172,8 +173,10 @@ row-ID filters to this local range and adds the range start back to matching IDs
 
 ### Router and Vector Shard Files
 
-An all-null vector range has one router entry with outer `nlist=0` and a zero-byte
-router file. In other ranges, the router defines centroid IDs from `0` through
+An all-null vector range has one manifest-only router entry with outer `nlist=0`.
+Its `_FILE_NAME` identifies the entry for replacement and deletion, and `_FILE_SIZE`
+is zero. The manifest row-ID bounds record the covered range.
+In populated ranges, the router defines centroid IDs from `0` through
 `nlist - 1`. Each populated centroid has one vector shard file and a manifest
 entry with a positive row count. A centroid ID absent from the manifest represents
 an empty shard. Empty centroids still count toward the requested probe width.

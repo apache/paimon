@@ -623,7 +623,10 @@ class CentroidVectorGlobalIndexTest {
         ResultEntry model =
                 indexer.writeRoutingModel(files, files.newFilePath("router"), new byte[0]);
         assertThat(model.meta()).isEqualTo(metric.getBytes(StandardCharsets.UTF_8));
-        GlobalIndexIOMeta router = toIOMeta(io, directory, CentroidIndexMeta.router(model, 0));
+        Path routerPath = new Path(model.filePath());
+        assertThat(io.exists(routerPath)).isFalse();
+        GlobalIndexIOMeta router =
+                CentroidIndexMeta.file(routerPath, 0, 0, CentroidIndexMeta.router(model, 0).meta());
         assertThat(router.fileSize()).isZero();
         assertThat(
                         NativeCentroidVectorGlobalIndexer.storedMetric(
