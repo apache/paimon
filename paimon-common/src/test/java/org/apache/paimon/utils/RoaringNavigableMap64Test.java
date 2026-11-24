@@ -52,6 +52,33 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testRelativeRangeClipsAndRebasesRuns() {
+        long start = (1L << 32) - 100_000;
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(new Range(start - 12, start + 99_999));
+        bitmap.addRange(new Range(start + 100_004, start + 160_000));
+
+        assertThat(bitmap.relativeRange(new Range(start, start + 150_000)).toRangeList())
+                .containsExactly(new Range(0, 99_999), new Range(100_004, 150_000));
+        assertThat(bitmap.relativeRange(new Range(start + 100_000, start + 100_003))).isEmpty();
+        assertThat(bitmap.relativeRange(new Range(start + 140_000, start + 150_000)).toRangeList())
+                .containsExactly(new Range(0, 10_000));
+        assertThat(bitmap.getLongCardinality()).isEqualTo(160_009);
+    }
+
+    @Test
+    public void testRelativeRangeHandlesSparseValuesAtLongBoundary() {
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.bitmapOf(1, 7, Long.MAX_VALUE - 4, Long.MAX_VALUE);
+
+        assertThat(bitmap.relativeRange(new Range(7, Long.MAX_VALUE)))
+                .containsExactly(0L, Long.MAX_VALUE - 11, Long.MAX_VALUE - 7);
+        assertThat(bitmap.relativeRange(new Range(Long.MAX_VALUE - 5, Long.MAX_VALUE)))
+                .containsExactly(1L, 5L);
+        assertThat(bitmap.relativeRange(new Range(0, 6))).containsExactly(1L);
+    }
+
+    @Test
     public void testAddRangeBasic() {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         bitmap.addRange(new Range(5, 10));

@@ -522,7 +522,6 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                 table,
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         new Range(0, 1),
                         fields,
@@ -884,7 +883,6 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                 table,
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         vectorField.id(),
@@ -921,7 +919,6 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                 table,
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         nameField.id(),
@@ -950,7 +947,6 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                 table,
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         idField.id(),

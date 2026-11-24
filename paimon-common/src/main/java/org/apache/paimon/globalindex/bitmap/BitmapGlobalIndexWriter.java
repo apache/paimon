@@ -51,7 +51,7 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
     private final RoaringNavigableMap64 nullRows;
     private final RoaringNavigableMap64 nonNullRows;
 
-    private String fileName;
+    private String filePath;
     private PositionOutputStream outputStream;
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter;
     private long rowCount;
@@ -105,21 +105,6 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
             return Collections.emptyList();
         }
 
-        finishSection();
-        byte[] meta =
-                new SortedIndexFileMeta(
-                                firstKey == null ? null : keySerializer.serialize(firstKey),
-                                lastKey == null ? null : keySerializer.serialize(lastKey),
-                                !nullRows.isEmpty())
-                        .serialize();
-        return Collections.singletonList(new ResultEntry(fileName, rowCount, meta));
-    }
-
-    /** Finalizes a bitmap section for a reader that loads its directory from the footer. */
-    long finishSection() {
-        if (rowCount == 0) {
-            return 0;
-        }
         try {
             flushCurrentBitmap();
             streamingWriter().finish(nullRows, nonNullRows);
@@ -128,7 +113,13 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
             throw new RuntimeException("Error in closing bitmap index writer.", e);
         }
 
-        return rowCount;
+        byte[] meta =
+                new SortedIndexFileMeta(
+                                firstKey == null ? null : keySerializer.serialize(firstKey),
+                                lastKey == null ? null : keySerializer.serialize(lastKey),
+                                !nullRows.isEmpty())
+                        .serialize();
+        return Collections.singletonList(new ResultEntry(filePath, rowCount, meta));
     }
 
     @Override
@@ -158,8 +149,8 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
 
     private BitmapGlobalIndexFormat.StreamingWriter streamingWriter() throws IOException {
         if (streamingWriter == null) {
-            fileName = fileWriter.newFileName(BitmapGlobalIndexerFactory.IDENTIFIER);
-            outputStream = fileWriter.newOutputStream(fileName);
+            filePath = fileWriter.newFilePath(BitmapGlobalIndexerFactory.IDENTIFIER);
+            outputStream = fileWriter.newOutputStream(filePath);
             streamingWriter =
                     new BitmapGlobalIndexFormat.StreamingWriter(
                             outputStream, dictionaryBlockSize, compressionFactory);

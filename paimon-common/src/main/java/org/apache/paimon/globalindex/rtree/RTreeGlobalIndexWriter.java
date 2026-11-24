@@ -139,8 +139,8 @@ public class RTreeGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Cl
                         firstRow,
                         lastRow,
                         bounds);
-        String name = files.newFileName("rtree");
-        try (PositionOutputStream output = files.newOutputStream(name)) {
+        String filePath = files.newFilePath("rtree");
+        try (PositionOutputStream output = files.newOutputStream(filePath)) {
             output.write(meta.bytes);
             List<RTreeIndexFile.Entry> level = entries;
             int depth = 0;
@@ -175,7 +175,7 @@ public class RTreeGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Cl
             finished = true;
             throw new UncheckedIOException("Failed to write R-tree index.", e);
         }
-        results.add(new ResultEntry(name, meta.rowCount(), meta.bytes));
+        results.add(new ResultEntry(filePath, meta.rowCount(), meta.bytes));
         entries.clear();
         nulls.clear();
         nonNulls.clear();

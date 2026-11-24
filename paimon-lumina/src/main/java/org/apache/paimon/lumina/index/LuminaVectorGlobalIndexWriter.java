@@ -279,8 +279,8 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
             phaseStart = System.currentTimeMillis();
             LOG.info("Lumina dump phase started");
-            String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            String filePath = fileWriter.newFilePath(FILE_NAME_PREFIX);
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 index.dump(new OutputStreamFileOutput(out));
                 out.flush();
             }
@@ -292,7 +292,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
             LuminaIndexMeta meta = new LuminaIndexMeta(luminaOptions);
             // rowCount = logical rows including nulls (not just indexed vectors)
-            return new ResultEntry(fileName, rowCount, meta.serialize());
+            return new ResultEntry(filePath, rowCount, meta.serialize());
         }
     }
 

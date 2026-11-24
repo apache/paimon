@@ -104,7 +104,8 @@ class CentroidIndexMetaTest {
                         CentroidIndexMeta.file(path, 100, bitmap.rowCount(), bitmap.meta());
         assertThat(decoded.scalarIndex()).isTrue();
         assertThat(decoded.routingModel()).isFalse();
-        assertThat(decoded.centroid()).isEqualTo(4);
+        assertThat(decoded.fieldId()).isEqualTo(4);
+        assertThatThrownBy(decoded::centroid).hasMessageContaining("Expected a centroid shard");
         assertThat(decoded.metadata()).containsExactly(9);
         assertThat(bitmap.meta()[8]).isEqualTo((byte) 1);
 

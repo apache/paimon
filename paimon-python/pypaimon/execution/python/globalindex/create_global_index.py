@@ -111,19 +111,18 @@ class PythonGlobalIndexBuilder:
             read_type=read_type,
         )
         index_path_factory = self._table.path_factory().global_index_path_factory()
-        index_path = index_path_factory.global_index_root_path()
 
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
-                splits, unindexed_ranges, index_field, table_read, index_path,
+                splits, unindexed_ranges, index_field, table_read, index_path_factory,
                 DataEvolutionIndexSourceMeta(snapshot.id).serialize() if snapshot else None)
         if execution == "ray":
             from pypaimon.execution.python.globalindex.ray_index_build import build_vector_index
             return build_vector_index(
                 self, splits, unindexed_ranges, index_field, table_read,
-                index_path, concurrency, ray_remote_args)
+                index_path_factory, concurrency, ray_remote_args)
         return self._build_generic_index(
-            splits, unindexed_ranges, index_field, table_read, index_path)
+            splits, unindexed_ranges, index_field, table_read, index_path_factory)
 
     def _snapshot_for_plan(self, plan):
         snapshot_id = getattr(plan, "snapshot_id", None)
@@ -133,7 +132,7 @@ class PythonGlobalIndexBuilder:
         return snapshot_manager.get_latest_snapshot()
 
     def _build_sorted_index(
-        self, splits, unindexed_ranges, index_field, table_read, index_path: str,
+        self, splits, unindexed_ranges, index_field, table_read, index_path_factory,
         source_meta=None,
     ) -> List[CommitMessage]:
         key_serializer = create_serializer(index_field.type)
@@ -164,6 +163,7 @@ class PythonGlobalIndexBuilder:
                 continue
             index_adds = []
             for chunk in _chunks(rows, records_per_range):
+                index_path = index_path_factory.new_root_path()
                 writer = self._create_sorted_index_writer(
                     index_path, key_serializer)
                 for key, row_id in chunk:
@@ -177,6 +177,7 @@ class PythonGlobalIndexBuilder:
                         index_field.id,
                         self._index_type,
                         result_entries,
+                        index_path,
                         source_meta=source_meta,
                     )
                 )
@@ -213,7 +214,7 @@ class PythonGlobalIndexBuilder:
         raise ValueError("Unsupported sorted global index type: %s" % self._index_type)
 
     def _build_generic_index(
-        self, splits, unindexed_ranges, index_field, table_read, index_path: str
+        self, splits, unindexed_ranges, index_field, table_read, index_path_factory
     ) -> List[CommitMessage]:
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
         if rows_per_shard <= 0:
@@ -237,7 +238,8 @@ class PythonGlobalIndexBuilder:
             try:
                 for index_split, index_range in shards:
                     message = self._build_generic_shard(
-                        index_split, index_range, index_field, table_read, index_path)
+                        index_split, index_range, index_field, table_read,
+                        index_path_factory.new_root_path())
                     if message is not None:
                         messages.append(message)
                 return messages
@@ -253,7 +255,7 @@ class PythonGlobalIndexBuilder:
         completed = []
         completed_lock = threading.Lock()
 
-        def build_shard(index_split, index_range):
+        def build_shard(index_split, index_range, index_path):
             message = self._build_generic_shard(
                 index_split, index_range, index_field, table_read, index_path)
             if message is not None:
@@ -270,7 +272,8 @@ class PythonGlobalIndexBuilder:
                 try:
                     for index_split, index_range in shards:
                         futures.append(
-                            executor.submit(build_shard, index_split, index_range))
+                            executor.submit(build_shard, index_split, index_range,
+                                            index_path_factory.new_root_path()))
                 except BaseException:
                     # Keep queued shards that have not started from building an
                     # index file this build is about to delete.
@@ -347,6 +350,7 @@ class PythonGlobalIndexBuilder:
                 index_field.id,
                 self._index_type,
                 writer.finish(),
+                index_path,
             )
             if not index_adds:
                 return None
@@ -483,12 +487,13 @@ def _to_index_manifest_entries(
     index_field_id: int,
     index_type: str,
     result_entries,
+    index_path: str,
     source_meta=None,
 ) -> List[IndexManifestEntry]:
     path_factory = table.path_factory().global_index_path_factory()
     entries = []
     for result in result_entries:
-        file_path = path_factory.to_path(result.file_name)
+        file_path = f"{index_path}/{result.file_name}"
         file_size = table.file_io.get_file_size(file_path)
         external_path = file_path if path_factory.is_external_path() else None
         index_file = IndexFileMeta(

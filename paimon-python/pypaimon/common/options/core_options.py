@@ -1027,14 +1027,11 @@ class CoreOptions:
         .with_description("Search mode for full-text index queries.")
     )
 
-    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
-        ConfigOptions.key("global-index.external-path")
+    GLOBAL_INDEX_EXTERNAL_PATHS: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-paths")
         .string_type()
         .no_default_value()
-        .with_description(
-            "Global index root directory. If not set, global index files are "
-            "stored under the table index directory."
-        )
+        .with_description("Comma-separated global index root directories.")
     )
 
     GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
@@ -1877,16 +1874,21 @@ class CoreOptions:
         global_mode = self.global_index_search_mode()
         return global_mode if global_mode is not None else self.options.get(option, default)
 
-    def global_index_external_path(self, default=None):
-        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+    def global_index_external_paths(self) -> List[str]:
+        """Return configured index roots, with a legacy single-URI fallback."""
+        if self.options.contains(self.GLOBAL_INDEX_EXTERNAL_PATHS):
+            values = (self.options.get(self.GLOBAL_INDEX_EXTERNAL_PATHS) or '').split(',')
+            return [path for path in map(str.strip, values) if path]
+
+        value = self.options.to_map().get("global-index.external-path")
         if value is None:
-            return None
+            return []
         value = str(value).strip()
         if not value:
-            return None
+            return []
         if not urlparse(value).scheme:
             raise ValueError("scheme should not be null: %s" % value)
-        return value
+        return [value]
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)

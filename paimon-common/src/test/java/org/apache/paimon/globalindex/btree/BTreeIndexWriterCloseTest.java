@@ -156,12 +156,12 @@ public class BTreeIndexWriterCloseTest {
         return new GlobalIndexFileWriter() {
 
             @Override
-            public String newFileName(String prefix) {
-                return "test-btree" + prefix;
+            public String newFilePath(String prefix) {
+                return "memory://test/test-btree" + prefix;
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) {
+            public PositionOutputStream newOutputStream(String filePath) {
                 return new PositionOutputStream() {
 
                     private long pos;
