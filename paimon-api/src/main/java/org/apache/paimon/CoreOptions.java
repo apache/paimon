@@ -2912,7 +2912,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Comma-separated global index root directories for Java index writers. "
+                            "Comma-separated global index root directories. "
                                     + "New index files are distributed in round-robin order. "
                                     + "An empty value uses <table-root-directory>/index.");
 

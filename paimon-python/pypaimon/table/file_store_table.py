@@ -342,7 +342,6 @@ class FileStoreTable(Table):
         format_identifier = self.options.file_format()
 
         file_compression = self.options.file_compression()
-        index_roots = self.options.global_index_external_paths()
 
         return FileStorePathFactory(
             root=str(self.table_path),
@@ -361,7 +360,7 @@ class FileStoreTable(Table):
             external_path_strategy=self.options.data_file_external_paths_strategy(),
             external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=self.options.index_file_in_data_file_dir(),
-            global_index_external_path=index_roots[0] if index_roots else None,
+            global_index_external_paths=self.options.global_index_external_paths(),
         )
 
     def new_snapshot_commit(self):

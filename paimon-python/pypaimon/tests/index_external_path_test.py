@@ -28,7 +28,7 @@ pytestmark = pytest.mark.execution_defaults
 _OPTION = 'global-index.external-paths'
 
 
-def _table(tmp_path, *, dynamic=False, options=None):
+def _table(tmp_path, *, dynamic=False, partitioned=False, options=None):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('db', True)
     table_options = {
@@ -42,9 +42,13 @@ def _table(tmp_path, *, dynamic=False, options=None):
             'deletion-vectors.enabled': 'true',
         })
     table_options.update(options or {})
+    fields = [('id', pa.int64()), ('value', pa.int64())]
+    if partitioned:
+        fields.append(('p', pa.string()))
+    partition_keys = ['p'] if partitioned else []
     catalog.create_table('db.t', Schema.from_pyarrow_schema(
-        pa.schema([('id', pa.int64()), ('value', pa.int64())]),
-        primary_keys=['id'] if dynamic else [], options=table_options), False)
+        pa.schema(fields), partition_keys=partition_keys,
+        primary_keys=partition_keys + ['id'] if dynamic else [], options=table_options), False)
     return catalog.get_table('db.t')
 
 
@@ -52,7 +56,10 @@ def _append(table):
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
-        writer.write_arrow(pa.table({'id': [1, 2], 'value': [10, 20]}))
+        data = {'id': [1, 2], 'value': [10, 20]}
+        if table.partition_keys:
+            data['p'] = ['one', 'two']
+        writer.write_arrow(pa.table(data))
         commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -115,33 +122,33 @@ def test_partition_delete_with_external_index_paths(tmp_path, native):
 
 @pytest.mark.parametrize('dynamic', [False, True])
 @pytest.mark.parametrize('use_path_list', [False, True])
-def test_external_bucket_index_writes_and_reads(tmp_path, dynamic, use_path_list):
+def test_python_external_bucket_index_writes_and_reads(tmp_path, dynamic, use_path_list):
     legacy = tmp_path.as_uri() + '/index,archive'
     options = {'global-index.external-path': legacy}
-    root = legacy
+    roots = {legacy}
     if use_path_list:
         options[_OPTION] = _multiple_paths(tmp_path)
-        root = (tmp_path / 'index-a').as_uri()
-    table = _table(tmp_path, dynamic=dynamic, options=options)
+        roots = {(tmp_path / name).as_uri() for name in ('index-a', 'index-b')}
+    table = _table(tmp_path, dynamic=dynamic, partitioned=use_path_list, options=options)
     _append(table)
     if not dynamic:
         builder = table.new_batch_write_builder()
         commit = builder.new_commit()
         try:
-            commit.commit(builder.new_update().delete_by_row_id([0]))
+            rows = [0, 1] if use_path_list else [0]
+            commit.commit(builder.new_update().delete_by_row_id(rows))
         finally:
             commit.close()
     entries = IndexFileHandler(table).scan(table.snapshot_manager().get_latest_snapshot())
-    assert entries
-    for entry in entries:
-        path = entry.index_file.external_path
-        assert path.startswith(root + '/')
+    assert len(entries) == len(roots)
+    paths = [entry.index_file.external_path for entry in entries]
+    assert {path.rsplit('/', 1)[0] for path in paths} == roots
+    for path in paths:
         assert table.file_io.exists(path)
-    assert (tmp_path / ('index-a' if use_path_list else 'index,archive')).is_dir()
     assert not (tmp_path / 'index').exists()
     reader = table.new_read_builder()
     ids = reader.new_read().to_arrow(reader.new_scan().plan().splits())['id'].to_pylist()
-    assert sorted(ids) == ([1, 2] if dynamic else [2])
+    assert sorted(ids) == ([1, 2] if dynamic else [] if use_path_list else [2])
 
 
 @pytest.mark.parametrize('dynamic', [False, True])
