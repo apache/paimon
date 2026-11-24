@@ -126,10 +126,12 @@ Selection uses these existing options:
 - `compaction.min.file-num` triggers selection when a group reaches that file
   count. Above the threshold, the planner selects enough newest files to reduce
   the count toward the threshold. A single selected file is left unchanged.
-  Normal-file batches can also trigger below this count when at least two files
-  exceed `target-file-size` in combined size, counting each file as at least
-  `source.split.open-file-cost`. Such batches use a two-file minimum for
-  incremental selection and still apply the size-ratio and amplification checks.
+  Data Evolution normal-file batches can also trigger compaction below this
+  count when two or more files have a combined weighted size greater than
+  `target-file-size`. Each file contributes at least
+  `source.split.open-file-cost` to the weighted size. Such batches use a
+  two-file minimum for incremental selection and still apply the size-ratio and
+  amplification checks.
   BLOB groups retain their existing two-file trigger, and VECTOR groups retain
   the configured minimum count.
 - `compaction.size-ratio` is the percentage allowance when comparing the
