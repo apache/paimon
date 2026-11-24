@@ -58,7 +58,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       spark
         .sql(
           s"""CALL sys.create_global_index(table=>'$dbName0.$bitmapTable', index_column=>'v',
-             |index_type=>'ivf-flat', extra_fields=>'{"status":"bitmap"}',
+             |index_type=>'ivf-flat', extra_fields=>'{"id":"bitmap","status":"bitmap"}',
              |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=$paddedL2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1,ivf-flat.train.sample-ratio=1')""".stripMargin)
         .collect()
 
@@ -106,8 +106,8 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       assert(
         files
           .filter(CentroidIndexMeta.isScalarIndex)
-          .map(_.globalIndexMeta().indexMeta().length)
-          .toSeq == Seq(14))
+          .map(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(10))
+          .toSet == Set(0, 2))
 
       sys.env.get("PAIMON_JAVA_CENTROID_FIXTURE").foreach {
         directory =>
@@ -179,10 +179,11 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
           .map(_.indexFile())
           .toSeq
       }
-      def nearest(predicate: String): Seq[Int] =
+      def nearest(predicate: String, probes: Int = 2): Seq[Int] =
         spark
-          .sql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
-                  |map('centroid.nprobe','2','ivf.nprobe','1')) WHERE $predicate""".stripMargin)
+          .sql(
+            s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+               |map('centroid.nprobe','$probes','ivf.nprobe','1')) WHERE $predicate""".stripMargin)
           .collect()
           .map(_.getInt(0))
           .toSeq
@@ -209,9 +210,17 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
 
       build("""{"tenant":"bitmap","status":"bitmap"}""")
       assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
-      assert(files.count(CentroidIndexMeta.isScalarIndex) == 2)
-      assert(files.filter(CentroidIndexMeta.isScalarIndex).map(_.rowCount()).sum == 64)
-      val coveredPlan = loadTable("T")
+      val table = loadTable("T")
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      val bitmaps = files.filter(CentroidIndexMeta.isScalarIndex).map {
+        file => CentroidIndexMeta.file(file, paths).asInstanceOf[CentroidIndexFile]
+      }
+      assert(bitmaps.size == 2)
+      assert(
+        bitmaps.map(_.fieldId()).toSet ==
+          Set(table.rowType().getField("tenant").id(), table.rowType().getField("status").id()))
+      assert(bitmaps.forall(_.rowCount() == 64))
+      val coveredPlan = table
         .newVectorSearchBuilder()
         .withVectorColumn("v")
         .withVector(Array(0f, 0f))
@@ -221,9 +230,11 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       assert(!coveredPlan.splits().asScala.exists(_.isInstanceOf[RawVectorSearchSplit]))
       assert(nearest("tenant IN ('red', 'green') AND status IS NULL") == Seq(48))
       assert(nearest("tenant = 'blue' AND status IS NULL").isEmpty)
+      assert(nearest("status IS NULL", probes = 1).isEmpty)
 
       build("""{"status":"bitmap"}""")
       assert(files.count(CentroidIndexMeta.isRoutingModel) == 1)
+      assert(files.count(CentroidIndexMeta.isScalarIndex) == 1)
       assert(files.forall(_.globalIndexMeta().extraFieldIds().length == 1))
       assert(nearest("status IS NULL") == Seq(48))
       for (inReader <- Seq(false, true)) {
@@ -291,7 +302,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
-  test("centroid shard bitmaps apply cross-column OR before top K") {
+  test("centroid field bitmaps apply cross-column OR before top K") {
     withTable("T") {
       spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant_id INT, status STRING, p INT)
                   |PARTITIONED BY (p) TBLPROPERTIES (

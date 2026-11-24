@@ -648,12 +648,6 @@ class CentroidVectorGlobalIndexTest {
             assertThat(shard.centroid()).isEqualTo(id);
             assertThat(ByteBuffer.wrap(shard.metadata()).getInt()).isEqualTo(1);
             files.add(shard);
-            CentroidIndexFile bitmap = rustFixtureFile("bitmap-" + id, rows);
-            assertThat(bitmap.scalarIndex()).isTrue();
-            assertThat(bitmap.centroid()).isEqualTo(id);
-            assertThat(bitmap.rowCount()).isEqualTo(shard.rowCount());
-            bitmaps.put(id, bitmap);
-            files.add(bitmap);
         }
 
         RowType fields =
@@ -661,6 +655,14 @@ class CentroidVectorGlobalIndexTest {
                         new DataField(2, "status", DataTypes.INT()),
                         new DataField(0, "id", DataTypes.INT()));
         int[] extraFieldIds = {0, 2};
+        for (int fieldId : extraFieldIds) {
+            CentroidIndexFile bitmap = rustFixtureFile("bitmap-" + fieldId, rows);
+            assertThat(bitmap.scalarIndex()).isTrue();
+            assertThat(bitmap.fieldId()).isEqualTo(fieldId);
+            assertThat(bitmap.rowCount()).isEqualTo(5);
+            bitmaps.put(fieldId, bitmap);
+            files.add(bitmap);
+        }
         PredicateBuilder predicates = new PredicateBuilder(fields);
         Predicate filter = PredicateBuilder.or(predicates.equal(1, 2), predicates.isNull(0));
         FileIO io = new LocalFileIO();
@@ -673,14 +675,8 @@ class CentroidVectorGlobalIndexTest {
         try (GlobalIndexReader reader = indexer.createReader(input, files, 5, null, executor)) {
             ((CentroidShardFilterReader) reader)
                     .withShardFilter(
-                            id ->
-                                    CentroidBitmapIndex.match(
-                                            input,
-                                            bitmaps.get(id),
-                                            extraFieldIds,
-                                            fields,
-                                            fields,
-                                            filter));
+                            CentroidBitmapIndex.filter(
+                                    input, bitmaps, fields, fields, filter, 5, router.nlist()));
             OffsetGlobalIndexReader offset = new OffsetGlobalIndexReader(reader, BASE, BASE + 4);
             ScoredGlobalIndexResult result =
                     offset.visitVectorSearch(

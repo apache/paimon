@@ -63,8 +63,16 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
 
     /** Centroid to which this shard belongs. */
     public int centroid() {
-        if (routingModel) {
+        if (routingModel || scalarIndex) {
             throw new IllegalStateException("Expected a centroid shard.");
+        }
+        return countOrId;
+    }
+
+    /** Table field indexed by this Bitmap. */
+    public int fieldId() {
+        if (!scalarIndex) {
+            throw new IllegalStateException("Expected a centroid bitmap.");
         }
         return countOrId;
     }

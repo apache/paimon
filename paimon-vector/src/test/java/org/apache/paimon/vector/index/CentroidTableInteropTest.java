@@ -21,6 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -89,7 +90,12 @@ class CentroidTableInteropTest {
                 .isEqualTo("PCEMPTY1".getBytes(StandardCharsets.US_ASCII));
         IndexFileMeta bitmap =
                 files.stream().filter(CentroidIndexMeta::isScalarIndex).findFirst().get();
-        assertThat(descriptor(bitmap)).hasSize(14);
+        CentroidIndexFile bitmapFile =
+                (CentroidIndexFile)
+                        CentroidIndexMeta.file(
+                                bitmap, table.store().pathFactory().globalIndexFileFactory());
+        assertThat(bitmapFile.fieldId()).isEqualTo(2);
+        assertThat(bitmapFile.metadata()).isNotEmpty();
         assertThat(bitmap.globalIndexMeta().extraFieldIds()).containsExactly(2);
         assertThat(DataEvolutionIndexSourceMeta.fromIndexFile(bitmap).sourceSchemaId())
                 .isEqualTo(1)

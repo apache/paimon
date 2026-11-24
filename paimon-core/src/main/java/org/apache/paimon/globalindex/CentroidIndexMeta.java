@@ -73,7 +73,7 @@ public final class CentroidIndexMeta {
         return isWrapped(meta) && role(meta) == BITMAP;
     }
 
-    /** Scalar sections belong to the primary vector index for create and drop operations. */
+    /** Scalar Bitmap files belong to the primary vector index for create and drop operations. */
     public static boolean matchesIndexFields(GlobalIndexMeta meta, List<Integer> fieldIds) {
         return meta.getIndexedFieldIds().equals(fieldIds)
                 || (fieldIds.size() == 1
@@ -99,8 +99,8 @@ public final class CentroidIndexMeta {
         return wrap(file, SHARD, centroid);
     }
 
-    public static ResultEntry scalarIndex(ResultEntry file, int centroid) {
-        return wrap(file, BITMAP, centroid);
+    public static ResultEntry scalarIndex(ResultEntry file, int fieldId) {
+        return wrap(file, BITMAP, fieldId);
     }
 
     private static ResultEntry wrap(ResultEntry file, byte role, int countOrId) {

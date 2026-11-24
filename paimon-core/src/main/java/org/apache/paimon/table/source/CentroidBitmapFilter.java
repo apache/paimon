@@ -82,20 +82,22 @@ final class CentroidBitmapFilter {
 
         IndexPathFactory paths = table.store().pathFactory().globalIndexFileFactory();
         Map<Integer, CentroidIndexFile> bitmaps = new HashMap<>();
-        Map<Integer, CentroidIndexFile> shards = new HashMap<>();
-        boolean hasRouter = false;
+        int nlist = -1;
+        long vectorCount = 0;
         long schemaId = -1;
         for (IndexFileMeta file : files) {
             CentroidIndexFile entry = (CentroidIndexFile) CentroidIndexMeta.file(file, paths);
             if (entry.routingModel()) {
-                checkState(!hasRouter, "Multiple centroid routing models.");
-                hasRouter = true;
+                checkState(nlist == -1, "Multiple centroid routing models.");
+                nlist = entry.nlist();
             } else if (entry.scalarIndex()) {
                 checkState(
                         Arrays.equals(extraFieldIds, file.globalIndexMeta().extraFieldIds()),
                         "Mixed centroid bitmap fields.");
                 checkState(
-                        bitmaps.put(entry.centroid(), entry) == null, "Duplicate centroid bitmap.");
+                        bitmaps.put(entry.fieldId(), entry) == null,
+                        "Duplicate centroid bitmap for field %s.",
+                        entry.fieldId());
                 long bitmapSchemaId =
                         DataEvolutionIndexSourceMeta.fromIndexFile(file).sourceSchemaId();
                 checkState(bitmapSchemaId >= 0, "Missing centroid bitmap build schema.");
@@ -103,23 +105,24 @@ final class CentroidBitmapFilter {
                         schemaId == -1 || schemaId == bitmapSchemaId,
                         "Mixed centroid bitmap schemas.");
                 schemaId = bitmapSchemaId;
-            } else if (entry.rowCount() > 0) {
-                checkState(
-                        shards.put(entry.centroid(), entry) == null, "Duplicate centroid shard.");
+            } else {
+                vectorCount = Math.addExact(vectorCount, entry.rowCount());
             }
         }
-        checkState(hasRouter, "Missing centroid routing model.");
-        checkState(
-                shards.keySet().equals(bitmaps.keySet()),
-                "Centroid bitmap files do not cover the shard group.");
-        if (bitmaps.isEmpty()) {
+        checkState(nlist >= 0, "Missing centroid routing model.");
+        if (vectorCount == 0) {
+            checkState(bitmaps.isEmpty(), "Unexpected bitmap for an empty centroid range.");
             return null;
         }
-        for (CentroidIndexFile bitmap : bitmaps.values()) {
-            CentroidIndexFile shard = shards.get(bitmap.centroid());
+        checkState(
+                bitmaps.size() == extraFieldIds.length,
+                "Centroid bitmap files do not cover the extra fields.");
+        for (int fieldId : extraFieldIds) {
+            CentroidIndexFile bitmap = bitmaps.get(fieldId);
+            checkState(bitmap != null, "Missing centroid bitmap for field %s.", fieldId);
             checkState(
-                    bitmap.rowCount() == shard.rowCount(),
-                    "Centroid bitmap and vector shard row counts differ.");
+                    bitmap.rowCount() == vectorCount,
+                    "Centroid bitmap row count differs from the total vector count.");
         }
 
         RowType buildType =
@@ -133,14 +136,14 @@ final class CentroidBitmapFilter {
                 return null;
             }
         }
-        return centroid ->
-                CentroidBitmapIndex.match(
-                        file -> table.fileIO().newInputStream(file.filePath()),
-                        bitmaps.get(centroid),
-                        extraFieldIds,
-                        rowType,
-                        buildType,
-                        predicate);
+        return CentroidBitmapIndex.filter(
+                file -> table.fileIO().newInputStream(file.filePath()),
+                bitmaps,
+                rowType,
+                buildType,
+                predicate,
+                meta.rowRange().count(),
+                nlist);
     }
 
     @Nullable
