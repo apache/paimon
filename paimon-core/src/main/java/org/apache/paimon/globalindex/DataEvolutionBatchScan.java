@@ -44,6 +44,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -51,6 +52,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
@@ -62,12 +65,15 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED;
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
@@ -75,6 +81,10 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequ
 public class DataEvolutionBatchScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
+
+    private static final long MAX_SCALAR_INDEX_READ_BYTES = 16L * 1024 * 1024;
+    private static final long MAX_SCALAR_INDEX_ROW_IDS = 1_000_000L;
+    private static final int MAX_SCALAR_INDEX_SELECTION_RANGES = 100_000;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -317,15 +327,34 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         if (rowRangeIndex == null) {
             Optional<GlobalIndexResult> indexResult;
+            GlobalIndexScanBudget budget = GlobalIndexScanBudget.UNLIMITED;
             if (canPushDownGlobalIndexTopN()) {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
-                indexResult = evalGlobalIndex();
+                budget = scalarScanBudget();
+                indexResult = evalGlobalIndex(budget);
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
+                RoaringNavigableMap64 candidates = result.results();
+                int maxRanges = budget.maxSelectionRanges();
+                // Only a bitmap with more candidates than the range budget can overflow it.
+                // Keep the manifest-level range pushdown for smaller results.
+                if (maxRanges > 0
+                        && candidates.getLongCardinality() > maxRanges
+                        && batchScan.snapshotReader().hasNonPartitionFilter()) {
+                    return planWithFileGroupPruning(candidates, maxRanges);
+                }
+                rowRangeIndex =
+                        maxRanges == 0
+                                ? RowRangeIndex.fromBitmap(candidates)
+                                : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
+                if (rowRangeIndex == null) {
+                    LOG.info(
+                            "Scan table '{}' without global index because the row-ID range limit was exceeded.",
+                            table.name());
+                }
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -352,6 +381,73 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    private Plan planWithFileGroupPruning(RoaringNavigableMap64 candidates, int maxRanges) {
+        // The snapshot is pinned by index evaluation. Keep the regular predicate on the scan
+        // and plan without a row-level LIMIT or TopN before removing any file groups.
+        Plan plan = batchScan.plan();
+        if (!(plan instanceof SnapshotReader.Plan)) {
+            return plan;
+        }
+        SnapshotReader.Plan dataPlan = (SnapshotReader.Plan) plan;
+        SnapshotReader.Plan prunedPlan = pruneFileGroups(dataPlan, candidates);
+        if (prunedPlan.splits().isEmpty()) {
+            return prunedPlan;
+        }
+
+        Optional<RowRangeIndex> ranges = RowRangeIndex.tryFromBitmap(candidates, maxRanges);
+        if (ranges.isPresent()) {
+            return wrapToIndexSplits(prunedPlan.splits(), ranges.get(), null);
+        }
+        LOG.info(
+                "Scan table '{}' with {} because the row-ID range limit was exceeded.",
+                table.name(),
+                prunedPlan == dataPlan ? "the original data plan" : "file group pruning");
+        return prunedPlan;
+    }
+
+    @VisibleForTesting
+    static SnapshotReader.Plan pruneFileGroups(
+            SnapshotReader.Plan dataPlan, RoaringNavigableMap64 candidates) {
+        RangeHelper<DataFileMeta> fileGroups = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<Split> keptSplits = new ArrayList<>(dataPlan.splits().size());
+        boolean pruned = false;
+        for (Split split : dataPlan.splits()) {
+            DataSplit dataSplit = (DataSplit) split;
+            Set<String> removedFiles = new HashSet<>();
+            for (List<DataFileMeta> group :
+                    fileGroups.mergeOverlappingRanges(dataSplit.dataFiles())) {
+                // Keep all versions and dedicated files together when a row in the group is a
+                // candidate. The reader assembles full rows before applying the residual filter.
+                boolean intersects =
+                        group.stream()
+                                .anyMatch(
+                                        file ->
+                                                candidates.intersects(
+                                                        file.nonNullFirstRowId(),
+                                                        file.nonNullFirstRowId()
+                                                                + file.rowCount()));
+                if (!intersects) {
+                    group.forEach(file -> removedFiles.add(file.fileName()));
+                }
+            }
+            if (removedFiles.isEmpty()) {
+                keptSplits.add(split);
+            } else {
+                pruned = true;
+                dataSplit
+                        .filterDataFile(file -> !removedFiles.contains(file.fileName()))
+                        .ifPresent(keptSplits::add);
+            }
+        }
+        return pruned
+                ? new PlanImpl(
+                        dataPlan.watermark(),
+                        dataPlan.snapshotId(),
+                        dataPlan.snapshot(),
+                        keptSplits)
+                : dataPlan;
     }
 
     // An OR across a spatial and another column can require fallback for the entire predicate.
@@ -510,7 +606,25 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return options != null && options.queryAuthEnabled();
     }
 
-    private Optional<GlobalIndexResult> evalGlobalIndex() {
+    private GlobalIndexScanBudget scalarScanBudget() {
+        if (filter == null || globalIndexResult != null || queryAuthEnabled()) {
+            return GlobalIndexScanBudget.UNLIMITED;
+        }
+        CoreOptions options = table.coreOptions();
+        // FAST intentionally restricts reads to index coverage. A data-scan fallback would
+        // widen that search scope.
+        if (!options.toConfiguration().get(DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED)
+                || !options.globalIndexEnabled()
+                || options.scalarScanSearchMode() == GlobalIndexSearchMode.FAST) {
+            return GlobalIndexScanBudget.UNLIMITED;
+        }
+        return new GlobalIndexScanBudget(
+                MAX_SCALAR_INDEX_READ_BYTES,
+                MAX_SCALAR_INDEX_ROW_IDS,
+                MAX_SCALAR_INDEX_SELECTION_RANGES);
+    }
+
+    private Optional<GlobalIndexResult> evalGlobalIndex(GlobalIndexScanBudget budget) {
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
         // can hand in one that was computed off the raw values.
@@ -536,7 +650,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForPredicate(
-                        table, batchScan.prepareSnapshot(), partitionFilter, globalIndexFilter);
+                        table,
+                        batchScan.prepareSnapshot(),
+                        partitionFilter,
+                        globalIndexFilter,
+                        budget);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();

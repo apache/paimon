@@ -32,6 +32,9 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.Map;
+import java.util.function.LongConsumer;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
@@ -49,6 +52,7 @@ public class SstFileReader implements Closeable {
     private final BlockCache blockCache;
     private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
+    @Nullable private final LongConsumer beforeRead;
 
     private boolean hasCompressedBlocks;
     private boolean loadBloomOnMiss;
@@ -59,9 +63,19 @@ public class SstFileReader implements Closeable {
             BlockCache blockCache,
             BlockHandle indexBlockHandle,
             @Nullable FileBasedBloomFilter bloomFilter) {
+        this(comparator, blockCache, indexBlockHandle, bloomFilter, null);
+    }
+
+    public SstFileReader(
+            Comparator<MemorySlice> comparator,
+            BlockCache blockCache,
+            BlockHandle indexBlockHandle,
+            @Nullable FileBasedBloomFilter bloomFilter,
+            @Nullable LongConsumer beforeRead) {
         this.comparator = comparator;
         this.blockCache = blockCache;
         this.bloomFilter = bloomFilter;
+        this.beforeRead = beforeRead;
         this.loadBloomOnMiss = bloomFilter != null && bloomFilter.isCacheable();
         this.indexBlock = readBlock(indexBlockHandle, true);
     }
@@ -109,6 +123,7 @@ public class SstFileReader implements Closeable {
                         && (loadBloomOnMiss
                                 || hasCompressedBlocks
                                 || bloomFilter.size() < handle.getFullBlockSize())) {
+                    reserveBytes(bloomFilter.size());
                     boolean matches = bloomFilter.testHash(hash);
                     // Try to warm a filter that fits, but after rejection only reload it when
                     // its read cost or the saved decompression justifies bypassing the data.
@@ -119,6 +134,9 @@ public class SstFileReader implements Closeable {
                         return null;
                     }
                 }
+            }
+            if (cachedData != null) {
+                reserveBytes(handle.getFullBlockSize());
             }
             BlockReader dataBlock =
                     cachedData == null
@@ -149,6 +167,26 @@ public class SstFileReader implements Closeable {
         return new SstFileIterator(indexBlock.iterator());
     }
 
+    /** Estimates the bytes of leaf blocks visited by a range scan using the block index alone. */
+    public long estimateRangeReadSize(
+            ToIntFunction<MemorySlice> lowerBound,
+            Predicate<MemorySlice> pastUpperBound,
+            long stopAfterBytes) {
+        BlockIterator blocks = indexBlock.iterator();
+        blocks.seekTo(lowerBound);
+        long bytes = 0;
+        while (blocks.hasNext()) {
+            Map.Entry<MemorySlice, MemorySlice> entry = blocks.next();
+            bytes += BlockHandle.readBlockHandle(entry.getValue().toInput()).getFullBlockSize();
+            // The index entry is the last key of the block. The range scan also reads the
+            // boundary block to find its last matching key.
+            if (bytes > stopAfterBytes || pastUpperBound.test(entry.getKey())) {
+                break;
+            }
+        }
+        return bytes;
+    }
+
     public SstFileReverseIterator createReverseIterator() {
         return new SstFileReverseIterator(indexBlock.reverseIterator());
     }
@@ -175,6 +213,7 @@ public class SstFileReader implements Closeable {
      * @return The reader of the target block.
      */
     private BlockReader readBlock(BlockHandle blockHandle, boolean index) {
+        reserveBytes(blockHandle.getFullBlockSize());
         MemorySlice unCompressedBlock =
                 blockCache.getBlockSlice(
                         blockHandle.offset(),
@@ -182,6 +221,12 @@ public class SstFileReader implements Closeable {
                         this::decompressBlock,
                         index);
         return createBlockReader(blockHandle, unCompressedBlock);
+    }
+
+    private void reserveBytes(int bytes) {
+        if (beforeRead != null) {
+            beforeRead.accept(bytes);
+        }
     }
 
     private BlockReader createBlockReader(BlockHandle blockHandle, MemorySlice unCompressedBlock) {

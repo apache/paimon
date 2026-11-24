@@ -56,10 +56,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -176,7 +178,7 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            readerFutures.add(visitor.apply(reader));
+            readerFutures.add(declineAsUnsupported(() -> visitor.apply(reader)));
         }
 
         return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
@@ -204,6 +206,27 @@ public class GlobalIndexEvaluator implements Closeable {
                                             new Evaluation(
                                                     result, Collections.singleton(fieldId), null));
                         });
+    }
+
+    static CompletableFuture<Optional<GlobalIndexResult>> declineAsUnsupported(
+            Supplier<CompletableFuture<Optional<GlobalIndexResult>>> lookup) {
+        try {
+            return lookup.get()
+                    .exceptionally(
+                            error -> {
+                                if (GlobalIndexScanBudget.isExceeded(error)) {
+                                    return Optional.empty();
+                                }
+                                throw error instanceof CompletionException
+                                        ? (CompletionException) error
+                                        : new CompletionException(error);
+                            });
+        } catch (RuntimeException error) {
+            if (GlobalIndexScanBudget.isExceeded(error)) {
+                return CompletableFuture.completedFuture(Optional.empty());
+            }
+            throw error;
+        }
     }
 
     private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(

@@ -191,6 +191,8 @@ public class RoaringNavigableMap64Test {
                 start += runLength + 1;
             }
             assertThat(bitmap.toRangeList()).isEqualTo(expected);
+            assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
+            assertThat(bitmap.tryToRangeList(expected.size() - 1)).isEmpty();
         }
     }
 
@@ -210,6 +212,8 @@ public class RoaringNavigableMap64Test {
                 assertThat((boolean) useSelect.invoke(bitmap, bitmap.getLongCardinality()))
                         .isTrue();
                 assertThat(bitmap.toRangeList()).isEqualTo(expected);
+                assertThat(bitmap.tryToRangeList(2)).contains(expected);
+                assertThat(bitmap.tryToRangeList(1)).isEmpty();
             }
         }
     }

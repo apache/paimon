@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -44,7 +45,15 @@ public class RowRangeIndex {
 
     /** Builds an index from a bitmap, skipping sorting and merging for already ordered ranges. */
     public static RowRangeIndex fromBitmap(RoaringNavigableMap64 bitmap) {
-        List<Range> ranges = bitmap.toRangeList();
+        return fromBitmapRanges(bitmap.toRangeList());
+    }
+
+    public static Optional<RowRangeIndex> tryFromBitmap(
+            RoaringNavigableMap64 bitmap, int maxRanges) {
+        return bitmap.tryToRangeList(maxRanges).map(RowRangeIndex::fromBitmapRanges);
+    }
+
+    private static RowRangeIndex fromBitmapRanges(List<Range> ranges) {
         // Bitmap order is unsigned; mixed signs still require signed sorting and merging.
         if (ranges.size() > 1 && ranges.get(0).from > ranges.get(ranges.size() - 1).from) {
             return create(ranges);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -76,17 +77,27 @@ final class BTreePostingList {
             RoaringNavigableMap64 target,
             @Nullable RoaringNavigableMap64 rowIdFilter)
             throws IOException {
+        addTo(slice, target, rowIdFilter, GlobalIndexScanBudget.UNLIMITED);
+    }
+
+    static void addTo(
+            MemorySlice slice,
+            RoaringNavigableMap64 target,
+            @Nullable RoaringNavigableMap64 rowIdFilter,
+            GlobalIndexScanBudget budget)
+            throws IOException {
         MemorySliceInput input = slice.toInput();
         int type = input.readUnsignedByte();
         switch (type) {
             case SINGLE:
+                budget.reserveRowIds(1);
                 long rowId = input.readVarLenLong();
                 if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
                     target.add(rowId);
                 }
                 return;
             case DELTA_LIST:
-                addDeltaList(input, target, rowIdFilter);
+                addDeltaList(input, target, rowIdFilter, budget);
                 return;
             case ROARING:
                 RoaringNavigableMap64 bitmap = readRoaring(input);
@@ -95,6 +106,21 @@ final class BTreePostingList {
                 }
                 target.or(bitmap);
                 return;
+            default:
+                throw new IllegalStateException("Unknown BTree posting list type: " + type);
+        }
+    }
+
+    static int decodedRowIdCount(MemorySlice slice) {
+        MemorySliceInput input = slice.toInput();
+        int type = input.readUnsignedByte();
+        switch (type) {
+            case SINGLE:
+                return 1;
+            case DELTA_LIST:
+                return readDeltaCount(input);
+            case ROARING:
+                return 0;
             default:
                 throw new IllegalStateException("Unknown BTree posting list type: " + type);
         }
@@ -226,8 +252,10 @@ final class BTreePostingList {
     private static void addDeltaList(
             MemorySliceInput input,
             RoaringNavigableMap64 target,
-            @Nullable RoaringNavigableMap64 rowIdFilter) {
+            @Nullable RoaringNavigableMap64 rowIdFilter,
+            GlobalIndexScanBudget budget) {
         int count = readDeltaCount(input);
+        budget.reserveRowIds(count);
         long rowId = input.readVarLenLong();
         if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
             target.add(rowId);

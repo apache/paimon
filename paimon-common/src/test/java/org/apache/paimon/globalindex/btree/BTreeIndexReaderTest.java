@@ -23,6 +23,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.Options;
@@ -49,6 +50,7 @@ import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BTreeIndexReader} to read a single file. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -67,6 +69,46 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 dataNum,
                 null,
                 newDirectExecutorService());
+    }
+
+    @TestTemplate
+    public void testRangeReadBudgetDeclinesBeforeLeafReads() throws Exception {
+        GlobalIndexIOMeta written = writeData(data);
+        GlobalIndexScanBudget budget = new GlobalIndexScanBudget(written.fileSize() - 1, 0, 0);
+        try (BTreeIndexReader reader =
+                new BTreeIndexReader(
+                        keySerializer,
+                        fileReader.withScanBudget(budget),
+                        written,
+                        CACHE_MANAGER,
+                        null)) {
+            long remainingAfterMetadata = budget.remainingIndexBytes();
+            assertThatThrownBy(
+                            () ->
+                                    reader.visitBetween(
+                                            data.get(0).getKey(), data.get(dataNum - 1).getKey()))
+                    .matches(GlobalIndexScanBudget::isExceeded);
+            assertThat(budget.remainingIndexBytes()).isEqualTo(remainingAfterMetadata);
+        }
+    }
+
+    @TestTemplate
+    public void testLegacyPostingsHonorRowBudget() throws Exception {
+        GlobalIndexIOMeta written = writeData(data);
+        GlobalIndexScanBudget budget = new GlobalIndexScanBudget(0, dataNum - 1, 0);
+        try (BTreeIndexReader reader =
+                new BTreeIndexReader(
+                        keySerializer,
+                        fileReader.withScanBudget(budget),
+                        written,
+                        CACHE_MANAGER,
+                        null)) {
+            assertThatThrownBy(
+                            () ->
+                                    reader.visitBetween(
+                                            data.get(0).getKey(), data.get(dataNum - 1).getKey()))
+                    .matches(GlobalIndexScanBudget::isExceeded);
+        }
     }
 
     @TestTemplate

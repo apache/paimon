@@ -26,6 +26,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -33,6 +35,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
@@ -212,6 +215,44 @@ public class DataEvolutionBatchScanTest {
         assertThat(indexedSplit.dataSplit()).isEqualTo(split);
         assertThat(indexedSplit.rowRanges())
                 .containsExactly(new Range(4200, 4450), new Range(4650, 4700));
+    }
+
+    @Test
+    public void testPruneFileGroupsKeepsCompanionFilesAndDeletionVectors() {
+        DataFileMeta anchor = newAppendFile(0, 20, "anchor.parquet");
+        DataFileMeta removed = newAppendFile(20, 20, "removed.parquet");
+        DataFileMeta companion = newAppendFile(5, 10, "companion.blob");
+        DataFileMeta tail = newAppendFile(40, 20, "tail.parquet");
+        DeletionFile anchorDeletion = new DeletionFile("deletions", 0, 100, 1L);
+        DeletionFile removedDeletion = new DeletionFile("deletions", 100, 100, 2L);
+        DeletionFile tailDeletion = new DeletionFile("deletions", 200, 100, 3L);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(42L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(anchor, removed, companion, tail))
+                        .withDataDeletionFiles(
+                                Arrays.asList(anchorDeletion, removedDeletion, null, tailDeletion))
+                        .build();
+        SnapshotReader.Plan plan = new PlanImpl(100L, 42L, null, Collections.singletonList(split));
+        RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
+        candidates.add(0);
+        candidates.add(40);
+
+        SnapshotReader.Plan pruned = DataEvolutionBatchScan.pruneFileGroups(plan, candidates);
+
+        assertThat(pruned.snapshotId()).isEqualTo(42L);
+        assertThat(pruned.watermark()).isEqualTo(100L);
+        assertThat(pruned.dataSplits())
+                .singleElement()
+                .satisfies(
+                        kept -> {
+                            assertThat(kept.dataFiles()).containsExactly(anchor, companion, tail);
+                            assertThat(kept.deletionFiles())
+                                    .hasValue(Arrays.asList(anchorDeletion, null, tailDeletion));
+                        });
     }
 
     @ParameterizedTest

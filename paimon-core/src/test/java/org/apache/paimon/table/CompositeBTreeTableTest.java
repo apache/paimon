@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.IndexQuerySplit;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
@@ -213,6 +214,28 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                         .containsExactlyInAnyOrderElementsOf(read(withoutIndex, query));
             }
         }
+    }
+
+    @Test
+    void testAdaptiveScanKeepsSelectiveCompositeRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f1", "f0");
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        b.equal(1, BinaryString.fromString("category-a")), b.greaterThan(0, 7));
+
+        FileStoreTable adaptive =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(),
+                                "true"));
+        assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+        assertThat(read(adaptive, predicate)).containsExactlyInAnyOrder("p8", "p9");
     }
 
     @Test

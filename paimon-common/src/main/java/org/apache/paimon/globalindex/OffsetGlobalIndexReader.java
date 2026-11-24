@@ -43,11 +43,18 @@ public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReade
     private final GlobalIndexReader wrapped;
     private final long offset;
     private final long to;
+    private final GlobalIndexScanBudget budget;
 
     public OffsetGlobalIndexReader(GlobalIndexReader wrapped, long offset, long to) {
+        this(wrapped, offset, to, GlobalIndexScanBudget.UNLIMITED);
+    }
+
+    public OffsetGlobalIndexReader(
+            GlobalIndexReader wrapped, long offset, long to, GlobalIndexScanBudget budget) {
         this.wrapped = wrapped;
         this.offset = offset;
         this.to = to;
+        this.budget = budget;
     }
 
     @Override
@@ -238,7 +245,7 @@ public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReade
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {
-        return result.map(r -> r.offset(offset));
+        return result.map(r -> budget.offset(r, offset));
     }
 
     @Override
@@ -254,7 +261,7 @@ public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReade
             return null;
         }
         RoaringNavigableMap64 local = new RoaringNavigableMap64();
-        for (Range range : candidates.results().toRangeList()) {
+        for (Range range : budget.toRanges(candidates.results())) {
             long from = Math.max(range.from, offset);
             long rangeTo = Math.min(range.to, to);
             if (from <= rangeTo) {

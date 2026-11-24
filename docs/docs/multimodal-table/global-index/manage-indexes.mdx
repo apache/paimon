@@ -483,6 +483,7 @@ These table options affect global index build and read behavior:
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `full` | Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters. |
+| `data-evolution.scalar-index.adaptive.enabled` | `false` | Bound scalar global index work during Java Data Evolution batch planning in `full` and `detail` modes and fall back to filtering the data when limits are exceeded. |
 | `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
@@ -501,3 +502,16 @@ These table options affect global index build and read behavior:
 
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
 evaluated by the core scan, including scans used by Flink and Spark.
+
+When adaptive scalar index evaluation is enabled, the planner uses built-in limits on index
+bytes, row IDs decoded or shifted, and disjoint row-ID ranges. All index shards share the byte
+and row-ID limits. BTree checks the expected leaf block bytes before reading a range, and
+Bitmap checks the cardinality of its compressed result before individually shifting row IDs.
+The range limit bounds conversion of the combined candidate bitmap.
+
+A lookup that exceeds a limit leaves its predicate for the data reader. Other conjuncts may still
+prune rows using indexes. When the candidate count can exceed the range limit, the planner checks
+the compressed bitmap against entire file groups in the ordinary scan plan before expanding
+row-ID ranges. If range conversion exceeds the limit, it emits ordinary splits for the groups
+that can still match, including groups with uncovered rows. The scan uses the same snapshot and
+retains the original predicate as a residual filter.

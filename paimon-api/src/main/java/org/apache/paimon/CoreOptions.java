@@ -3206,6 +3206,15 @@ public class CoreOptions implements Serializable {
                             "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
                                     + "setting also serves as a fallback for scalar prefilters.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED =
+            key("data-evolution.scalar-index.adaptive.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to bound automatic scalar global index evaluation during "
+                                    + "Data Evolution batch scan planning in full or detail mode "
+                                    + "and fall back to filtering the data when limits are exceeded.");
+
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
             key("scalar-index.prefilter.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
