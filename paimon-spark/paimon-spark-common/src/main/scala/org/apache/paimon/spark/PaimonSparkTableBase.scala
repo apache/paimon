@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.options.CatalogOptions.TABLE_TYPE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.functions.BucketFunction
-import org.apache.paimon.spark.read.PaimonSplitScanBuilder
+import org.apache.paimon.spark.read.{PaimonScanMerging, PaimonSplitScanBuilder}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
@@ -119,6 +119,7 @@ abstract class PaimonSparkTableBase(val table: Table)
       capabilities.add(TableCapability.V1_BATCH_WRITE)
       capabilities.add(TableCapability.OVERWRITE_BY_FILTER)
     }
+    PaimonScanMerging.capabilities(table).foreach(capabilities.add)
 
     capabilities
   }
