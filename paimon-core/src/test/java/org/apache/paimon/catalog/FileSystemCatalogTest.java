@@ -289,6 +289,52 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    public void testDropTableWithMissingChainBranch() throws Exception {
+        catalog.createDatabase("chain_db", false);
+        Identifier identifier = Identifier.create("chain_db", "chained");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("k", DataTypes.BIGINT())
+                        .column("seq", DataTypes.BIGINT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .primaryKey("dt", "k")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET_KEY.key(), "k")
+                        .option(CoreOptions.SEQUENCE_FIELD.key(), "seq")
+                        .option(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd")
+                        .option(CoreOptions.CHAIN_TABLE_CHAIN_PARTITION_KEYS.key(), "dt")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        table.createBranch("snapshot");
+        table.createBranch("delta");
+        Path tablePath =
+                ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
+                        .getTableLocation(identifier);
+        for (String branch : Arrays.asList(Identifier.DEFAULT_MAIN_BRANCH, "snapshot", "delta")) {
+            new FileSystemSchemaManager(fileIO, tablePath, branch)
+                    .commitChanges(
+                            SchemaChange.setOption(
+                                    CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot"),
+                            SchemaChange.setOption(
+                                    CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta"));
+        }
+        // the chain loads while both branches are there
+        assertThat(catalog.getTable(identifier)).isNotNull();
+
+        table.branchManager().dropBranch("snapshot");
+
+        catalog.dropTable(identifier, false);
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDropTableWithInvalidOptions(boolean cacheEnabled) throws Exception {
