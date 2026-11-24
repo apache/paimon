@@ -4214,61 +4214,23 @@ public class CoreOptions implements Serializable {
     }
 
     public List<Path> globalIndexExternalPaths() {
-        return globalIndexExternalPaths(false);
-    }
-
-    /** Returns the valid index roots that writers could have used under this schema. */
-    public List<Path> globalIndexExternalPathsForCleanup() {
-        return globalIndexExternalPaths(true);
-    }
-
-    private List<Path> globalIndexExternalPaths(boolean forCleanup) {
-        String pathList = options.get(GLOBAL_INDEX_EXTERNAL_PATHS);
-        if (!forCleanup && options.contains(GLOBAL_INDEX_EXTERNAL_PATHS)) {
-            return parseGlobalIndexExternalPaths(pathList, true);
-        }
-
-        String legacyPath = options.get("global-index.external-path");
-        if (!forCleanup) {
-            return parseGlobalIndexExternalPaths(legacyPath, false);
-        }
-
-        List<Path> paths = new ArrayList<>();
-        collectGlobalIndexExternalPaths(paths, pathList, true);
-        // Older engines used the legacy root even when the list was present.
-        collectGlobalIndexExternalPaths(paths, legacyPath, false);
-        return paths;
-    }
-
-    private static void collectGlobalIndexExternalPaths(
-            List<Path> paths, @Nullable String pathString, boolean multiple) {
-        try {
-            paths.addAll(parseGlobalIndexExternalPaths(pathString, multiple));
-        } catch (IllegalArgumentException ignored) {
-            // Writers reject the entire option if any of its paths is invalid.
-        }
-    }
-
-    private static List<Path> parseGlobalIndexExternalPaths(
-            @Nullable String pathString, boolean multiple) {
+        boolean multiple = options.contains(GLOBAL_INDEX_EXTERNAL_PATHS);
+        String pathString =
+                multiple
+                        ? options.get(GLOBAL_INDEX_EXTERNAL_PATHS)
+                        : options.get("global-index.external-path");
         if (pathString == null || pathString.isEmpty()) {
             return Collections.emptyList();
         }
-        if (!multiple) {
-            return Collections.singletonList(parseGlobalIndexExternalPath(pathString));
-        }
+        String[] values = multiple ? pathString.split(",") : new String[] {pathString};
         List<Path> paths = new ArrayList<>();
-        for (String value : pathString.split(",")) {
-            paths.add(parseGlobalIndexExternalPath(value.trim()));
+        for (String value : values) {
+            Path path = new Path(multiple ? value.trim() : value);
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
         }
         checkArgument(!paths.isEmpty(), "global index external paths is empty");
         return paths;
-    }
-
-    private static Path parseGlobalIndexExternalPath(String value) {
-        Path path = new Path(value);
-        checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
-        return path;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {

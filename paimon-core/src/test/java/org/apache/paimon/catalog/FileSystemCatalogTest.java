@@ -462,34 +462,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Files.createDirectories(secondRoot);
 
         catalog.dropTable(identifier, false);
-        assertThat(legacyRoot).doesNotExist();
+        assertThat(legacyRoot).exists();
         assertThat(firstRoot).doesNotExist();
         assertThat(secondRoot).doesNotExist();
         assertThat(unrelated).exists();
-    }
-
-    @Test
-    public void testRejectInvalidGlobalIndexPathsOnCreateAndAlter() throws Exception {
-        Identifier identifier = Identifier.create("test_db", "invalid_index_paths");
-        catalog.createDatabase(identifier.getDatabaseName(), false);
-        String option = CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key();
-        String invalidPaths = tempFile.resolve("a").toUri() + ",," + tempFile.resolve("b").toUri();
-        Schema invalidSchema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .option(option, invalidPaths)
-                        .build();
-        assertThatThrownBy(() -> catalog.createTable(identifier, invalidSchema, false))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class);
-
-        catalog.createTable(
-                identifier, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
-        List<SchemaChange> changes =
-                Collections.singletonList(SchemaChange.setOption(option, invalidPaths));
-        assertThatThrownBy(() -> catalog.alterTable(identifier, changes, false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("empty string");
-        assertThat(catalog.getTable(identifier).options()).doesNotContainKey(option);
     }
 
     @Test
@@ -497,39 +473,26 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "invalid_index_paths_history");
         catalog.createDatabase(identifier.getDatabaseName(), false);
         java.nio.file.Path oldRoot = Files.createDirectory(tempFile.resolve("old-index"));
-        java.nio.file.Path legacyRoot = Files.createDirectory(tempFile.resolve("legacy,index"));
         java.nio.file.Path newRoot = Files.createDirectory(tempFile.resolve("new-index"));
-        java.nio.file.Path unusedRoot = Files.createDirectory(tempFile.resolve("unused-index"));
         String option = CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key();
         catalog.createTable(
                 identifier,
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
-                        .option(option, oldRoot.toUri().toString())
+                        .option(option, oldRoot.toUri() + ",," + newRoot.toUri())
                         .build(),
                 false);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        FileSystemSchemaManager schemaManager =
-                new FileSystemSchemaManager(fileIO, table.location());
-        TableSchema schema = table.schema();
-        Map<String, String> invalidOptions = new HashMap<>(schema.options());
-        invalidOptions.put(option, unusedRoot.toUri() + ",," + unusedRoot.resolve("other").toUri());
-        invalidOptions.put("global-index.external-path", legacyRoot.toUri().toString());
-        writeLegacySchema(schemaManager, schema, schema.id() + 1, invalidOptions);
-
         catalog.alterTable(
                 identifier,
-                Arrays.asList(
-                        SchemaChange.setOption(option, newRoot.toUri().toString()),
-                        SchemaChange.removeOption("global-index.external-path")),
+                Collections.singletonList(
+                        SchemaChange.setOption(option, newRoot.toUri().toString())),
                 false);
         catalog.dropTable(identifier, false);
 
-        assertThat(fileIO.exists(table.location())).isFalse();
-        assertThat(oldRoot).doesNotExist();
-        assertThat(legacyRoot).doesNotExist();
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
         assertThat(newRoot).doesNotExist();
-        assertThat(unusedRoot).exists();
+        assertThat(oldRoot).exists();
     }
 
     @ParameterizedTest
@@ -556,11 +519,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         FileSystemSchemaManager branchSchemaManager = schemaManager.copyWithBranch("dev");
         Map<String, String> branchOptions = new HashMap<>(legacySchema.options());
         branchOptions.put("global-index.external-path", oldBranchPath.toUri().toString());
-        // An older engine ignores the new key and can still write to the legacy root.
-        branchOptions.put(
-                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(), newBranchPath.toUri().toString());
         writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
         branchOptions.remove("global-index.external-path");
+        branchOptions.put(
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(), newBranchPath.toUri().toString());
         writeLegacySchema(branchSchemaManager, legacySchema, 1, branchOptions);
 
         assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
@@ -568,9 +530,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.dropTable(identifier, false);
 
         for (java.nio.file.Path externalPath :
-                Arrays.asList(oldMainPath, newMainPath, oldBranchPath, newBranchPath)) {
+                Arrays.asList(oldMainPath, newMainPath, newBranchPath)) {
             assertThat(externalPath).doesNotExist();
         }
+        assertThat(oldBranchPath).exists();
         assertThat(unrelatedPath).exists();
     }
 

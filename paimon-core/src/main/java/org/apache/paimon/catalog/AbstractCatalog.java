@@ -62,6 +62,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -408,27 +409,21 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     private List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {
-        if (schemas == null) {
+        if (schemas == null || schemas.isEmpty()) {
             return Collections.emptyList();
         }
-        return schemas.stream()
-                .flatMap(
-                        schema -> {
-                            CoreOptions options = new CoreOptions(schema.options());
-                            List<Path> paths = options.globalIndexExternalPathsForCleanup();
-                            String strategy =
-                                    schema.options().get(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
-                            boolean template =
-                                    ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE
-                                            .toString()
-                                            .equalsIgnoreCase(strategy);
-                            if (!template) {
-                                paths.addAll(options.dataFileExternalPathList());
-                            }
-                            return paths.stream();
-                        })
-                .distinct()
-                .collect(Collectors.toList());
+        TableSchema latest = Collections.max(schemas, Comparator.comparingLong(TableSchema::id));
+        List<Path> paths =
+                new ArrayList<>(CoreOptions.fromMap(latest.options()).globalIndexExternalPaths());
+        for (TableSchema schema : schemas) {
+            String strategy = schema.options().get(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
+            if (!ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE
+                    .toString()
+                    .equalsIgnoreCase(strategy)) {
+                paths.addAll(CoreOptions.fromMap(schema.options()).dataFileExternalPathList());
+            }
+        }
+        return paths;
     }
 
     protected abstract void dropTableImpl(Identifier identifier, List<Path> externalPaths);

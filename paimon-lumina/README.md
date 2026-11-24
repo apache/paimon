@@ -15,8 +15,7 @@ release. For snapshot or custom builds, build both from the same source revision
 The Java writer interface for multiple external index paths requires an updated
 Lumina plugin, even when only one external directory is configured or the option
 is unset. Replace the old plugin JAR when upgrading Paimon; updating only
-`lumina-jni` is insufficient. See [Upgrade Java Index Plugins](../docs/docs/multimodal-table/global-index/manage-indexes.mdx#upgrade-java-index-plugins)
-for deployment requirements and interface migration details.
+`lumina-jni` is insufficient.
 
 ### Supported Index Types
 

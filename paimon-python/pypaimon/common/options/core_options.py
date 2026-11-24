@@ -1027,6 +1027,13 @@ class CoreOptions:
         .with_description("Search mode for full-text index queries.")
     )
 
+    GLOBAL_INDEX_EXTERNAL_PATHS: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-paths")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated global index root directories for Java index writers.")
+    )
+
     GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
         ConfigOptions.key("global-index.filter.refine-from-data")
         .boolean_type()

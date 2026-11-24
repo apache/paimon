@@ -165,8 +165,6 @@ public class CoreOptionsTest {
         options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a, file:///b");
         assertThat(core.globalIndexExternalPaths())
                 .containsExactly(new Path("file:///a"), new Path("file:///b"));
-        assertThat(core.globalIndexExternalPathsForCleanup())
-                .containsExactly(new Path("file:///a"), new Path("file:///b"), legacy);
 
         options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
         assertThat(core.globalIndexExternalPaths()).isEmpty();
