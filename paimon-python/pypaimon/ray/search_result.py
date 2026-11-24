@@ -18,11 +18,18 @@
 """Snapshot-pinned distributed lookup of global-index search candidates."""
 
 from copy import copy
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import uuid
 
 import pyarrow as pa
 
 from pypaimon.table.special_fields import SpecialFields
+
+if TYPE_CHECKING:
+    from ray.data import Dataset
+
+    from pypaimon.read.split import Split
+    from pypaimon.read.table_read import TableRead
 
 
 def read_search_result(query, result, concurrency, remote_args, override_num_blocks):
@@ -37,9 +44,8 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
         builder = lookup._configured_read_builder()
         _validate_projection([field.name for field in builder._output_fields()])
         splits = builder.new_scan().with_global_index_result(result).plan().splits()
-        dataset = builder.new_read().to_ray(
-            splits, concurrency=concurrency, ray_remote_args=remote_args,
-            override_num_blocks=override_num_blocks)
+        dataset = _read_lookup_splits(
+            builder.new_read(), splits, concurrency, remote_args, override_num_blocks)
     else:
         query._require_row_id_scores()
         row_id = SpecialFields.ROW_ID.name
@@ -56,9 +62,8 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
             dataset = ray.data.from_arrow(pa.table({row_id: pa.array(list(result.results()), type=pa.int64())}))
         else:
             splits = builder.new_scan().with_global_index_result(result).plan().splits()
-            dataset = reader.to_ray(
-                splits, concurrency=concurrency, ray_remote_args=remote_args,
-                override_num_blocks=override_num_blocks)
+            dataset = _read_lookup_splits(
+                reader, splits, concurrency, remote_args, override_num_blocks)
 
         # Only compact candidate metadata crosses the driver. Payloads remain in
         # worker blocks, including during score attachment and global ordering.
@@ -104,3 +109,27 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
 def _validate_projection(names):
     if not names or len(set(names)) != len(names):
         raise ValueError("Ray search requires a nonempty projection with unique column names.")
+
+
+def _read_lookup_splits(
+    reader: "TableRead",
+    splits: List["Split"],
+    concurrency: int,
+    remote_args: Dict[str, Any],
+    override_num_blocks: Optional[int],
+) -> "Dataset":
+    from ray.data import DataContext
+
+    from pypaimon.read.datasource.ray_datasource import estimate_split_size
+
+    if override_num_blocks is None and splits:
+        # Keep independent file reads parallel even for small search results.
+        override_num_blocks = min(len(splits), concurrency)
+        target = DataContext.get_current().target_max_block_size
+        if target is not None and target > 0:
+            size = sum(estimate_split_size(split) for split in splits)
+            override_num_blocks = max(override_num_blocks, (size + target - 1) // target)
+        concurrency = min(concurrency, override_num_blocks)
+    return reader.to_ray(
+        splits, concurrency=concurrency, ray_remote_args=remote_args,
+        override_num_blocks=override_num_blocks)
