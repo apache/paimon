@@ -23,10 +23,16 @@ import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, Paimon
 import org.apache.paimon.spark.catalyst.analysis.MergeInto
 
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.plans.FullOuter
+import org.apache.spark.sql.catalyst.plans.logical.Join
+import org.apache.spark.sql.execution.QueryExecution
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.paimon.Utils
+import org.apache.spark.sql.util.QueryExecutionListener
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 import java.util.UUID
-import java.util.concurrent.Executors
+import java.util.concurrent.{ConcurrentLinkedQueue, Executors}
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -1529,6 +1535,194 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
 
 trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
   import testImplicits._
+
+  test("Paimon MergeInto: wide pk table with update set star + insert star keeps pruned columns") {
+    withTable("source", "target") {
+      // Only `id` is referenced by the merge, so the target scan is pruned down to it; the output
+      // templates NULL-fill the pruned columns. If a NULL slot ever leaked into a written row,
+      // the matched rows below would lose their v1..v5 values.
+      createTable("target", "id INT, v1 INT, v2 INT, v3 STRING, v4 STRING, v5 DOUBLE", Seq("id"))
+      spark.sql(
+        "INSERT INTO target VALUES (1, 10, 100, 'a1', 'x1', 1.5), (2, 20, 200, 'a2', 'x2', 2.5), " +
+          "(3, 30, 300, 'a3', 'x3', 3.5)")
+
+      Seq(
+        (1, 11, 111, "b1", "y1", 11.1),
+        (3, 33, 333, "b3", "y3", 33.3),
+        (4, 44, 444, "b4", "y4", 44.4))
+        .toDF("id", "v1", "v2", "v3", "v4", "v5")
+        .createOrReplaceTempView("source")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id
+                  |WHEN MATCHED THEN UPDATE SET *
+                  |WHEN NOT MATCHED THEN INSERT *
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Row(1, 11, 111, "b1", "y1", 11.1) :: Row(2, 20, 200, "a2", "x2", 2.5) ::
+          Row(3, 33, 333, "b3", "y3", 33.3) :: Row(4, 44, 444, "b4", "y4", 44.4) :: Nil
+      )
+    }
+  }
+
+  test("Paimon MergeInto: update assignments referencing target columns on pk table") {
+    withTable("source", "target") {
+      createTable("target", "id INT, v1 INT, v2 INT, v3 STRING", Seq("id"))
+      spark.sql("INSERT INTO target VALUES (1, 10, 100, 'a1'), (2, 20, 200, 'a2')")
+
+      Seq((1, 5, 55, "b1"), (3, 7, 77, "b3"))
+        .toDF("id", "v1", "v2", "v3")
+        .createOrReplaceTempView("source")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id
+                  |WHEN MATCHED THEN
+                  |UPDATE SET v1 = target.v1 + source.v1, v2 = source.v2
+                  |WHEN NOT MATCHED THEN
+                  |INSERT (id, v1, v2, v3) VALUES (source.id, source.v1, source.v2, source.v3)
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Row(1, 15, 55, "a1") :: Row(2, 20, 200, "a2") :: Row(3, 7, 77, "b3") :: Nil)
+    }
+  }
+
+  test("Paimon MergeInto: merge condition referencing target non-key column") {
+    withTable("source", "target") {
+      // `region` is only referenced by the merge condition; if pruning dropped it the join could
+      // not bind the condition. Ids are aligned so no insert collides with an existing primary
+      // key (a pk table cannot hold two rows with the same id).
+      createTable("target", "id INT, region STRING, v1 INT, v2 INT", Seq("id"))
+      spark.sql("INSERT INTO target VALUES (1, 'us', 10, 100), (2, 'eu', 20, 200)")
+
+      Seq((1, "us", 11, 111), (2, "eu", 22, 222), (3, "ap", 30, 300))
+        .toDF("id", "region", "v1", "v2")
+        .createOrReplaceTempView("source")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id AND target.region = source.region
+                  |WHEN MATCHED THEN UPDATE SET *
+                  |WHEN NOT MATCHED THEN INSERT *
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Row(1, "us", 11, 111) :: Row(2, "eu", 22, 222) :: Row(3, "ap", 30, 300) :: Nil)
+    }
+  }
+
+  test("Paimon MergeInto: delete clause on wide pk table materializes full target rows") {
+    withTable("source", "target") {
+      // The DELETE clause emits -D records that carry the full target row, so the target side
+      // must fall back to unpruned columns.
+      createTable("target", "id INT, v1 INT, v2 INT, v3 STRING, v4 STRING, v5 DOUBLE", Seq("id"))
+      spark.sql(
+        "INSERT INTO target VALUES (1, 10, 100, 'a1', 'x1', 1.5), (2, 20, 200, 'a2', 'x2', 2.5), " +
+          "(3, 30, 300, 'a3', 'x3', 3.5)")
+
+      Seq(
+        (1, 11, 111, "b1", "y1", 11.1),
+        (3, 33, 333, "b3", "y3", 33.3),
+        (4, 44, 444, "b4", "y4", 44.4))
+        .toDF("id", "v1", "v2", "v3", "v4", "v5")
+        .createOrReplaceTempView("source")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id
+                  |WHEN MATCHED THEN DELETE
+                  |WHEN NOT MATCHED THEN INSERT *
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Row(2, 20, 200, "a2", "x2", 2.5) :: Row(4, 44, 444, "b4", "y4", 44.4) :: Nil)
+    }
+  }
+
+  test("Paimon MergeInto: source side needs no columns") {
+    withTable("source", "target") {
+      createTable("target", "id INT, v INT", Seq("id"))
+      createTable(
+        "source",
+        "id INT, seq INT",
+        Seq("id"),
+        extraProps = Map("sequence.field" -> "seq"))
+      spark.sql("INSERT INTO target VALUES (1, 10), (2, 20)")
+      spark.sql("INSERT INTO source VALUES (1, 1)")
+
+      // The source scan has rows but no projected columns; its sequence field is read internally.
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id > 0
+                  |WHEN MATCHED THEN UPDATE SET v = target.v + 1
+                  |""".stripMargin)
+
+      checkAnswer(spark.sql("SELECT * FROM target ORDER BY id"), Row(1, 11) :: Row(2, 21) :: Nil)
+    }
+  }
+
+  /**
+   * Guards the join-side column pruning. Correctness tests alone stay green when pruning silently
+   * degrades to a full-row scan, so assert the optimizer's target scan output instead:
+   * `UPDATE SET *` / `INSERT *` reference no target column except the merge key.
+   */
+  test("Paimon MergeInto: scan only the merge key from the target table") {
+    // Dynamic-bucket writes replace the SQL plan with LogicalRDD before the write action.
+    assume(bucket > 0)
+    withTable("source", "target") {
+      createTable("target", "id INT, v1 INT, v2 INT, v3 STRING", Seq("id"))
+      spark.sql("INSERT INTO target VALUES (1, 10, 100, 'a1'), (2, 20, 200, 'a2')")
+      Seq((1, 11, 111, "b1"), (3, 33, 333, "b3"))
+        .toDF("id", "v1", "v2", "v3")
+        .createOrReplaceTempView("source")
+
+      val targetScans = new ConcurrentLinkedQueue[Set[String]]()
+      val listener = new QueryExecutionListener {
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit =
+          ()
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          val isMergeWrite = qe.optimizedPlan.find {
+            case join: Join => join.joinType == FullOuter
+            case _ => false
+          }.isDefined
+          if (isMergeWrite) {
+            qe.optimizedPlan.collect {
+              case scan: DataSourceV2ScanRelation =>
+                targetScans.add(scan.output.map(_.name).toSet)
+            }
+          }
+        }
+      }
+
+      spark.listenerManager.register(listener)
+      try {
+        spark.sql("""MERGE INTO target
+                    |USING source
+                    |ON target.id = source.id
+                    |WHEN MATCHED THEN UPDATE SET *
+                    |WHEN NOT MATCHED THEN INSERT *
+                    |""".stripMargin)
+        Utils.waitUntilEventEmpty(spark)
+      } finally {
+        spark.listenerManager.unregister(listener)
+      }
+
+      assert(targetScans.size() == 1, targetScans)
+      assert(targetScans.peek() == Set("id"), targetScans)
+    }
+  }
 
   test("Paimon MergeInto: fail in case that maybe update primary key column") {
     withTable("source", "target") {
