@@ -2170,11 +2170,23 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
     }
 
-    @Test
-    void testValidTokenPreservesServerCacheSettings() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+        ",,server-cache",
+        "client-endpoint,,client-endpoint",
+        ",client-dlf-endpoint,client-dlf-endpoint",
+        "client-endpoint,client-dlf-endpoint,client-dlf-endpoint"
+    })
+    void testValidTokenWithCacheSettingsAndEndpointOverrides(
+            String clientEndpoint, String clientDlfEndpoint, String expectedEndpoint)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put("fs.oss.endpoint", "client-endpoint");
-        options.put(DLF_OSS_ENDPOINT.key(), "client-dlf-endpoint");
+        if (clientEndpoint != null) {
+            options.put("fs.oss.endpoint", clientEndpoint);
+        }
+        if (clientDlfEndpoint != null) {
+            options.put(DLF_OSS_ENDPOINT.key(), clientDlfEndpoint);
+        }
         this.catalog = newRestCatalogWithDataToken(options);
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_testing_server_cache_settings");
@@ -2197,7 +2209,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken fileDataToken = fileIO.validToken();
 
         assertEquals("server-origin", fileDataToken.token().get("io-cache.origin.endpoint"));
-        assertEquals("server-cache", fileDataToken.token().get("fs.oss.endpoint"));
+        assertEquals(expectedEndpoint, fileDataToken.token().get("fs.oss.endpoint"));
+        assertEquals(serverDataToken, getDataTokenFromRestServer(identifier));
     }
 
     @Test
