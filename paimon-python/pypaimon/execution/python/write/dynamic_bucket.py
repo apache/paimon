@@ -375,7 +375,6 @@ class DynamicBucketIndexMaintainer:
         ignore_existing: bool = False,
         snapshot=_SNAPSHOT_UNSET,
     ) -> None:
-        table.options.validate_index_write_path()
         self.table = table
         self.ignore_existing = ignore_existing
         self.snapshot = (

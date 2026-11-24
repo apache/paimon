@@ -30,15 +30,6 @@ from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 
 
-def validate_global_index_external_paths(configured):
-    """Reject unsupported index placement before a writer creates any files."""
-    if configured:
-        raise ValueError(
-            "PyPaimon does not support 'global-index.external-paths' for index writes. "
-            "Use 'global-index.external-path' for a single directory."
-        )
-
-
 class ExternalPathStrategy(str, Enum):
     """
     Strategy for selecting external paths.
@@ -1036,26 +1027,6 @@ class CoreOptions:
         .with_description("Search mode for full-text index queries.")
     )
 
-    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
-        ConfigOptions.key("global-index.external-path")
-        .string_type()
-        .no_default_value()
-        .with_description(
-            "Global index root directory as a single URI, including any literal commas. "
-            "If not set, global index files are stored under the table index directory."
-        )
-    )
-
-    GLOBAL_INDEX_EXTERNAL_PATHS: ConfigOption[str] = (
-        ConfigOptions.key("global-index.external-paths")
-        .string_type()
-        .no_default_value()
-        .with_description(
-            "Comma-separated global index root directories for JVM writers. "
-            "PyPaimon does not support this option for index writes, even with a single or empty value."
-        )
-    )
-
     GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
         ConfigOptions.key("global-index.filter.refine-from-data")
         .boolean_type()
@@ -1896,20 +1867,17 @@ class CoreOptions:
         global_mode = self.global_index_search_mode()
         return global_mode if global_mode is not None else self.options.get(option, default)
 
-    def global_index_external_path(self, default=None):
-        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+    def global_index_external_paths(self) -> List[str]:
+        """Return the configured legacy index root as a single URI."""
+        value = self.options.to_map().get("global-index.external-path")
         if value is None:
-            return None
+            return []
         value = str(value).strip()
         if not value:
-            return None
+            return []
         if not urlparse(value).scheme:
             raise ValueError("scheme should not be null: %s" % value)
-        return value
-
-    def validate_index_write_path(self):
-        # Keep validation out of the getter so existing metadata stays readable.
-        validate_global_index_external_paths(self.options.contains(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS))
+        return [value]
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)

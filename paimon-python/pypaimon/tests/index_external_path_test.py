@@ -15,21 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from contextlib import contextmanager
-from unittest.mock import patch
-
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = pytest.mark.execution_defaults
 _OPTION = 'global-index.external-paths'
-_ERROR = "does not support 'global-index.external-paths'"
 
 
 def _table(tmp_path, *, dynamic=False, options=None):
@@ -67,121 +61,50 @@ def _multiple_paths(tmp_path):
     return ', '.join((tmp_path / name).as_uri() for name in ('index-a', 'index-b')) + ','
 
 
-@contextmanager
-def _reject_before_write(table, tmp_path):
-    paths_before = set(tmp_path.rglob('*'))
-    snapshot_id = table.snapshot_manager().get_latest_snapshot().id
-    with patch.object(table.file_io, 'new_output_stream', wraps=table.file_io.new_output_stream) as output:
-        with pytest.raises(ValueError, match=_ERROR):
-            yield
-        output.assert_not_called()
-    assert set(tmp_path.rglob('*')) == paths_before
-    assert table.snapshot_manager().get_latest_snapshot().id == snapshot_id
-
-
-@pytest.mark.parametrize('paths', ['', 'single', 'multiple'])
 @pytest.mark.parametrize('native', ['false', 'true'])
-@pytest.mark.parametrize('index_in_data_dir', ['false', 'true'])
-@pytest.mark.parametrize('operation', ['row-id', 'predicate', 'stream', 'direct', 'captured', 'python'])
-def test_delete_rejects_external_paths_option_before_files(tmp_path, paths, native, index_in_data_dir, operation):
-    table = _table(tmp_path)
-    _append(table)
-    value = _multiple_paths(tmp_path) if paths == 'multiple' else (tmp_path / 'index-a').as_uri() if paths else ''
-    table = table.copy({
-        _OPTION: value, 'write.native.enabled': native, 'index-file-in-data-file-dir': index_in_data_dir,
-    })
-    with patch('pypaimon.write.backend_dispatch.try_prepare_native') as prepare, _reject_before_write(table, tmp_path):
-        if operation == 'direct':
-            TableDeleteByRowId(table).delete([0])
-        elif operation == 'captured':
-            from pypaimon.write.row_id_plan import capture_row_id_plan
-            TableDeleteByRowId(table, capture_row_id_plan(table)).delete([0])
-        elif operation == 'python':
-            TableDeleteByRowId._from_python(table).delete([0])
-        elif operation == 'stream':
-            table.new_stream_write_builder().new_update().delete_by_row_id([0], 2)
-        else:
-            update = table.new_batch_write_builder().new_update()
-            if operation == 'predicate':
-                update.delete_by_predicate(update.new_predicate_builder().equal('id', 1))
-            else:
-                update.delete_by_row_id([0])
-    prepare.assert_not_called()
+def test_partition_delete_with_external_index_paths(tmp_path, native):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('db', True)
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        pa.schema([('p', pa.string()), ('id', pa.int64())]),
+        partition_keys=['p'], options={
+            'bucket': '-1', 'file.format': 'parquet', 'write.native.enabled': 'false',
+            'commit.native.enabled': 'false', _OPTION: _multiple_paths(tmp_path),
+        }), False)
+    table = catalog.get_table('db.t')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.table({'p': ['drop', 'keep'], 'id': [1, 2]}))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
 
+    table = table.copy({'write.native.enabled': native})
+    builder = table.new_batch_write_builder()
+    update = builder.new_update()
+    messages = update.delete_by_predicate(update.new_predicate_builder().equal('p', 'drop'))
+    assert sum(len(message.deleted_files) for message in messages) == 1
+    assert all(not message.index_adds for message in messages)
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
 
-@pytest.mark.parametrize('paths', ['', 'single', 'multiple'])
-@pytest.mark.parametrize('native', ['false', 'true'])
-@pytest.mark.parametrize('index_in_data_dir', ['false', 'true'])
-@pytest.mark.parametrize('operation', ['batch', 'stream', 'overwrite', 'direct-batch', 'direct-stream', 'python'])
-def test_dynamic_bucket_rejects_external_paths_option_before_data_files(
-        tmp_path, paths, native, index_in_data_dir, operation):
-    table = _table(tmp_path, dynamic=True)
-    _append(table)
-    value = _multiple_paths(tmp_path) if paths == 'multiple' else (tmp_path / 'index-a').as_uri() if paths else ''
-    table = table.copy({
-        _OPTION: value, 'write.native.enabled': native, 'index-file-in-data-file-dir': index_in_data_dir,
-    })
-    with patch('pypaimon.write.backend_dispatch.try_prepare_native') as prepare, _reject_before_write(table, tmp_path):
-        if operation == 'python':
-            from pypaimon.write.backend_dispatch import create_python_write
-            create_python_write(table, 'writer')
-        elif operation in ('direct-batch', 'direct-stream'):
-            from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
-            writer_type = BatchTableWrite if operation == 'direct-batch' else StreamTableWrite
-            writer_type(table, 'writer')
-        else:
-            builder = (table.new_stream_write_builder() if operation == 'stream'
-                       else table.new_batch_write_builder())
-            if operation == 'overwrite':
-                builder.overwrite({})
-            builder.new_write()
-    prepare.assert_not_called()
-
-
-@pytest.mark.parametrize('native', ['false', 'true'])
-def test_merge_delete_rejects_external_paths_option_before_update_or_insert(tmp_path, native):
-    table = _table(tmp_path)
-    _append(table)
-    table = table.copy({_OPTION: _multiple_paths(tmp_path), 'write.native.enabled': native})
-    with patch('pypaimon.write.backend_dispatch.prepare_native_merge_into') as prepare, \
-            _reject_before_write(table, tmp_path):
-        table.new_batch_write_builder().new_update().merge_into(
-            pa.table({'id': [1, 2, 3], 'value': [11, 22, 33]}), on=['id'],
-            when_matched=[WhenMatched.delete('s.id = 1'), WhenMatched.update('*')],
-            when_not_matched=[WhenNotMatched('*')])
-    prepare.assert_not_called()
-
-
-def test_ray_merge_delete_rejects_external_paths_option_before_source_execution(tmp_path):
-    from pypaimon.ray.data_evolution_merge_into import merge_into
-
-    table = _table(tmp_path, options={_OPTION: _multiple_paths(tmp_path)})
-    _append(table)
-    # Exercise coordinator validation without starting optional Ray workers.
-    with patch('pypaimon.ray.data_evolution_merge_into._require_ray_join'), _reject_before_write(table, tmp_path):
-        merge_into(
-            target='db.t', source=object(),
-            catalog_options={'warehouse': str(tmp_path / 'warehouse')}, on=['id'],
-            when_matched=[WhenMatched.delete()], when_not_matched=[WhenNotMatched('*')])
-
-
-@pytest.mark.parametrize('paths', ['', 'single', 'multiple'])
-@pytest.mark.parametrize('index_in_data_dir', ['false', 'true'])
-def test_shared_allocator_rejects_external_paths_option(tmp_path, paths, index_in_data_dir):
-    value = _multiple_paths(tmp_path) if paths == 'multiple' else (tmp_path / 'index-a').as_uri() if paths else ''
-    table = _table(tmp_path, options={_OPTION: value, 'index-file-in-data-file-dir': index_in_data_dir})
-    _append(table)
-    factory = table.path_factory()
-    with _reject_before_write(table, tmp_path):
-        factory.new_bucket_index_path((), 0, 'index-test')
-    with _reject_before_write(table, tmp_path):
-        factory.global_index_path_factory().new_path()
+    reader = table.new_read_builder()
+    assert reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist() == [
+        {'p': 'keep', 'id': 2},
+    ]
 
 
 @pytest.mark.parametrize('dynamic', [False, True])
 def test_legacy_comma_uri_supports_bucket_index_writes_and_reads(tmp_path, dynamic):
     root = tmp_path.as_uri() + '/index,archive'
-    table = _table(tmp_path, dynamic=dynamic, options={'global-index.external-path': root})
+    table = _table(tmp_path, dynamic=dynamic, options={
+        'global-index.external-path': root, _OPTION: _multiple_paths(tmp_path),
+    })
     _append(table)
     if not dynamic:
         builder = table.new_batch_write_builder()

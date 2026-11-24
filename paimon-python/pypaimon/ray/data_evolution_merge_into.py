@@ -184,8 +184,6 @@ def _prepare(
 
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(target)
-    if any(clause.delete for clause in when_matched):
-        table.options.validate_index_write_path()
     _authorize_update(table)
     if not table.options.data_evolution_enabled():
         raise ValueError(

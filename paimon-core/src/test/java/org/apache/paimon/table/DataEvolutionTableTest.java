@@ -1916,8 +1916,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
 
         table =
                 table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), testExternalpath));
+                        Collections.singletonMap("global-index.external-path", testExternalpath));
 
         indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         Path path3 = indexPathFactory.newPathFromName("test-file");

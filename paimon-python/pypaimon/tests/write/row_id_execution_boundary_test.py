@@ -129,8 +129,6 @@ class BlockPython(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockPython())
 import pyarrow as pa
 from pypaimon.execution.native.write import native_update
-from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.options.options import Options
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -146,7 +144,7 @@ class Execution:
 
 native_update.create_native_update_by_row_id = lambda *args: Execution()
 native_update.create_native_row_id_delete = lambda *args: Execution()
-table = SimpleNamespace(options=CoreOptions(Options({'write.native.enabled': 'true'})), identifier=object(),
+table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True), identifier=object(),
                         catalog_environment=SimpleNamespace(table_query_auth=lambda *args: None))
 if sys.argv[1] == 'update':
     update = TableUpdateByRowId(table, 'user', BATCH_COMMIT_IDENTIFIER)

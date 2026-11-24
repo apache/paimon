@@ -18,7 +18,6 @@
 from datetime import date, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from pypaimon.common.options.core_options import validate_global_index_external_paths
 from pypaimon.utils.numeric_utils import java_floating_string
 from pypaimon.utils.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.utils.path import resolve_path, to_file_io_path
@@ -115,7 +114,6 @@ class FileStorePathFactory:
         index_file_in_data_file_dir: bool = False,
         global_index_external_path: Optional[str] = None,
         partition_types: Optional[List[DataType]] = None,
-        global_index_external_paths_configured: bool = False,
     ):
         self._root = root.rstrip('/')
         self.partition_keys = partition_keys
@@ -137,7 +135,6 @@ class FileStorePathFactory:
         self.global_index_external_path = (
             global_index_external_path.rstrip('/')
             if global_index_external_path else None)
-        self.global_index_external_paths_configured = global_index_external_paths_configured
 
     def root(self) -> str:
         return self._root
@@ -268,12 +265,10 @@ class FileStorePathFactory:
             self.index_path(),
             self.global_index_root_path(),
             self.global_index_external_path is not None,
-            self.global_index_external_paths_configured,
         )
 
     def new_bucket_index_path(self, partition: Tuple, bucket: int, file_name: str) -> Tuple[str, bool]:
         """Return a new bucket index's path and whether to persist its external location."""
-        validate_global_index_external_paths(self.global_index_external_paths_configured)
         if self.index_file_in_data_file_dir:
             external = self.create_external_path_provider(partition, bucket, canonical_partition=True)
             if external is not None:
@@ -301,12 +296,10 @@ class IndexPathFactory:
         index_path: str,
         global_index_root_path: Optional[str] = None,
         external_path: bool = False,
-        external_paths_configured: bool = False,
     ):
         self._index_path = index_path
         self._global_index_root_path = global_index_root_path or index_path
         self._external_path = external_path
-        self._external_paths_configured = external_paths_configured
         self._file_count = 0
 
     def index_path(self) -> str:
@@ -323,7 +316,6 @@ class IndexPathFactory:
 
     def new_path(self, prefix: str = "index-") -> str:
         """Create a new unique index file path."""
-        validate_global_index_external_paths(self._external_paths_configured)
         import uuid
         unique_id = str(uuid.uuid4())
         self._file_count += 1

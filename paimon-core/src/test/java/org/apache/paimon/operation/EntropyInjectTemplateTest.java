@@ -142,8 +142,7 @@ public class EntropyInjectTemplateTest {
                     identifier,
                     Arrays.asList(
                             SchemaChange.setOption(
-                                    CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
-                                    legacyIndex.toUri().toString()),
+                                    "global-index.external-path", legacyIndex.toUri().toString()),
                             SchemaChange.setOption(
                                     CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
                                     firstIndex.toUri() + "," + secondIndex.toUri())),

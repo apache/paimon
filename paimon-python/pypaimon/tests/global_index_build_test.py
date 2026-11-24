@@ -794,6 +794,8 @@ class GlobalIndexBuildTest(
             self.tempdir, 'global-index-external,archive')
         options = dict(self.table_options)
         options['global-index.external-path'] = external_root
+        options['global-index.external-paths'] = ','.join(
+            'file://%s' % os.path.join(self.tempdir, name) for name in ('index-a', 'index-b'))
         table = self._create_table(options=options)
         self._write_arrow(table, pa.table(
             {
@@ -814,94 +816,6 @@ class GlobalIndexBuildTest(
         self.assertIsNotNone(external_path)
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
-
-    def test_create_global_index_rejects_external_paths_option_before_build(self):
-        from pypaimon.globalindex.index_dispatch import build_global_index
-
-        table = self._create_table()
-        self._write_arrow(table, pa.table(
-            {'id': [1], 'name': ['a'], 'age': [10], 'city': ['x']},
-            schema=self.pa_schema,
-        ))
-        option = 'global-index.external-paths'
-        root_a = 'file://%s' % os.path.join(self.tempdir, 'external-a')
-        root_b = 'file://%s' % os.path.join(self.tempdir, 'external-b')
-        snapshot = table.snapshot_manager().get_latest_snapshot()
-        files_before = {
-            os.path.join(root, name)
-            for root, dirs, files in os.walk(self.tempdir)
-            for name in dirs + files
-        }
-
-        for paths in ('', root_a, root_a + ',' + root_b, root_a + ', ' + root_b + ','):
-            for native in ('false', 'true'):
-                for source in ('table', 'build', 'table-with-build-override'):
-                    with self.subTest(paths=paths, native=native, source=source):
-                        table_options = {'write.native.enabled': native, 'global-index.external-path': root_a}
-                        build_options = {}
-                        if source == 'build':
-                            build_options[option] = paths
-                        else:
-                            table_options[option] = paths
-                            if source == 'table-with-build-override':
-                                build_options[option] = root_a
-                        configured = table.copy(table_options)
-                        with patch(
-                            'pypaimon.globalindex.index_dispatch.build_global_index',
-                            wraps=build_global_index,
-                        ) as build:
-                            with patch.object(
-                                configured, 'new_batch_write_builder',
-                                wraps=configured.new_batch_write_builder,
-                            ) as write_builder:
-                                with self.assertRaisesRegex(
-                                    ValueError,
-                                    "does not support 'global-index.external-paths'",
-                                ):
-                                    configured.create_global_index('id', options=build_options)
-                                build.assert_not_called()
-                                write_builder.assert_not_called()
-                        self.assertEqual(
-                            snapshot.id, table.snapshot_manager().get_latest_snapshot().id)
-                        self.assertEqual([], IndexFileHandler(table).scan(snapshot))
-                        self.assertEqual(files_before, {
-                            os.path.join(root, name)
-                            for root, dirs, files in os.walk(self.tempdir)
-                            for name in dirs + files
-                        })
-
-    def test_vector_build_rejects_external_paths_option_before_backend_selection(self):
-        schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
-        option = 'global-index.external-paths'
-        root = 'file://%s' % os.path.join(self.tempdir, 'external')
-        files_before = {os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
-                        for name in dirs + files}
-
-        for layout in ('range', 'centroid'):
-            for paths in ('', root, root + ',' + root + '-other'):
-                for source in ('table', 'build', 'table-with-build-override'):
-                    with self.subTest(layout=layout, paths=paths, source=source):
-                        table_options = {'fields.embedding.sharding': layout, 'write.native.enabled': 'true'}
-                        build_options = {}
-                        if source == 'build':
-                            build_options[option] = paths
-                        else:
-                            table_options[option] = paths
-                            if source == 'table-with-build-override':
-                                build_options[option] = None
-                        configured = table.copy(table_options)
-                        with patch('pypaimon.globalindex.index_dispatch.build_global_index') as build:
-                            with self.assertRaisesRegex(ValueError, "does not support 'global-index.external-paths'"):
-                                configured.create_global_index(
-                                    'embedding', 'ivf-flat', options=build_options,
-                                    extra_fields={'status': 'bitmap'} if layout == 'centroid' else None)
-                            build.assert_not_called()
-                        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
-                        self.assertEqual(files_before, {
-                            os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
-                            for name in dirs + files
-                        })
 
     def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()

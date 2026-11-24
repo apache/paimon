@@ -450,6 +450,7 @@ public class SchemaValidation {
         validateManifestSort(schema, options);
 
         validateExternalPathTemplate(options);
+        options.globalIndexExternalPaths();
     }
 
     public static void validateExternalPathStrategyChange(
