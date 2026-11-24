@@ -1806,12 +1806,21 @@ class DataEvolutionSplitRead(SplitRead):
         source_projections = {}
         source_ranges = {}
         segments = []
+        # A residual filter can reject rows before LIMIT sees them.
+        remaining = self.limit if self.predicate is None and self._post_merge_filter is None else None
         for ranges, providers in selected_plan:
+            if remaining == 0:
+                break
             row_count = sum(row_range.count() for row_range in ranges)
             if deleted:
                 row_count -= sum(deleted.range_cardinality(r.from_ - dv_start, r.to - dv_start) for r in ranges)
             if not row_count:
                 continue
+            if remaining is not None:
+                if row_count > remaining:
+                    ranges = self._live_row_prefix(ranges, remaining, dv_start, deleted)
+                    row_count = remaining
+                remaining -= row_count
 
             sources = fixed_sources.copy()
             for file, field_ids in providers:
@@ -1840,7 +1849,8 @@ class DataEvolutionSplitRead(SplitRead):
             full_range = (source.logical_range() if isinstance(source, BlobBunch)
                           else source.files()[0].non_null_row_id_range())
             reader.row_ranges = None if self.row_ranges is None and row_ranges == [full_range] else row_ranges
-            suppliers[source] = partial(reader._create_bunch_reader, source, read_fields, deletion_vector)
+            suppliers[source] = partial(
+                reader._create_bunch_reader, source, read_fields, deletion_vector, coalesce=False)
 
         columns_by_range = [
             (count, [(sources[field.id], offsets[sources[field.id]][field.id])
@@ -1850,6 +1860,36 @@ class DataEvolutionSplitRead(SplitRead):
         return DataEvolutionRangeMergeReader(
             suppliers, columns_by_range, read_arrow_schema(self.read_fields),
             self.table.options.read_batch_size())
+
+    @staticmethod
+    def _live_row_prefix(ranges: List[Range], limit: int, dv_start: int, deleted) -> List[Range]:
+        """Keep the physical prefix that contains the requested number of live rows."""
+        prefix = []
+        for row_range in ranges:
+            start = row_range.from_
+            count = row_range.count()
+            if deleted:
+                count -= deleted.range_cardinality(start - dv_start, row_range.to - dv_start)
+            if count <= limit:
+                prefix.append(row_range)
+                limit -= count
+                if limit == 0:
+                    break
+                continue
+
+            end = start + limit - 1
+            if deleted:
+                high = row_range.to
+                while end < high:
+                    mid = (end + high) // 2
+                    live = mid - start + 1 - deleted.range_cardinality(start - dv_start, mid - dv_start)
+                    if live < limit:
+                        end = mid + 1
+                    else:
+                        high = mid
+            prefix.append(Range(start, end))
+            break
+        return prefix
 
     def _bunch_field_ids(self, bunch: FieldBunch, partition_ids: List[int]):
         if isinstance(bunch, VectorBunch):
@@ -1941,7 +1981,8 @@ class DataEvolutionSplitRead(SplitRead):
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
     def _create_bunch_reader(
-            self, bunch: FieldBunch, read_fields: List[DataField], deletion_vector) -> RecordBatchReader:
+            self, bunch: FieldBunch, read_fields: List[DataField], deletion_vector,
+            coalesce: bool = True) -> RecordBatchReader:
         reader = copy(self)
         reader.read_fields = read_fields
         names = self._remove_partition_fields(read_fields)
@@ -1969,7 +2010,9 @@ class DataEvolutionSplitRead(SplitRead):
             partial(reader._create_file_reader, file, names, deletion_vector, row_ranges=ranges)
             for ranges, file in files_to_read
         ]
-        return MergeAllBatchReader(suppliers, batch_size=batch_size)
+        if coalesce:
+            return MergeAllBatchReader(suppliers, batch_size=batch_size)
+        return ConcatBatchReader(suppliers)
 
     def _create_file_reader(
             self, file: DataFileMeta, read_fields: List[str], deletion_vector=None,

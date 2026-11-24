@@ -554,6 +554,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
     def _assert_rolled_vector_update(
             self, vortex, initial_file_size, updated_file_size, updated_row_count, alter_schema,
             shared_vector_file=False):
+        from pypaimon.execution.python.read.reader.format_vortex_reader import FormatVortexReader
         from pypaimon.execution.python.read.split_read import DataEvolutionSplitRead
         from pypaimon.schema.schema_change import SchemaChange
         from pypaimon.utils.range import Range
@@ -620,8 +621,23 @@ class VectorTableWriteReadTest(unittest.TestCase):
         self.assertIn(normal_files[0].file_name, opened_files)
         self.assertCountEqual(opened_files, set(opened_files))
 
+        if shared_vector_file and updated_row_count < row_count:
+            original = FormatVortexReader.read_arrow_batch
+            decoded_rows = []
+
+            def count_decoded(reader):
+                batch = original(reader)
+                if batch is not None:
+                    decoded_rows.append(batch.num_rows)
+                return batch
+
+            with patch.object(FormatVortexReader, 'read_arrow_batch', count_decoded):
+                result = builder.with_limit(1).new_read().to_arrow(splits).to_pydict()
+            self.assertEqual({name: values[:1] for name, values in expected.items()}, result)
+            self.assertEqual([1, 1, 1], decoded_rows)
+
         if shared_vector_file:
-            deleted = [7, 23, 24, 73, 78]
+            deleted = [6, 7, 8, 23, 24, 73, 78]
             write_builder = table.new_batch_write_builder()
             messages = write_builder.new_update().delete_by_row_id(deleted)
             commit = write_builder.new_commit()
@@ -644,6 +660,12 @@ class VectorTableWriteReadTest(unittest.TestCase):
                     if DataFileMeta.is_vector_file(file.file_name):
                         self.assertEqual(Range.and_(selected, [file.non_null_row_id_range()]),
                                          call.kwargs['row_ranges'])
+            else:
+                result = builder.with_limit(1).new_read().to_arrow(splits).to_pydict()
+                self.assertEqual({name: [values[row_ids[0]]] for name, values in expected.items()}, result)
+                predicate = builder.new_predicate_builder().greater_or_equal('id', 70)
+                result = builder.with_filter(predicate).new_read().to_arrow(splits).to_pydict()
+                self.assertEqual({name: [values[70]] for name, values in expected.items()}, result)
 
     @staticmethod
     def _write_vector_batches(table, data, first_row_id=None, rows_per_batch=8):
