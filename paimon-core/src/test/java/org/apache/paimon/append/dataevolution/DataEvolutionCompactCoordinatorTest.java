@@ -221,6 +221,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("large-update.parquet", 20L, 10L, 1, threshold + 1),
                         makeEntryWithSize("version1.parquet", 30L, 10L, 0, versionSize),
                         makeEntryWithSize("version2.parquet", 30L, 10L, 1, versionSize),
+                        makeEntryWithSize("large.parquet", 40L, 10L, 0, threshold + 1),
                         makeBlobEntry("large.blob", 0L, 10L, 1000L),
                         makeVectorStoreEntry("large.vector.lance", 10L, 10L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
@@ -240,9 +241,12 @@ public class DataEvolutionCompactCoordinatorTest {
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
-        assertThat(tasks).hasSize(1);
+        assertThat(tasks).hasSize(3);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(2).file(), entries.get(3).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(4).file(), entries.get(5).file());
+        assertThat(tasks.get(2).compactBefore()).containsExactly(entries.get(6).file());
     }
 
     @Test
@@ -259,6 +263,80 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks).isEmpty();
     }
 
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    public void testCompactPlannerSizeTriggerBelowMinimumFileCount(
+            boolean incremental, boolean columnUpdates) {
+        List<ManifestEntry> entries =
+                new ArrayList<>(
+                        Arrays.asList(
+                                makeEntryWithSize("first.parquet", 0L, 10L, 0, 300L),
+                                makeEntryWithSize(
+                                        "second.parquet", columnUpdates ? 0L : 10L, 10L, 1, 300L)));
+        if (columnUpdates) {
+            // Merging versions is useful even when a retained BLOB forbids splitting the range.
+            entries.add(makeBlobEntry("whole.blob", 0L, 10L, 1000L));
+        }
+        DataEvolutionIncrementalCompactPlanner incrementalPlanner =
+                incremental
+                        ? new DataEvolutionIncrementalCompactPlanner(
+                                new CoreOptions(new Options()),
+                                file -> Collections.singleton(0),
+                                file -> true,
+                                files -> true)
+                        : null;
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false,
+                        false,
+                        Long.MAX_VALUE,
+                        512L,
+                        512L,
+                        1L,
+                        5L,
+                        schemaId -> null,
+                        null,
+                        512L,
+                        null,
+                        incrementalPlanner);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0)).isInstanceOf(DataEvolutionNormalCompactTask.class);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactlyInAnyOrder(entries.get(0).file(), entries.get(1).file());
+        assertThat(((DataEvolutionNormalCompactTask) tasks.get(0)).partialRewrite()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {4, 6})
+    public void testNormalSizeTriggerPreservesVectorMinimumFileCount(int vectorFileCount) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntryWithSize("first.parquet", 0L, 30L, 0, 300L));
+        entries.add(makeEntryWithSize("second.parquet", 30L, 30L, 0, 300L));
+        int rowCount = 60 / vectorFileCount;
+        for (int i = 0; i < vectorFileCount; i++) {
+            entries.add(
+                    makeVectorStoreEntry(
+                            "v" + i + ".vector.json", i * (long) rowCount, rowCount, 10L));
+        }
+
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(512L, 1L, 5L).compactPlan(entries);
+
+        assertThat(tasks).hasSize(vectorFileCount >= 5 ? 2 : 1);
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.NORMAL);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(0).file(), entries.get(1).file());
+        if (vectorFileCount >= 5) {
+            assertThat(tasks.get(1).type()).isEqualTo(DataEvolutionCompactTask.TaskType.VECTOR);
+            assertThat(tasks.get(1).compactBefore()).hasSize(vectorFileCount);
+            assertThat(((DataEvolutionNormalCompactTask) tasks.get(0)).protectedRanges())
+                    .contains(new Range(0, 59));
+        }
+    }
+
     @Test
     public void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
         List<ManifestEntry> entries =
@@ -266,7 +344,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("below.parquet", 0L, 10L, 0, 199L),
                         makeEntryWithSize("boundary.parquet", 10L, 10L, 0, 200L),
                         makeEntryWithSize("large.parquet", 20L, 10L, 0, 201L),
-                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L));
+                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L),
+                        makeEntryWithSize("single-large.parquet", 30L, 10L, 0, 201L));
         for (boolean enabled : new boolean[] {false, true}) {
             DataEvolutionCompactCoordinator.CompactPlanner planner =
                     new DataEvolutionCompactCoordinator.CompactPlanner(
@@ -283,12 +362,13 @@ public class DataEvolutionCompactCoordinatorTest {
                             null,
                             null);
             List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+            assertThat(tasks.get(0).compactBefore())
+                    .containsExactly(entries.get(2).file(), entries.get(3).file());
             if (enabled) {
-                assertThat(tasks).hasSize(1);
-                assertThat(tasks.get(0).compactBefore())
-                        .containsExactly(entries.get(2).file(), entries.get(3).file());
+                assertThat(tasks).hasSize(2);
+                assertThat(tasks.get(1).compactBefore()).containsExactly(entries.get(4).file());
             } else {
-                assertThat(tasks).isEmpty();
+                assertThat(tasks).hasSize(1);
             }
         }
     }
@@ -586,13 +666,13 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeBlobEntry("file2.blob", 100L, 100L, 100, "pic"));
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                blobPlanner(1024, 1024, 100, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+                blobPlanner(1024, 1, 100, rowType(new DataField(1, "pic", DataTypes.BLOB())));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
 
-        planner = blobPlanner(1024, 1024, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+        planner = blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
         tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(2);
@@ -610,14 +690,13 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
         entries.add(makeVectorStoreEntry("file2.vector.json", 100L, 100L, 100));
 
-        DataEvolutionCompactCoordinator.CompactPlanner planner =
-                vectorStorePlanner(1024, 1024, 100);
+        DataEvolutionCompactCoordinator.CompactPlanner planner = vectorStorePlanner(1024, 1, 100);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
 
-        planner = vectorStorePlanner(1024, 1024, 2);
+        planner = vectorStorePlanner(1024, 1, 2);
         tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(2);

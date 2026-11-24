@@ -126,7 +126,12 @@ Selection uses these existing options:
 - `compaction.min.file-num` triggers selection when a group reaches that file
   count. Above the threshold, the planner selects enough newest files to reduce
   the count toward the threshold. A single selected file is left unchanged.
-  BLOB groups retain their existing two-file trigger.
+  Normal-file batches can also trigger below this count when at least two files
+  exceed `target-file-size` in combined size, counting each file as at least
+  `source.split.open-file-cost`. Such batches use a two-file minimum for
+  incremental selection and still apply the size-ratio and amplification checks.
+  BLOB groups retain their existing two-file trigger, and VECTOR groups retain
+  the configured minimum count.
 - `compaction.size-ratio` is the percentage allowance when comparing the
   selected files' accumulated size with the next older version's size. A much
   larger older version stops size-based selection.
@@ -202,8 +207,9 @@ Every BLOB or VECTOR file must remain fully contained in a single normal file's
 row-ID range. An estimated cut inside a dedicated file moves to the end of its range,
 including any overlapping ranges from different columns or versions and ranges produced
 by dedicated compaction in the same batch. Output files may therefore exceed
-`target-file-size`. If these ranges prevent any split, file size alone does not trigger a compaction task. Normal
-merging based on `compaction.min.file-num` remains available.
+`target-file-size`. If these ranges prevent any split, a single large file is
+left unchanged. Multiple normal files can still merge when their count reaches
+`compaction.min.file-num` or their combined weighted size exceeds `target-file-size`.
 
 ### Materialize Deletion Vectors
 

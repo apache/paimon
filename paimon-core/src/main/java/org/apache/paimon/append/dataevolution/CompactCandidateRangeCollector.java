@@ -553,6 +553,7 @@ final class CompactCandidateRangeCollector {
 
         private void emitComponent(Component component) {
             if (component.normalFileCount >= compactMinFileNum
+                    || (component.normalFileCount > 1 && component.normalWeight > targetFileSize)
                     || component.dedicatedCandidate
                     || component.largeFile) {
                 consumer.accept(component.start, component.end, component.fileCount);
@@ -560,7 +561,7 @@ final class CompactCandidateRangeCollector {
         }
 
         private void flushBin() {
-            bin.emit(compactMinFileNum, consumer);
+            bin.emit(compactMinFileNum, targetFileSize, consumer);
             bin.clear();
         }
 
@@ -632,11 +633,13 @@ final class CompactCandidateRangeCollector {
             }
         }
 
-        private void emit(long compactMinFileNum, CandidateRangeConsumer consumer) {
+        private void emit(
+                long compactMinFileNum, long targetFileSize, CandidateRangeConsumer consumer) {
             if (fileCount == 0) {
                 return;
             }
-            if (normalFileCount >= compactMinFileNum) {
+            if (normalFileCount >= compactMinFileNum
+                    || (normalFileCount > 1 && normalWeight > targetFileSize)) {
                 consumer.accept(start, end, fileCount);
                 return;
             }

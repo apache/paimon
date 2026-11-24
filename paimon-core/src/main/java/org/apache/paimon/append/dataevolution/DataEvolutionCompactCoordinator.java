@@ -500,9 +500,10 @@ public class DataEvolutionCompactCoordinator {
                                                     file.fileSize() > largeFileThreshold
                                                             && !completedNormalFiles.contains(
                                                                     file.fileName()));
-            boolean triggerNormalFile =
-                    hasUncompactedFiles
-                            && (dataFiles.size() >= compactMinFileNum || splitLargeFile);
+            boolean mergeNormalFiles =
+                    dataFiles.size() >= compactMinFileNum
+                            || (dataFiles.size() > 1 && compactBin.enoughContent());
+            boolean triggerNormalFile = hasUncompactedFiles && (mergeNormalFiles || splitLargeFile);
 
             if (compactBlob) {
                 if (triggerNormalFile) {
@@ -539,7 +540,7 @@ public class DataEvolutionCompactCoordinator {
                 }
                 // Output may span several normal files only when they are merged in this batch.
                 List<DataFileMeta> selectedVectorFiles =
-                        triggerNormalFile && dataFiles.size() >= compactMinFileNum
+                        triggerNormalFile && mergeNormalFiles
                                 ? vectorStoreFilesToCompact(binVectorStoreFiles)
                                 : Collections.emptyList();
                 if (!selectedVectorFiles.isEmpty()) {
@@ -564,14 +565,16 @@ public class DataEvolutionCompactCoordinator {
                 for (DataEvolutionCompactTask task : tasks) {
                     protectedRanges.add(checkContiguousRowRange(task.compactBefore()));
                 }
-                if (dataFiles.size() >= compactMinFileNum
-                        || canSplit(normalRange, protectedRanges)) {
+                if (mergeNormalFiles || canSplit(normalRange, protectedRanges)) {
+                    // Size-triggered bins still honor incremental size-ratio and amplification
+                    // checks, so a retained large base is not rewritten with a tiny update.
+                    long minFileNum = dataFiles.size() < compactMinFileNum ? 2L : compactMinFileNum;
                     List<DataFileMeta> selected =
                             incrementalPlanner == null
                                             || (splitLargeFile
                                                     && canSplit(normalRange, protectedRanges))
                                     ? dataFiles
-                                    : incrementalPlanner.selectFiles(dataFiles, compactMinFileNum);
+                                    : incrementalPlanner.selectFiles(dataFiles, minFileNum);
                     if (!selected.isEmpty()
                             && selected.stream()
                                     .anyMatch(
