@@ -2912,10 +2912,9 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Comma-separated global index root directories. New index files are distributed "
-                                    + "in round-robin order. When configured, takes precedence over global-index.external-path; "
-                                    + "an empty value uses <table-root-directory>/index. If not configured, the legacy global-index.external-path is read as a single URI. "
-                                    + "PyPaimon uses the legacy single-root setting or its table index directory.");
+                            "Comma-separated global index root directories for Java index writers. "
+                                    + "New index files are distributed in round-robin order. "
+                                    + "An empty value uses <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
