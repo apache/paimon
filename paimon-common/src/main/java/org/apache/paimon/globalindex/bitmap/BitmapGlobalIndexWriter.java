@@ -105,21 +105,6 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
             return Collections.emptyList();
         }
 
-        finishSection();
-        byte[] meta =
-                new SortedIndexFileMeta(
-                                firstKey == null ? null : keySerializer.serialize(firstKey),
-                                lastKey == null ? null : keySerializer.serialize(lastKey),
-                                !nullRows.isEmpty())
-                        .serialize();
-        return Collections.singletonList(new ResultEntry(filePath, rowCount, meta));
-    }
-
-    /** Finalizes a bitmap section for a reader that loads its directory from the footer. */
-    long finishSection() {
-        if (rowCount == 0) {
-            return 0;
-        }
         try {
             flushCurrentBitmap();
             streamingWriter().finish(nullRows, nonNullRows);
@@ -128,7 +113,13 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
             throw new RuntimeException("Error in closing bitmap index writer.", e);
         }
 
-        return rowCount;
+        byte[] meta =
+                new SortedIndexFileMeta(
+                                firstKey == null ? null : keySerializer.serialize(firstKey),
+                                lastKey == null ? null : keySerializer.serialize(lastKey),
+                                !nullRows.isEmpty())
+                        .serialize();
+        return Collections.singletonList(new ResultEntry(filePath, rowCount, meta));
     }
 
     @Override

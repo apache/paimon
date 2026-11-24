@@ -62,6 +62,16 @@ public final class CentroidIndexMeta {
         return isWrapped(meta) && role(meta) == ROUTER;
     }
 
+    /** Whether the router covers a range with no non-null vectors. */
+    public static boolean isEmptyRouter(IndexFileMeta file) {
+        GlobalIndexMeta meta = file.globalIndexMeta();
+        byte[] descriptor = meta == null ? null : meta.indexMeta();
+        return file.fileSize() == 0
+                && file.rowCount() == 0
+                && isRoutingModel(descriptor)
+                && ByteBuffer.wrap(descriptor).getInt(MAGIC.length + 2) == 0;
+    }
+
     /** Whether the index definition includes Bitmap fields, even in an all-null range. */
     public static boolean hasBitmapFields(GlobalIndexMeta meta) {
         int[] fields = meta.extraFieldIds();
@@ -73,7 +83,7 @@ public final class CentroidIndexMeta {
         return isWrapped(meta) && role(meta) == BITMAP;
     }
 
-    /** Scalar sections belong to the primary vector index for create and drop operations. */
+    /** Scalar Bitmap files belong to the primary vector index for create and drop operations. */
     public static boolean matchesIndexFields(GlobalIndexMeta meta, List<Integer> fieldIds) {
         return meta.getIndexedFieldIds().equals(fieldIds)
                 || (fieldIds.size() == 1
@@ -99,8 +109,8 @@ public final class CentroidIndexMeta {
         return wrap(file, SHARD, centroid);
     }
 
-    public static ResultEntry scalarIndex(ResultEntry file, int centroid) {
-        return wrap(file, BITMAP, centroid);
+    public static ResultEntry scalarIndex(ResultEntry file, int fieldId) {
+        return wrap(file, BITMAP, fieldId);
     }
 
     private static ResultEntry wrap(ResultEntry file, byte role, int countOrId) {

@@ -25,7 +25,7 @@ import fastavro
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
-from pypaimon.manifest.centroid_index_groups import centroid_routers
+from pypaimon.manifest.centroid_index_groups import centroid_routers, check_centroid_deletes
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
@@ -258,8 +258,7 @@ class IndexManifestFile:
         delete_files = {(e.index_file.index_type, e.index_file.file_name) for e in deletes}
         survivors = [e for e in previous
                      if (e.index_file.index_type, e.index_file.file_name) not in delete_files]
-        if any(_is_centroid_entry(entry) for entry in deletes):
-            centroid_routers(survivors)
+        check_centroid_deletes(survivors, deletes)
         routers = centroid_routers(adds)
         if routers:
             ordinary_adds = [entry for entry in adds if not _is_centroid_entry(entry)]

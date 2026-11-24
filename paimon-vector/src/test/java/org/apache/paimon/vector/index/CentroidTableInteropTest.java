@@ -18,12 +18,16 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -31,6 +35,8 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.table.source.VectorSearchBuilder;
@@ -48,10 +54,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Opens Data Evolution tables and centroid manifests written by paimon-rust. */
 class CentroidTableInteropTest {
@@ -69,27 +77,32 @@ class CentroidTableInteropTest {
         Path location = tablePath("centroid_bitmap");
         FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
         List<IndexFileMeta> files = indexFiles(table, "v", "ivf-flat");
-        assertThat(files).hasSize(5);
+        assertThat(files).hasSize(4);
 
         IndexFileMeta emptyRouter =
-                files.stream()
-                        .filter(CentroidIndexMeta::isRoutingModel)
-                        .filter(file -> file.fileSize() == 0)
-                        .findFirst()
-                        .get();
+                files.stream().filter(CentroidIndexMeta::isEmptyRouter).findFirst().get();
         assertThat(ByteBuffer.wrap(descriptor(emptyRouter)).getInt(10)).isZero();
         assertThat(metric(emptyRouter)).isEqualTo("l2");
-        IndexFileMeta emptyShard =
-                files.stream()
-                        .filter(file -> descriptor(file)[9] == 'S' && file.rowCount() == 0)
-                        .findFirst()
-                        .get();
-        assertThat(descriptor(emptyShard)).hasSize(14);
-        assertThat(payload(table, emptyShard))
-                .isEqualTo("PCEMPTY1".getBytes(StandardCharsets.US_ASCII));
+        assertThat(fileIO.getFileSize(indexPath(table, emptyRouter))).isZero();
+        assertThat(files)
+                .filteredOn(file -> CentroidIndexMeta.isRoutingModel(file) && file.fileSize() > 0)
+                .singleElement()
+                .satisfies(
+                        file ->
+                                assertThat(ByteBuffer.wrap(descriptor(file)).getInt(10))
+                                        .isEqualTo(2));
+        assertThat(files)
+                .filteredOn(file -> descriptor(file)[9] == 'S')
+                .singleElement()
+                .satisfies(file -> assertThat(file.rowCount()).isEqualTo(4));
         IndexFileMeta bitmap =
                 files.stream().filter(CentroidIndexMeta::isScalarIndex).findFirst().get();
-        assertThat(descriptor(bitmap)).hasSize(14);
+        CentroidIndexFile bitmapFile =
+                (CentroidIndexFile)
+                        CentroidIndexMeta.file(
+                                bitmap, table.store().pathFactory().globalIndexFileFactory());
+        assertThat(bitmapFile.fieldId()).isEqualTo(2);
+        assertThat(bitmapFile.metadata()).isNotEmpty();
         assertThat(bitmap.globalIndexMeta().extraFieldIds()).containsExactly(2);
         assertThat(DataEvolutionIndexSourceMeta.fromIndexFile(bitmap).sourceSchemaId())
                 .isEqualTo(1)
@@ -147,6 +160,29 @@ class CentroidTableInteropTest {
 
     private Path tablePath(String table) {
         return new Path(warehouse.resolve("test.db").resolve(table).toUri());
+    }
+
+    @Test
+    void rejectsCommitsThatOnlyDeleteCentroidShards() throws Exception {
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath("centroid_metrics"));
+        List<IndexFileMeta> shards =
+                indexFiles(table, "cos", "ivf-flat").stream()
+                        .filter(file -> !CentroidIndexMeta.isRoutingModel(file))
+                        .collect(Collectors.toList());
+        assertThat(shards).isNotEmpty();
+        CommitMessageImpl delete =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        DataIncrement.deleteIndexIncrement(
+                                Collections.singletonList(shards.get(0))),
+                        CompactIncrement.emptyIncrement());
+        try (TableCommitImpl commit = table.newCommit("delete-centroid-shards")) {
+            assertThatThrownBy(() -> commit.commit(Collections.singletonList(delete)))
+                    .hasStackTraceContaining("Cannot partially delete a centroid index generation");
+        }
+        assertThat(search(table, "cos", null, 1)).containsExactly(0);
     }
 
     private static List<IndexFileMeta> indexFiles(

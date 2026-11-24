@@ -49,6 +49,7 @@ from pypaimon.globalindex.full_text_options import (
     NativeFullTextIndexOptions,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
@@ -250,7 +251,8 @@ class GlobalIndexBuildTest(
             'read.native.enabled': 'false',
             'scan.native-plan.enabled': 'false',
         })
-        self._write_arrow(table, pa.table({'embedding': [[1.0, 2.0]], 'status': ['ready']},
+        self._write_arrow(table, pa.table({'embedding': [[1.0, 2.0], [1.0, 2.0]],
+                                           'status': ['ready', 'ready']},
                                           schema=schema))
         vector_id = table.field_dict['embedding'].id
         status_id = table.field_dict['status'].id
@@ -261,13 +263,13 @@ class GlobalIndexBuildTest(
         def entry(name, rows, metadata, fields=None):
             return IndexManifestEntry(0, partition, 0, IndexFileMeta(
                 'ivf-flat', name, 100, rows,
-                global_index_meta=GlobalIndexMeta(0, 0, vector_id, fields, metadata, source)))
+                global_index_meta=GlobalIndexMeta(0, 1, vector_id, fields, metadata, source)))
 
         centroid_files = []
         for role, rows, number, payload in (
-            (b'R', 0, 1, b'l2'),
-            (b'S', 1, 0, struct.pack('>i', 1)),
-            (b'B', 1, 0, b''),
+            (b'R', 0, 2, b'l2'),
+            (b'S', 2, 0, struct.pack('>i', 1)),
+            (b'B', 2, status_id, SortedIndexFileMeta(b'ready', b'ready', False).serialize()),
         ):
             header = struct.pack('>8sBci', b'PAIMCENT', 1, role, number)
             centroid_files.append(entry(role.decode('ascii'), rows, header + payload, [status_id]))
@@ -284,7 +286,7 @@ class GlobalIndexBuildTest(
         commit = table.new_batch_write_builder().new_commit()
         try:
             with self.assertRaisesRegex(RuntimeError, "overlapping row range"):
-                commit.commit([CommitMessage((), 0, [], index_adds=[entry('range', 1, b'{}')])])
+                commit.commit([CommitMessage((), 0, [], index_adds=[entry('range', 2, b'{}')])])
         finally:
             commit.close()
         self.assertEqual(3, table.drop_global_index('embedding', 'ivf-flat'))

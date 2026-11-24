@@ -93,6 +93,9 @@ def test_centroid_shards_and_bitmap_filter(catalog):
     assert roles == {b'PAIMCENT\x01R': 1, b'PAIMCENT\x01S': 2, b'PAIMCENT\x01B': 2}
     fields = {table.field_dict[name].id for name in ('status', 'tenant')}
     assert all(set(file.global_index_meta.extra_field_ids) == fields for file in files)
+    bitmaps = [file for file in files if file.global_index_meta.index_meta[9:10] == b'B']
+    assert {int.from_bytes(file.global_index_meta.index_meta[10:14], 'big') for file in bitmaps} == fields
+    assert all(file.row_count == 4 for file in bitmaps)
     assert sum(file.row_count for file in files if file.global_index_meta.index_meta[9:10] == b'S') == 4
 
     p = table.new_read_builder().new_predicate_builder()
@@ -117,6 +120,22 @@ def test_centroid_shards_and_bitmap_filter(catalog):
     residual = p.or_predicates([p.equal('status', 'keep'), p.less_than('id', 1)])
     assert _ids(table, _single(table, [0, 0], 4).with_filter(residual)
                 .with_option('centroid.nprobe', 2).execute_local()) == [0, 2]
+
+
+def test_all_null_centroid_range_has_a_zero_byte_router(catalog):
+    table = _table(catalog)
+    indexes._append(table, [dict(ROWS[-1], id=0)], SCHEMA)
+    assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
+                                     extra_fields={'status': 'bitmap'}) == 1
+    router, = indexes._files(table)
+    meta = router.global_index_meta
+    assert meta.index_meta[:14] == b'PAIMCENT\x01R\x00\x00\x00\x00'
+    assert (meta.row_range_start, meta.row_range_end) == (0, 0)
+    assert router.file_size == router.row_count == 0
+    with table.file_io.new_input_stream(indexes._path(table, router)) as stream:
+        assert stream.read() == b''
+    assert _single(table, [0, 0], 1).execute_local().is_empty()
+    assert table.drop_global_index('embedding', 'ivf-flat') == 1
 
 
 def test_bitmap_plan_does_not_raw_score_rows_outside_probed_shards(filesystem_catalog):
@@ -232,8 +251,8 @@ def test_centroid_build_resolves_field_json_and_scopes_extra_fields(catalog):
         'extra_fields': '{"status":"bitmap"}',
     })
     indexes._append(table, ROWS, SCHEMA)
-    assert table.create_global_index('embedding', 'ivf-flat', options=RANGE) == 5
-    assert table.create_global_index('embedding', 'ivf-flat', options=RANGE, extra_fields={'status': 'bitmap'}) == 5
+    assert table.create_global_index('embedding', 'ivf-flat', options=RANGE) == 4
+    assert table.create_global_index('embedding', 'ivf-flat', options=RANGE, extra_fields={'status': 'bitmap'}) == 4
     assert table.create_global_index('id', 'btree') > 0
 
 
@@ -274,9 +293,9 @@ def test_rebuild_replaces_centroid_generation_and_drop_removes_bitmaps(catalog, 
     if execution == 'ray':
         monkeypatch.setitem(sys.modules, 'ray', _Ray())
     assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
-                                     extra_fields='{"status":"bitmap"}', execution=execution) == 5
+                                     extra_fields='{"status":"bitmap"}', execution=execution) == 4
     assert old.isdisjoint(file.file_name for file in indexes._files(table))
-    assert table.drop_global_index('embedding', 'ivf-flat') == 5
+    assert table.drop_global_index('embedding', 'ivf-flat') == 4
     assert indexes._files(table) == []
 
 
@@ -284,9 +303,9 @@ def test_drop_matches_centroid_bitmap_fields_with_older_runtime(rest_catalog):
     table = _table(rest_catalog[0])
     indexes._append(table, ROWS, SCHEMA)
     assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
-                                     extra_fields={'status': 'bitmap'}) == 5
+                                     extra_fields={'status': 'bitmap'}) == 4
     with patch('pypaimon_rust.datafusion.GlobalIndexBuildPlan', object):
-        assert table.drop_global_index('embedding', 'ivf-flat') == 5
+        assert table.drop_global_index('embedding', 'ivf-flat') == 4
     assert indexes._files(table) == []
 
 
@@ -315,18 +334,19 @@ def test_centroid_bitmap_commit_checks_source_and_retained_index(catalog):
     assert _ids(table, result) == [0]
 
 
-def test_python_commit_rejects_conflicting_and_incomplete_centroid_groups(catalog):
+@pytest.mark.parametrize('extra_fields', [None, {'status': 'bitmap'}], ids=['vector', 'bitmap'])
+def test_python_commit_rejects_conflicting_and_incomplete_centroid_groups(catalog, extra_fields):
     table = _table(catalog)
     indexes._append(table, ROWS, SCHEMA)
-    build = GlobalIndexBuilder(table, 'embedding', 'ivf-flat', options=CENTROID, extra_fields={'status': 'bitmap'})
+    build = GlobalIndexBuilder(table, 'embedding', 'ivf-flat', options=CENTROID, extra_fields=extra_fields)
     first, second = build.build(), build.build()
     with pytest.raises(RuntimeError, match='centroid|Centroid'):
         indexes._commit(table, first + second)
     assert indexes._files(table) == []
     indexes._commit(table, first)
 
-    entry = first[0].index_adds[0]
-    with pytest.raises(RuntimeError, match='centroid|Centroid'):
+    entry = next(entry for entry in first[0].index_adds if entry.index_file.global_index_meta.index_meta[9:10] == b'S')
+    with pytest.raises(RuntimeError, match='Cannot partially delete centroid generation'):
         indexes._commit(table, [CommitMessage((), 0, [], index_deletes=[replace(entry, kind=1)])])
     assert _ids(table, _single(table, [0, 0], 1).execute_local()) == [0]
 
@@ -347,14 +367,14 @@ def test_bitmap_column_update_drops_only_its_partition_index(catalog):
     table = _table(catalog, partitioned=True, **{'global-index.column-update-action': 'DROP_PARTITION_INDEX'})
     indexes._append(table, ROWS + [dict(row, id=10 + row['id'], pt=1) for row in ROWS], SCHEMA)
     assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
-                                     extra_fields={'status': 'bitmap'}) == 10
+                                     extra_fields={'status': 'bitmap'}) == 8
     from pypaimon.index.index_file_handler import IndexFileHandler
 
     handler = IndexFileHandler(table)
     retained = {entry.index_file.file_name for entry in handler.scan(None) if entry.partition.values == [1]}
     updater = table.new_batch_write_builder().new_update()
     indexes._commit(table, updater.update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'status': ['keep']})))
-    assert len(retained) == 5
+    assert len(retained) == 4
     assert {entry.index_file.file_name for entry in handler.scan(None)} == retained
 
 
@@ -364,7 +384,7 @@ def test_staged_partition_delete_rechecks_retained_centroid_index(catalog, extra
     indexes._append(table, ROWS + [dict(row, id=10 + row['id'], pt=1) for row in ROWS], SCHEMA)
     partition = table.new_read_builder().new_predicate_builder().equal('pt', 0)
     staged = table.new_batch_write_builder().new_update().delete_by_predicate(partition)
-    count = 5 if extra_fields else 3
+    count = 4 if extra_fields else 3
     assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
                                      extra_fields=extra_fields) == 2 * count
     with pytest.raises(RuntimeError, match='Delete affects an active centroid index'):
@@ -394,7 +414,7 @@ def test_python_commit_reads_a_historical_centroid_source_once(filesystem_catalo
     with patch.object(SnapshotManager, 'get_snapshot_by_id', track):
         indexes._commit(table, staged)
     assert seen.count(source_id) == 1
-    assert len(indexes._files(table)) == 5
+    assert len(indexes._files(table)) == 4
 
 
 @pytest.mark.parametrize('column, value, conflicts', [('status', ['keep'], True), ('tenant', [2], False)])
@@ -418,7 +438,7 @@ def test_centroid_build_checks_compacted_source_columns(catalog, column, value, 
                 indexes._commit(table, staged)
         else:
             indexes._commit(table, staged)
-    assert len(indexes._files(table)) == (0 if conflicts else 5)
+    assert len(indexes._files(table)) == (0 if conflicts else 4)
 
 
 def test_centroid_build_rejects_deleted_partial_column_source(filesystem_catalog):

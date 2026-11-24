@@ -18,16 +18,9 @@
 
 package org.apache.paimon.globalindex.bitmap;
 
-import org.apache.paimon.fs.CloseShieldOutputStream;
-import org.apache.paimon.fs.OffsetSeekableInputStream;
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.KeySerializer;
-import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
@@ -37,15 +30,13 @@ import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -53,42 +44,86 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/**
- * Bitmap sections ordered by the manifest's extra field IDs, with offsets for sections 2 onward.
- */
+/** Evaluates a scalar predicate across the Bitmap files of a centroid row-ID range. */
 public final class CentroidBitmapIndex {
 
     private CentroidBitmapIndex() {}
 
-    public static RoaringNavigableMap64 match(
+    /** Positions for each centroid occupy a separate copy of the source row-ID range. */
+    public static long encodeRowId(int centroid, long rowRangeSize, long relativeRowId) {
+        return Math.addExact(Math.multiplyExact(centroid, rowRangeSize), relativeRowId);
+    }
+
+    public static IOFunction<Integer, RoaringNavigableMap64> filter(
             GlobalIndexFileReader files,
-            GlobalIndexIOMeta bitmap,
-            int[] extraFieldIds,
+            Map<Integer, ? extends GlobalIndexIOMeta> bitmaps,
+            RowType rowType,
+            RowType buildType,
+            Predicate predicate,
+            long rowRangeSize,
+            int nlist) {
+        checkArgument(rowRangeSize > 0 && nlist > 0, "Invalid centroid bitmap range.");
+        return new IOFunction<Integer, RoaringNavigableMap64>() {
+            private RoaringNavigableMap64 matches;
+
+            @Override
+            public RoaringNavigableMap64 apply(Integer centroid) throws IOException {
+                if (centroid < 0 || centroid >= nlist || centroid > Long.MAX_VALUE / rowRangeSize) {
+                    return new RoaringNavigableMap64();
+                }
+                long start = encodeRowId(centroid, rowRangeSize, 0);
+                long end = start + Math.min(rowRangeSize - 1, Long.MAX_VALUE - start);
+                return matches().relativeRange(new Range(start, end));
+            }
+
+            private synchronized RoaringNavigableMap64 matches() throws IOException {
+                if (matches == null) {
+                    RoaringNavigableMap64 rows =
+                            match(files, bitmaps, rowType, buildType, predicate);
+                    // Populate the rank cache before probe tasks share the encoded matches.
+                    if (rows.getLongCardinality() > 0) {
+                        long last = rows.last();
+                        checkState(
+                                last >= 0 && last / rowRangeSize < nlist,
+                                "Invalid centroid bitmap position: %s.",
+                                last);
+                    }
+                    matches = rows;
+                }
+                return matches;
+            }
+        };
+    }
+
+    private static RoaringNavigableMap64 match(
+            GlobalIndexFileReader files,
+            Map<Integer, ? extends GlobalIndexIOMeta> bitmaps,
             RowType rowType,
             RowType buildType,
             Predicate predicate)
             throws IOException {
-        Map<Integer, Section> sections =
-                readDirectory(bitmap.metadata(), extraFieldIds, bitmap.fileSize());
-        try (SeekableInputStream input = files.getInputStream(bitmap)) {
+        Map<Integer, BitmapIndexReader> readers = new HashMap<>();
+        try {
             return evaluate(
                     predicate,
                     fieldName -> {
                         int fieldId = rowType.getField(fieldName).id();
-                        Section section = sections.get(fieldId);
-                        checkState(
-                                section != null,
-                                "Missing field %s in %s.",
-                                fieldId,
-                                bitmap.filePath());
-                        KeySerializer serializer =
-                                KeySerializer.create(buildType.getField(fieldId).type());
-                        GlobalIndexIOMeta sectionMeta =
-                                new GlobalIndexIOMeta(
-                                        bitmap.filePath(), section.length, bitmap.rowCount(), null);
-                        return new BitmapIndexReader(
-                                serializer, ignored -> section.open(input), sectionMeta);
+                        BitmapIndexReader reader = readers.get(fieldId);
+                        if (reader == null) {
+                            GlobalIndexIOMeta bitmap = bitmaps.get(fieldId);
+                            checkState(
+                                    bitmap != null,
+                                    "Missing centroid bitmap for field %s.",
+                                    fieldId);
+                            KeySerializer serializer =
+                                    KeySerializer.create(buildType.getField(fieldId).type());
+                            reader = new BitmapIndexReader(serializer, files, bitmap);
+                            readers.put(fieldId, reader);
+                        }
+                        return reader;
                     });
+        } finally {
+            IOUtils.closeAllQuietly(readers.values());
         }
     }
 
@@ -97,23 +132,21 @@ public final class CentroidBitmapIndex {
             throws IOException {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
-            try (BitmapIndexReader reader =
-                    openReader.apply(leaf.fieldRefOptional().get().name())) {
-                if (Equal.INSTANCE.equals(leaf.function())) {
-                    return reader.visitEqual(leaf.literals().get(0)).get().results();
-                }
-                if (IsNull.INSTANCE.equals(leaf.function())) {
-                    return reader.visitIsNull().get().results();
-                }
-                if (IsNotNull.INSTANCE.equals(leaf.function())) {
-                    return reader.visitIsNotNull().get().results();
-                }
-                checkArgument(
-                        In.INSTANCE.equals(leaf.function()),
-                        "Unsupported centroid bitmap predicate %s.",
-                        leaf.function());
-                return reader.visitIn(leaf.literals()).get().results();
+            BitmapIndexReader reader = openReader.apply(leaf.fieldRefOptional().get().name());
+            if (Equal.INSTANCE.equals(leaf.function())) {
+                return reader.visitEqual(leaf.literals().get(0)).get().results();
             }
+            if (IsNull.INSTANCE.equals(leaf.function())) {
+                return reader.visitIsNull().get().results();
+            }
+            if (IsNotNull.INSTANCE.equals(leaf.function())) {
+                return reader.visitIsNotNull().get().results();
+            }
+            checkArgument(
+                    In.INSTANCE.equals(leaf.function()),
+                    "Unsupported centroid bitmap predicate %s.",
+                    leaf.function());
+            return reader.visitIn(leaf.literals()).get().results();
         }
 
         checkArgument(
@@ -136,132 +169,5 @@ public final class CentroidBitmapIndex {
             }
         }
         return rows;
-    }
-
-    private static Map<Integer, Section> readDirectory(
-            @Nullable byte[] metadata, int[] extraFieldIds, long fileSize) {
-        ByteBuffer directory =
-                metadata == null ? ByteBuffer.allocate(0) : ByteBuffer.wrap(metadata);
-        int fieldCount = extraFieldIds.length;
-        checkArgument(
-                fieldCount > 0 && directory.remaining() == (fieldCount - 1L) * Long.BYTES,
-                "Invalid centroid bitmap directory length.");
-        Map<Integer, Section> sections = new HashMap<>();
-        long offset = 0;
-        for (int i = 0; i < fieldCount; i++) {
-            int fieldId = extraFieldIds[i];
-            long end = i == fieldCount - 1 ? fileSize : directory.getLong();
-            checkArgument(
-                    end > offset && end <= fileSize,
-                    "Invalid centroid bitmap section for field %s.",
-                    fieldId);
-            checkArgument(
-                    sections.put(fieldId, new Section(offset, end - offset)) == null,
-                    "Duplicate centroid bitmap field %s.",
-                    fieldId);
-            offset = end;
-        }
-        return sections;
-    }
-
-    /** Writes one complete Bitmap per column to the same output stream. */
-    public static final class Writer implements AutoCloseable {
-
-        private final String filePath;
-        private final int fieldCount;
-        private final long rowCount;
-        private final PositionOutputStream output;
-        private final ByteBuffer directory;
-        private int written;
-
-        public Writer(GlobalIndexFileWriter files, int fieldCount, long rowCount)
-                throws IOException {
-            checkArgument(fieldCount > 0 && rowCount > 0, "Empty centroid bitmap file.");
-            this.filePath = files.newFilePath("centroid-bitmap");
-            this.fieldCount = fieldCount;
-            this.rowCount = rowCount;
-            this.directory = ByteBuffer.allocate(Math.multiplyExact(fieldCount - 1, Long.BYTES));
-            this.output = files.newOutputStream(filePath);
-        }
-
-        public void writeColumn(DataField field, Options options, ColumnRows rows)
-                throws IOException {
-            checkState(written < fieldCount, "Too many centroid bitmap sections.");
-            long offset = output.getPos();
-            GlobalIndexFileWriter sectionWriter =
-                    new GlobalIndexFileWriter() {
-                        @Override
-                        public String newFilePath(String prefix) {
-                            return filePath;
-                        }
-
-                        @Override
-                        public PositionOutputStream newOutputStream(String filePath) {
-                            return new CloseShieldOutputStream(output) {
-                                @Override
-                                public long getPos() throws IOException {
-                                    return super.getPos() - offset;
-                                }
-                            };
-                        }
-                    };
-            long sectionRows;
-            try (BitmapGlobalIndexWriter writer =
-                    new BitmapGlobalIndexer(field, options).createWriter(sectionWriter)) {
-                rows.writeTo(writer);
-                sectionRows = writer.finishSection();
-            }
-            checkState(sectionRows == rowCount, "Centroid bitmap and vector row counts differ.");
-            if (written > 0) {
-                directory.putLong(offset);
-            }
-            written++;
-        }
-
-        public ResultEntry finish() {
-            checkState(written == fieldCount, "Incomplete centroid bitmap file.");
-            return new ResultEntry(filePath, rowCount, fieldCount == 1 ? null : directory.array());
-        }
-
-        @Override
-        public void close() throws IOException {
-            output.close();
-        }
-    }
-
-    /** Sorted rows of one extra field. */
-    @FunctionalInterface
-    public interface ColumnRows {
-        void writeTo(BitmapGlobalIndexWriter writer) throws IOException;
-    }
-
-    private static final class Section {
-        private final long offset;
-        private final long length;
-
-        private Section(long offset, long length) {
-            this.offset = offset;
-            this.length = length;
-        }
-
-        private SeekableInputStream open(SeekableInputStream input) throws IOException {
-            if (offset == 0) {
-                input.seek(0);
-            }
-            return new OffsetSeekableInputStream(input, offset, length) {
-                @Override
-                public void seek(long desired) throws IOException {
-                    if (desired < 0 || desired > length) {
-                        throw new IOException("Seek outside centroid bitmap section.");
-                    }
-                    super.seek(desired);
-                }
-
-                @Override
-                public void close() {
-                    // The caller owns the shared input stream.
-                }
-            };
-        }
     }
 }

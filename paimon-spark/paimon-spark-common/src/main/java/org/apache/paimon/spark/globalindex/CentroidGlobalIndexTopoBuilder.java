@@ -25,7 +25,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.CentroidVectorGlobalIndexer;
@@ -38,15 +37,16 @@ import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.VectorIndexUtils;
 import org.apache.paimon.globalindex.VectorTrainingModel;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexWriter;
+import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.CentroidBitmapIndex;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.DataInputDeserializer;
-import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
@@ -319,7 +319,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         }
         Broadcast<byte[]> broadcast = sc.broadcast(payload);
         try {
-            int parallelism = Math.min(nlist, slots);
+            int parallelism = (int) Math.min((long) nlist + context.extraFields().size(), slots);
             JavaRDD<InternalRow> routedRows =
                     context.hasBitmaps()
                             ? inputSplits.mapPartitions(
@@ -338,15 +338,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                             broadcast.value()));
             List<byte[]> results =
                     assigned.repartitionAndSortWithinPartitions(new HashPartitioner(parallelism))
-                            .mapPartitionsWithIndex(
-                                    (partition, input) ->
-                                            writeShards(
-                                                    BuildContext.restore(contextBytes),
-                                                    input,
-                                                    partition,
-                                                    parallelism,
-                                                    nlist),
-                                    false)
+                            .mapPartitions(
+                                    input -> writeFiles(BuildContext.restore(contextBytes), input))
                             .collect();
             List<CommitMessage> messages = CommitMessageSerializer.deserializeAll(results);
             messages.add(writeRouter(context, indexer, payload, nlist));
@@ -467,38 +460,48 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         InternalRow.FieldGetter getter = context.getter(context.readType);
         int idPosition = context.readType.getFieldIndex(SpecialFields.ROW_ID.name());
         List<InternalRow.FieldGetter> extraGetters = new ArrayList<>();
+        List<KeySerializer> serializers = new ArrayList<>();
         for (DataField field : context.extraFields()) {
             extraGetters.add(
                     InternalRow.createFieldGetter(
                             field.type(), context.readType.getFieldIndex(field.name())));
+            serializers.add(KeySerializer.create(field.type()));
         }
-        InternalRowSerializer serializer =
-                new InternalRowSerializer(new RowType(context.extraFields()));
-        DataOutputSerializer buffer = new DataOutputSerializer(128);
-        GenericRow extras = new GenericRow(extraGetters.size());
-        return Iterators.transform(
-                input,
-                row -> {
-                    float[] vector = VectorIndexUtils.toFloatArray(getter.getFieldOrNull(row));
-                    byte[] keys = null;
-                    if (!extraGetters.isEmpty()) {
-                        for (int i = 0; i < extraGetters.size(); i++) {
-                            extras.setField(i, extraGetters.get(i).getFieldOrNull(row));
-                        }
-                        try {
-                            buffer.clear();
-                            serializer.serialize(extras, buffer);
-                            keys = buffer.getCopyOfBuffer();
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    }
-                    return new Tuple2<>(
-                            model.assignCentroid(vector),
-                            new Tuple2<>(
-                                    row.getLong(idPosition) - context.rowRange.from,
-                                    new Tuple2<>(vector, keys)));
-                });
+        long rowRangeSize = context.rowRange.count();
+        return Iterators.concat(
+                Iterators.transform(
+                        input,
+                        row -> {
+                            float[] vector =
+                                    VectorIndexUtils.toFloatArray(getter.getFieldOrNull(row));
+                            int centroid = model.assignCentroid(vector);
+                            long rowId = row.getLong(idPosition) - context.rowRange.from;
+                            Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>> vectorRow =
+                                    new Tuple2<>(
+                                            centroid,
+                                            new Tuple2<>(rowId, new Tuple2<>(vector, null)));
+                            if (extraGetters.isEmpty()) {
+                                return Iterators.singletonIterator(vectorRow);
+                            }
+                            // Each negative key owns one complete Bitmap, independent of vector
+                            // shards.
+                            long bitmapRowId =
+                                    CentroidBitmapIndex.encodeRowId(centroid, rowRangeSize, rowId);
+                            List<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> entries =
+                                    new ArrayList<>(1 + extraGetters.size());
+                            for (int i = 0; i < extraGetters.size(); i++) {
+                                Object value = extraGetters.get(i).getFieldOrNull(row);
+                                byte[] key =
+                                        value == null ? null : serializers.get(i).serialize(value);
+                                entries.add(
+                                        new Tuple2<>(
+                                                -1 - i,
+                                                new Tuple2<>(
+                                                        bitmapRowId, new Tuple2<>(null, key))));
+                            }
+                            entries.add(vectorRow);
+                            return entries.iterator();
+                        }));
     }
 
     private static void closeOnTaskCompletion(AutoCloseable resource) {
@@ -515,41 +518,31 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 });
     }
 
-    private static Iterator<byte[]> writeShards(
+    private static Iterator<byte[]> writeFiles(
             BuildContext context,
-            Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows,
-            int partition,
-            int parallelism,
-            int nlist)
+            Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
         PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input =
                 Iterators.peekingIterator(rows);
         CentroidVectorGlobalIndexer indexer = context.indexer();
         GlobalIndexFileReadWrite io = context.io();
-        // HashPartitioner assigns nonnegative integer keys by modulo. Emit empty shards here
-        // as well, without a second set of input tasks to shuffle sentinel records.
-        for (int centroid = partition; centroid < nlist; centroid += parallelism) {
+        while (input.hasNext() && input.peek()._1() < 0) {
+            int key = input.peek()._1();
+            DataField field = context.extraFields().get(-1 - key);
+            commits.add(context.finish(writeBitmap(context, io, input, key, field)));
+        }
+        while (input.hasNext()) {
+            int centroid = input.peek()._1();
             GlobalIndexSingleColumnWriter writer = indexer.createCentroidWriter(io);
-            try (BitmapSorters bitmapSorters =
-                    context.hasBitmaps() && input.hasNext() && input.peek()._1() == centroid
-                            ? new BitmapSorters(context)
-                            : null) {
+            try {
                 while (input.hasNext() && input.peek()._1() == centroid) {
                     Tuple2<Long, Tuple2<float[], byte[]>> row = input.next()._2();
                     writer.write(row._2()._1(), row._1());
-                    if (bitmapSorters != null) {
-                        bitmapSorters.add(row._1(), row._2()._2());
-                    }
                 }
                 List<ResultEntry> files = new ArrayList<>();
                 for (ResultEntry file : writer.finish()) {
                     files.add(CentroidIndexMeta.shard(file, centroid));
-                }
-                if (bitmapSorters != null) {
-                    files.add(
-                            CentroidIndexMeta.scalarIndex(
-                                    bitmapSorters.finish(context, io), centroid));
                 }
                 commits.add(context.finish(files));
             } finally {
@@ -559,97 +552,59 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         return commits.iterator();
     }
 
-    private static final class BitmapSorters implements AutoCloseable {
-        private final IOManager ioManager;
-        private final List<BinaryExternalSortBuffer> buffers = new ArrayList<>();
-        private final List<InternalRow.FieldGetter> getters = new ArrayList<>();
-        private final InternalRowSerializer serializer;
-        private final DataInputDeserializer input = new DataInputDeserializer();
-        private long count;
-
-        BitmapSorters(BuildContext context) throws Exception {
-            List<DataField> fields = context.extraFields();
-            this.serializer = new InternalRowSerializer(new RowType(fields));
-            CoreOptions options = new CoreOptions(context.options);
-            long memory =
-                    Math.max(3L * options.pageSize(), options.writeBufferSize() / fields.size());
-            this.ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+    private static List<ResultEntry> writeBitmap(
+            BuildContext context,
+            GlobalIndexFileReadWrite files,
+            PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input,
+            int key,
+            DataField field)
+            throws Exception {
+        CoreOptions options = new CoreOptions(context.options);
+        KeySerializer serializer = KeySerializer.create(field.type());
+        try (IOManager ioManager = IOManager.create(System.getProperty("java.io.tmpdir"))) {
+            BinaryExternalSortBuffer buffer =
+                    BinaryExternalSortBuffer.create(
+                            ioManager,
+                            RowType.of(field, SpecialFields.ROW_ID),
+                            new int[] {0},
+                            Math.max(3L * options.pageSize(), options.writeBufferSize()),
+                            options.pageSize(),
+                            options.localSortMaxNumFileHandles(),
+                            options.spillCompressOptions(),
+                            options.writeBufferSpillDiskSize());
             try {
-                for (int i = 0; i < fields.size(); i++) {
-                    DataField field = fields.get(i);
-                    getters.add(InternalRow.createFieldGetter(field.type(), i));
-                    buffers.add(
-                            BinaryExternalSortBuffer.create(
-                                    ioManager,
-                                    RowType.of(field, SpecialFields.ROW_ID),
-                                    new int[] {0},
-                                    memory,
-                                    options.pageSize(),
-                                    options.localSortMaxNumFileHandles(),
-                                    options.spillCompressOptions(),
-                                    options.writeBufferSpillDiskSize()));
+                while (input.hasNext() && input.peek()._1() == key) {
+                    Tuple2<Long, Tuple2<float[], byte[]>> row = input.next()._2();
+                    byte[] bytes = row._2()._2();
+                    Object value =
+                            bytes == null ? null : serializer.deserialize(MemorySlice.wrap(bytes));
+                    checkArgument(
+                            buffer.write(GenericRow.of(value, row._1())),
+                            "Centroid bitmap sort buffer could not accept a row.");
                 }
-            } catch (Exception | Error failure) {
-                try {
-                    close();
-                } catch (Exception cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
-                throw failure;
-            }
-        }
-
-        void add(long rowId, byte[] keys) throws IOException {
-            input.setBuffer(keys);
-            InternalRow row = serializer.deserialize(input);
-            for (int i = 0; i < buffers.size(); i++) {
-                Object value = getters.get(i).getFieldOrNull(row);
-                checkArgument(
-                        buffers.get(i).write(GenericRow.of(value, rowId)),
-                        "Centroid bitmap sort buffer could not accept a row.");
-            }
-            count++;
-        }
-
-        ResultEntry finish(BuildContext context, GlobalIndexFileReadWrite files)
-                throws IOException {
-            List<DataField> fields = context.extraFields();
-            try (CentroidBitmapIndex.Writer writer =
-                    new CentroidBitmapIndex.Writer(files, fields.size(), count)) {
-                for (int i = 0; i < fields.size(); i++) {
-                    DataField field = fields.get(i);
-                    BinaryExternalSortBuffer buffer = buffers.get(i);
+                BitmapGlobalIndexer indexer =
+                        new BitmapGlobalIndexer(
+                                field, options.globalIndexOptions("bitmap", field.name()));
+                try (BitmapGlobalIndexWriter bitmap = indexer.createWriter(files)) {
                     Iterator<InternalRow> rows =
                             new MutableObjectIteratorAdapter<>(
                                     buffer.sortedIterator(), new BinaryRow(2));
                     InternalRow.FieldGetter getter = InternalRow.createFieldGetter(field.type(), 0);
-                    writer.writeColumn(
-                            field,
-                            new CoreOptions(context.options)
-                                    .globalIndexOptions("bitmap", field.name()),
-                            bitmap -> {
-                                while (rows.hasNext()) {
-                                    InternalRow row = rows.next();
-                                    Object value = getter.getFieldOrNull(row);
-                                    bitmap.write(
-                                            value instanceof BinaryString
-                                                    ? ((BinaryString) value).copy()
-                                                    : value,
-                                            row.getLong(1));
-                                }
-                            });
-                    buffer.clear();
+                    while (rows.hasNext()) {
+                        InternalRow row = rows.next();
+                        Object value = getter.getFieldOrNull(row);
+                        bitmap.write(
+                                value instanceof BinaryString
+                                        ? ((BinaryString) value).copy()
+                                        : value,
+                                row.getLong(1));
+                    }
+                    return bitmap.finish().stream()
+                            .map(file -> CentroidIndexMeta.scalarIndex(file, field.id()))
+                            .collect(Collectors.toList());
                 }
-                return writer.finish();
-            }
-        }
-
-        @Override
-        public void close() throws Exception {
-            try {
-                buffers.forEach(BinaryExternalSortBuffer::clear);
             } finally {
-                ioManager.close();
+                buffer.clear();
             }
         }
     }

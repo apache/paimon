@@ -53,9 +53,11 @@ docs.create_index("content", index_type="full-text")
 ### Centroid shards and Bitmap filters
 
 On a Parquet Data Evolution append table, use `ivf-flat.sharding=centroid`
-to train a router and build an index for each centroid. `extra_fields` accepts
-a mapping of scalar column names to `bitmap`. Searches can use these Bitmaps for
-equality, `IN`, null checks, and their `AND` and `OR` combinations before ranking.
+to train a router and build a vector shard for each populated centroid.
+Use `extra_fields` to map scalar column names to `bitmap`. For each row-ID range
+with indexed vectors, Paimon writes one Bitmap per configured scalar column.
+Searches can use these Bitmaps for equality, `IN`, null checks, and their `AND`
+and `OR` combinations before ranking.
 Building with `extra_fields` requires `global-index.column-update-action` to
 be `THROW_ERROR` (the default) or `DROP_PARTITION_INDEX`.
 

@@ -31,7 +31,7 @@ row-ID range. Spark and PyPaimon support this layout for `ivf-flat`, `ivf-pq`,
 
 Use Spark to build centroid indexes on [Data Evolution append tables](../data-evolution)
 without a primary key. Enable row tracking and Data Evolution and set `bucket=-1`.
-Each source row-ID range in a partition gets a router and one shard per centroid.
+Each source row-ID range in a partition gets a router and one shard per populated centroid.
 
 The examples use a 768-dimensional `embedding` column and two optional scalar
 filter columns.
@@ -139,7 +139,7 @@ of quantization. For IVF-RQ, calibrate `rq.bits`. For DiskANN, calibrate both ou
 probes and local graph search width.
 
 Calibrate `ivf-pq.centroid.nlist` and `ivf-pq.pq.m` together with the query probe width.
-Increasing `centroid.nlist` creates more centroid files, each populated file carrying its own
+Increasing `centroid.nlist` can create more populated shard files, each carrying its own
 local model. With 8-bit PQ codes, `pq.m=64` uses twice the code bytes per vector
 of `pq.m=32`. Record the resolved build options, total index size, query file
 reads, and achieved recall when comparing configurations.
@@ -156,7 +156,7 @@ index manifest). The descriptor starts with a 14-byte header.
 | 0 | 8 | ASCII marker `PAIMCENT` |
 | 8 | 1 | Numeric format version `1` |
 | 9 | 1 | ASCII role `R`, `S`, or `B` |
-| 10 | 4 | Outer `nlist` for `R`, or zero-based centroid ID for `S` and `B`, stored as a big-endian `int32` |
+| 10 | 4 | Outer `nlist` for `R`, zero-based centroid ID for `S`, or scalar field ID for `B`, stored as a big-endian `int32` |
 
 The value ranges from `0` to `2,147,483,647`. The role also determines the payload starting at byte 14.
 
@@ -164,7 +164,7 @@ The value ranges from `0` to `2,147,483,647`. The role also determines the paylo
 | --- | --- |
 | `R` (router) | Build-time distance metric in UTF-8 |
 | `S` (vector shard) | The actual local IVF list count as a 32-bit big-endian integer for populated L2 IVF-FLAT and IVF-PQ shards. Other shards end at the header. |
-| `B` (Bitmap) | Big-endian 64-bit start offsets of the second and subsequent Bitmap sections, measured from the start of the Bitmap file. |
+| `B` (Bitmap) | Standard Bitmap key-bound and null metadata. |
 
 The router and its shards share the manifest row-ID range `[_ROW_RANGE_START, _ROW_RANGE_END]`.
 Each shard stores row IDs relative to `_ROW_RANGE_START`. During a query, Paimon translates
@@ -173,9 +173,10 @@ row-ID filters to this local range and adds the range start back to matching IDs
 ### Router and Vector Shard Files
 
 An all-null vector range has one router entry with outer `nlist=0` and a zero-byte
-router file. Other ranges have one vector shard entry for every centroid ID from
-`0` through `nlist - 1`. An empty shard file contains the eight ASCII bytes
-`PCEMPTY1` and has manifest row count zero. Queries skip empty files.
+router file. In other ranges, the router defines centroid IDs from `0` through
+`nlist - 1`. Each populated centroid has one vector shard file and a manifest
+entry with a positive row count. A centroid ID absent from the manifest represents
+an empty shard. Empty centroids still count toward the requested probe width.
 
 A populated router file contains the native `PVROUT01` model bytes.
 
@@ -193,13 +194,16 @@ loaded model's centroid count matches the manifest.
 
 ### Bitmap Files
 
-When `extra_fields` is configured, each populated centroid gets one Bitmap file
-with one consecutive section per `_EXTRA_FIELD_IDS` entry, in that order. Each
-section uses the standalone [Bitmap file format](./bitmap#file-format), with block
-offsets relative to the start of the section. The first section starts at byte zero
-and the last ends at the manifest's `_FILE_SIZE`. For `N` fields, the `B` descriptor
-stores `N - 1` increasing offsets.
-The build schema ID in `_SOURCE_META` identifies the types of the Bitmap keys.
+Each row-ID range with indexed vectors has one standalone [Bitmap file](./bitmap#file-format)
+per field in `_EXTRA_FIELD_IDS`. Each Bitmap covers all indexed rows in the range.
+Its field ID is in the `B` descriptor, and the build schema ID in `_SOURCE_META`
+identifies the key type. A range with no vectors has no Bitmap files.
+
+For a vector assigned to centroid `c`, a Bitmap stores the position
+`c * range_size + (row_id - row_range_start)`, where `range_size` is
+`row_range_end - row_range_start + 1`. After evaluating a scalar predicate once
+for the range, Paimon uses the quotient to select the shard and the remainder as
+the row ID relative to the start of the range.
 
 ## Scalar Bitmap Filters in Centroid Shards
 
@@ -220,13 +224,12 @@ CALL sys.create_global_index(
 A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
 combinations of these predicates with `AND` or `OR`, including across columns. It applies the
 exact matches before ranking and skips opening the ANN file when no visible vector matches.
-If any branch cannot be evaluated exactly by the shard Bitmaps, the filter uses the existing
+If any branch cannot be evaluated exactly by the field Bitmaps, the filter uses the existing
 scalar-filter path.
 
 To change the scalar columns, run the centroid build again with the new `extra_fields`. For the selected
 partitions, the build replaces the indexes of the same type on the vector column. Pass just the
-vector column as `index_column` to `sys.drop_global_index` to remove the group. Drop the group
-before using an older Java reader that lacks support for centroid Bitmap files.
+vector column as `index_column` to `sys.drop_global_index` to remove the group.
 
 ## Rebuild and Compatibility
 
