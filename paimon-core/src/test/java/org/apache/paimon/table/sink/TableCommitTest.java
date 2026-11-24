@@ -27,9 +27,6 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.CentroidIndexMeta;
-import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -37,7 +34,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
@@ -63,7 +59,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -277,69 +272,6 @@ public class TableCommitTest {
                 .hasMessageContaining(
                         "Cannot recover from this checkpoint because some files in the"
                                 + " snapshot that need to be resubmitted have been deleted");
-    }
-
-    @Test
-    public void testRecoverCommitWithManifestOnlyCentroidRouter() throws Exception {
-        Path path = new Path(tempDir.toUri());
-        LocalFileIO io = LocalFileIO.create();
-        TableSchema schema =
-                SchemaUtils.forceCommit(
-                        new FileSystemSchemaManager(io, path),
-                        Schema.newBuilder()
-                                .column("id", DataTypes.INT())
-                                .column("v", DataTypes.ARRAY(DataTypes.FLOAT()))
-                                .option(CoreOptions.BUCKET.key(), "-1")
-                                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                                .build());
-        FileStoreTable table =
-                FileStoreTableFactory.create(io, path, schema, CatalogEnvironment.empty());
-        commitRow(table, "source", GenericRow.of(0, null));
-        long snapshotId = table.snapshotManager().latestSnapshot().id();
-        ResultEntry router =
-                CentroidIndexMeta.router(
-                        new ResultEntry(
-                                "empty-router.index", 0, "l2".getBytes(StandardCharsets.UTF_8)),
-                        0);
-        IndexFileMeta entry =
-                new IndexFileMeta(
-                        "ivf-flat",
-                        router.fileName(),
-                        0,
-                        0,
-                        new GlobalIndexMeta(
-                                0,
-                                0,
-                                table.rowType().getField("v").id(),
-                                null,
-                                router.meta(),
-                                new DataEvolutionIndexSourceMeta(snapshotId, schema.id())
-                                        .serialize()),
-                        null);
-        ManifestCommittable committable = new ManifestCommittable(1);
-        committable.addFileCommittable(
-                new CommitMessageImpl(
-                                BinaryRow.EMPTY_ROW,
-                                0,
-                                null,
-                                DataIncrement.indexIncrement(Collections.singletonList(entry)),
-                                CompactIncrement.emptyIncrement())
-                        .withCheckFromSnapshot(snapshotId));
-        try (TableCommitImpl commit = table.newCommit("recover-index")) {
-            assertThat(
-                            commit.filterAndCommitMultiple(
-                                    Collections.singletonList(committable), false))
-                    .isEqualTo(1);
-        }
-        assertThat(
-                        table.store()
-                                .newIndexFileHandler()
-                                .scan(table.snapshotManager().latestSnapshot(), "ivf-flat"))
-                .extracting(IndexManifestEntry::indexFile)
-                .containsExactly(entry);
-        assertThat(io.exists(table.store().pathFactory().globalIndexFileFactory().toPath(entry)))
-                .isFalse();
     }
 
     @Test

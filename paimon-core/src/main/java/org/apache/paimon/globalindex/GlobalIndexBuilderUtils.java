@@ -619,9 +619,7 @@ public class GlobalIndexBuilderUtils {
         for (ResultEntry entry : entries) {
             Path filePath = new Path(entry.filePath());
             String fileName = filePath.getName();
-            boolean emptyRouter =
-                    entry.rowCount() == 0 && CentroidIndexMeta.isEmptyRouter(entry.meta());
-            long fileSize = emptyRouter ? 0 : fileIO.getFileSize(filePath);
+            long fileSize = fileIO.getFileSize(filePath);
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(
                             range.from,
@@ -631,7 +629,7 @@ public class GlobalIndexBuilderUtils {
                             entry.meta(),
                             sourceMeta);
 
-            String externalPathString = isExternalPath && !emptyRouter ? filePath.toString() : null;
+            String externalPathString = isExternalPath ? filePath.toString() : null;
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
                             indexType,

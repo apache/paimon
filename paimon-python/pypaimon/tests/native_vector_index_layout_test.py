@@ -122,7 +122,7 @@ def test_centroid_shards_and_bitmap_filter(catalog):
                 .with_option('centroid.nprobe', 2).execute_local()) == [0, 2]
 
 
-def test_all_null_centroid_range_has_only_a_manifest_entry(catalog):
+def test_all_null_centroid_range_has_a_zero_byte_router(catalog):
     table = _table(catalog)
     indexes._append(table, [dict(ROWS[-1], id=0)], SCHEMA)
     assert table.create_global_index('embedding', 'ivf-flat', options=CENTROID,
@@ -132,7 +132,8 @@ def test_all_null_centroid_range_has_only_a_manifest_entry(catalog):
     assert meta.index_meta[:14] == b'PAIMCENT\x01R\x00\x00\x00\x00'
     assert (meta.row_range_start, meta.row_range_end) == (0, 0)
     assert router.file_size == router.row_count == 0
-    assert not table.file_io.exists(indexes._path(table, router))
+    with table.file_io.new_input_stream(indexes._path(table, router)) as stream:
+        assert stream.read() == b''
     assert _single(table, [0, 0], 1).execute_local().is_empty()
     assert table.drop_global_index('embedding', 'ivf-flat') == 1
 

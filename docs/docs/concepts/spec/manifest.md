@@ -382,8 +382,8 @@ An index manifest describes index files through these fields:
 | `_PARTITION` | BYTES | Serialized partition BinaryRow. |
 | `_BUCKET` | INT | Bucket associated with the index entry. |
 | `_INDEX_TYPE` | STRING | Index type identifier, for example `HASH` or `DELETION_VECTORS`. |
-| `_FILE_NAME` | STRING | Index file name or logical identifier of a manifest-only router entry. |
-| `_FILE_SIZE` | BIGINT | Index file size in bytes. A manifest-only router entry has size zero. |
+| `_FILE_NAME` | STRING | Index file name. |
+| `_FILE_SIZE` | BIGINT | Index file size in bytes. |
 | `_ROW_COUNT` | BIGINT | Entry count recorded by the index implementation. |
 | `_DELETIONS_VECTORS_RANGES` | ARRAY of DeletionVectorMeta, nullable | Mapping from data files to deletion vectors. |
 | `_EXTERNAL_PATH` | STRING, nullable | External index file path. |

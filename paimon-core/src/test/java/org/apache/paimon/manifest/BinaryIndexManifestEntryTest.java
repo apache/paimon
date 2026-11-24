@@ -187,8 +187,8 @@ class BinaryIndexManifestEntryTest extends TableTestBase {
             assertThat(first.externalPath()).isNull();
             assertThat(deserializeBinaryRow(first.partitionBytes())).isEqualTo(local.partition());
             assertThat(first.bucket()).isEqualTo(local.bucket());
-            assertThat(first.hasGlobalIndexMeta()).isFalse();
-            assertThat(first.isEmptyRouter()).isFalse();
+            assertThatThrownBy(first::hasGlobalIndexMeta)
+                    .isInstanceOf(UnsupportedOperationException.class);
 
             BinaryIndexManifestEntry second = entries.next();
             assertThat(second).isSameAs(first);
@@ -197,8 +197,6 @@ class BinaryIndexManifestEntryTest extends TableTestBase {
             assertThat(deserializeBinaryRow(second.partitionBytes()))
                     .isEqualTo(external.partition());
             assertThat(second.bucket()).isEqualTo(external.bucket());
-            assertThat(second.hasGlobalIndexMeta()).isTrue();
-            assertThat(second.isEmptyRouter()).isFalse();
             assertThat(entries.hasNext()).isFalse();
         }
         try (CloseableIterator<BinaryIndexManifestEntry> entries =

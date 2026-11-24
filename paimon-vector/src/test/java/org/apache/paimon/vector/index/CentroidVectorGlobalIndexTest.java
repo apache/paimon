@@ -410,14 +410,9 @@ class CentroidVectorGlobalIndexTest {
         long rowCount = 101L * (vectors.length - 1) + 1;
         ResultEntry emptyRouterEntry =
                 CentroidIndexMeta.router(
-                        indexer.writeRoutingModel(files, files.newFileName("routing"), new byte[0]),
+                        indexer.writeRoutingModel(files, files.newFilePath("routing"), new byte[0]),
                         0);
-        GlobalIndexIOMeta emptyRouter =
-                CentroidIndexMeta.file(
-                        new Path(directory, emptyRouterEntry.fileName()),
-                        0,
-                        0,
-                        emptyRouterEntry.meta());
+        GlobalIndexIOMeta emptyRouter = toIOMeta(io, directory, emptyRouterEntry);
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         indexer.createReader(fileReader, metas, rowCount, null, executor),
@@ -633,10 +628,7 @@ class CentroidVectorGlobalIndexTest {
         ResultEntry model =
                 indexer.writeRoutingModel(files, files.newFilePath("router"), new byte[0]);
         assertThat(model.meta()).isEqualTo(metric.getBytes(StandardCharsets.UTF_8));
-        Path routerPath = new Path(model.filePath());
-        assertThat(io.exists(routerPath)).isFalse();
-        GlobalIndexIOMeta router =
-                CentroidIndexMeta.file(routerPath, 0, 0, CentroidIndexMeta.router(model, 0).meta());
+        GlobalIndexIOMeta router = toIOMeta(io, directory, CentroidIndexMeta.router(model, 0));
         assertThat(router.fileSize()).isZero();
         assertThat(
                         NativeCentroidVectorGlobalIndexer.storedMetric(

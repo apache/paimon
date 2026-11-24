@@ -24,7 +24,6 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -369,13 +368,11 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);
                 msg.newFilesIncrement().newIndexFiles().stream()
-                        .filter(file -> !CentroidIndexMeta.isEmptyRouter(file))
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.compactIncrement().changelogFiles().forEach(collector);
                 msg.compactIncrement().newIndexFiles().stream()
-                        .filter(file -> !CentroidIndexMeta.isEmptyRouter(file))
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
 

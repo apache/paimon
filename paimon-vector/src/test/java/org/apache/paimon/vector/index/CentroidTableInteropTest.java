@@ -83,7 +83,7 @@ class CentroidTableInteropTest {
                 files.stream().filter(CentroidIndexMeta::isEmptyRouter).findFirst().get();
         assertThat(ByteBuffer.wrap(descriptor(emptyRouter)).getInt(10)).isZero();
         assertThat(metric(emptyRouter)).isEqualTo("l2");
-        assertThat(fileIO.exists(indexPath(table, emptyRouter))).isFalse();
+        assertThat(fileIO.getFileSize(indexPath(table, emptyRouter))).isZero();
         assertThat(files)
                 .filteredOn(file -> CentroidIndexMeta.isRoutingModel(file) && file.fileSize() > 0)
                 .singleElement()

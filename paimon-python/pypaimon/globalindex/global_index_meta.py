@@ -44,9 +44,6 @@ class GlobalIndexMeta:
     def is_centroid_router(self) -> bool:
         return self.index_meta is not None and self.index_meta.startswith(CENTROID_INDEX_MAGIC + b"\x01R")
 
-    def is_empty_centroid_router(self) -> bool:
-        return self.is_centroid_router() and self.index_meta[10:14] == b"\x00\x00\x00\x00"
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GlobalIndexMeta):
             return False

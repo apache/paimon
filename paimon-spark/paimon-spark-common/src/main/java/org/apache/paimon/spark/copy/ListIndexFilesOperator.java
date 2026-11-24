@@ -22,7 +22,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
@@ -72,9 +71,8 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         List<IndexManifestEntry> indexManifestEntries =
                 sourceIndexHandler.readManifestWithIOException(snapshot.indexManifest());
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
-            if (!CentroidIndexMeta.isEmptyRouter(indexManifestEntry.indexFile())
-                    && (partitionPredicate == null
-                            || partitionPredicate.test(indexManifestEntry.partition()))) {
+            if (partitionPredicate == null
+                    || partitionPredicate.test(indexManifestEntry.partition())) {
                 CopyFileInfo indexFile =
                         pickIndexFiles(
                                 indexManifestEntry, sourceIndexHandler, targetFileStorePathFactory);

@@ -39,8 +39,7 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
   test("centroid interchange tables omit empty shards and carry canonical metrics") {
     val bitmapTable = "centroid_bitmap"
     val metricsTable = "centroid_metrics"
-    val copiedTable = "centroid_bitmap_copy"
-    withTable(bitmapTable, metricsTable, copiedTable) {
+    withTable(bitmapTable, metricsTable) {
       val properties =
         """'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
           |'file.format'='parquet', 'vector-index.search-mode'='detail',
@@ -93,12 +92,10 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
         .asScala
         .map(_.indexFile())
       val routers = files.filter(CentroidIndexMeta.isRoutingModel)
+      assert(routers.map(_.fileSize() == 0).toSet == Set(true, false))
       val paths = table.store().pathFactory().globalIndexFileFactory()
-      assert(routers.count(CentroidIndexMeta.isEmptyRouter) == 1)
       assert(
-        routers.forall(
-          file =>
-            table.fileIO().exists(paths.toPath(file)) == !CentroidIndexMeta.isEmptyRouter(file)))
+        routers.forall(file => table.fileIO().getFileSize(paths.toPath(file)) == file.fileSize()))
       assert(
         routers
           .map(file => ByteBuffer.wrap(file.globalIndexMeta().indexMeta()).getInt(10))
@@ -126,20 +123,6 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
                 new File(directory, s"$dbName0.db/$name"))
           }
       }
-
-      spark
-        .sql(s"CALL sys.copy(source_table => '$bitmapTable', target_table => '$copiedTable')")
-        .collect()
-      val copied = loadTable(copiedTable)
-      val copiedEntries = copied
-        .store()
-        .newIndexFileHandler()
-        .scan(copied.snapshotManager().latestSnapshot(), "ivf-flat")
-        .asScala
-      assert(copiedEntries.size == files.size - 1)
-      checkAnswer(
-        spark.sql(s"SELECT * FROM $copiedTable"),
-        spark.sql(s"SELECT * FROM $bitmapTable"))
     }
   }
 

@@ -1007,10 +1007,6 @@ class FileStoreCommit:
                 file_name = None
                 try:
                     index_file = entry.index_file
-                    meta = index_file.global_index_meta
-                    if (index_file.file_size == 0 and index_file.row_count == 0
-                            and meta is not None and meta.is_empty_centroid_router()):
-                        continue
                     file_name = index_file.file_name
                     if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                         path = self.table.path_factory().bucket_index_path(

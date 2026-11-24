@@ -41,10 +41,7 @@ public interface CentroidVectorGlobalIndexer extends VectorGlobalIndexer {
         throw new IllegalArgumentException(key + " must be range or centroid, got " + layout);
     }
 
-    /**
-     * Persist the trained router and return its index metadata. An empty payload records coverage
-     * in the manifest only.
-     */
+    /** Persist the trained router and return the model entry with its underlying index metadata. */
     ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String filePath, byte[] payload)
             throws IOException;
 

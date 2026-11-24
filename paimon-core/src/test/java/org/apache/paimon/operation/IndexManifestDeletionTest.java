@@ -24,8 +24,6 @@ import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.CentroidIndexMeta;
-import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -169,48 +167,6 @@ class IndexManifestDeletionTest {
         assertThat(handler.existsManifest(protectedManifest)).isTrue();
         assertThat(handler.existsManifest(expiredManifest)).isFalse();
         assertThat(handler.existsManifest(duplicateManifest)).isFalse();
-    }
-
-    @Test
-    void testPlansDeletionOnlyForPhysicalIndexFiles() throws Exception {
-        ResultEntry empty =
-                CentroidIndexMeta.router(
-                        new ResultEntry("empty-router", 0, new byte[] {'l', '2'}), 0);
-        IndexManifestEntry emptyRouter =
-                entry(
-                        0,
-                        new IndexFileMeta(
-                                "diskann",
-                                "empty-router",
-                                0,
-                                0,
-                                new GlobalIndexMeta(0, 9, 1, null, empty.meta()),
-                                null));
-        IndexManifestEntry physicalIndex =
-                entry(
-                        0,
-                        new IndexFileMeta(
-                                "ivf-flat",
-                                "physical-index",
-                                0,
-                                0,
-                                new GlobalIndexMeta(0, 9, 2, null, new byte[0]),
-                                null));
-        IndexFileHandler handler = store.newIndexFileHandler();
-        Path physicalPath = handler.filePath(physicalIndex);
-        store.fileIO().tryToWriteAtomic(physicalPath, "");
-        String manifest =
-                store.indexManifestFileFactory()
-                        .create()
-                        .writeWithoutRolling(Arrays.asList(emptyRouter, physicalIndex));
-
-        SnapshotDeletion deletion = store.newSnapshotDeletion();
-        List<Runnable> tasks =
-                deletion.planManifestsCleaner(snapshot(manifest), new HashSet<>(), false, false);
-        assertThat(tasks).hasSize(2);
-        deletion.executeAll(tasks);
-        assertThat(store.fileIO().exists(physicalPath)).isFalse();
-        assertThat(handler.existsManifest(manifest)).isFalse();
     }
 
     @Test

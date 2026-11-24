@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
@@ -187,7 +186,6 @@ public class CopyMetaFilesFunction extends ProcessFunction<Tuple2<String, String
                 List<Path> indexFileList = new ArrayList<>();
                 if (indexManifestEntries != null) {
                     indexManifestEntries.stream()
-                            .filter(entry -> !CentroidIndexMeta.isEmptyRouter(entry.indexFile()))
                             .map(indexFileHandler::filePath)
                             .forEach(indexFileList::add);
                 }
