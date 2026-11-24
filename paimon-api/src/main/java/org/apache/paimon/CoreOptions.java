@@ -1276,7 +1276,11 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to remove the whole row in aggregation engine when -D records are received.");
+                            "Whether to remove the whole row in aggregation engine when -D records are received. "
+                                    + "Records after a -D start a new aggregate only if the -D is merged together "
+                                    + "with the older records of the same key. If the -D and later records are "
+                                    + "merged without them first, for example when written in the same commit, "
+                                    + "the older aggregate is kept.");
 
     @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
@@ -2923,12 +2927,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
-    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATH =
-            key("global-index.external-path")
+    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATHS =
+            key("global-index.external-paths")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+                            "Comma-separated global index root directories. "
+                                    + "New index files are distributed in round-robin order. "
+                                    + "An empty value uses <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -3104,6 +3110,14 @@ public class CoreOptions implements Serializable {
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
                                     + "When false, the write fails when the descriptor is read.");
 
+    public static final ConfigOption<Boolean> BLOB_TRANSFER_METRICS_ENABLED =
+            key("blob-transfer-metrics.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Collect additional Blob copy duration, failed-copy payload bytes and "
+                                    + "terminal HTTP 503 metrics when a metric registry is provided.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -3209,8 +3223,19 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .withDescription(
+                            "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
+                                    + "setting also serves as a fallback for scalar prefilters.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
+            key("scalar-index.prefilter.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription("Search mode for scalar index queries.");
+                    .withDescription(
+                            "Search mode for scalar prefilters in vector and full-text search. If "
+                                    + "unset, use an explicit scalar-index.search-mode, then an "
+                                    + "explicit global-index.search-mode, then fast.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
             key("vector-index.search-mode")
@@ -4208,17 +4233,24 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    public Path globalIndexExternalPath() {
-        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
+    public List<Path> globalIndexExternalPaths() {
+        boolean multiple = options.contains(GLOBAL_INDEX_EXTERNAL_PATHS);
+        String pathString =
+                multiple
+                        ? options.get(GLOBAL_INDEX_EXTERNAL_PATHS)
+                        : options.get("global-index.external-path");
         if (pathString == null || pathString.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
-        Path path = new Path(pathString);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
+        String[] values = multiple ? pathString.split(",") : new String[] {pathString};
+        List<Path> paths = new ArrayList<>();
+        for (String value : values) {
+            Path path = new Path(multiple ? value.trim() : value);
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
         }
-        return path;
+        checkArgument(!paths.isEmpty(), "global index external paths is empty");
+        return paths;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
@@ -4491,6 +4523,49 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    /** Returns all configured external data paths without applying the write strategy. */
+    public List<Path> dataFileExternalPathList() {
+        String externalPaths = dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            paths.add(new Path(pathString.trim()));
+        }
+        return paths;
+    }
+
+    /** Returns external data paths eligible for writing under the configured strategy. */
+    public List<Path> createExternalPaths() {
+        String externalPaths = dataFileExternalPaths();
+        ExternalPathStrategy strategy = externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = externalSpecificFS();
+        List<Path> paths = new ArrayList<>();
+        for (Path path : dataFileExternalPathList()) {
+            String scheme = path.toUri().getScheme();
+            checkArgument(scheme != null, "scheme should not be null: %s", path);
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     public ExternalPathStrategy externalPathStrategy() {
@@ -5128,7 +5203,20 @@ public class CoreOptions implements Serializable {
     }
 
     public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE, GlobalIndexSearchMode.FAST);
+    }
+
+    public GlobalIndexSearchMode scalarScanSearchMode() {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarPrefilterSearchMode() {
+        return options.getOptional(SCALAR_INDEX_PREFILTER_SEARCH_MODE)
+                .orElseGet(
+                        () ->
+                                indexSearchMode(
+                                        SCALAR_INDEX_SEARCH_MODE,
+                                        SCALAR_INDEX_PREFILTER_SEARCH_MODE.defaultValue()));
     }
 
     public boolean globalIndexFilterRefineFromData() {
@@ -5145,11 +5233,14 @@ public class CoreOptions implements Serializable {
 
     private GlobalIndexSearchMode indexSearchMode(
             ConfigOption<GlobalIndexSearchMode> familySearchMode) {
-        if (options.contains(familySearchMode)) {
-            return options.get(familySearchMode);
-        }
-        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
-                .orElseGet(() -> options.get(familySearchMode));
+        return indexSearchMode(familySearchMode, familySearchMode.defaultValue());
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode,
+            GlobalIndexSearchMode defaultMode) {
+        return options.getOptional(familySearchMode)
+                .orElseGet(() -> options.getOptional(GLOBAL_INDEX_SEARCH_MODE).orElse(defaultMode));
     }
 
     public Integer globalIndexThreadNum() {
@@ -5180,6 +5271,12 @@ public class CoreOptions implements Serializable {
         return options.contains(VECTOR_FILE_FORMAT);
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(List)}.
+     */
+    @Deprecated
     public Set<String> vectorField() {
         String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
@@ -5188,12 +5285,61 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
     }
 
+    /**
+     * Returns {@link #VECTOR_FIELD} names without trimming each name.
+     *
+     * @deprecated Use {@link #vectorField(Map, List)}.
+     */
+    @Deprecated
     public static Set<String> vectorField(Map<String, String> options) {
         String vectorFields = options.getOrDefault(CoreOptions.VECTOR_FIELD.key(), null);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {
             return Collections.emptySet();
         }
         return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public Set<String> vectorField(List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD), fieldNames));
+    }
+
+    /** Resolves {@link #VECTOR_FIELD} against the given field names. */
+    public static Set<String> vectorField(Map<String, String> options, List<String> fieldNames) {
+        return new HashSet<>(resolveVectorFields(options.get(VECTOR_FIELD.key()), fieldNames));
+    }
+
+    /**
+     * Rewrites a {@link #VECTOR_FIELD} value as the field names it resolves to, so that adding a
+     * field later cannot change which fields the stored value refers to. A value that names unknown
+     * fields, or that would refer to other fields once rewritten, is returned unchanged.
+     */
+    public static String normalizeVectorField(String vectorFields, List<String> fieldNames) {
+        List<String> names = resolveVectorFields(vectorFields, fieldNames);
+        String normalized = String.join(",", names);
+        return fieldNames.containsAll(names)
+                        && resolveVectorFields(normalized, fieldNames).equals(names)
+                ? normalized
+                : vectorFields;
+    }
+
+    /**
+     * Uses a name exactly as written when a field has that name, which keeps existing tables with
+     * spaces in field names working, and its trimmed form otherwise.
+     */
+    private static List<String> resolveVectorFields(
+            @Nullable String vectorFields, List<String> fieldNames) {
+        List<String> fields = new ArrayList<>();
+        if (vectorFields == null) {
+            return fields;
+        }
+        for (String field : vectorFields.trim().split(",")) {
+            String name = fieldNames.contains(field) ? field : field.trim();
+            if (!name.isEmpty()) {
+                fields.add(name);
+            }
+        }
+        return fields;
     }
 
     public long vectorTargetFileSize() {
@@ -6036,6 +6182,13 @@ public class CoreOptions implements Serializable {
         ENTROPY_INJECT(
                 "entropy-inject",
                 "When writing a new file, a path is chosen based on the hash value of the file's content."),
+
+        ENTROPY_INJECT_TEMPLATE(
+                "entropy-inject-template",
+                "Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. "
+                        + "The placeholder is replaced in place by hash directories computed from the file name. "
+                        + "Place '{hash}' before the database and table directories to share object storage prefixes across tables. "
+                        + "This strategy cannot be enabled or disabled on an existing table."),
 
         WEIGHTED(
                 "weight-robin",

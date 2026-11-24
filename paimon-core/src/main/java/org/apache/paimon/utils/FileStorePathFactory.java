@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RoundRobinExternalPathProvider;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.ChainReadContext;
@@ -83,7 +84,7 @@ public class FileStorePathFactory {
     private final List<Path> externalPaths;
     private final ExternalPathStrategy strategy;
     @Nullable private final int[] externalPathWeights;
-    @Nullable private final Path globalIndexExternalRootDir;
+    @Nullable private final List<Path> globalIndexExternalPaths;
 
     public FileStorePathFactory(
             Path root,
@@ -100,7 +101,7 @@ public class FileStorePathFactory {
             ExternalPathStrategy strategy,
             @Nullable int[] externalPathWeights,
             boolean indexFileInDataFileDir,
-            @Nullable Path globalIndexExternalRootDir) {
+            @Nullable List<Path> globalIndexExternalPaths) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.indexFileInDataFileDir = indexFileInDataFileDir;
@@ -122,7 +123,7 @@ public class FileStorePathFactory {
         this.externalPaths = externalPaths;
         this.strategy = strategy;
         this.externalPathWeights = externalPathWeights;
-        this.globalIndexExternalRootDir = globalIndexExternalRootDir;
+        this.globalIndexExternalPaths = globalIndexExternalPaths;
     }
 
     public Path root() {
@@ -135,10 +136,6 @@ public class FileStorePathFactory {
 
     public Path indexPath() {
         return new Path(root, INDEX_PATH);
-    }
-
-    public Path globalIndexRootDir() {
-        return globalIndexExternalRootDir != null ? globalIndexExternalRootDir : indexPath();
     }
 
     public Path statisticsPath() {
@@ -329,15 +326,22 @@ public class FileStorePathFactory {
     }
 
     public IndexPathFactory globalIndexFileFactory() {
+        ExternalPathProvider provider =
+                globalIndexExternalPaths == null || globalIndexExternalPaths.isEmpty()
+                        ? null
+                        : new RoundRobinExternalPathProvider(globalIndexExternalPaths, null);
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
-                return new Path(globalIndexRootDir(), fileName);
+            public synchronized Path newPathFromName(String fileName) {
+                return provider == null
+                        ? new Path(indexPath(), fileName)
+                        : provider.getNextExternalDataPath(fileName);
             }
 
             @Override
             public Path newPath() {
-                return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
+                return newPathFromName(
+                        INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
             }
 
             @Override
@@ -351,7 +355,7 @@ public class FileStorePathFactory {
 
             @Override
             public boolean isExternalPath() {
-                return globalIndexExternalRootDir != null;
+                return provider != null;
             }
         };
     }

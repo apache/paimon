@@ -94,14 +94,15 @@ public class FMGlobalIndexTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(basePath, prefix + "-" + UUID.randomUUID() + ".index")
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(basePath, fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
         fileReader = meta -> fileIO.newInputStream(meta.filePath());
@@ -908,7 +909,7 @@ public class FMGlobalIndexTest {
     private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> entries) throws IOException {
         List<GlobalIndexIOMeta> result = new ArrayList<>();
         for (ResultEntry entry : entries) {
-            Path path = new Path(basePath, entry.fileName());
+            Path path = new Path(entry.filePath());
             result.add(new GlobalIndexIOMeta(path, fileIO.getFileSize(path), entry.meta()));
         }
         return result;

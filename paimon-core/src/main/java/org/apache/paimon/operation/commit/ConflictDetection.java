@@ -174,6 +174,13 @@ public abstract class ConflictDetection {
         return false;
     }
 
+    /** Checks whether the existing global indexes can be retained by this commit. */
+    public void checkRetainedGlobalIndexes(
+            Snapshot snapshot,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {}
+
     @Nullable
     public RowIdConflictChecker createRowIdConflictChecker(
             SchemaManager schemaManager, List<ManifestEntry> deltaFiles, CommitKind commitKind) {

@@ -24,11 +24,11 @@ import javax.annotation.Nullable;
 
 import java.util.Objects;
 
-/** A router or shard with its underlying index metadata unpacked by Paimon. */
+/** A router, vector shard or scalar bitmap file in a centroid index. */
 public final class CentroidIndexFile extends GlobalIndexIOMeta {
 
-    private final String modelId;
     private final boolean routingModel;
+    private final boolean scalarIndex;
     private final int countOrId;
 
     public CentroidIndexFile(
@@ -36,21 +36,21 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
             long size,
             long rows,
             @Nullable byte[] payload,
-            String modelId,
             boolean routingModel,
+            boolean scalarIndex,
             int countOrId) {
         super(path, size, rows, payload);
-        this.modelId = modelId;
         this.routingModel = routingModel;
+        this.scalarIndex = scalarIndex;
         this.countOrId = countOrId;
-    }
-
-    public String modelId() {
-        return modelId;
     }
 
     public boolean routingModel() {
         return routingModel;
+    }
+
+    public boolean scalarIndex() {
+        return scalarIndex;
     }
 
     /** Number of centroids in this router. */
@@ -63,8 +63,16 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
 
     /** Centroid to which this shard belongs. */
     public int centroid() {
-        if (routingModel) {
+        if (routingModel || scalarIndex) {
             throw new IllegalStateException("Expected a centroid shard.");
+        }
+        return countOrId;
+    }
+
+    /** Table field indexed by this Bitmap. */
+    public int fieldId() {
+        if (!scalarIndex) {
+            throw new IllegalStateException("Expected a centroid bitmap.");
         }
         return countOrId;
     }
@@ -76,12 +84,12 @@ public final class CentroidIndexFile extends GlobalIndexIOMeta {
         }
         CentroidIndexFile file = (CentroidIndexFile) other;
         return routingModel == file.routingModel
-                && countOrId == file.countOrId
-                && modelId.equals(file.modelId);
+                && scalarIndex == file.scalarIndex
+                && countOrId == file.countOrId;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), modelId, routingModel, countOrId);
+        return Objects.hash(super.hashCode(), routingModel, scalarIndex, countOrId);
     }
 }

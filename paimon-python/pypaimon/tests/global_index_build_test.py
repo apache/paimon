@@ -48,6 +48,8 @@ from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,
 )
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
@@ -57,12 +59,15 @@ from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer imp
 )
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
 )
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import IndexPathFactory
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 
@@ -227,12 +232,66 @@ class GlobalIndexBuildTest(
         'file.format': 'parquet',
     }
 
-    def test_centroid_sharding_requires_spark(self):
+    def test_centroid_sharding_requires_native_build(self):
         schema = pa.schema([('embedding', pa.list_(pa.float32()))])
-        table = self._create_table(pa_schema=schema, options={**self.table_options, 'ivf-pq.sharding': 'centroid'})
-        with self.assertRaisesRegex(NotImplementedError, "built with Spark"):
-            GlobalIndexBuilder(table, 'embedding', 'ivf-pq')
-        GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'ivf-pq.sharding': 'range'})
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options, 'fields.embedding.sharding': 'centroid', 'write.native.enabled': 'false',
+        })
+        with self.assertRaisesRegex(NotImplementedError, "pypaimon-rust"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq').build()
+        self.assertEqual([], GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'sharding': 'range'}).build())
+        with self.assertRaisesRegex(ValueError, "extra_fields requires a centroid-sharded vector index"):
+            GlobalIndexBuilder(table, 'embedding', 'ivf-pq', options={'sharding': 'range'}, extra_fields={})
+
+    def test_centroid_bitmaps_share_the_primary_vector_index_definition(self):
+        schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options,
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+            'read.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false',
+        })
+        self._write_arrow(table, pa.table({'embedding': [[1.0, 2.0], [1.0, 2.0]],
+                                           'status': ['ready', 'ready']},
+                                          schema=schema))
+        vector_id = table.field_dict['embedding'].id
+        status_id = table.field_dict['status'].id
+        partition = GenericRow([], [])
+        from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
+        source = DataEvolutionIndexSourceMeta(1, table.table_schema.id).serialize()
+
+        def entry(name, rows, metadata, fields=None):
+            return IndexManifestEntry(0, partition, 0, IndexFileMeta(
+                'ivf-flat', name, 100, rows,
+                global_index_meta=GlobalIndexMeta(0, 1, vector_id, fields, metadata, source)))
+
+        centroid_files = []
+        for role, rows, number, payload in (
+            (b'R', 0, 2, b'l2'),
+            (b'S', 2, 0, struct.pack('>i', 1)),
+            (b'B', 2, status_id, SortedIndexFileMeta(b'ready', b'ready', False).serialize()),
+        ):
+            header = struct.pack('>8sBci', b'PAIMCENT', 1, role, number)
+            centroid_files.append(entry(role.decode('ascii'), rows, header + payload, [status_id]))
+
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.commit([CommitMessage((), 0, [], index_adds=centroid_files)])
+        finally:
+            commit.close()
+
+        self.assertEqual(0, table.create_global_index('embedding', 'ivf-flat'))
+        self.assertEqual(3, table.drop_global_index('embedding', 'ivf-flat', dry_run=True))
+
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "overlapping row range"):
+                commit.commit([CommitMessage((), 0, [], index_adds=[entry('range', 2, b'{}')])])
+        finally:
+            commit.close()
+        self.assertEqual(3, table.drop_global_index('embedding', 'ivf-flat'))
+        self.assertEqual([], IndexFileHandler(table).scan(None))
 
     def test_native_vector_build_preserves_field_option_formats(self):
         schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
@@ -460,6 +519,24 @@ class GlobalIndexBuildTest(
                 rows = read.new_read().to_arrow(read.new_scan().plan().splits())
                 self.assertEqual([2], rows.column('id').to_pylist())
                 self.assertEqual(0, table.create_global_index('name', index_type=kind))
+
+    def test_scalar_scan_includes_unindexed_rows_by_default(self):
+        schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        table = self._create_table(pa_schema=schema)
+        self._write_arrow(table, pa.table({'id': [1], 'name': ['match']}, schema=schema))
+        self.assertEqual(1, table.create_global_index('name'))
+        self._write_arrow(table, pa.table({'id': [2], 'name': ['match']}, schema=schema))
+
+        for options, expected in [
+            ({}, [1, 2]),
+            ({'global-index.search-mode': 'fast'}, [1]),
+            ({'global-index.search-mode': 'fast', 'scalar-index.search-mode': 'full'}, [1, 2]),
+        ]:
+            with self.subTest(options=options):
+                builder = table.copy(options).new_read_builder()
+                builder.with_filter(builder.new_predicate_builder().equal('name', 'match'))
+                result = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+                self.assertEqual(expected, sorted(result.column('id').to_pylist()))
 
     def test_create_btree_global_index_from_python(self):
         table = self._create_table()
@@ -715,7 +792,7 @@ class GlobalIndexBuildTest(
 
     def test_create_global_index_uses_external_path(self):
         external_root = 'file://%s' % os.path.join(
-            self.tempdir, 'global-index-external')
+            self.tempdir, 'global-index-external,archive')
         options = dict(self.table_options)
         options['global-index.external-path'] = external_root
         table = self._create_table(options=options)
@@ -738,6 +815,27 @@ class GlobalIndexBuildTest(
         self.assertIsNotNone(external_path)
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
+
+    def test_python_index_files_rotate_across_external_roots(self):
+        roots = ['file://%s' % os.path.join(self.tempdir, name) for name in ('index-a', 'index-b')]
+        options = {
+            **self.table_options,
+            'write.native.enabled': 'false',
+            'global-index.external-paths': ','.join(roots),
+        }
+        table = self._create_table(options=options)
+        self._write_arrow(table, pa.table(
+            {'id': [1, 2, 3, 4], 'name': ['a'] * 4, 'age': [10] * 4, 'city': ['x'] * 4},
+            schema=self.pa_schema,
+        ))
+        self.assertEqual(4, table.create_global_index('id', options={'sorted-index.records-per-file': '1'}))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        paths = [entry.index_file.external_path for entry in IndexFileHandler(table).scan(snapshot)]
+        self.assertTrue(all(table.file_io.exists(path) for path in paths))
+        allocated = [path.rsplit('/', 1)[0] for path in paths]
+        self.assertEqual(2, allocated.count(roots[0]))
+        self.assertEqual(2, allocated.count(roots[1]))
+        self.assertEqual(allocated[:2], allocated[2:])
 
     def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
@@ -1701,7 +1799,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             (_FakeSplit([]), Range(10, 19)),
         ]), patch(module + '._to_index_manifest_entries', return_value=[]):
             return self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
     def test_batches_are_written_before_reading_the_next_batch(self):
         self.builder._index_type = 'lucene'
@@ -1810,7 +1908,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 ValueError, "global-index.build.parallelism.*greater than 0"):
             self._build([self._batch([[10.0]], [10])])
 
-    def test_parallel_build_is_bounded_and_keeps_shard_order(self):
+    def test_python_parallel_build_keeps_shard_order_and_rotates_paths(self):
         self.builder._core_options.global_index_build_parallelism.return_value = 2
         shards = [
             (_FakeSplit([]), Range(start, start + 9))
@@ -1841,15 +1939,20 @@ class GenericIndexStreamingTest(unittest.TestCase):
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
         module = 'pypaimon.execution.python.globalindex.create_global_index'
+        roots = ['file:///a', 'file:///b']
         with patch(module + '._split_by_global_index_shard', return_value=shards):
             messages = self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused', roots))
 
         self.assertEqual(2, max_active)
         self.assertEqual(
             [(0,), (10,), (20,), (30,)],
             [message.partition for message in messages],
         )
+        calls = self.builder._build_generic_shard.call_args_list
+        allocated = [call.args[-1] for call in sorted(calls, key=lambda call: call.args[1].from_)]
+        self.assertEqual(set(roots), set(allocated[:2]))
+        self.assertEqual(allocated[:2], allocated[2:])
 
     def test_parallel_failure_deletes_completed_uncommitted_indexes(self):
         self.builder._core_options.global_index_build_parallelism.return_value = 2
@@ -1884,7 +1987,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         self.builder._table.file_io.delete_quietly.assert_called_once_with(
             '/index/completed.index')
@@ -1936,7 +2039,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 patch.object(threading.Thread, 'start', failing_start), \
                 self.assertRaisesRegex(RuntimeError, "can't start new thread"):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         deleted = {
             call[0][0]
@@ -1977,7 +2080,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         self.builder._table.file_io.delete_quietly.assert_called_once_with(
             '/index/completed.index')

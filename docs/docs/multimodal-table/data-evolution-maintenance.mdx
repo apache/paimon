@@ -89,6 +89,39 @@ Ordinary compaction **does not physically remove rows hidden by deletion
 vectors**. Removing their positions would change the alignment with untouched
 column files.
 
+### Recovering Files After a Failed Rewrite
+
+Flink and Spark rewrite DV indexes on workers. A failed worker attempt cleans
+up the new DV files it has tracked. Files from tasks that already succeeded,
+or from a lost worker process, can remain unreferenced if the overall rewrite
+fails before committing.
+
+For files in the table's index directory, stop the failed job and its retries,
+then use
+[Remove Orphan Files](../maintenance/manage-snapshots#remove-orphan-files)
+to reclaim these files. The default retention window is one day. If setting
+`older_than`, choose a cutoff that keeps files from any active writes or
+maintenance jobs. Snapshot expiration alone does not reclaim files that were
+never committed.
+
+Use manual recovery for orphaned DV index files in external index directories,
+including previously configured roots:
+
+1. Stop the failed attempt and its retries, and identify its output files from
+   a recorded inventory or storage audit log. For a root used exclusively by
+   this table, an inventory of files older than the safety cutoff can also
+   supply candidates, after excluding files from active jobs.
+2. Check the candidates' full paths against index manifests referenced by all
+   retained snapshots, tags, branches, and changelogs. For a shared root,
+   include all tables with retained references to that root, and protect files
+   from active jobs.
+3. Delete only confirmed unreferenced output files. If ownership or references
+   cannot be established, retain the files. A file-name prefix or a scan of
+   one table's metadata does not establish ownership of files in a shared root.
+
+Use a dedicated external index directory per table and retain an attempt's
+output inventory when relying on manual recovery.
+
 ### Incremental Column-Version Compaction
 
 To reduce repeated rewrites of large base files when only a few columns

@@ -350,6 +350,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return null;
         }
 
+        @Override
+        @Nullable
+        public Snapshot specifiedSnapshot() {
+            return wrapped.specifiedSnapshot();
+        }
+
         public SnapshotReader withSnapshot(long snapshotId) {
             wrapped.withSnapshot(snapshotId);
             return this;

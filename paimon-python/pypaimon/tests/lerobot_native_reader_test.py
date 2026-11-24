@@ -171,13 +171,18 @@ def test_native_plan_failure_reuses_scanner_and_keeps_predicate(frames):
     {"read.native.enabled": "false"},
     {"scan.native-plan.enabled": "false"},
 ])
-def test_explicit_python_lookup_is_preserved(frames, options):
-    current = reader(frames, **options)
+@pytest.mark.parametrize("scalar_options, expected", [
+    ({}, [2, 4]),
+    ({"scalar-index.search-mode": "fast"}, [2]),
+])
+def test_explicit_python_lookup_is_preserved(frames, options, scalar_options, expected):
+    frames.add(pa.table({"index": [40, 50], "value": [4, 5]}))
+    current = reader(frames, **options, **scalar_options)
     try:
         assert not current._table.options.native_read_enabled()
         with patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
-            assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
-            locate.assert_called_once_with([20])
+            assert sorted(current.read_indices([20, 40], ["value"])["value"].to_pylist()) == expected
+            locate.assert_called_once_with([20, 40])
     finally:
         current.close()
 

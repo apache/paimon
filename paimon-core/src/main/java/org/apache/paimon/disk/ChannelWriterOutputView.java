@@ -24,6 +24,7 @@ import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -64,13 +65,27 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
     @Override
     public void close() throws IOException {
         if (!writer.isClosed()) {
-            int currentPositionInSegment = getCurrentPositionInSegment();
-            if (currentPositionInSegment > 0) {
-                writeCompressed(currentSegment, currentPositionInSegment);
+            Throwable failure = null;
+            try {
+                int currentPositionInSegment = getCurrentPositionInSegment();
+                if (currentPositionInSegment > 0) {
+                    writeCompressed(currentSegment, currentPositionInSegment);
+                }
+                this.writeBytes = writer.getSize();
+            } catch (IOException | RuntimeException | Error e) {
+                failure = e;
+                throw e;
+            } finally {
+                clear();
+                try {
+                    this.writer.close();
+                } catch (IOException | RuntimeException | Error e) {
+                    if (failure == null) {
+                        throw e;
+                    }
+                    ExceptionUtils.firstOrSuppressed(e, failure);
+                }
             }
-            clear();
-            this.writeBytes = writer.getSize();
-            this.writer.close();
         }
     }
 

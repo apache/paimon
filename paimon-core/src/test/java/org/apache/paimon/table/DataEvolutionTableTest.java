@@ -2025,7 +2025,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         FileStoreTable table = getTableDefault();
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
-        Path path0 = indexPathFactory.toPath("test-file");
+        Path path0 = indexPathFactory.newPathFromName("test-file");
         assertThat(path0.toString().contains(warehouse.toString())).isTrue();
         String testExternalpath = "file:/external/path/test-file-dir";
         Path path1 =
@@ -2042,11 +2042,10 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
 
         table =
                 table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), testExternalpath));
+                        Collections.singletonMap("global-index.external-path", testExternalpath));
 
         indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        Path path3 = indexPathFactory.toPath("test-file");
+        Path path3 = indexPathFactory.newPathFromName("test-file");
         assertThat(path3.toString()).isEqualTo(testExternalpath + "/test-file");
 
         String testExternalpath2 = "file:/external/path2/test-file";

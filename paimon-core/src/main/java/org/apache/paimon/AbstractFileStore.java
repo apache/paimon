@@ -18,7 +18,6 @@
 
 package org.apache.paimon;
 
-import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -33,6 +32,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.ChainTableCommitPreCallback;
@@ -42,13 +42,16 @@ import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChainTablePartitionExpire;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.NormalPartitionExpire;
+import org.apache.paimon.operation.PartitionEntryScanner;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.partition.PartitionExpireStrategy;
+import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -81,10 +84,11 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -142,45 +146,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                createExternalPaths(),
+                options.createExternalPaths(),
                 options.externalPathStrategy(),
                 options.externalPathWeights(),
                 options.indexFileInDataFileDir(),
-                options.globalIndexExternalPath());
-    }
-
-    private List<Path> createExternalPaths() {
-        String externalPaths = options.dataFileExternalPaths();
-        ExternalPathStrategy strategy = options.externalPathStrategy();
-        if (externalPaths == null
-                || externalPaths.isEmpty()
-                || strategy == ExternalPathStrategy.NONE) {
-            return Collections.emptyList();
-        }
-
-        String specificFS = options.externalSpecificFS();
-
-        List<Path> paths = new ArrayList<>();
-        for (String pathString : externalPaths.split(",")) {
-            Path path = new Path(pathString.trim());
-            String scheme = path.toUri().getScheme();
-            if (scheme == null) {
-                throw new IllegalArgumentException("scheme should not be null: " + path);
-            }
-
-            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
-                checkArgument(
-                        specificFS != null,
-                        "External path specificFS should not be null when strategy is specificFS.");
-                if (scheme.equalsIgnoreCase(specificFS)) {
-                    paths.add(path);
-                }
-            } else {
-                paths.add(path);
-            }
-        }
-        checkArgument(!paths.isEmpty(), "External paths should not be empty");
-        return paths;
+                options.globalIndexExternalPaths());
     }
 
     @Override
@@ -489,11 +459,34 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             partitionModification = catalogEnvironment.partitionModification();
         }
 
+        Function<LocalDateTime, List<PartitionEntry>> partitionSelector;
+        // Custom strategies, including subclasses, retain their FileStoreScan contract.
+        if (expireStrategy.getClass() == PartitionUpdateTimeExpireStrategy.class
+                || expireStrategy.getClass() == PartitionValuesTimeExpireStrategy.class) {
+            PartitionEntryScanner scanner =
+                    new PartitionEntryScanner(
+                            newManifestsReader(),
+                            manifestFileFactory(),
+                            options.scanManifestParallelism());
+            if (expireStrategy instanceof PartitionUpdateTimeExpireStrategy) {
+                PartitionUpdateTimeExpireStrategy updateStrategy =
+                        (PartitionUpdateTimeExpireStrategy) expireStrategy;
+                partitionSelector = time -> updateStrategy.selectExpiredPartitions(scanner, time);
+            } else {
+                PartitionValuesTimeExpireStrategy valuesStrategy =
+                        (PartitionValuesTimeExpireStrategy) expireStrategy;
+                partitionSelector = time -> valuesStrategy.selectExpiredPartitions(scanner, time);
+            }
+        } else {
+            FileStoreScan scan = newScan();
+            partitionSelector = time -> expireStrategy.selectExpiredPartitions(scan, time);
+        }
+
         return new NormalPartitionExpire(
                 expirationTime,
                 checkInterval,
                 expireStrategy,
-                newScan(),
+                partitionSelector,
                 newCommit(commitUser, table),
                 partitionModification,
                 options.endInputCheckPartitionExpire(),

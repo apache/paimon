@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.partition.PartitionPredicate;
 
 import javax.annotation.Nullable;
 
@@ -37,6 +38,12 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
      * partitions must have all the partition keys.
      */
     InnerTableCommit withOverwriteStaticPartitions(List<BinaryRow> staticPartitions);
+
+    /**
+     * Truncate the partitions {@code partitionFilter} matches, as {@link
+     * BatchTableCommit#truncatePartitions} does for partition specs.
+     */
+    void truncatePartitions(PartitionPredicate partitionFilter);
 
     /**
      * If this is set to true, when there is no new data, no snapshot will be generated. By default,

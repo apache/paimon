@@ -36,7 +36,7 @@ under the License.
             <td><h5>aggregation.remove-record-on-delete</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
+            <td>Whether to remove the whole row in aggregation engine when -D records are received. Records after a -D start a new aggregate only if the -D is merged together with the older records of the same key. If the -D and later records are merged without them first, for example when written in the same commit, the older aggregate is kept.</td>
         </tr>
         <tr>
             <td><h5>alter-column-null-to-not-null.disabled</h5></td>
@@ -85,6 +85,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in blob-descriptor-field, blob-view-field, or video-frame-field are also treated as BLOB fields.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-transfer-metrics.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Collect additional Blob copy duration, failed-copy payload bytes and terminal HTTP 503 metrics when a metric registry is provided.</td>
         </tr>
         <tr>
             <td><h5>blob-view-field</h5></td>
@@ -660,7 +666,7 @@ under the License.
             <td><h5>data-file.external-paths.strategy</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li><li>"weight-robin": When writing a new file, a path is chosen based on configured weights.</li></ul></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li><li>"entropy-inject-template": Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. The placeholder is replaced in place by hash directories computed from the file name. Place '{hash}' before the database and table directories to share object storage prefixes across tables. This strategy cannot be enabled or disabled on an existing table.</li><li>"weight-robin": When writing a new file, a path is chosen based on configured weights.</li></ul></td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths.weights</h5></td>
@@ -951,10 +957,10 @@ under the License.
             <td>Whether to enable global index for scan.</td>
         </tr>
         <tr>
-            <td><h5>global-index.external-path</h5></td>
+            <td><h5>global-index.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+            <td>Comma-separated global index root directories. New index files are distributed in round-robin order. An empty value uses &lt;table-root-directory&gt;/index.</td>
         </tr>
         <tr>
             <td><h5>global-index.filter.refine-from-data</h5></td>
@@ -1585,10 +1591,16 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
         </tr>
         <tr>
-            <td><h5>scalar-index.search-mode</h5></td>
+            <td><h5>scalar-index.prefilter.search-mode</h5></td>
             <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
-            <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+            <td>Search mode for scalar prefilters in vector and full-text search. If unset, use an explicit scalar-index.search-mode, then an explicit global-index.search-mode, then fast.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scalar-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>scan.bounded.watermark</h5></td>

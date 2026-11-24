@@ -307,14 +307,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         }
         try {
             if (count == 0) {
-                if (!centroidShard) {
-                    return Collections.emptyList();
-                }
-                String name = fileWriter.newFileName(fileNamePrefix());
-                try (PositionOutputStream out = fileWriter.newOutputStream(name)) {
-                    out.write(new byte[] {'P', 'C', 'E', 'M', 'P', 'T', 'Y', '1'});
-                }
-                return Collections.singletonList(new ResultEntry(name, 0, null));
+                return Collections.emptyList();
             }
             flushWriteBuffer();
             writeChannel.close();
@@ -353,14 +346,18 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
             LOG.info("{} write phase started", identifier);
-            String fileName = fileWriter.newFileName(fileNamePrefix());
+            String filePath = fileWriter.newFilePath(fileNamePrefix());
             // Native IVF-FLAT and IVF-PQ readers obtain their geometry from the 64-byte header.
             // Capture it as it is written so automatic local nlist is resolved by native itself.
+            String metric =
+                    nativeOptions.getOrDefault("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
             byte[] header =
-                    centroidShard && ("ivf-flat".equals(identifier) || "ivf-pq".equals(identifier))
+                    centroidShard
+                                    && NativeCentroidRoutedIndexReader.storesLocalNlist(
+                                            identifier, metric)
                             ? new byte[64]
                             : null;
-            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+            try (PositionOutputStream out = fileWriter.newOutputStream(filePath)) {
                 writer.writeIndex(
                         new PositionOutputStreamWrapper(out) {
                             private long bytesWritten;
@@ -400,18 +397,17 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta descriptor = new VectorIndexMeta();
+            byte[] descriptor = centroidShard ? null : new VectorIndexMeta().serialize();
             if (header != null) {
                 try (VectorIndexReader reader =
                         new VectorIndexReader(
                                 new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(
                                         new ByteArraySeekableStream(header)))) {
                     VectorIndexMetadata local = reader.metadata();
-                    descriptor = new VectorIndexMeta(local.nlist(), local.metric());
+                    descriptor = ByteBuffer.allocate(Integer.BYTES).putInt(local.nlist()).array();
                 }
             }
-            return new ResultEntry(
-                    fileName, !centroidShard ? rowCount : count, descriptor.serialize());
+            return new ResultEntry(filePath, centroidShard ? count : rowCount, descriptor);
         }
     }
 

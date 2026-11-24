@@ -33,6 +33,8 @@ class VectorSearchSplit:
     ``isinstance``.
     """
 
+    _native_vector_layout = False
+
     def __new__(
         cls,
         row_range_start=None,
@@ -67,3 +69,4 @@ class RawVectorSearchSplit(VectorSearchSplit):
     row_ranges: List[Range]
     scalar_index_files: List[IndexFileMeta] = field(default_factory=list)
     index_type: Optional[str] = None
+    _scalar_prefilter_ranges: List[Range] = field(default_factory=list, init=False, repr=False)

@@ -100,7 +100,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
             Integer scanManifestParallelism,
-            boolean deletionVectorsEnabled) {
+            boolean deletionVectorsEnabled,
+            String tableName) {
         super(
                 manifestsReader,
                 bucketSelectConverter,
@@ -112,7 +113,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 false,
                 false,
                 deletionVectorsEnabled,
-                true);
+                true,
+                tableName);
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.metadataMemoryOptimizationEnabled =
                 new CoreOptions(schema.options()).dataEvolutionMetadataMemoryOptimizationEnabled();

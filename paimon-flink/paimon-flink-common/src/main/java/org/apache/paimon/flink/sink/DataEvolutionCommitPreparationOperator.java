@@ -19,12 +19,13 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
+import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -34,14 +35,43 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Prepares deletion-vector and index changes for a data-evolution rewrite commit. */
+/** Prepares commits after all distributed DV rewrites finish. */
 public class DataEvolutionCommitPreparationOperator
         extends PrepareCommitOperator<Committable, Committable> {
 
-    private final FileStoreTable table;
     private final Snapshot snapshot;
     private final boolean materializeDvRowIdCheck;
     private final List<Committable> committables;
+
+    static DataStream<Committable> prepare(
+            DataStream<Committable> written,
+            FileStoreTable table,
+            Snapshot snapshot,
+            boolean materializeDvRowIdCheck) {
+        SingleOutputStreamOperator<byte[]> planned =
+                written.transform(
+                                "Data Evolution DV Rewrite Planner : " + table.name(),
+                                PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO,
+                                new DataEvolutionDeletionVectorRewriteOperator.PlannerFactory(
+                                        table, snapshot))
+                        .forceNonParallel();
+        DataStream<Committable> rewritten =
+                planned.rebalance()
+                        .transform(
+                                "Data Evolution DV Rewriter : " + table.name(),
+                                new CommittableTypeInfo(),
+                                new DataEvolutionDeletionVectorRewriteOperator.Factory(table))
+                        .setParallelism(written.getParallelism());
+        return rewritten
+                .union(
+                        planned.getSideOutput(
+                                DataEvolutionDeletionVectorRewriteOperator.DATA_COMMITS))
+                .transform(
+                        "Data Evolution Commit Preparation : " + table.name(),
+                        new CommittableTypeInfo(),
+                        new Factory(table, snapshot, materializeDvRowIdCheck))
+                .forceNonParallel();
+    }
 
     private DataEvolutionCommitPreparationOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -49,7 +79,6 @@ public class DataEvolutionCommitPreparationOperator
             Snapshot snapshot,
             boolean materializeDvRowIdCheck) {
         super(parameters, Options.fromMap(table.options()));
-        this.table = table;
         this.snapshot = snapshot;
         this.materializeDvRowIdCheck = materializeDvRowIdCheck;
         this.committables = new ArrayList<>();
@@ -69,14 +98,6 @@ public class DataEvolutionCommitPreparationOperator
             return toCommit;
         }
 
-        List<CommitMessage> messages = new ArrayList<>(toCommit.size());
-        for (Committable committable : toCommit) {
-            messages.add(committable.commitMessage());
-        }
-        for (CommitMessage message :
-                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages)) {
-            toCommit.add(new Committable(toCommit.get(0).checkpointId(), message));
-        }
         if (!materializeDvRowIdCheck) {
             return toCommit;
         }

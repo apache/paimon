@@ -31,9 +31,12 @@ from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.read.plan import native_plan
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.schema.schema_change import SchemaChange
@@ -401,6 +404,29 @@ def test_both_index_types_can_share_one_explicit_commit(rest_catalog):
 
 
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])
+@pytest.mark.parametrize('source_schema_id', [0, -1])
+def test_native_query_reads_index_with_version_two_source_meta(rest_catalog, kind, source_schema_id):
+    catalog, _ = rest_catalog
+    table = _create(catalog)
+    _append(table, ROWS)
+    messages = _build(table, kind)
+    for file in _message_files(messages):
+        meta = file.global_index_meta
+        source = DataEvolutionIndexSourceMeta.deserialize(meta.source_meta)
+        meta.source_meta = DataEvolutionIndexSourceMeta(
+            source.scan_snapshot_id, source_schema_id).serialize()
+    _commit(table, messages)
+
+    files = _files(table)
+    assert files
+    assert all(file.global_index_meta.source_meta == struct.pack('>iiqq', 0x44454958, 2, 1, source_schema_id)
+               for file in files)
+    predicate = table.new_read_builder().new_predicate_builder().equal('name', 'a')
+    assert any(isinstance(split, IndexedSplit) for split in native_plan(table, predicate=predicate).splits())
+    assert _ids(table, predicate) == [1, 5]
+
+
+@pytest.mark.parametrize('kind', ['btree', 'bitmap'])
 def test_commit_response_failure_keeps_published_index_files(rest_catalog, kind):
     catalog, _ = rest_catalog
     table = _create(catalog)
@@ -488,8 +514,10 @@ def test_append_and_unrelated_column_changes_do_not_invalidate_staged_index(rest
     table = _create(catalog, options={'commit.native.enabled': str(native_commit).lower()})
     _append(table, ROWS)
     messages = _build(table, kind)
-    assert all(struct.unpack('>iiq', file.global_index_meta.source_meta) == (0x44454958, 1, 1)
-               for file in _message_files(messages))
+    for file in _message_files(messages):
+        source = DataEvolutionIndexSourceMeta.deserialize(file.global_index_meta.source_meta)
+        assert source.scan_snapshot_id == 1
+        assert source.source_schema_id in (None, table.table_schema.id)
     updater = table.new_batch_write_builder().new_update()
     _commit(table, updater.update_by_arrow_with_row_id(pa.table({'_ROW_ID': [0], 'id': pa.array([10], pa.int32())})))
     _append(table, [{'id': 6, 'name': 'a', 'pt': 0}])

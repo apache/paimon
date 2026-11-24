@@ -108,26 +108,25 @@ public class LuminaVectorGlobalIndexTest {
     private GlobalIndexFileWriter createFileWriter(Path path) {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix + "-" + UUID.randomUUID();
+            public String newFilePath(String prefix) {
+                return new Path(path, prefix + "-" + UUID.randomUUID()).toString();
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                return fileIO.newOutputStream(new Path(path, fileName), false);
+            public PositionOutputStream newOutputStream(String filePath) throws IOException {
+                return fileIO.newOutputStream(new Path(filePath), false);
             }
         };
     }
 
-    private GlobalIndexFileReader createFileReader(Path path) {
-        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    private GlobalIndexFileReader createFileReader() {
+        return meta -> fileIO.newInputStream(meta.filePath());
     }
 
-    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
-            throws IOException {
+    private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results) throws IOException {
         assertThat(results).hasSize(1);
         ResultEntry result = results.get(0);
-        Path filePath = new Path(path, result.fileName());
+        Path filePath = new Path(result.filePath());
         return Collections.singletonList(
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta()));
     }
@@ -156,9 +155,9 @@ public class LuminaVectorGlobalIndexTest {
             writeVectors(writer, testVectors);
 
             List<ResultEntry> results = writer.finish();
-            List<GlobalIndexIOMeta> metas = toIOMetas(results, metricIndexPath);
+            List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-            GlobalIndexFileReader fileReader = createFileReader(metricIndexPath);
+            GlobalIndexFileReader fileReader = createFileReader();
             try (LuminaVectorGlobalIndexReader reader =
                     new LuminaVectorGlobalIndexReader(
                             fileReader, metas, vectorType, indexOptions, executor)) {
@@ -191,9 +190,9 @@ public class LuminaVectorGlobalIndexTest {
             writeVectors(writer, testVectors);
 
             List<ResultEntry> results = writer.finish();
-            List<GlobalIndexIOMeta> metas = toIOMetas(results, dimIndexPath);
+            List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-            GlobalIndexFileReader fileReader = createFileReader(dimIndexPath);
+            GlobalIndexFileReader fileReader = createFileReader();
             try (LuminaVectorGlobalIndexReader reader =
                     new LuminaVectorGlobalIndexReader(
                             fileReader, metas, vectorType, indexOptions, executor)) {
@@ -242,9 +241,9 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -304,9 +303,9 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -372,13 +371,13 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        Path filePath = new Path(indexPath, results.get(0).fileName());
+        Path filePath = new Path(results.get(0).filePath());
         assertThat(fileIO.exists(filePath)).isTrue();
         assertThat(fileIO.getFileSize(filePath)).isGreaterThan(0);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -422,7 +421,7 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, writeIndexOptions);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
         // Read with default options (dimension=128, the default) — simulates
         // the case where table options do not contain lumina.index.dimension.
@@ -434,7 +433,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions readIndexOptions = new LuminaVectorIndexOptions(readOptions);
         assertThat(readIndexOptions.dimension()).isEqualTo(128);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, readIndexOptions, executor)) {
@@ -475,9 +474,9 @@ public class LuminaVectorGlobalIndexTest {
         }
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, vecIndexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(vecIndexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vecFieldType, indexOptions, executor)) {
@@ -562,8 +561,8 @@ public class LuminaVectorGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(6);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -629,9 +628,9 @@ public class LuminaVectorGlobalIndexTest {
         writer.write(vectors[3], 5); // row 5
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -689,8 +688,8 @@ public class LuminaVectorGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(2);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -719,8 +718,8 @@ public class LuminaVectorGlobalIndexTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).rowCount()).isEqualTo(2);
 
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -795,9 +794,9 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -846,9 +845,9 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -889,9 +888,9 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {
@@ -935,9 +934,9 @@ public class LuminaVectorGlobalIndexTest {
         writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
-        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        List<GlobalIndexIOMeta> metas = toIOMetas(results);
 
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
         try (LuminaVectorGlobalIndexReader reader =
                 new LuminaVectorGlobalIndexReader(
                         fileReader, metas, vectorType, indexOptions, executor)) {

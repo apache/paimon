@@ -1790,8 +1790,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCentroidIndexChecksContiguousSourceRange() {
-        byte[] meta =
-                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        byte[] meta = CentroidIndexMeta.router(new ResultEntry("model", 0, null), 2).meta();
         IndexManifestEntry index = centroidRouter("first", 10, 19, 1, meta);
         List<SimpleFileEntry> data =
                 Arrays.asList(
@@ -1858,6 +1857,17 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.APPEND))
                 .isEmpty();
+        IndexManifestEntry bitmapIndex = centroidRouter("first", 10, 19, 1, meta, 0);
+        assertThat(
+                        detection.checkConflicts(
+                                concurrent,
+                                data,
+                                Collections.emptyList(),
+                                Collections.singletonList(bitmapIndex),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .hasValueSatisfying(
+                        error -> assertThat(error).hasMessageContaining("source rows changed"));
         // A second router starts at snapshot 2. The change in its interval in that
         // snapshot is already included in its training data. Both are active in snapshot 3.
         IndexManifestEntry second = centroidRouter("second", 100, 109, 2, meta);
@@ -1878,7 +1888,7 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.APPEND))
                 .isNotPresent();
-        verify(scanner, times(3)).readIncrementalEntries(concurrent, partitions);
+        verify(scanner, times(4)).readIncrementalEntries(concurrent, partitions);
         verify(scanner).readIncrementalEntries(latest, partitions);
 
         when(scanner.readIncrementalEntries(latest, partitions))
@@ -1896,7 +1906,7 @@ class ConflictDetectionTest {
     }
 
     private IndexManifestEntry centroidRouter(
-            String name, long from, long to, long snapshot, byte[] meta) {
+            String name, long from, long to, long snapshot, byte[] meta, int... extraFields) {
         IndexFileMeta file =
                 new IndexFileMeta(
                         "ivf-pq",
@@ -1909,7 +1919,7 @@ class ConflictDetectionTest {
                                 from,
                                 to,
                                 1,
-                                null,
+                                extraFields.length == 0 ? null : extraFields,
                                 meta,
                                 new org.apache.paimon.index.DataEvolutionIndexSourceMeta(snapshot)
                                         .serialize()));

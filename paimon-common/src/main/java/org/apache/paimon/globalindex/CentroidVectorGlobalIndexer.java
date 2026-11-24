@@ -42,8 +42,7 @@ public interface CentroidVectorGlobalIndexer extends VectorGlobalIndexer {
     }
 
     /** Persist the trained router and return the model entry with its underlying index metadata. */
-    ResultEntry writeRoutingModel(
-            GlobalIndexFileWriter io, String name, byte[] payload, String modelId)
+    ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String filePath, byte[] payload)
             throws IOException;
 
     /** Open an independently trained local index for the assigned centroid. */

@@ -27,6 +27,22 @@ under the License.
 
 Retain a dataset snapshot with a tag or work on a separate table history with a branch. Configure the CLI first, and use a table that already has committed data. Commands below illustrate separate operations; choose the ones you need.
 
+## Table Rollback
+
+Use `paimon table rollback` to restore a previous table state. For filesystem
+catalogs, rollback removes snapshots and tags newer than the target. Before
+rolling back, inspect the available targets with
+`paimon table list-snapshots mydb.users` or `paimon tag list mydb.users`.
+
+Choose exactly one target. For `--timestamp`, use Unix epoch milliseconds.
+The command selects the latest snapshot committed at or before that time.
+
+```shell
+paimon table rollback mydb.users --snapshot-id 3
+paimon table rollback mydb.users --tag v1
+paimon table rollback mydb.users --timestamp 1767225600000
+```
+
 ## Tag Commands
 
 Manage tags (named snapshots) on a table. Tags are useful for time travel and pinning a snapshot for later access.

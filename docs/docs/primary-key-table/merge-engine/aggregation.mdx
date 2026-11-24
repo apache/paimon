@@ -97,6 +97,7 @@ Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` rec
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
   For TINYINT, SMALLINT, INTEGER, and BIGINT, overflows are ignored by default.
+  For DECIMAL, a precision overflow makes the aggregated value NULL by default.
   Set `fields.<field-name>.sum.fail-on-overflow` to `true` to throw an exception on overflow.
 
 ### product
@@ -706,6 +707,14 @@ unless `fields.<field-name>.ignore-retract = true` is configured.
 Set `aggregation.remove-record-on-delete = true` to remove the whole row on `DELETE`, bypassing
 per-field retraction. The default is `false`. `UPDATE_BEFORE` still retracts individual fields.
 This option cannot be combined with per-field `ignore-retract`.
+
+Records written for the same key after a `DELETE` start a new aggregate, but only when the
+`DELETE` is merged together with the older records of that key, such as during a read or a full
+compaction. A merged result is stored as a single record per key, so it cannot record that older
+values must be discarded. If the `DELETE` and the later records are merged before the older
+records are, the older aggregate is kept and the later records are aggregated onto it. This
+happens when the `DELETE` and the later records are written in the same commit (for example the
+same Flink checkpoint), or when a compaction merges their files without the older files.
 
 ### Field Retraction Behavior
 

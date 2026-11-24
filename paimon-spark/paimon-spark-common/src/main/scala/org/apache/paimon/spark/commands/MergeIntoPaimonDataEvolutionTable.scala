@@ -1533,7 +1533,8 @@ object MergeIntoPaimonDataEvolutionTable {
           dynamicOptions.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), fullSearchMode)
           dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId)
 
-          val scanTable = SparkTable.of(table.copy(dynamicOptions))
+          // Pin the files to read without replacing the target schema used by the writer.
+          val scanTable = SparkTable.of(table.copyWithoutTimeTravel(dynamicOptions))
           val scanRelation =
             SparkShimLoader.shim.copyDataSourceV2Relation(relation, scanTable, relation.output)
           (scanTable, scanRelation)

@@ -32,6 +32,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagAutoCreation;
@@ -70,6 +71,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
@@ -231,6 +233,13 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public void truncatePartitions(PartitionPredicate partitionFilter) {
+        checkNotNull(partitionFilter, "Partition filter cannot be null.");
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
+        commit.dropPartitions(partitionFilter, COMMIT_IDENTIFIER);
+    }
+
+    @Override
     public void updateStatistics(Statistics statistics) {
         commit.commitStatistics(statistics, COMMIT_IDENTIFIER);
     }
@@ -365,6 +374,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
                 msg.compactIncrement().compactAfter().forEach(collector);
+                msg.compactIncrement().changelogFiles().forEach(collector);
                 msg.compactIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);

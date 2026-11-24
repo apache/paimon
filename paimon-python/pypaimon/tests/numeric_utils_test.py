@@ -15,14 +15,22 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Golden numeric digits from Java 8, 11 and 17 Double.toString."""
+"""Tests for Java-compatible numeric formatting and ordering."""
 
-from decimal import Decimal
+import math
 import struct
+from decimal import Decimal
 
 import pytest
 
-from pypaimon.utils.numeric_utils import java_double_decimal_text
+from pypaimon.utils.numeric_utils import java_double_decimal_text, java_floating_sort_key
+
+
+def test_java_floating_sort_key():
+    ordered_values = [-math.inf, -1.0, -0.0, +0.0, 1.0, math.inf, math.nan]
+    keys = [java_floating_sort_key(value) for value in ordered_values]
+    assert all(left < right for left, right in zip(keys, keys[1:]))
+    assert java_floating_sort_key(-math.nan) == keys[-1]
 
 
 @pytest.mark.parametrize('bits,expected', [

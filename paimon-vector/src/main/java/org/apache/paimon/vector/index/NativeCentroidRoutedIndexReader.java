@@ -21,6 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.AbstractVectorGlobalIndexReader;
 import org.apache.paimon.globalindex.CentroidIndexFile;
+import org.apache.paimon.globalindex.CentroidShardFilterReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ScoreGetter;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
@@ -37,6 +38,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,25 +55,24 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Routes queries to shard files using row IDs relative to their shared range. */
-final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader {
+final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader
+        implements CentroidShardFilterReader {
     private static final int JOINT_OUTER_PROBES = 4;
     private static final int[] NO_CENTERS = new int[0];
 
     private final GlobalIndexFileReader files;
-    private final GlobalIndexIOMeta routing;
-    private String metric;
-    private final CentroidIndexFile metadata;
+    private final CentroidIndexFile routing;
+    private final String metric;
     private final Map<Integer, GlobalIndexIOMeta> shards = new HashMap<>();
-    // Populated for shard descriptors that record their native geometry.
-    private final Map<Integer, Boolean> jointLayout = new HashMap<>();
+    private final Set<Integer> jointLayout = new HashSet<>();
     private final DataType fieldType;
     private final ExecutorService executor;
     private final long vectorCount;
     private final String indexType;
     private CentroidRouter model;
+    private IOFunction<Integer, RoaringNavigableMap64> shardFilter;
     private volatile boolean closed;
 
     NativeCentroidRoutedIndexReader(
@@ -84,50 +85,73 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.fieldType = fieldType;
         this.executor = executor;
         this.indexType = indexType;
-        GlobalIndexIOMeta routing = null;
         CentroidIndexFile modelMeta = null;
         long count = 0;
+        checkArgument(
+                !entries.isEmpty() && entries.get(0) instanceof CentroidIndexFile,
+                "Missing centroid index metadata.");
         for (GlobalIndexIOMeta file : entries) {
+            checkArgument(
+                    file instanceof CentroidIndexFile, "Mixed centroid and range index files.");
             CentroidIndexFile meta = (CentroidIndexFile) file;
+            if (meta.scalarIndex()) {
+                continue;
+            }
             if (meta.routingModel()) {
+                checkArgument(modelMeta == null, "Multiple routing models.");
                 modelMeta = meta;
-                checkArgument(routing == null, "Multiple routing models.");
-                routing = file;
             } else {
+                checkArgument(file.rowCount() > 0, "Centroid shards must contain vectors.");
                 checkArgument(
-                        file.rowCount() >= 0, "Centroid shards must record their vector count.");
-                VectorIndexMeta local = VectorIndexMeta.read(file.metadata());
-                Integer localNlist = local.localNlist();
-                if (localNlist != null) {
-                    jointLayout.put(
-                            meta.centroid(), localNlist == 64 && "l2".equals(local.metric()));
-                }
-                shards.put(meta.centroid(), file);
+                        shards.put(meta.centroid(), file) == null,
+                        "Duplicate centroid shard %s.",
+                        meta.centroid());
                 count = Math.addExact(count, file.rowCount());
             }
         }
-        checkArgument(routing != null, "Missing routing model.");
-        this.routing = routing;
-        this.metadata = modelMeta;
-        this.metric = VectorIndexMeta.read(routing.metadata()).metric();
+        checkArgument(modelMeta != null, "Missing routing model.");
+        this.routing = modelMeta;
+        this.metric = NativeCentroidVectorGlobalIndexer.routingMetric(modelMeta);
         this.vectorCount = count;
+        int nlist = routing.nlist();
+        checkArgument(nlist == 0 || count > 0, "Centroid routing model has no vector shards.");
+        boolean storesLocalNlist = storesLocalNlist(indexType, metric);
+        for (Map.Entry<Integer, GlobalIndexIOMeta> shard : shards.entrySet()) {
+            int centroid = shard.getKey();
+            checkArgument(
+                    centroid >= 0 && centroid < nlist, "Invalid shard centroid %s.", centroid);
+            byte[] local = shard.getValue().metadata();
+            if (storesLocalNlist) {
+                checkArgument(
+                        local != null && local.length == Integer.BYTES,
+                        "Invalid centroid shard metadata.");
+                int localNlist = ByteBuffer.wrap(local).getInt();
+                checkArgument(localNlist > 0, "Invalid centroid shard nlist.");
+                if (localNlist == 64) {
+                    jointLayout.add(centroid);
+                }
+            } else {
+                checkArgument(local == null, "Unexpected centroid shard metadata.");
+            }
+        }
+    }
+
+    static boolean storesLocalNlist(String indexType, String metric) {
+        return "l2".equals(metric) && ("ivf-flat".equals(indexType) || "ivf-pq".equals(indexType));
+    }
+
+    @Override
+    public void withShardFilter(IOFunction<Integer, RoaringNavigableMap64> filter) {
+        this.shardFilter = filter;
     }
 
     private synchronized CentroidRouter model() {
         checkArgument(!closed, "Centroid reader is closed.");
         if (model == null) {
             try (SeekableInputStream in = files.getInputStream(routing)) {
-                byte[] payload =
-                        VectorTrainingModelIO.read(
-                                in,
-                                routing.fileSize(),
-                                metadata.modelId(),
-                                CentroidRouter.maxSerializedBytes());
-                if (metric == null) {
-                    metric = VectorTrainingModelIO.legacyMetric(payload);
-                }
+                byte[] payload = VectorTrainingModelIO.read(in, routing.fileSize());
                 CentroidRouter loaded = CentroidRouter.deserialize(payload);
-                if (loaded.nlist() != metadata.nlist()) {
+                if (loaded.nlist() != routing.nlist()) {
                     loaded.close();
                     throw new IOException("Routing nlist differs from manifest metadata.");
                 }
@@ -139,34 +163,9 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         return model;
     }
 
-    private GlobalIndexIOMeta shard(int centroid) {
-        return checkNotNull(shards.get(centroid), "Missing routed centroid shard %s.", centroid);
-    }
-
-    private <T> CompletableFuture<T> readShard(
-            GlobalIndexIOMeta shard, IOFunction<NativeVectorGlobalIndexReader, T> operation) {
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    try (NativeVectorGlobalIndexReader reader =
-                            new NativeVectorGlobalIndexReader(
-                                    files,
-                                    Collections.singletonList(shard),
-                                    fieldType,
-                                    executor,
-                                    indexType)) {
-                        return operation.apply(reader);
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                },
-                executor);
-    }
-
-    private synchronized String metric() {
-        if (metric == null) {
-            model();
-        }
-        return metric;
+    private NativeVectorGlobalIndexReader openShard(GlobalIndexIOMeta shard) {
+        return new NativeVectorGlobalIndexReader(
+                files, Collections.singletonList(shard), fieldType, executor, indexType);
     }
 
     private int initialWidth(VectorSearch query) {
@@ -175,7 +174,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             throw new IllegalArgumentException(
                     "Use centroid.nprobe for DiskANN outer routing and diskann.l_search for graph search");
         }
-        int nlist = metadata.nlist();
+        int nlist = routing.nlist();
         if (width != null) {
             int probes = Integer.parseInt(width);
             checkArgument(probes > 0, "centroid.nprobe must be greater than 0");
@@ -183,7 +182,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         }
         // The coarse router orders Euclidean distances. A distant, high-norm shard can
         // contain every maximum inner product, even when nearer shards fill top-K.
-        if ("inner_product".equals(metric())) {
+        if ("inner_product".equals(metric)) {
             return nlist;
         }
         return automaticWidth(
@@ -234,15 +233,15 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                     checkArgument(!closed, "Centroid reader is closed.");
                     int width = initialWidth(query);
                     if (automatic(query)
-                            && width == metadata.nlist()
-                            && "inner_product".equals(metric())) {
+                            && width == routing.nlist()
+                            && "inner_product".equals(metric)) {
                         int[] all = new int[width];
                         for (int i = 0; i < width; i++) {
                             all[i] = i;
                         }
                         return Collections.nCopies(vectors.length, all);
                     }
-                    if (width == metadata.nlist()) {
+                    if (width == routing.nlist()) {
                         CentroidRouter router = model();
                         int[] all = router.findNearestCentroids(vectors[0], width);
                         // Validate each query against the coarse model before opening any shard.
@@ -267,127 +266,44 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         VectorSearch query = batch.forIndex(0);
         SearchScope scope = SearchScope.of(batch.includeRowIds(), batch.limit());
         boolean considerJoint =
-                centers.get(0).length == 8
-                        && metadata.nlist() == 64
+                shardFilter == null
+                        && centers.get(0).length == 8
+                        && routing.nlist() == 64
                         && query.limit() >= 10
                         && query.limit() <= 100
                         && query.includeRowIds() == null
                         && automatic(query)
-                        && "l2".equals(metric())
                         && !query.options().containsKey("ivf.nprobe")
                         && !query.options().containsKey("diskann.l_search")
                         && !query.options().containsKey("ivf.max_initial_filter_expansion_factor")
-                        && ("ivf-flat".equals(indexType) || "ivf-pq".equals(indexType));
+                        && storesLocalNlist(indexType, metric);
         List<Route> plans = new ArrayList<>(centers.size());
-        Map<Integer, CompletableFuture<Boolean>> legacy = new HashMap<>();
         for (int[] nearest : centers) {
             boolean joint = considerJoint;
             for (int i = 0; joint && i < JOINT_OUTER_PROBES; i++) {
                 int centroid = nearest[i];
+                GlobalIndexIOMeta shard = shards.get(centroid);
                 joint =
-                        shard(centroid).rowCount()
+                        shard != null
+                                && shard.rowCount()
                                         >= (long) NativeVectorGlobalIndexReader.JOINT_INNER_PROBES
                                                 * query.limit()
-                                && !Boolean.FALSE.equals(jointLayout.get(centroid));
+                                && jointLayout.contains(centroid);
             }
-            plans.add(new Route(nearest, joint, scope.effectiveK));
-            if (joint) {
-                for (int i = 0; i < JOINT_OUTER_PROBES; i++) {
-                    if (!jointLayout.containsKey(nearest[i])) {
-                        legacy.put(nearest[i], null);
-                    }
-                }
-            }
+            plans.add(
+                    new Route(
+                            joint ? Arrays.copyOf(nearest, JOINT_OUTER_PROBES) : nearest,
+                            joint,
+                            scope.effectiveK));
         }
-        if (legacy.isEmpty()) {
-            for (Route plan : plans) {
-                if (plan.joint) {
-                    plan.centers = Arrays.copyOf(plan.centers, JOINT_OUTER_PROBES);
-                }
-            }
-            return searchRound(batch, plans, scope);
-        }
-        // The layout probes search each legacy file once. Until all four layouts are known,
-        // keep a bounded top-K for each of the two possible policies.
-        for (Route route : plans) {
-            if (route.joint) {
-                route.legacyJointMatches = new ShardTopK(scope.effectiveK);
-            }
-        }
-        legacy.replaceAll(
-                (centroid, ignored) ->
-                        readShard(
-                                shard(centroid),
-                                reader -> probeLegacyShard(reader, centroid, batch, plans, scope)));
-        return CompletableFuture.allOf(legacy.values().toArray(new CompletableFuture[0]))
-                .thenComposeAsync(
-                        done -> {
-                            for (Route route : plans) {
-                                for (int j = 0; route.joint && j < JOINT_OUTER_PROBES; j++) {
-                                    CompletableFuture<Boolean> probe = legacy.get(route.centers[j]);
-                                    route.joint = probe == null || probe.join();
-                                }
-                                if (route.joint) {
-                                    route.centers =
-                                            Arrays.copyOf(route.centers, JOINT_OUTER_PROBES);
-                                    route.matches = route.legacyJointMatches;
-                                }
-                                route.legacyJointMatches = null;
-                                for (int c : route.centers) {
-                                    if (legacy.containsKey(c)) {
-                                        route.visited.add(c);
-                                    }
-                                }
-                            }
-                            return searchRound(batch, plans, scope);
-                        });
-    }
-
-    private static boolean probeLegacyShard(
-            NativeVectorGlobalIndexReader reader,
-            int centroid,
-            BatchVectorSearch batch,
-            List<Route> plans,
-            SearchScope scope)
-            throws IOException {
-        boolean compatible = reader.hasJointLayout();
-        List<Integer> ordinary = new ArrayList<>();
-        List<Integer> joint = new ArrayList<>();
-        for (int i = 0; i < plans.size(); i++) {
-            Route route = plans.get(i);
-            for (int j = 0; j < route.centers.length; j++) {
-                if (route.centers[j] == centroid) {
-                    ordinary.add(i);
-                    if (compatible && route.joint && j < JOINT_OUTER_PROBES) {
-                        joint.add(i);
-                    }
-                    break;
-                }
-            }
-        }
-        searchSubset(
-                reader,
-                batch,
-                scope,
-                ordinary,
-                false,
-                (i, result) -> plans.get(i).matches.add(result));
-        searchSubset(
-                reader,
-                batch,
-                scope,
-                joint,
-                true,
-                (i, result) -> plans.get(i).legacyJointMatches.add(result));
-        return compatible;
+        return searchRound(batch, plans, scope);
     }
 
     private static final class Route {
         int[] centers;
         boolean joint;
         final Set<Integer> visited = new HashSet<>();
-        ShardTopK matches;
-        ShardTopK legacyJointMatches;
+        final ShardTopK matches;
 
         Route(int[] centers, boolean joint, int limit) {
             this.centers = centers;
@@ -495,29 +411,46 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         groups.forEach(
                 (file, policies) ->
                         pending.add(
-                                readShard(
-                                        file,
-                                        reader -> {
-                                            // A mixed batch may select this shard with both probe
-                                            // policies.
-                                            for (Map.Entry<Boolean, List<Integer>> policy :
-                                                    policies.entrySet()) {
-                                                List<Integer> indices = policy.getValue();
-                                                searchSubset(
-                                                        reader,
-                                                        batch,
-                                                        scope,
-                                                        indices,
-                                                        policy.getKey(),
-                                                        (index, result) ->
-                                                                plans.get(index)
-                                                                        .matches
-                                                                        .add(result));
-                                            }
-                                            return null;
-                                        })));
+                                CompletableFuture.runAsync(
+                                        () -> searchShard(file, policies, batch, plans, scope),
+                                        executor)));
         return CompletableFuture.allOf(pending.toArray(new CompletableFuture[0]))
                 .thenComposeAsync(done -> finishRound(batch, plans, scope));
+    }
+
+    private void searchShard(
+            GlobalIndexIOMeta file,
+            Map<Boolean, List<Integer>> policies,
+            BatchVectorSearch batch,
+            List<Route> plans,
+            SearchScope scope) {
+        try {
+            if (shardFilter != null) {
+                RoaringNavigableMap64 rows =
+                        shardFilter.apply(((CentroidIndexFile) file).centroid());
+                if (batch.includeRowIds() != null) {
+                    rows.and(batch.includeRowIds());
+                }
+                if (rows.isEmpty()) {
+                    return;
+                }
+                scope = SearchScope.of(rows, batch.limit());
+            }
+            try (NativeVectorGlobalIndexReader reader = openShard(file)) {
+                // A mixed batch may select this shard with both probe policies.
+                for (Map.Entry<Boolean, List<Integer>> policy : policies.entrySet()) {
+                    searchSubset(
+                            reader,
+                            batch,
+                            scope,
+                            policy.getValue(),
+                            policy.getKey(),
+                            (index, result) -> plans.get(index).matches.add(result));
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private Map<GlobalIndexIOMeta, Map<Boolean, List<Integer>>> shardsForRound(List<Route> plans) {
@@ -525,7 +458,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         if (plans.stream()
                 .allMatch(
                         route ->
-                                route.centers.length == metadata.nlist()
+                                route.centers.length == routing.nlist()
                                         && route.visited.isEmpty())) {
             // Share the full batch across all shards instead of building a query/shard cross
             // product.
@@ -535,8 +468,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             }
             Map<Boolean, List<Integer>> policy = Collections.singletonMap(false, indices);
             for (int centroid : plans.get(0).centers) {
-                GlobalIndexIOMeta file = shard(centroid);
-                if (file.rowCount() > 0) {
+                GlobalIndexIOMeta file = shards.get(centroid);
+                if (file != null) {
                     groups.put(file, policy);
                 }
             }
@@ -549,8 +482,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             Route route = plans.get(i);
             for (int centroid : route.centers) {
                 if (route.visited.add(centroid)) {
-                    GlobalIndexIOMeta file = shard(centroid);
-                    if (file.rowCount() > 0) {
+                    GlobalIndexIOMeta file = shards.get(centroid);
+                    if (file != null) {
                         groups.computeIfAbsent(file, ignored -> new LinkedHashMap<>())
                                 .computeIfAbsent(route.joint, ignored -> new ArrayList<>())
                                 .add(i);
@@ -600,9 +533,9 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             if (route.centers.length > 0) {
                 int visited = route.visited.size();
                 if (!batch.options().containsKey("centroid.nprobe")
-                        && visited < metadata.nlist()
+                        && visited < routing.nlist()
                         && route.matches.size() < required) {
-                    int width = (int) Math.min(metadata.nlist(), (long) visited * 2);
+                    int width = (int) Math.min(routing.nlist(), (long) visited * 2);
                     route.centers = model().findNearestCentroids(batch.vectors()[i], width);
                     route.joint = false;
                     widen = true;

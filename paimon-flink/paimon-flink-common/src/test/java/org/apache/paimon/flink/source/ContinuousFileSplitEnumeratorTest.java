@@ -823,6 +823,56 @@ public class ContinuousFileSplitEnumeratorTest
     }
 
     @Test
+    public void testConsumerProgressWithOutOfOrderSplits() throws Exception {
+        List<Long> progress = new ArrayList<>();
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+        }
+        MockScan scan = new MockScan(new TreeMap<>());
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(getSplitEnumeratorContext(2))
+                        .setInitialSplits(splits)
+                        .setScan(scan)
+                        .unawareBucket(true)
+                        .build();
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+
+        // separate resets leave the shared queue as [2, 3, 1, 4, 5]
+        enumerator.addSplitsBack(splits.subList(0, 1), 0);
+        enumerator.addSplitsBack(splits.subList(1, 3), 1);
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+        triggerCheckpointAndComplete(enumerator, 1L); // split 1 is still pending
+        progress.add(scan.getNextSnapshotIdForConsumer());
+
+        // readers request the next split before reporting the one they have finished
+        enumerator.handleSplitRequest(1, "test-host");
+        enumerator.handleSourceEvent(1, new ReaderConsumeProgressEvent(3L));
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSourceEvent(0, new ReaderConsumeProgressEvent(2L));
+        triggerCheckpointAndComplete(enumerator, 2L); // split 1 is still being read
+        progress.add(scan.getNextSnapshotIdForConsumer());
+
+        // restored splits have no order, so finishing 5 does not mean that 2 has finished
+        MockScan restoredScan = new MockScan(new TreeMap<>());
+        ContinuousFileSplitEnumerator restored =
+                new Builder()
+                        .setSplitEnumeratorContext(getSplitEnumeratorContext(1))
+                        .setScan(restoredScan)
+                        .build();
+        restored.addSplitsBack(Collections.emptyList(), 0);
+        restored.handleSourceEvent(0, new ReaderConsumeProgressEvent(5L));
+        triggerCheckpointAndComplete(restored, 1L);
+        progress.add(restoredScan.getNextSnapshotIdForConsumer());
+
+        assertThat(progress).containsExactly(1L, 1L, null);
+    }
+
+    @Test
     public void testEnumeratorSplitMax() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);

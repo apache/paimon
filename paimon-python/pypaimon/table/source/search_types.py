@@ -31,8 +31,7 @@ class VectorSearchScanPlan:
     """Plan of vector search scan."""
 
     def __init__(self, splits, snapshot=None):
-        # type: (list, object) -> None
-        self._splits = splits
+        self._splits = splits if isinstance(splits, (list, tuple)) else list(splits)
         self._snapshot = snapshot
 
     def splits(self):

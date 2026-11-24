@@ -175,6 +175,56 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
     }
   }
 
+  test("Paimon Optimization: metadata only delete of partitions whose names do not parse back") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, p STRING) PARTITIONED BY (p)")
+      sql("INSERT INTO t VALUES (1, ' '), (2, NULL), (3, 'a')")
+      // A blank value's partition name is the null partition's.
+      val df = sql("DELETE FROM t WHERE p = ' '")
+      checkTruncatePaimonTable(df)
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(2), Row(3)))
+    }
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, p1 STRING, p2 BINARY) PARTITIONED BY (p1, p2)")
+      sql(
+        "INSERT INTO t VALUES (1, 'x', CAST(' ' AS BINARY)), (2, 'x', NULL), (3, 'y', NULL), " +
+          "(4, 'x', X'FF')")
+      // X'FF' is not valid UTF-8, so its partition name holds other bytes.
+      val df = sql("DELETE FROM t WHERE p1 = 'x'")
+      checkTruncatePaimonTable(df)
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(3)))
+    }
+  }
+
+  test("Paimon Optimization: metadata only delete of a timestamp partition off UTC") {
+    withTimeZone("Asia/Shanghai") {
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, p TIMESTAMP) PARTITIONED BY (p)")
+        // The legacy name of 10:30:00 is its UTC wall clock, which parses back as 02:30:00 here.
+        sql(
+          "INSERT INTO t VALUES (1, CAST('2024-06-01 10:30:00' AS TIMESTAMP)), " +
+            "(2, CAST('2024-06-01 02:30:00' AS TIMESTAMP))")
+        val df = sql("DELETE FROM t WHERE p = TIMESTAMP '2024-06-01 10:30:00'")
+        checkTruncatePaimonTable(df)
+        checkAnswer(sql("SELECT a FROM t"), Seq(Row(2)))
+      }
+    }
+  }
+
+  test("Paimon Optimization: metadata only delete leaves expired partitions alone") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, dt STRING) PARTITIONED BY (dt)")
+      sql("INSERT INTO t VALUES (1, '2020-01-01'), (2, '2099-01-01')")
+      sql(
+        "ALTER TABLE t SET TBLPROPERTIES ('partition.expiration-time' = '7 d', " +
+          "'partition.expiration-check-interval' = '0 s', " +
+          "'partition.timestamp-pattern' = '$dt', 'partition.timestamp-formatter' = 'yyyy-MM-dd')")
+      val df = sql("DELETE FROM t WHERE dt = '2099-01-01'")
+      checkTruncatePaimonTable(df)
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(1)))
+    }
+  }
+
   test(s"Paimon Optimization: eval subqueries for delete table with ScalarSubquery") {
     withPk.foreach(
       hasPk => {

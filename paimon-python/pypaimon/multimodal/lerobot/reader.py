@@ -132,7 +132,7 @@ class _FrameLocator:
                     "frame index predicate.")
             unindexed = scanner.unindexed_ranges(
                 predicate,
-                search_mode=self._table.options.scalar_index_search_mode(),
+                search_mode=self._table.options.scalar_scan_search_mode(),
                 contributing_field_ids=evaluation.contributing_field_ids,
             )
             ranges = evaluation.result.results().to_range_list() + unindexed

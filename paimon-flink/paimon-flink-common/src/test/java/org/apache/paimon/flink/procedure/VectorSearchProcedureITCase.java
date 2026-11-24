@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -62,12 +64,17 @@ import org.junit.jupiter.params.provider.CsvSource;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /** IT cases for {@link VectorSearchProcedure}. */
 public class VectorSearchProcedureITCase extends CatalogITCaseBase {
@@ -588,6 +595,36 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
             assertThat(json).contains("\"id\"");
             assertThat(json).contains("\"vec\"");
         }
+    }
+
+    @Test
+    public void testVectorSearchReadsRowsFromRankingSnapshot() throws Exception {
+        createVectorTable("T");
+        FileStoreTable table = paimonTable("T");
+        float[][] vectors = {{1.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        Snapshot rankedSnapshot = table.latestSnapshot().get();
+
+        BatchWriteBuilder overwrite = table.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = overwrite.newWrite();
+                BatchTableCommit commit = overwrite.newCommit()) {
+            write.write(GenericRow.of(9, new GenericArray(new float[] {0.0f, 1.0f})));
+            commit.commit(write.prepareCommit());
+        }
+
+        // Expose the earlier snapshot to ranking, while fresh scans see the overwrite.
+        FileStoreTable searchTable = spy(table);
+        doReturn(Optional.of(rankedSnapshot)).when(searchTable).latestSnapshot();
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.getTable(Identifier.fromString("default.T"))).thenReturn(searchTable);
+        VectorSearchProcedure procedure = new VectorSearchProcedure();
+        procedure.withCatalog(catalog);
+
+        assertThat(
+                        procedure.call(
+                                null, "default.T", VECTOR_FIELD, "1,0", 1, "id", null, null, null))
+                .containsExactly("{\"id\":\"0\"}");
     }
 
     @Test
@@ -1292,7 +1329,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         vectorField.id(),
@@ -1333,7 +1369,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         Arrays.asList(vectorField, idField),

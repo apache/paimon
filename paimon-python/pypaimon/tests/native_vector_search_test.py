@@ -366,14 +366,17 @@ def test_unused_context_attributes_preserve_native_search(vector_table, option, 
 
 
 @pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
-def test_unevaluable_scalar_filter_scores_indexed_ranges_raw(vector_table, mode):
+@pytest.mark.parametrize('probes', [1, 4])
+def test_range_filter_without_a_scalar_index(vector_table, mode, probes):
+    from pypaimon_rust.datafusion import VectorSearchBuilder
     from pypaimon.globalindex.create_global_index import create_global_index
     from pypaimon.execution.python.read.search.vector_search_read import (
         DataEvolutionVectorRead,
         BatchVectorSearchReadImpl,
     )
-    # The matching vectors live outside the nearest IVF cluster. Sending a
-    # data-derived allow-list to ANN with nprobe=1 silently loses all matches.
+    # The matching vectors live outside the nearest IVF cluster. Java and the
+    # layout-capable Rust runtime filter bounded ANN candidates. The Python
+    # reader and Rust 0.5 score the matching range directly.
     _write(vector_table, [
         {'id': i, 'embedding': [i / 1000, 0], 'pt': 2} for i in range(50)
     ] + [
@@ -390,13 +393,16 @@ def test_unevaluable_scalar_filter_scores_indexed_ranges_raw(vector_table, mode)
     partition = predicates.equal('pt', 2)
 
     def configure(builder, direct=False):
-        return (builder.with_option('ivf.nprobe', '1')
+        return (builder.with_option('ivf.nprobe', str(probes))
+                .with_option('vector-index.post-filter.candidates-factor', '40')
                 .with_filter(_predicate_to_native(predicate) if direct else predicate)
                 .with_partition_filter(_predicate_to_native(partition) if direct else partition))
 
     queries = [[0, 0], [1, 0]]
     expected = [_scores(configure(_single(classic, query)).execute_local()) for query in queries]
     assert all(len(scores) == 3 for scores in expected)
+    if probes == 1 and hasattr(VectorSearchBuilder, 'with_multi_vector'):
+        expected = [{}, {}]
     direct_table = _native_table(native)
     direct = configure(direct_table.new_batch_vector_search_builder().with_vector_column('embedding')
                        .with_query_vectors(queries).with_limit(3), direct=True).execute()
@@ -410,7 +416,7 @@ def test_unevaluable_scalar_filter_scores_indexed_ranges_raw(vector_table, mode)
     for single, batched, scores in zip(singles, batch, expected):
         _assert_scores(_scores(single), scores)
         _assert_scores(_scores(batched), scores)
-    assert sorted(_rows(native, singles[0]).column('id').to_pylist()) == [100, 101, 102]
+    assert sorted(_rows(native, singles[0]).column('id').to_pylist()) == ([100, 101, 102] if expected[0] else [])
 
 
 @pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
@@ -569,6 +575,25 @@ def test_unsupported_conjunct_on_same_indexed_field_is_not_exact(rest_catalog, m
         assert len(single.results()) == count
         assert [len(result.results()) for result in batch] == [count, count]
     assert len(_rows(native, _single(native, limit=2).with_filter(is_null).execute_local())) == 1
+
+
+@pytest.mark.parametrize('table_mode, query_options', [
+    ('full', {}),
+    ('fast', {'scalar-index.prefilter.search-mode': 'full'}),
+    ('full', {'scalar-index.prefilter.search-mode': None}),
+])
+def test_prefilter_mode_includes_uncovered_scalar_rows(vector_table, table_mode, query_options):
+    vector_table.create_global_index('id', index_type='btree')
+    _write(vector_table, [{'id': 7, 'embedding': [3, 3], 'pt': 1}])
+    vector_table.create_global_index('embedding', index_type='ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+    table = vector_table.copy({'vector-index.search-mode': 'fast', 'scalar-index.search-mode': 'fast',
+                               'scalar-index.prefilter.search-mode': table_mode})
+    predicate = table.new_read_builder().new_predicate_builder().equal('id', 7)
+    for native in ['false', 'true']:
+        read_table = table.copy({'read.native.enabled': native, 'scan.native-plan.enabled': native})
+        builder = _single(read_table, [3, 3], 10).with_filter(predicate).with_options(query_options)
+        assert _rows(read_table, builder.execute_local()).column('id').to_pylist() == [7]
 
 
 @pytest.mark.parametrize('scalar_mode', ['fast', 'full', 'detail'])

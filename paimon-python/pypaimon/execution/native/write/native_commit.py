@@ -36,11 +36,16 @@ def native_messages_supported(table, messages, *, for_commit=False) -> bool:
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
-        # Native 0.5.0 cannot validate retained field IDs against the schema of
-        # each publication attempt. Full-row updates also retain field IDs;
-        # write_cols=None does not exempt them. Pure conflict probes are safe.
+        # Python checks retained field IDs and centroid groups against each
+        # publication attempt for changes to existing Data Evolution rows.
         if (for_commit and table.options.data_evolution_enabled()
-                and any(file.first_row_id is not None for file in message.new_files)):
+                and any(file.first_row_id is not None for file in message.new_files + message.deleted_files)):
+            return False
+        if for_commit and any(entry.index_file.global_index_meta is not None
+                              and entry.index_file.global_index_meta.is_centroid_index()
+                              for entry in message.index_adds + message.index_deletes):
+            # Java checks intervening COMPACT snapshots and complete centroid
+            # groups during publication. Keep those checks on each Python CAS attempt.
             return False
         partition = tuple(message.partition)
         for file in message.new_files + message.changelog_files:

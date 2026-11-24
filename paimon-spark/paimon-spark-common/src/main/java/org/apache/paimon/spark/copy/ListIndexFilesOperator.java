@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -87,14 +88,14 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
             FileStorePathFactory targetFileStorePathFactory)
             throws IOException {
         Path indexFilePath = sourceIndexFileHandler.filePath(indexManifestEntry);
-        Path targetIndexFilePath =
-                targetFileStorePathFactory
-                        .indexFileFactory(
-                                indexManifestEntry.partition(), indexManifestEntry.bucket())
-                        .newPath();
+        IndexPathFactory targetIndexPathFactory =
+                targetFileStorePathFactory.indexFileFactory(
+                        indexManifestEntry.partition(), indexManifestEntry.bucket());
+        Path targetIndexFilePath = targetIndexPathFactory.newPath();
         IndexFileMeta fileMeta = indexManifestEntry.indexFile();
         IndexFileMeta targetFileMeta =
-                CopyFilesUtil.toNewIndexFileMeta(fileMeta, targetIndexFilePath.getName());
+                CopyFilesUtil.toNewIndexFileMeta(
+                        fileMeta, targetIndexFilePath, targetIndexPathFactory.isExternalPath());
         return new CopyFileInfo(
                 indexFilePath.toString(),
                 targetIndexFilePath.toString(),

@@ -135,12 +135,12 @@ public class LuminaVectorGlobalIndexWriterTest {
     private static GlobalIndexFileWriter createNoopFileWriter() {
         return new GlobalIndexFileWriter() {
             @Override
-            public String newFileName(String prefix) {
-                return prefix;
+            public String newFilePath(String prefix) {
+                return "memory://test/" + prefix;
             }
 
             @Override
-            public PositionOutputStream newOutputStream(String fileName) {
+            public PositionOutputStream newOutputStream(String filePath) {
                 throw new UnsupportedOperationException();
             }
         };

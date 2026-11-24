@@ -18,7 +18,12 @@
 
 package dev.vortex.jni;
 
-/** Native methods for Vortex runtime configuration. */
+/**
+ * Native methods for the JVM-wide worker pool that drives every Vortex session.
+ *
+ * <p>The pool has no background threads by default. Then only the Java thread that waits on a
+ * Vortex call drives the decode work of that call.
+ */
 public final class NativeRuntime {
 
     static {

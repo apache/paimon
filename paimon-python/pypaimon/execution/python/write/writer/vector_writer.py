@@ -97,7 +97,9 @@ class VectorWriter(AppendOnlyDataWriter):
                                        zstd_level=self.zstd_level,
                                        **self.parquet_writer_options)
         elif self.vector_file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            write_vortex_file(self.file_io, file_path, data)
+            write_vortex_file(self.file_io, file_path, data,
+                              compact=self.options.vortex_compact_encodings(),
+                              edition=self.options.vortex_write_edition())
         else:
             raise ValueError(f"Unsupported vector file format: {self.vector_file_format}")
 

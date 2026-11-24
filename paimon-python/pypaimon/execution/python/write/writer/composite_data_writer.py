@@ -145,14 +145,12 @@ class CompositeDataWriter(DataWriter):
         try:
             if self.file_format == CoreOptions.FILE_FORMAT_BLOB:
                 raise ValueError(f"Unsupported file format: {self.file_format}")
-            shredding_stats = self._write_file(file_path, data, self.file_format)
+            stats_fields = self.table.table_schema.data_file_fields(data.schema.names)
+            stats = self._value_stats_collector(stats_fields)
+            shredding_stats, parquet_metadata = self._write_file(file_path, data, self.file_format, stats)
 
             is_external_path = self.external_path_provider is not None
             external_path_str = file_path if is_external_path else None
-
-            metadata_stats_enabled = self.options.metadata_stats_enabled()
-            stats_columns = self.normal_columns if metadata_stats_enabled else []
-            value_stats = self._collect_value_stats(data, stats_columns)
 
             min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
 
@@ -163,7 +161,7 @@ class CompositeDataWriter(DataWriter):
                 min_key=GenericRow([], []),
                 max_key=GenericRow([], []),
                 key_stats=SimpleStats.empty_stats(),
-                value_stats=value_stats,
+                value_stats=stats.collect(data, parquet_metadata=parquet_metadata),
                 min_sequence_number=min_seq,
                 max_sequence_number=max_seq,
                 schema_id=self.table.table_schema.id,
@@ -172,7 +170,7 @@ class CompositeDataWriter(DataWriter):
                 creation_time=Timestamp.now().to_millis_timestamp(),
                 delete_row_count=0,
                 file_source=0,
-                value_stats_cols=[column.name for column in stats_columns],
+                value_stats_cols=stats.columns,
                 external_path=external_path_str,
                 file_path=file_path,
                 write_cols=self.write_cols,

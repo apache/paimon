@@ -807,15 +807,31 @@ public class JdbcCatalog extends AbstractCatalog {
             return runWithLock(firstIdentifier, callable);
         }
 
-        Identifier firstLock = firstIdentifier;
-        Identifier secondLock = secondIdentifier;
-        if (lockKey(firstIdentifier).compareTo(lockKey(secondIdentifier)) > 0) {
-            firstLock = secondIdentifier;
-            secondLock = firstIdentifier;
+        // Logical key order does not order stripes when different identifiers hash to the same
+        // locks. Acquire the local stripes first, retaining key order for distributed locks.
+        List<java.util.concurrent.locks.Lock> localLocks =
+                Lists.newArrayList(
+                        LOCAL_LOCKS.bulkGet(
+                                Lists.newArrayList(
+                                        lockKey(firstIdentifier), lockKey(secondIdentifier))));
+        for (java.util.concurrent.locks.Lock localLock : localLocks) {
+            localLock.lock();
         }
+        try {
+            Identifier firstLock = firstIdentifier;
+            Identifier secondLock = secondIdentifier;
+            if (lockKey(firstIdentifier).compareTo(lockKey(secondIdentifier)) > 0) {
+                firstLock = secondIdentifier;
+                secondLock = firstIdentifier;
+            }
 
-        Identifier nestedLock = secondLock;
-        return runWithLock(firstLock, () -> runWithLock(nestedLock, callable));
+            Identifier nestedLock = secondLock;
+            return runWithLock(firstLock, () -> runWithLock(nestedLock, callable));
+        } finally {
+            for (int i = localLocks.size() - 1; i >= 0; i--) {
+                localLocks.get(i).unlock();
+            }
+        }
     }
 
     private String lockKey(Identifier identifier) {

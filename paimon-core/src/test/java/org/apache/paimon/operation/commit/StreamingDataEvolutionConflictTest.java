@@ -107,8 +107,7 @@ class StreamingDataEvolutionConflictTest {
                 .thenReturn(
                         Collections.singletonList(
                                 ManifestEntry.create(ADD, EMPTY_ROW, 0, -1, update)));
-        byte[] meta =
-                CentroidIndexMeta.router(new ResultEntry("model", 0, null), "model", 2).meta();
+        byte[] meta = CentroidIndexMeta.router(new ResultEntry("model", 0, null), 2).meta();
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "ivf-pq",

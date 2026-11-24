@@ -19,11 +19,13 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.utils.Triple;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Range;
@@ -224,6 +226,8 @@ public class IndexManifestFileHandler {
                     newIndexFiles.stream()
                             .filter(f -> f.kind() == FileKind.ADD)
                             .collect(Collectors.toList());
+            Set<Triple<BucketIdentifier, Integer, Range<Long>>> removedCentroidRanges =
+                    new HashSet<>();
             for (IndexManifestEntry entry : removed) {
                 String fileName = entry.indexFile().fileName();
                 IndexManifestEntry previous = indexEntries.get(fileName);
@@ -233,12 +237,35 @@ public class IndexManifestFileHandler {
                         fileName);
                 checkDeletedIndexFile(previous, entry);
                 indexEntries.remove(fileName);
+                Triple<BucketIdentifier, Integer, Range<Long>> range = centroidRange(previous);
+                if (range != null) {
+                    removedCentroidRanges.add(range);
+                }
+            }
+            if (!removedCentroidRanges.isEmpty()) {
+                for (IndexManifestEntry retained : indexEntries.values()) {
+                    checkState(
+                            !removedCentroidRanges.contains(centroidRange(retained)),
+                            "Cannot partially delete a centroid index generation. File %s still exists.",
+                            retained.indexFile().fileName());
+                }
             }
             validateRetainedIndexFiles(indexEntries.values(), added);
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }
             return new ArrayList<>(indexEntries.values());
+        }
+
+        private static @Nullable Triple<BucketIdentifier, Integer, Range<Long>> centroidRange(
+                IndexManifestEntry entry) {
+            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+            return meta != null && CentroidIndexMeta.isWrapped(meta.indexMeta())
+                    ? Triple.of(
+                            identifier(entry),
+                            meta.indexFieldId(),
+                            Range.closed(meta.rowRangeStart(), meta.rowRangeEnd()))
+                    : null;
         }
 
         private void validateRetainedIndexFiles(
@@ -248,6 +275,12 @@ public class IndexManifestFileHandler {
             // table-wide row range must be checked against either kind.
             validateOverlaps(retainedIndexFiles, addedIndexFiles, false);
             validateOverlaps(retainedIndexFiles, addedIndexFiles, true);
+        }
+
+        private List<Integer> overlapFieldIds(GlobalIndexMeta meta) {
+            return CentroidIndexMeta.hasBitmapFields(meta)
+                    ? Collections.singletonList(meta.indexFieldId())
+                    : meta.getIndexedFieldIds();
         }
 
         private void validateOverlaps(
@@ -264,8 +297,7 @@ public class IndexManifestFileHandler {
                 TreeRangeMap<Long, IndexManifestEntry> ranges =
                         additions
                                 .computeIfAbsent(entry.partition(), p -> new HashMap<>())
-                                .computeIfAbsent(
-                                        meta.getIndexedFieldIds(), f -> TreeRangeMap.create());
+                                .computeIfAbsent(overlapFieldIds(meta), f -> TreeRangeMap.create());
                 Range<Long> range = Range.closed(meta.rowRangeStart(), meta.rowRangeEnd());
                 Map.Entry<Range<Long>, IndexManifestEntry> previous =
                         ranges.getEntry(meta.rowRangeStart());
@@ -287,7 +319,7 @@ public class IndexManifestFileHandler {
                     continue;
                 }
                 TreeRangeMap<Long, IndexManifestEntry> ranges =
-                        partition.get(retainedMeta.getIndexedFieldIds());
+                        partition.get(overlapFieldIds(retainedMeta));
                 if (ranges == null) {
                     continue;
                 }

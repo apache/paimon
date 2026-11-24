@@ -47,6 +47,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -228,8 +229,14 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         MapReader mapReader = new MapReader(valueReader);
 
         if (valueType != null) {
-            if (valueType.getTypeRoot() == DataTypeRoot.CHAR
-                    || valueType.getTypeRoot() == DataTypeRoot.VARCHAR) {
+            if ((valueType.getTypeRoot() == DataTypeRoot.CHAR
+                            || valueType.getTypeRoot() == DataTypeRoot.VARCHAR)
+                    && schema.getValueType()
+                            .equals(
+                                    AvroSchemaConverter.convertToSchema(
+                                            valueType, Collections.emptyMap()))) {
+                // The byte-backed map expects the same nullability and null-first union layout
+                // that Paimon's writer uses. Other valid layouts need the schema-aware reader.
                 return new StringMapReader(valueType.isNullable(), mapReader);
             }
         }

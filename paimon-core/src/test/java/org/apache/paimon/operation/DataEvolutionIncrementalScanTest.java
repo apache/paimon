@@ -1162,7 +1162,7 @@ class DataEvolutionIncrementalScanTest {
                             partitionType,
                             schema.logicalBucketKeyType());
             return new DataEvolutionFileStoreScan(
-                    reader, bucketSelectConverter, null, null, schema, factory, 2, false) {
+                    reader, bucketSelectConverter, null, null, schema, factory, 2, false, "test") {
                 @Override
                 protected List<ManifestEntry> postFilterManifestEntries(
                         List<ManifestEntry> entries) {

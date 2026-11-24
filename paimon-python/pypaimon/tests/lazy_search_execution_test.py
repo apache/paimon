@@ -32,7 +32,7 @@ from pypaimon.table.source.search_types import FullTextScanPlan, VectorSearchSca
 
 
 @pytest.fixture
-def search_table(tmp_path):
+def filesystem_search_table(tmp_path):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
     catalog.create_table('default.search', Schema.from_pyarrow_schema(
@@ -40,6 +40,14 @@ def search_table(tmp_path):
         options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                  'read.native.enabled': 'true'}), False)
     return catalog.get_table('default.search')
+
+
+@pytest.fixture
+def search_table(filesystem_search_table, monkeypatch):
+    # These adapter tests supply the existing native route with test doubles.
+    monkeypatch.setattr('pypaimon.execution.native.read.native_vector_search._filesystem_vector_table_supported',
+                        lambda table: False)
+    return filesystem_search_table
 
 
 def _builder(table, family):
@@ -903,7 +911,7 @@ def test_search_plan_conversion_rejects_splits_from_the_other_search_family(sear
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
-def test_selected_native_reader_does_not_probe_or_replay_an_older_sdk(search_table, family):
+def test_selected_native_reader_does_not_probe_or_replay_an_older_sdk(filesystem_search_table, family):
     class OlderSdk(ModuleType):
         def __getattr__(self, name):
             if name in ('VectorScanPlan', 'FullTextScanPlan'):
@@ -913,7 +921,7 @@ def test_selected_native_reader_does_not_probe_or_replay_an_older_sdk(search_tab
     sdk, datafusion = ModuleType('pypaimon_rust'), OlderSdk('pypaimon_rust.datafusion')
     sdk.datafusion = datafusion
     native, _, core_read = _native_builder(family)
-    builder = _builder(search_table, family)
+    builder = _builder(filesystem_search_table, family)
     _, read_factory = _factories(builder, family)
     with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}), \
             _forbid_python_execution(), patch(_native_factory(family), return_value=native):

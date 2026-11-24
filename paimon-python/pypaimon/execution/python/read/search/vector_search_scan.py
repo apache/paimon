@@ -53,8 +53,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
         self._partition_filter = partition_filter
         self._options = dict(options or {})
 
-    def scan(self):
-        # type: () -> VectorSearchScanPlan
+    def scan(self, *, partition_entries=None):
         from pypaimon.index.index_file_handler import IndexFileHandler
         from pypaimon.read.push_down_utils import _get_all_fields
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -76,8 +75,6 @@ class DataEvolutionVectorScan(VectorSearchScan):
         if snapshot is None:
             return VectorSearchScanPlan([])
 
-        index_file_handler = IndexFileHandler(table=self._table)
-
         partition_filter = self._partition_filter
 
         def contains_field(global_index_meta, field_id):
@@ -88,7 +85,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             return False
 
         def index_file_filter(entry):
-            if partition_filter is not None:
+            if partition_entries is None and partition_filter is not None:
                 if not partition_filter.test(entry.partition):
                     return False
             global_index_meta = entry.index_file.global_index_meta
@@ -104,7 +101,10 @@ class DataEvolutionVectorScan(VectorSearchScan):
                     return True
             return False
 
-        entries = index_file_handler.scan(snapshot, index_file_filter)
+        if partition_entries is None:
+            entries = IndexFileHandler(self._table).scan(snapshot, index_file_filter)
+        else:
+            entries = [entry for entry in partition_entries if index_file_filter(entry)]
         all_index_files = [entry.index_file for entry in entries]
 
         # Group vector index files by (rowRangeStart, rowRangeEnd).
@@ -177,7 +177,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             ).unindexed_ranges(
                 self._table.fields,
                 self._filter,
-                search_mode=effective_core.scalar_index_search_mode(),
+                search_mode=effective_core.scalar_prefilter_search_mode(),
             )
             if vector_search_mode == GlobalIndexSearchMode.FAST:
                 scalar_unindexed_ranges = Range.and_(

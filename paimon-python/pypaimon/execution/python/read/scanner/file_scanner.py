@@ -571,7 +571,7 @@ class FileScanner:
                 evaluation = scanner.scan_with_coverage(predicate)
                 if evaluation is None:
                     return None
-                scalar_mode = self.table.options.scalar_index_search_mode()
+                scalar_mode = self.table.options.scalar_scan_search_mode()
                 coverage_args = {}
                 if evaluation.indexed_ranges is not None:
                     coverage_args["indexed_ranges"] = evaluation.indexed_ranges

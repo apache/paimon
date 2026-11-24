@@ -8,6 +8,15 @@ Alibaba Storage Service Team. It is accessed via JNI through the `lumina-jni` ar
 
 **Note:** Lumina native library only supports **x86_64 (AMD64)** architecture. It is not available on ARM (e.g., Apple Silicon, aarch64).
 
+### Upgrading with Paimon
+
+Deploy `paimon-lumina` and the Paimon engine connector/runtime from the same Paimon
+release. For snapshot or custom builds, build both from the same source revision.
+The Java writer interface for multiple external index paths requires an updated
+Lumina plugin, even when only one external directory is configured or the option
+is unset. Replace the old plugin JAR when upgrading Paimon; updating only
+`lumina-jni` is insufficient.
+
 ### Supported Index Types
 
 | Index Type | Description |

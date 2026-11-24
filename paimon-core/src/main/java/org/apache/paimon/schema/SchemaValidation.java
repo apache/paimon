@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
@@ -31,6 +32,8 @@ import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TemplateEntropyInjectExternalPathProvider;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
@@ -390,7 +393,7 @@ public class SchemaValidation {
         }
 
         // vector field names must point to vector type
-        Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
+        Set<String> fieldNamesSpecifiedAsVector = options.vectorField(schema.fieldNames());
         schema.fields()
                 .forEach(
                         f ->
@@ -445,6 +448,44 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+
+        validateExternalPathTemplate(options);
+    }
+
+    public static void validateExternalPathStrategyChange(
+            @Nullable String previous, @Nullable String next) {
+        String template = ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE.toString();
+        if (template.equalsIgnoreCase(previous) != template.equalsIgnoreCase(next)) {
+            throw new UnsupportedOperationException(
+                    "Switching to or from " + template + " is not supported.");
+        }
+    }
+
+    private static void validateExternalPathTemplate(CoreOptions options) {
+        if (options.externalPathStrategy() != ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE) {
+            return;
+        }
+
+        checkArgument(
+                !options.isChainTable(),
+                "Chain tables do not support the '%s' external path strategy.",
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE);
+        String externalPaths = options.dataFileExternalPaths();
+        checkArgument(
+                externalPaths != null && !externalPaths.trim().isEmpty(),
+                "'%s' requires a non-empty template when '%s' is '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE);
+        String[] paths = externalPaths.split(",", -1);
+        checkArgument(
+                paths.length == 1,
+                "'%s' only accepts a single path when '%s' is '%s', but got %s.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE,
+                paths.length);
+        TemplateEntropyInjectExternalPathProvider.checkTemplate(new Path(paths[0].trim()));
     }
 
     /**

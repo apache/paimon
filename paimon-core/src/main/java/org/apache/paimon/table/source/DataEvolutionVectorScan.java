@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -36,6 +37,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -128,7 +130,6 @@ public class DataEvolutionVectorScan implements VectorScan {
         List<IndexFileMeta> scalarFiles = new ArrayList<>();
         // Only the primary field serves this vector search. Each split goes to its own index type.
         Map<Pair<Range, String>, List<IndexFileMeta>> rangeGroups = new HashMap<>();
-        List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : indexEntries) {
             IndexFileMeta file = entry.indexFile();
             GlobalIndexMeta meta = checkNotNull(file.globalIndexMeta());
@@ -136,7 +137,6 @@ public class DataEvolutionVectorScan implements VectorScan {
                 scalarFiles.add(file);
             }
             if (isPrimaryColumn(meta, vectorColumn.id())) {
-                vectorIndexFiles.add(file);
                 rangeGroups
                         .computeIfAbsent(
                                 Pair.of(meta.rowRange(), file.indexType()), k -> new ArrayList<>())
@@ -155,12 +155,18 @@ public class DataEvolutionVectorScan implements VectorScan {
                                         .collect(Collectors.toList()));
         List<VectorSearchSplit> splits = new ArrayList<>();
         List<Range> indexedRanges = new ArrayList<>();
+        List<Range> vectorCoverage = new ArrayList<>();
+        List<Range> bitmapCoverage = new ArrayList<>();
+        Map<Long, RowType> bitmapBuildSchemas = new HashMap<>();
         String scoringIndexType = null;
         for (Map.Entry<Pair<Range, String>, List<IndexFileMeta>> entry : rangeGroups.entrySet()) {
             List<IndexFileMeta> files = entry.getValue();
+            GlobalIndexMeta meta = checkNotNull(files.get(0).globalIndexMeta());
+            if (!hasExtraFields(meta) || CentroidIndexMeta.hasBitmapFields(meta)) {
+                vectorCoverage.add(meta.rowRange());
+            }
             // An all-null range still supplies coverage, but has no vectors to search or score.
-            if (files.stream().allMatch(file -> file.rowCount() == 0)
-                    && files.stream().anyMatch(CentroidIndexMeta::isRoutingModel)) {
+            if (files.size() == 1 && CentroidIndexMeta.isEmptyRouter(files.get(0))) {
                 continue;
             }
             String type = entry.getKey().getRight();
@@ -169,6 +175,11 @@ public class DataEvolutionVectorScan implements VectorScan {
             }
             Range range = entry.getKey().getLeft();
             indexedRanges.add(range);
+            if (!scalarFiles.isEmpty()
+                    && CentroidBitmapFilter.create(table, filter, files, bitmapBuildSchemas)
+                            != null) {
+                bitmapCoverage.add(range);
+            }
             splits.add(
                     new IndexVectorSearchSplit(
                             range.from,
@@ -183,16 +194,23 @@ public class DataEvolutionVectorScan implements VectorScan {
                                 table,
                                 snapshot,
                                 partitionFilter,
-                                vectorIndexFiles,
+                                Collections.emptyList(),
                                 vectorSearchMode)
-                        .unindexedRanges(vectorColumn.id());
+                        .unindexedRangesFromCoverage(vectorCoverage, null);
         if (filter != null) {
             List<Range> scalarUnindexedRanges =
                     scalarUnindexedRanges(
                             snapshot,
                             scalarFiles,
-                            effectiveOptions.scalarIndexSearchMode(),
+                            effectiveOptions.scalarPrefilterSearchMode(),
                             filterFieldIds);
+            if (!bitmapCoverage.isEmpty()) {
+                List<Range> covered = Range.sortAndMergeOverlap(bitmapCoverage, true);
+                scalarUnindexedRanges =
+                        scalarUnindexedRanges.stream()
+                                .flatMap(range -> range.exclude(covered).stream())
+                                .collect(Collectors.toList());
+            }
             if (vectorSearchMode == GlobalIndexSearchMode.FAST) {
                 scalarUnindexedRanges =
                         Range.and(
@@ -247,9 +265,10 @@ public class DataEvolutionVectorScan implements VectorScan {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
+        DataEvolutionIndexSchema schema = new DataEvolutionIndexSchema(table);
         DataEvolutionGlobalIndexCoverage coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table, snapshot, partitionFilter, scalarFiles, searchMode);
+                        table, snapshot, partitionFilter, scalarFiles, searchMode, schema);
         List<Range> dataRanges = coverage.unindexedRanges(Collections.emptySet(), null);
         boolean possiblyPartial = false;
         for (int fieldId : filterFieldIds) {
@@ -268,7 +287,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         // use the actual contributing fields so a declined OR arm does not generate raw work.
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForScalarFilters(
-                        table, snapshot, partitionFilter, scalarFiles);
+                        table, snapshot, partitionFilter, scalarFiles, searchMode, schema);
         if (!optionalScanner.isPresent()) {
             return Collections.emptyList();
         }
@@ -332,7 +351,8 @@ public class DataEvolutionVectorScan implements VectorScan {
     }
 
     private boolean canServeScalarFilter(GlobalIndexMeta meta) {
-        return !isPrimaryColumn(meta, vectorColumn.id()) || hasExtraFields(meta);
+        return !CentroidIndexMeta.hasBitmapFields(meta)
+                && (!isPrimaryColumn(meta, vectorColumn.id()) || hasExtraFields(meta));
     }
 
     private static boolean hasExtraFields(GlobalIndexMeta meta) {

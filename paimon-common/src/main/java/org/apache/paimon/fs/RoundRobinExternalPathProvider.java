@@ -18,6 +18,8 @@
 
 package org.apache.paimon.fs;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -25,11 +27,12 @@ import java.util.concurrent.ThreadLocalRandom;
 public class RoundRobinExternalPathProvider implements ExternalPathProvider {
 
     private final List<Path> externalTablePaths;
-    private final Path relativeBucketPath;
+    @Nullable private final Path relativeBucketPath;
 
     private int position;
 
-    public RoundRobinExternalPathProvider(List<Path> externalTablePaths, Path relativeBucketPath) {
+    public RoundRobinExternalPathProvider(
+            List<Path> externalTablePaths, @Nullable Path relativeBucketPath) {
         this.externalTablePaths = externalTablePaths;
         this.relativeBucketPath = relativeBucketPath;
         this.position = ThreadLocalRandom.current().nextInt(externalTablePaths.size());
@@ -46,6 +49,10 @@ public class RoundRobinExternalPathProvider implements ExternalPathProvider {
         if (position == externalTablePaths.size()) {
             position = 0;
         }
-        return new Path(new Path(externalTablePaths.get(position), relativeBucketPath), fileName);
+        Path parent = externalTablePaths.get(position);
+        if (relativeBucketPath != null) {
+            parent = new Path(parent, relativeBucketPath);
+        }
+        return new Path(parent, fileName);
     }
 }

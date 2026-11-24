@@ -27,6 +27,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
@@ -53,6 +54,7 @@ import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -889,6 +891,47 @@ public class FileStoreCommitTest {
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testDropPartitionsByPredicate() throws Exception {
+        Map<BinaryRow, List<KeyValue>> data =
+                generateData(ThreadLocalRandom.current().nextInt(50, 1000));
+        TestFileStore store = createStore(false);
+        store.commitData(
+                data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
+                gen::getPartition,
+                kv -> 0);
+
+        // A predicate on dt alone also drops an hr partition the first commit did not write.
+        BinaryString dropped = data.keySet().iterator().next().getString(0);
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        new PredicateBuilder(TestKeyValueGenerator.DEFAULT_PART_TYPE)
+                                .equal(0, dropped));
+        store.commitData(
+                Collections.singletonList(
+                        gen.nextPartitionedData(RowKind.INSERT, dropped.toString(), 10)),
+                gen::getPartition,
+                kv -> 0);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.dropPartitions(partitionFilter, Long.MAX_VALUE);
+        }
+
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        List<KeyValue> expectedKvs = new ArrayList<>();
+        data.forEach(
+                (partition, kvs) -> {
+                    if (!partition.getString(0).equals(dropped)) {
+                        expectedKvs.addAll(kvs);
+                    }
+                });
+        gen.sort(expectedKvs);
+        List<KeyValue> actualKvs = store.readKvsFromSnapshot(snapshot.id());
+        gen.sort(actualKvs);
+        assertThat(store.toKvMap(actualKvs)).isEqualTo(store.toKvMap(expectedKvs));
     }
 
     @Test
@@ -2430,11 +2473,8 @@ public class FileStoreCommitTest {
                         invocation -> {
                             ManifestCommittable committable = invocation.getArgument(0);
                             CommitMessage message = committable.fileCommittables().get(0);
-                            if (retried.get() == null) {
-                                retried.set(message);
-                            } else {
-                                assertThat(message).isSameAs(retried.get());
-                            }
+                            retried.compareAndSet(null, message);
+                            assertThat(message).isSameAs(retried.get());
                             committable.fileCommittables().set(0, message);
                             return null;
                         })
