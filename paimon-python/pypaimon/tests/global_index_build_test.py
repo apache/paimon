@@ -794,8 +794,6 @@ class GlobalIndexBuildTest(
             self.tempdir, 'global-index-external,archive')
         options = dict(self.table_options)
         options['global-index.external-path'] = external_root
-        options['global-index.external-paths'] = ','.join(
-            'file://%s' % os.path.join(self.tempdir, name) for name in ('index-a', 'index-b'))
         table = self._create_table(options=options)
         self._write_arrow(table, pa.table(
             {

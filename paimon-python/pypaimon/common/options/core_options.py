@@ -1031,7 +1031,7 @@ class CoreOptions:
         ConfigOptions.key("global-index.external-paths")
         .string_type()
         .no_default_value()
-        .with_description("Comma-separated global index root directories for Java index writers.")
+        .with_description("Comma-separated global index root directories.")
     )
 
     GLOBAL_INDEX_FILTER_REFINE_FROM_DATA: ConfigOption[bool] = (
@@ -1875,7 +1875,11 @@ class CoreOptions:
         return global_mode if global_mode is not None else self.options.get(option, default)
 
     def global_index_external_paths(self) -> List[str]:
-        """Return the configured legacy index root as a single URI."""
+        """Return configured index roots, with a legacy single-URI fallback."""
+        if self.options.contains(self.GLOBAL_INDEX_EXTERNAL_PATHS):
+            values = (self.options.get(self.GLOBAL_INDEX_EXTERNAL_PATHS) or '').split(',')
+            return [path for path in map(str.strip, values) if path]
+
         value = self.options.to_map().get("global-index.external-path")
         if value is None:
             return []

@@ -19,6 +19,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.index.index_file_handler import IndexFileHandler
 
 
@@ -61,6 +63,18 @@ def _multiple_paths(tmp_path):
     return ', '.join((tmp_path / name).as_uri() for name in ('index-a', 'index-b')) + ','
 
 
+def test_global_index_external_paths(tmp_path):
+    legacy = tmp_path.as_uri() + '/index,archive'
+    roots = [(tmp_path / name).as_uri() for name in ('index-a', 'index-b')]
+    options = Options({'global-index.external-path': legacy})
+    core = CoreOptions(options)
+    assert core.global_index_external_paths() == [legacy]
+    options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, _multiple_paths(tmp_path))
+    assert core.global_index_external_paths() == roots
+    options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, '')
+    assert core.global_index_external_paths() == []
+
+
 @pytest.mark.parametrize('native', ['false', 'true'])
 def test_partition_delete_with_external_index_paths(tmp_path, native):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
@@ -100,11 +114,15 @@ def test_partition_delete_with_external_index_paths(tmp_path, native):
 
 
 @pytest.mark.parametrize('dynamic', [False, True])
-def test_legacy_comma_uri_supports_bucket_index_writes_and_reads(tmp_path, dynamic):
-    root = tmp_path.as_uri() + '/index,archive'
-    table = _table(tmp_path, dynamic=dynamic, options={
-        'global-index.external-path': root, _OPTION: _multiple_paths(tmp_path),
-    })
+@pytest.mark.parametrize('use_path_list', [False, True])
+def test_external_bucket_index_writes_and_reads(tmp_path, dynamic, use_path_list):
+    legacy = tmp_path.as_uri() + '/index,archive'
+    options = {'global-index.external-path': legacy}
+    root = legacy
+    if use_path_list:
+        options[_OPTION] = _multiple_paths(tmp_path)
+        root = (tmp_path / 'index-a').as_uri()
+    table = _table(tmp_path, dynamic=dynamic, options=options)
     _append(table)
     if not dynamic:
         builder = table.new_batch_write_builder()
@@ -119,7 +137,7 @@ def test_legacy_comma_uri_supports_bucket_index_writes_and_reads(tmp_path, dynam
         path = entry.index_file.external_path
         assert path.startswith(root + '/')
         assert table.file_io.exists(path)
-    assert (tmp_path / 'index,archive').is_dir()
+    assert (tmp_path / ('index-a' if use_path_list else 'index,archive')).is_dir()
     assert not (tmp_path / 'index').exists()
     reader = table.new_read_builder()
     ids = reader.new_read().to_arrow(reader.new_scan().plan().splits())['id'].to_pylist()
