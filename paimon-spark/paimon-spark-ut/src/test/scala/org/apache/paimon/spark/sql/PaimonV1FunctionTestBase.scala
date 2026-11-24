@@ -455,7 +455,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
       // Spark 4.2 rewords this error, and 4.3 also quotes the name
       val expected =
         if (gteqSpark4_2) "is a temporary function. 'DROP FUNCTION' expects a persistent function"
-        else "is a built-in/temporary function"
+        else "udf_add2 is a built-in/temporary function"
       assert(message.contains("udf_add2") && message.contains(expected), message)
     }
   }
