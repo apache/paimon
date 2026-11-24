@@ -309,11 +309,9 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                         trainingRows,
                         indexer,
                         context.getter(context.trainingReadType()));
-        String modelId = UUID.randomUUID().toString();
         if (payload == null) {
             // Record coverage so an all-null interval also satisfies index visibility checks.
-            return Collections.singletonList(
-                    writeRouter(context, indexer, new byte[0], modelId, 0));
+            return Collections.singletonList(writeRouter(context, indexer, new byte[0], 0));
         }
         int nlist;
         try (VectorTrainingModel model = indexer.restoreTrainingModel(payload)) {
@@ -347,12 +345,11 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                                     input,
                                                     partition,
                                                     parallelism,
-                                                    nlist,
-                                                    modelId),
+                                                    nlist),
                                     false)
                             .collect();
             List<CommitMessage> messages = CommitMessageSerializer.deserializeAll(results);
-            messages.add(writeRouter(context, indexer, payload, modelId, nlist));
+            messages.add(writeRouter(context, indexer, payload, nlist));
             return messages;
         } finally {
             broadcast.destroy();
@@ -360,18 +357,14 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
     }
 
     private static CommitMessage writeRouter(
-            BuildContext context,
-            CentroidVectorGlobalIndexer indexer,
-            byte[] payload,
-            String modelId,
-            int nlist)
+            BuildContext context, CentroidVectorGlobalIndexer indexer, byte[] payload, int nlist)
             throws IOException {
         GlobalIndexFileReadWrite io = context.io();
         String modelFile =
                 "vector-"
                         + context.indexType
                         + "-global-index-training-model-"
-                        + modelId
+                        + UUID.randomUUID()
                         + ".index";
         IndexFileMeta modelMeta =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
@@ -383,11 +376,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                                 context.indexType,
                                 Collections.singletonList(
                                         CentroidIndexMeta.router(
-                                                indexer.writeRoutingModel(
-                                                        io, modelFile, payload, modelId),
-                                                modelId,
-                                                nlist,
-                                                context.hasBitmaps())),
+                                                indexer.writeRoutingModel(io, modelFile, payload),
+                                                nlist)),
                                 context.sourceMeta())
                         .get(0);
         return context.message(Collections.singletonList(modelMeta));
@@ -523,8 +513,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
             Iterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> rows,
             int partition,
             int parallelism,
-            int nlist,
-            String modelId)
+            int nlist)
             throws Exception {
         List<byte[]> commits = new ArrayList<>();
         PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input =
@@ -548,13 +537,12 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 }
                 List<ResultEntry> files = new ArrayList<>();
                 for (ResultEntry file : writer.finish()) {
-                    files.add(
-                            CentroidIndexMeta.shard(file, modelId, centroid, context.hasBitmaps()));
+                    files.add(CentroidIndexMeta.shard(file, centroid));
                 }
                 if (bitmapSorters != null) {
                     files.add(
                             CentroidIndexMeta.scalarIndex(
-                                    bitmapSorters.finish(context, io), modelId, centroid));
+                                    bitmapSorters.finish(context, io), centroid));
                 }
                 commits.add(context.finish(files));
             } finally {
@@ -620,7 +608,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                 throws IOException {
             List<DataField> fields = context.extraFields();
             try (CentroidBitmapIndex.Writer writer =
-                    new CentroidBitmapIndex.Writer(files, context.schemaId, fields.size(), count)) {
+                    new CentroidBitmapIndex.Writer(files, fields.size(), count)) {
                 for (int i = 0; i < fields.size(); i++) {
                     DataField field = fields.get(i);
                     BinaryExternalSortBuffer buffer = buffers.get(i);

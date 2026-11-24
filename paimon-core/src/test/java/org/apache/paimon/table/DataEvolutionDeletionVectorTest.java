@@ -27,6 +27,8 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorRewritePlanner;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorRewriteTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionRangeSortPlan;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
@@ -37,8 +39,10 @@ import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -128,6 +132,178 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                     new DvSpec(new Range(0, 4), 1, 4),
                     new DvSpec(new Range(5, 9), 6),
                     new DvSpec(new Range(10, 14), 10, 12));
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDistributedDvRewriteWithSharedOldIndexes(boolean splitTasks) throws Exception {
+        FileStoreTable table = createPartitionedReassignTable("distributed_dv", false);
+        for (int first = 0; first < 18; first += 3) {
+            writePartitionRows(table, "a", first, first + 1, first + 2);
+        }
+        BinaryRow partition = partition(table, "a");
+        // The first index is shared by both compact messages and an untouched anchor.
+        commitDeletionVectors(
+                table,
+                partition,
+                Arrays.asList(
+                        new DvSpec(new Range(0, 2), 1),
+                        new DvSpec(new Range(6, 8), 7),
+                        new DvSpec(new Range(12, 14), 13)));
+        commitDeletionVectors(
+                table,
+                partition,
+                Arrays.asList(
+                        new DvSpec(new Range(3, 5), 4),
+                        new DvSpec(new Range(9, 11), 10),
+                        new DvSpec(new Range(15, 17), 16)));
+        List<String> rows = readPartitionedRows(table);
+        List<String> oldIndexes = liveDeletionVectorIndexFileNames(table);
+        assertThat(oldIndexes).hasSize(2);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<DataFileMeta> files = currentDataFiles(table, partition);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (long first : new long[] {0, 6}) {
+            List<DataFileMeta> inputs =
+                    files.stream()
+                            .filter(
+                                    file ->
+                                            file.nonNullFirstRowId() >= first
+                                                    && file.nonNullFirstRowId() < first + 6)
+                            .collect(Collectors.toList());
+            messages.add(
+                    new DataEvolutionNormalCompactTask(
+                                    partition, inputs, Collections.emptyList(), false)
+                            .doCompact(table, "distributed-dv"));
+        }
+        FileStoreTable rewriteTable =
+                splitTasks
+                        ? table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DELETION_VECTOR_INDEX_FILE_TARGET_SIZE.key(),
+                                        "1 b"))
+                        : table;
+        List<DataEvolutionDeletionVectorRewriteTask> tasks =
+                new DataEvolutionDeletionVectorRewritePlanner(rewriteTable, snapshot)
+                        .plan(messages);
+        if (splitTasks) {
+            assertThat(tasks.size()).isGreaterThan(1);
+        } else {
+            assertThat(tasks).hasSize(1);
+        }
+        // Reverse execution order after transport, so no task can depend on another's bitmap
+        // output.
+        Collections.reverse(tasks);
+        DataEvolutionDeletionVectorRewriteTask.Serializer serializer =
+                new DataEvolutionDeletionVectorRewriteTask.Serializer();
+        List<String> deleted = new ArrayList<>();
+        List<IndexFileMeta> added = new ArrayList<>();
+        for (DataEvolutionDeletionVectorRewriteTask task : tasks) {
+            CommitMessage rewritten =
+                    serializer
+                            .deserialize(serializer.getVersion(), serializer.serialize(task))
+                            .execute(rewriteTable);
+            CompactIncrement increment = ((CommitMessageImpl) rewritten).compactIncrement();
+            increment.deletedIndexFiles().forEach(file -> deleted.add(file.fileName()));
+            added.addAll(increment.newIndexFiles());
+            messages.add(rewritten);
+        }
+        assertThat(deleted).containsExactlyInAnyOrderElementsOf(oldIndexes);
+        if (!splitTasks) {
+            assertThat(added).hasSize(3);
+        }
+        commit(table, messages);
+        assertThat(readPartitionedRows(table)).containsExactlyInAnyOrderElementsOf(rows);
+        assertThat(liveDeletionVectorDataFileNames(table)).hasSize(4);
+
+        // Prepare both deletes from the same snapshot. Retained anchors from different old indexes
+        // must remain independently updatable after compaction.
+        CommitMessage firstDelete =
+                prepareDeletionVectors(
+                        table,
+                        partition,
+                        Collections.singletonList(new DvSpec(new Range(12, 14), 14)));
+        CommitMessage secondDelete =
+                prepareDeletionVectors(
+                        table,
+                        partition,
+                        Collections.singletonList(new DvSpec(new Range(15, 17), 17)));
+        commit(table, Collections.singletonList(firstDelete));
+        commit(table, Collections.singletonList(secondDelete));
+        assertThat(readPartitionedRows(table))
+                .containsExactlyInAnyOrderElementsOf(
+                        rows.stream()
+                                .filter(row -> !row.startsWith("a|14|") && !row.startsWith("a|17|"))
+                                .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testFailedDvRewriteRemovesPreviousTaskOutputs() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("failed_dv_rewrite", false)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DELETION_VECTOR_INDEX_FILE_TARGET_SIZE.key(),
+                                        "1 b"));
+        for (int first = 0; first < 12; first += 3) {
+            writePartitionRows(table, "a", first, first + 1, first + 2);
+        }
+        BinaryRow partition = partition(table, "a");
+        for (long first : new long[] {0, 6}) {
+            commitDeletionVectors(
+                    table,
+                    partition,
+                    Collections.singletonList(new DvSpec(new Range(first, first + 2), first + 1)));
+        }
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<DataFileMeta> files = currentDataFiles(table, partition);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (long first : new long[] {0, 6}) {
+            List<DataFileMeta> inputs =
+                    files.stream()
+                            .filter(
+                                    file ->
+                                            file.nonNullFirstRowId() >= first
+                                                    && file.nonNullFirstRowId() < first + 6)
+                            .collect(Collectors.toList());
+            messages.add(
+                    new DataEvolutionNormalCompactTask(
+                                    partition, inputs, Collections.emptyList(), false)
+                            .doCompact(table, "failed-dv-rewrite"));
+        }
+        assertThat(new DataEvolutionDeletionVectorRewritePlanner(table, snapshot).plan(messages))
+                .hasSizeGreaterThan(1);
+
+        IndexFileHandler handler = table.store().newIndexFileHandler();
+        DeletionVectorsIndexFile index = handler.dvIndex(partition, UNAWARE_BUCKET);
+        List<IndexFileMeta> oldIndexes =
+                handler.scan(snapshot, DELETION_VECTORS_INDEX, partition, UNAWARE_BUCKET);
+        String unreadableAnchor = anchorFilesByRange(table, partition).get(new Range(6, 8));
+        IndexFileMeta unreadable =
+                oldIndexes.stream()
+                        .filter(file -> file.dvRanges().containsKey(unreadableAnchor))
+                        .findFirst()
+                        .get();
+        table.fileIO().delete(index.path(unreadable), false);
+        Path indexDirectory = index.path(unreadable).getParent();
+        Set<Path> filesBefore =
+                Arrays.stream(table.fileIO().listStatus(indexDirectory))
+                        .map(status -> status.getPath())
+                        .collect(Collectors.toSet());
+
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionCompactDeletionVectorRewriter(table, snapshot)
+                                        .rewriteDeletionVectors(messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Unable to read deletion vector");
+
+        assertThat(
+                        Arrays.stream(table.fileIO().listStatus(indexDirectory))
+                                .map(status -> status.getPath())
+                                .collect(Collectors.toSet()))
+                .isEqualTo(filesBefore);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshot.id());
+    }
 
     @Test
     public void testCompactScansDeletionVectorIndexesOnceAcrossPartitions() throws Exception {
@@ -795,6 +971,51 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         List<String> liveDeletionVectorDataFileNames = liveDeletionVectorDataFileNames(table);
         assertThat(liveDeletionVectorDataFileNames).containsExactly(newAnchorFile);
         assertThat(liveDeletionVectorDataFileNames).doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testEqualRangeCompactionConvertsBitmapFormat(boolean bitmap64) throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("equal_range_bitmap", false)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DELETION_VECTOR_BITMAP64.key(),
+                                        String.valueOf(!bitmap64)));
+        writePartitionRows(table, "a", 0, 1, 2);
+        BinaryRow partition = partition(table, "a");
+        Range range = new Range(0, 2);
+        commitDeletionVectors(table, partition, Collections.singletonList(new DvSpec(range, 0)));
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTOR_BITMAP64.key(),
+                                String.valueOf(bitmap64)));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = new ArrayList<>();
+        messages.add(
+                new DataEvolutionNormalCompactTask(
+                                partition,
+                                currentDataFiles(table, partition),
+                                Collections.emptyList(),
+                                false)
+                        .doCompact(table, "equal-range-bitmap"));
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        commit(table, messages);
+
+        DeletionVector rewritten =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                                table.store().newIndexFileHandler(),
+                                table.latestSnapshot().get(),
+                                partition)
+                        .getDeletionVector(anchorFilesByRange(table, partition).get(range));
+        assertThat(rewritten)
+                .isInstanceOf(bitmap64 ? Bitmap64DeletionVector.class : BitmapDeletionVector.class);
+        assertThat(readPartitionedRows(table)).containsExactly("a|1|base-1", "a|2|base-2");
+        commitDeletionVectors(table, partition, Collections.singletonList(new DvSpec(range, 2)));
+        assertThat(readPartitionedRows(table)).containsExactly("a|1|base-1");
     }
 
     @ParameterizedTest
@@ -2112,6 +2333,14 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     private void commitDeletionVectors(
             FileStoreTable table, BinaryRow partition, List<DvSpec> deletionVectorSpecs)
             throws Exception {
+        commit(
+                table,
+                Collections.singletonList(
+                        prepareDeletionVectors(table, partition, deletionVectorSpecs)));
+    }
+
+    private CommitMessage prepareDeletionVectors(
+            FileStoreTable table, BinaryRow partition, List<DvSpec> deletionVectorSpecs) {
         BaseAppendDeleteFileMaintainer maintainer =
                 BaseAppendDeleteFileMaintainer.forUnawareAppend(
                         table.store().newIndexFileHandler(),
@@ -2120,7 +2349,10 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         Map<Range, String> anchorFiles = anchorFilesByRange(table, partition);
 
         for (DvSpec spec : deletionVectorSpecs) {
-            DeletionVector deletionVector = new BitmapDeletionVector();
+            DeletionVector deletionVector =
+                    table.coreOptions().deletionVectorBitmap64()
+                            ? new Bitmap64DeletionVector()
+                            : new BitmapDeletionVector();
             for (long rowId : spec.deletedRowIds) {
                 deletionVector.delete(rowId - spec.range.from);
             }
@@ -2137,20 +2369,17 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
             }
         }
 
-        commit(
-                table,
-                Collections.singletonList(
-                        new CommitMessageImpl(
-                                partition,
-                                UNAWARE_BUCKET,
-                                null,
-                                new DataIncrement(
-                                        Collections.emptyList(),
-                                        Collections.emptyList(),
-                                        Collections.emptyList(),
-                                        newIndexFiles,
-                                        deletedIndexFiles),
-                                CompactIncrement.emptyIncrement())));
+        return new CommitMessageImpl(
+                partition,
+                UNAWARE_BUCKET,
+                null,
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        newIndexFiles,
+                        deletedIndexFiles),
+                CompactIncrement.emptyIncrement());
     }
 
     private static void commit(FileStoreTable table, List<CommitMessage> commitMessages)

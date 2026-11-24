@@ -19,6 +19,7 @@
 """Tests for LocalDiskCacheManager, CachingInputStream, and CachingFileIO."""
 
 import gc
+import hashlib
 import io
 import multiprocessing
 import os
@@ -156,6 +157,43 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
         new_dir = os.path.join(self.cache_dir, "sub", "deep")
         LocalDiskCacheManager(new_dir, 2 ** 63 - 1, block_size=64)
         self.assertTrue(os.path.isdir(new_dir))
+
+    def test_invalidate_after_restart_removes_all_block_sizes(self):
+        for block_size in (32, 64):
+            cache = LocalDiskCacheManager(self.cache_dir, 1024, block_size)
+            cache.put_block("snapshot-2", 0, b"old")
+            cache.put_block("snapshot-2", 9, b"last")
+            cache.put_block("other/snapshot-2", 0, b"keep")
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, 128)
+        cache.invalidate("snapshot-2")
+        cache.invalidate("snapshot-2")
+        self.assertEqual(8, cache._current_size)
+        for block_size in (32, 64):
+            reopened = LocalDiskCacheManager(self.cache_dir, 1024, block_size)
+            self.assertIsNone(reopened.get_block("snapshot-2", 0))
+            self.assertIsNone(reopened.get_block("snapshot-2", 9))
+            self.assertEqual(b"keep", reopened.get_block("other/snapshot-2", 0))
+
+    def test_legacy_cache_blocks_are_not_reused(self):
+        old_key = hashlib.sha256(b"64:snapshot-2:0").hexdigest()
+        directory = os.path.join(self.cache_dir, old_key[:2])
+        os.makedirs(directory)
+        with open(os.path.join(directory, old_key), "wb") as stream:
+            stream.write(b"old")
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, 64)
+        self.assertIsNone(cache.get_block("snapshot-2", 0))
+        cache.put_block("snapshot-2", 0, b"new")
+        self.assertEqual(b"new", cache.get_block("snapshot-2", 0))
+
+    def test_invalidate_reports_failed_cache_removal(self):
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, 64)
+        cache.put_block("snapshot-2", 0, b"old")
+        with patch("os.unlink", side_effect=PermissionError("read-only cache")):
+            with self.assertRaises(PermissionError):
+                cache.invalidate("snapshot-2")
+        self.assertEqual(3, cache._current_size)
+        cache.invalidate("snapshot-2")
+        self.assertEqual(0, cache._current_size)
 
     def test_concurrent_put_get(self):
         cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
@@ -516,6 +554,30 @@ class CachingFileIOTest(unittest.TestCase):
         self.assertEqual(data, result2)
         # get_file_size called only once — second stream gets size from cache
         self.assertEqual(1, delegate.get_file_size.call_count)
+
+    def test_invalidate_reloads_blocks_and_length_only_for_target(self):
+        for disk in (False, True):
+            with self.subTest(disk=disk):
+                cache = (LocalDiskCacheManager(self.cache_dir, 1024, 4) if disk
+                         else LocalMemoryCacheManager(1024, 4))
+                values = {"snapshot-2": b"old contents", "other/schema-1": b"keep"}
+                delegate = self._make_delegate(values)
+                file_io = CachingFileIO(delegate, cache)
+                self.assertEqual(values["snapshot-2"], file_io.read_file_utf8("snapshot-2").encode())
+                self.assertEqual("keep", file_io.read_file_utf8("other/schema-1"))
+                for value in (b"x", b"a longer replacement"):
+                    values["snapshot-2"] = value
+                    file_io.invalidate_cache(["snapshot-2"])
+                    self.assertEqual(-1, cache.get_file_size("snapshot-2"))
+                    self.assertEqual(4, cache.get_file_size("other/schema-1"))
+                    self.assertEqual(b"keep", cache.get_block("other/schema-1", 0))
+                    self.assertEqual(4, cache._current_size)
+                    delegate.new_input_stream.reset_mock()
+                    delegate.get_file_size.reset_mock()
+                    self.assertEqual("keep", file_io.read_file_utf8("other/schema-1"))
+                    delegate.new_input_stream.assert_not_called()
+                    delegate.get_file_size.assert_not_called()
+                    self.assertEqual(value.decode(), file_io.read_file_utf8("snapshot-2"))
 
     def test_manifest_file_is_cached(self):
         data = b"manifest data"

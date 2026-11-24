@@ -561,12 +561,16 @@ class FileStoreCommit:
                 # Automatic rollback can delete snapshots and tags already used by readers.
                 raise conflict_exception
 
-        # Capture existing-row updates before assigning row IDs to new appends.
+        # Capture changes to existing rows before assigning row IDs to new appends.
         # Deletion vectors make mixed update/delete commits OVERWRITE.
-        update_files = [
-            entry.file for entry in commit_entries
-            if entry.kind == 0 and entry.file.first_row_id is not None
-        ] if commit_kind in ('APPEND', 'OVERWRITE') and self.table.options.data_evolution_enabled() else []
+        existing_row_changes = (
+            [entry for entry in commit_entries if entry.file.first_row_id is not None]
+            if commit_kind in ('APPEND', 'OVERWRITE') and self.table.options.data_evolution_enabled() else [])
+        update_files = [entry.file for entry in existing_row_changes if entry.kind == 0]
+        if existing_row_changes and latest_snapshot is not None and latest_snapshot.index_manifest is not None:
+            from pypaimon.execution.python.write.commit.global_index_source_check import check_retained_centroid_indexes
+            check_retained_centroid_indexes(
+                self.conflict_detection, latest_snapshot, existing_row_changes, index_entries)
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
         row_tracking_enabled = self.table.options.row_tracking_enabled()

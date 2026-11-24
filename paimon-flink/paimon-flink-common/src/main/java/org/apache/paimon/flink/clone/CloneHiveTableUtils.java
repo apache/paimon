@@ -54,6 +54,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -72,6 +73,27 @@ public class CloneHiveTableUtils {
             @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
             StreamExecutionEnvironment env)
+            throws Exception {
+        return env.fromCollection(
+                        listSourceTables(
+                                sourceDatabase,
+                                sourceTableName,
+                                targetDatabase,
+                                targetTableName,
+                                sourceCatalog,
+                                includedTables,
+                                excludedTables))
+                .forceNonParallel();
+    }
+
+    private static List<Tuple2<Identifier, Identifier>> listSourceTables(
+            String sourceDatabase,
+            String sourceTableName,
+            String targetDatabase,
+            String targetTableName,
+            Catalog sourceCatalog,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables)
             throws Exception {
         List<Tuple2<Identifier, Identifier>> result = new ArrayList<>();
         HiveCatalog hiveCatalog = getRootHiveCatalog(sourceCatalog);
@@ -131,7 +153,7 @@ public class CloneHiveTableUtils {
         if (LOG.isDebugEnabled()) {
             LOG.debug("The clone identifiers of source table and target table are: {}", result);
         }
-        return env.fromCollection(result).forceNonParallel();
+        return result;
     }
 
     public static HiveCatalog getRootHiveCatalog(Catalog catalog) {
@@ -160,17 +182,62 @@ public class CloneHiveTableUtils {
             boolean metaOnly,
             boolean cloneIfExists)
             throws Exception {
+        build(
+                env,
+                sourceCatalog,
+                sourceDatabase,
+                sourceTableName,
+                sourceCatalogConfig,
+                targetDatabase,
+                targetTableName,
+                targetCatalogConfig,
+                parallelism,
+                whereSql,
+                includedTables,
+                excludedTables,
+                preferFileFormat,
+                metaOnly,
+                cloneIfExists,
+                false,
+                false);
+    }
+
+    public static void build(
+            StreamExecutionEnvironment env,
+            Catalog sourceCatalog,
+            String sourceDatabase,
+            String sourceTableName,
+            Map<String, String> sourceCatalogConfig,
+            String targetDatabase,
+            String targetTableName,
+            Map<String, String> targetCatalogConfig,
+            int parallelism,
+            @Nullable String whereSql,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat,
+            boolean metaOnly,
+            boolean cloneIfExists,
+            boolean copyFiles,
+            boolean recursiveListing)
+            throws Exception {
         // list source tables
-        DataStream<Tuple2<Identifier, Identifier>> source =
-                buildSource(
+        List<Tuple2<Identifier, Identifier>> tables =
+                listSourceTables(
                         sourceDatabase,
                         sourceTableName,
                         targetDatabase,
                         targetTableName,
                         sourceCatalog,
                         includedTables,
-                        excludedTables,
-                        env);
+                        excludedTables);
+        if (copyFiles) {
+            org.apache.paimon.hive.clone.HiveCloneUtils.checkCopyFilesSupported(
+                    getRootHiveCatalog(sourceCatalog),
+                    tables.stream().map(t -> t.f0).collect(Collectors.toList()));
+        }
+        DataStream<Tuple2<Identifier, Identifier>> source =
+                env.fromCollection(tables).forceNonParallel();
 
         DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
                 FlinkStreamPartitioner.partition(
@@ -184,7 +251,8 @@ public class CloneHiveTableUtils {
                                         sourceCatalogConfig,
                                         targetCatalogConfig,
                                         preferFileFormat,
-                                        cloneIfExists))
+                                        cloneIfExists,
+                                        copyFiles))
                         .name("Clone Schema")
                         .setParallelism(parallelism);
 
@@ -198,7 +266,12 @@ public class CloneHiveTableUtils {
                 sourceCatalogConfig, targetCatalogConfig, parallelism, whereSql, schemaInfos);
 
         buildForCloneFile(
-                sourceCatalogConfig, targetCatalogConfig, parallelism, whereSql, schemaInfos);
+                sourceCatalogConfig,
+                targetCatalogConfig,
+                parallelism,
+                whereSql,
+                schemaInfos,
+                recursiveListing);
     }
 
     public static void buildForCloneSplits(
@@ -246,6 +319,22 @@ public class CloneHiveTableUtils {
             int parallelism,
             @Nullable String whereSql,
             DataStream<CloneSchemaInfo> schemaInfos) {
+        buildForCloneFile(
+                sourceCatalogConfig,
+                targetCatalogConfig,
+                parallelism,
+                whereSql,
+                schemaInfos,
+                false);
+    }
+
+    public static void buildForCloneFile(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            int parallelism,
+            @Nullable String whereSql,
+            DataStream<CloneSchemaInfo> schemaInfos,
+            boolean recursiveListing) {
         // list files and group by <table, partition>
         DataStream<CloneFileInfo> files =
                 schemaInfos
@@ -253,7 +342,10 @@ public class CloneHiveTableUtils {
                         .rebalance()
                         .process(
                                 new ListCloneFilesFunction(
-                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
+                                        sourceCatalogConfig,
+                                        targetCatalogConfig,
+                                        whereSql,
+                                        recursiveListing))
                         .name("List Files")
                         .setParallelism(parallelism);
 

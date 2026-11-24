@@ -413,6 +413,29 @@ class CoreOptions:
         )
     )
 
+    VORTEX_COMPACT_ENCODINGS: ConfigOption[bool] = (
+        ConfigOptions.key("vortex.compact-encodings")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether Python writers use the compact Vortex encodings, which make files smaller "
+            "and reads somewhat slower. Java writers always use the default encodings.")
+    )
+
+    VORTEX_WRITE_EDITION: ConfigOption[str] = (
+        ConfigOptions.key("vortex.write.edition")
+        .string_type()
+        .default_value("core2025.10.0")
+        .with_description(
+            "The Vortex edition that writers use. An edition sets the encodings and layouts that "
+            "a file can contain, and each edition has a minimum Vortex version that can read it. "
+            "The default, core2025.10.0, is readable by Paimon 2.0 and 2.1 in Java and in "
+            "PyPaimon. Set a newer edition, for example core2026.08.3, only after all readers of the table use a "
+            "Vortex version that reads it. After a file is written with a newer edition, older "
+            "readers cannot read it, so a roll back of the readers then also needs a rewrite of "
+            "these files.")
+    )
+
     MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
         ConfigOptions.key("mosaic.num-buckets")
         .int_type()
@@ -1458,6 +1481,12 @@ class CoreOptions:
             return [str(column).strip() for column in value if str(column).strip()]
         return []
 
+    def vortex_compact_encodings(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_COMPACT_ENCODINGS, default)
+
+    def vortex_write_edition(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_WRITE_EDITION, default)
+
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
 
@@ -1917,6 +1946,13 @@ class CoreOptions:
     def _index_columns(columns) -> List[str]:
         return [] if columns is None else [column.strip() for column in str(columns).split(',')]
 
+    @staticmethod
+    def _field_index_option_keys(index_type: str, column: str):
+        field = "fields.%s." % column
+        family = "vector" if CoreOptions._is_vector_index_type(index_type) else index_type
+        return (field + "index-options", field + "global-index.%s.index-options" % family,
+                field + "pk-%s.index.options" % family)
+
     def global_index_options(self, index_type: Optional[str], column: str) -> Options:
         """Resolve the same implementation and field options for either table mode."""
         values = dict(self.options.to_map())
@@ -1925,10 +1961,9 @@ class CoreOptions:
         vector = self._is_vector_index_type(index_type)
         prefix = index_type + ("." if vector or index_type == "full-text" else "-index.")
         field_prefix = "fields.%s." % column
-        shared_key = field_prefix + "index-options"
-        shared = values.get(shared_key) is not None
-        option_key = shared_key if shared else field_prefix + "pk-" + (
-            "vector" if vector else index_type) + ".index.options"
+        keys = self._field_index_option_keys(index_type, column)
+        option_key = next((key for key in keys if values.get(key) is not None), keys[-1])
+        shared = option_key == keys[0]
         serialized = values.get(option_key)
         if serialized is not None and str(serialized).strip():
             try:
@@ -1951,7 +1986,7 @@ class CoreOptions:
                 values[qualified] = str(value)
                 if vector and qualified.startswith(prefix):
                     short_key = qualified[len(prefix):]
-                    if shared:
+                    if shared or option_key == keys[1] or short_key == "sharding":
                         values[field_prefix + short_key] = str(value)
         return Options(values)
 

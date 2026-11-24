@@ -20,13 +20,16 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionDeletionVectorRewritePlanner, DataEvolutionDeletionVectorRewriteTask, DataEvolutionNormalCompactTask}
+import org.apache.paimon.data.{BinaryRow, BinaryString, GenericRow}
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.format.blob.BlobFileFormat
-import org.apache.paimon.fs.Path
-import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.fs.{Path, SeekableInputStream}
+import org.apache.paimon.fs.local.LocalFileIO
+import org.apache.paimon.index.IndexFileMeta
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta}
 import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.operation.LocalOrphanFilesClean
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -34,12 +37,14 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.commands.{DataEvolutionCompactMergeConflictRewriter, DataEvolutionPaimonWriter, PaimonSparkWriter}
 import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.CommitMessageImpl
+import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable}
+import org.apache.paimon.table.BucketMode.UNAWARE_BUCKET
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, TableCommitImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
 
+import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.api.java.JavaSparkContext
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
@@ -50,10 +55,12 @@ import org.assertj.core.api.Assertions
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.scalatest.time.Span
 
+import java.io.IOException
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
 import scala.collection.JavaConverters._
@@ -3001,7 +3008,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
       val snapshotBefore = lastSnapshotId(table)
 
-      executeDataEvolutionCompaction(table, candidateFilesPerBatch = 2)
+      executeDataEvolutionCompaction(
+        table.copy(Map("deletion-vector.index-file.target-size" -> "1 b").asJava),
+        candidateFilesPerBatch = 2)
 
       Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
       Assertions
@@ -3013,6 +3022,286 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
       )
     }
+  }
+
+  test("Paimon Procedure: clean outputs of failed deletion vector rewrite partitions") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true', 'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'zero')")
+      sql("INSERT INTO T VALUES (1, 'one')")
+      sql("DELETE FROM T WHERE id = 0")
+      val table = loadTable("T").copy(Map("deletion-vector.index-file.target-size" -> "1 b").asJava)
+      val snapshot = table.latestSnapshot().get()
+      val compact = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalDataFiles(table).asJava,
+        util.Collections.emptyList[Range](),
+        false).doCompact(table, "failed-dv-rewrite")
+      val tasks = new DataEvolutionDeletionVectorRewritePlanner(table, snapshot)
+        .plan(util.Collections.singletonList(compact))
+      val serializer = new DataEvolutionDeletionVectorRewriteTask.Serializer()
+      val taskBytes = serializer.serialize(tasks.get(0))
+      val handler = table.store().newIndexFileHandler()
+      val oldIndex = handler.scan(snapshot, DELETION_VECTORS_INDEX, BinaryRow.EMPTY_ROW, 0).get(0)
+      val directory = handler.dvIndex(BinaryRow.EMPTY_ROW, 0).path(oldIndex).getParent
+      def indexFiles(): Set[Path] = table.fileIO().listStatus(directory).map(_.getPath).toSet
+      val filesBefore = indexFiles()
+
+      // The first rewrite writes a file; deserializing the following task then fails.
+      assertThatThrownBy(
+        () =>
+          DataEvolutionRewriteExecutor.rewriteDeletionVectorPartition(
+            table,
+            util.Arrays.asList(taskBytes, Array.emptyByteArray).iterator(),
+            null))
+        .isInstanceOf(classOf[java.io.IOException])
+      Assertions.assertThat(indexFiles()).isEqualTo(filesBefore)
+
+      Seq("success", "failure", "cancel").foreach {
+        outcome =>
+          val module = Class.forName("org.apache.spark.TaskContext$").getField("MODULE$").get(null)
+          val context = module.getClass.getMethod("empty").invoke(module).asInstanceOf[TaskContext]
+          val messages = DataEvolutionRewriteExecutor.rewriteDeletionVectorPartition(
+            table,
+            util.Collections.singletonList(taskBytes).iterator(),
+            context)
+          assert(!messages.isEmpty)
+          val outputs = indexFiles() -- filesBefore
+          assert(outputs.nonEmpty)
+          if (outcome == "failure") {
+            context.getClass
+              .getMethod("markTaskFailed", classOf[Throwable])
+              .invoke(context, new IllegalStateException("Injected failure"))
+          } else if (outcome == "cancel") {
+            context.getClass.getMethod("markInterrupted", classOf[String]).invoke(context, "cancel")
+          }
+          context.getClass.getMethod("markTaskCompleted", classOf[Option[_]]).invoke(context, None)
+          if (outcome == "success") {
+            Assertions.assertThat(indexFiles()).isEqualTo(filesBefore ++ outputs)
+            outputs.foreach(table.fileIO().deleteQuietly)
+          } else {
+            Assertions.assertThat(indexFiles()).isEqualTo(filesBefore)
+          }
+      }
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshot.id())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(1)
+      checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, "one")))
+    }
+  }
+
+  test("Paimon Procedure: retry distributed deletion vector preparation") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1', 'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true', 'deletion-vectors.enabled' = 'true',
+            |  'commit.min-retry-wait' = '1 ms', 'commit.max-retry-wait' = '1 ms')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'zero')")
+      sql("INSERT INTO T VALUES (1, 'one')")
+      sql("DELETE FROM T WHERE id = 0")
+      val table = loadTable("T").copy(Map("deletion-vector.index-file.target-size" -> "1 b").asJava)
+      val snapshot = table.latestSnapshot().get()
+      val task = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalDataFiles(table).asJava,
+        util.Collections.emptyList[Range](),
+        false)
+      val attempts = new AtomicInteger()
+      val abortedIndexes = new util.ArrayList[IndexFileMeta]()
+      val configurer = new DataEvolutionRewriteExecutor.CommitConfigurer {
+        override def configure(commit: TableCommitImpl): Unit = {}
+
+        override def prepareMessages(base: Snapshot, messages: util.List[CommitMessage]): Unit = {
+          if (attempts.getAndIncrement() == 0) {
+            messages.asScala.foreach(
+              message =>
+                abortedIndexes.addAll(
+                  message.asInstanceOf[CommitMessageImpl].compactIncrement().newIndexFiles()))
+            throw new DataEvolutionRowRangeConflictException("Injected DV preparation conflict.")
+          }
+        }
+      }
+      DataEvolutionRewriteExecutor.execute(
+        table,
+        snapshot,
+        _ =>
+          new DataEvolutionRewriteExecutor.PlanResult(util.Collections.singletonList(task), true),
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        configurer,
+        (_, _, _, messages) => util.Optional.of(messages)
+      )
+
+      Assertions.assertThat(attempts.get()).isEqualTo(2)
+      assert(!abortedIndexes.isEmpty)
+      val index = table.store().newIndexFileHandler().dvIndex(BinaryRow.EMPTY_ROW, -1)
+      abortedIndexes.asScala.foreach(file => assert(!index.exists(file)))
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(1)
+      checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, "one")))
+    }
+  }
+
+  test("Paimon Procedure: equal-range DV rewrite follows the configured bitmap format") {
+    withTable("T") {
+      sql("""CREATE TABLE T (id INT, value STRING) TBLPROPERTIES (
+            |'bucket'='-1', 'row-tracking.enabled'='true',
+            |'data-evolution.enabled'='true', 'deletion-vectors.enabled'='true')
+            |""".stripMargin)
+      sql(
+        "INSERT INTO T SELECT /*+ COALESCE(1) */ * FROM VALUES (0, 'zero'), (1, 'one') AS s(id, value)")
+      sql("DELETE FROM T WHERE id = 0")
+      sql("ALTER TABLE T SET TBLPROPERTIES ('deletion-vectors.bitmap64'='true')")
+      val table = loadTable("T")
+      val files = normalDataFiles(table)
+      assert(files.size == 1)
+      val task = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        files.asJava,
+        util.Collections.emptyList[Range](),
+        false)
+      DataEvolutionRewriteExecutor.execute(
+        table,
+        table.latestSnapshot().get(),
+        _ =>
+          new DataEvolutionRewriteExecutor.PlanResult(util.Collections.singletonList(task), true),
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        new DataEvolutionRewriteExecutor.CommitConfigurer {
+          override def configure(commit: TableCommitImpl): Unit = {}
+        }
+      )
+      checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, "one")))
+      sql("DELETE FROM T WHERE id = 1")
+      checkAnswer(sql("SELECT * FROM T"), Seq.empty)
+    }
+  }
+
+  Seq(false, true).foreach {
+    externalIndex =>
+      val suffix = if (externalIndex) " with external index root" else ""
+      test(s"Paimon Procedure: recover outputs after a distributed DV rewrite job fails$suffix") {
+        withTempDir {
+          externalRoot =>
+            withTable("T") {
+              val externalOption =
+                if (externalIndex) s", 'global-index.external-path' = '${externalRoot.toURI}'"
+                else ""
+              sql(
+                s"""
+                   |CREATE TABLE T (id INT, value STRING)
+                   |TBLPROPERTIES (
+                   |  'bucket' = '-1', 'row-tracking.enabled' = 'true',
+                   |  'data-evolution.enabled' = 'true', 'deletion-vectors.enabled' = 'true'$externalOption)
+                   |""".stripMargin)
+              (0 until 4).foreach(id => sql(s"INSERT INTO T VALUES ($id, 'value-$id')"))
+              sql("DELETE FROM T WHERE id = 0")
+              sql("DELETE FROM T WHERE id = 2")
+              val table =
+                loadTable("T").copy(Map("deletion-vector.index-file.target-size" -> "1 b").asJava)
+              val snapshot = table.latestSnapshot().get()
+              val files = normalDataFiles(table).sortBy(_.nonNullFirstRowId())
+              val compact: Seq[DataEvolutionCompactTask] = Seq(0, 2).map(
+                first =>
+                  new DataEvolutionNormalCompactTask(
+                    BinaryRow.EMPTY_ROW,
+                    files.slice(first, first + 2).asJava,
+                    util.Collections.emptyList[Range](),
+                    false))
+              val handler = table.store().newIndexFileHandler()
+              val index = handler.dvIndex(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET)
+              val oldIndexes =
+                handler.scan(snapshot, DELETION_VECTORS_INDEX, BinaryRow.EMPTY_ROW, UNAWARE_BUCKET)
+              Assertions.assertThat(oldIndexes.size()).isEqualTo(2)
+              val unreadable =
+                oldIndexes.asScala.find(_.dvRanges().containsKey(files(2).fileName())).get
+              val readable =
+                oldIndexes.asScala.find(_.dvRanges().containsKey(files.head.fileName())).get
+              val directory = index.path(unreadable).getParent
+              def indexFiles(): Set[Path] =
+                table.fileIO().listStatus(directory).map(_.getPath).toSet
+              val before = indexFiles()
+              // Advance the head so the rewriter supplies a staged retry artifact before DV preparation.
+              sql("INSERT INTO T VALUES (4, 'four')")
+              val latest = table.latestSnapshot().get().id()
+              val retryFile = new AtomicReference[Path]()
+              val failingTable = new AppendOnlyFileStoreTable(
+                new DvRewriteFailureFileIO(
+                  index.path(unreadable).toString,
+                  index.path(readable).toString),
+                table.location(),
+                table.schema(),
+                table.catalogEnvironment())
+              DvRewriteFailure.firstTaskCompleted = new CountDownLatch(1)
+              try {
+                withSQLConf("spark.sql.shuffle.partitions" -> "2") {
+                  assertThatThrownBy(
+                    () =>
+                      DataEvolutionRewriteExecutor.execute(
+                        failingTable,
+                        snapshot,
+                        _ => new DataEvolutionRewriteExecutor.PlanResult(compact.asJava, true),
+                        new JavaSparkContext(spark.sparkContext),
+                        spark,
+                        new DataEvolutionRewriteExecutor.CommitConfigurer {
+                          override def configure(commit: TableCommitImpl): Unit = {}
+                        },
+                        (_, _, _, messages) => {
+                          val rewritten = new util.ArrayList[CommitMessage](messages)
+                          val write = table.newBatchWriteBuilder().newWrite()
+                          try {
+                            write.write(
+                              GenericRow.of(Int.box(99), BinaryString.fromString("retry-artifact")))
+                            val artifacts = write.prepareCommit()
+                            val artifact = artifacts.get(0).asInstanceOf[CommitMessageImpl]
+                            retryFile.set(
+                              table
+                                .store()
+                                .pathFactory()
+                                .createDataFilePathFactory(artifact.partition(), artifact.bucket())
+                                .toPath(artifact.newFilesIncrement().newFiles().get(0)))
+                            rewritten.add(
+                              new CommitMessageImpl(
+                                artifact.partition(),
+                                UNAWARE_BUCKET,
+                                null,
+                                artifact.newFilesIncrement(),
+                                CompactIncrement.emptyIncrement()))
+                          } finally {
+                            write.close()
+                          }
+                          assert(table.fileIO().exists(retryFile.get()))
+                          util.Optional.of(rewritten)
+                        }
+                      ))
+                    .hasStackTraceContaining(classOf[SparkException].getName)
+                    .hasStackTraceContaining("Injected DV read failure")
+                }
+              } finally {
+                DvRewriteFailure.firstTaskCompleted.countDown()
+              }
+              assert(retryFile.get() != null && !table.fileIO().exists(retryFile.get()))
+              Assertions.assertThat(lastSnapshotId(table)).isEqualTo(latest)
+              val orphanIndexes = indexFiles() -- before
+              assert(orphanIndexes.nonEmpty)
+              // The other partition already succeeded. Exercise the documented orphan-file recovery path.
+              new LocalOrphanFilesClean(table, System.currentTimeMillis() + 60000).clean()
+              if (externalIndex) {
+                Assertions.assertThat(indexFiles()).isEqualTo(before ++ orphanIndexes)
+                // This isolated fixture records the failed attempt's outputs. Reclaim only those paths.
+                orphanIndexes.foreach(table.fileIO().deleteQuietly)
+              }
+              Assertions.assertThat(indexFiles()).isEqualTo(before)
+              checkAnswer(sql("SELECT id FROM T"), Seq(Row(1), Row(3), Row(4)))
+            }
+        }
+      }
   }
 
   private def createCompactMergeRaceTable(): FileStoreTable = {
@@ -3154,5 +3443,29 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       .flatMap(_.values().asScala)
       .flatMap(meta => Option(meta.cardinality()).map(_.longValue()))
       .sum
+  }
+}
+
+private object DvRewriteFailure {
+  @volatile var firstTaskCompleted = new CountDownLatch(1)
+}
+
+private class DvRewriteFailureFileIO(unreadable: String, readable: String) extends LocalFileIO {
+  override def newInputStream(path: Path): SeekableInputStream = {
+    if (path.toString == readable && TaskContext.get() != null) {
+      TaskContext.get().addTaskCompletionListener[Unit] {
+        completed =>
+          if (!completed.isInterrupted()) {
+            DvRewriteFailure.firstTaskCompleted.countDown()
+          }
+      }
+    }
+    if (path.toString == unreadable) {
+      if (!DvRewriteFailure.firstTaskCompleted.await(30, TimeUnit.SECONDS)) {
+        throw new IOException("Timed out waiting for the successful DV rewrite task")
+      }
+      throw new IOException("Injected DV read failure")
+    }
+    super.newInputStream(path)
   }
 }

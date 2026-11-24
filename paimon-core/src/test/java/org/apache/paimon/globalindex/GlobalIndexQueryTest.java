@@ -127,10 +127,9 @@ class GlobalIndexQueryTest {
     @Test
     void workerReceivesRoutedFilesAfterSplitSerialization() throws Exception {
         RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.FLOAT()));
-        ResultEntry router =
-                CentroidIndexMeta.router(new ResultEntry("router", 0, null), "model", 2);
+        ResultEntry router = CentroidIndexMeta.router(new ResultEntry("router", 0, null), 2);
         ResultEntry shard =
-                CentroidIndexMeta.shard(new ResultEntry("shard", 3, new byte[] {42}), "model", 1);
+                CentroidIndexMeta.shard(new ResultEntry("shard", 3, new byte[] {42}), 1);
         List<IndexFileMeta> files = new ArrayList<>();
         for (ResultEntry file : Arrays.asList(router, shard)) {
             files.add(

@@ -42,9 +42,9 @@ def _reader(reader_type=VindexVectorGlobalIndexReader):
     return reader_type(SimpleNamespace(), '/indexes', [GlobalIndexIOMeta('index', 1)], {'option': 'value'})
 
 
-def test_centroid_files_require_the_java_reader():
+def test_centroid_files_require_table_level_search():
     files = [GlobalIndexIOMeta("router", 100, b"PAIMCENT" + bytes(20))]
-    with pytest.raises(NotImplementedError, match="Java reader"):
+    with pytest.raises(NotImplementedError, match="table-level search with pypaimon-rust"):
         VindexVectorGlobalIndexReader(SimpleNamespace(), '/indexes', files)
 
 

@@ -92,6 +92,13 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
+    public void testVortex() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "vortex");
+        innerTest("vortex", options);
+    }
+
+    @Test
     public void testOrc() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);

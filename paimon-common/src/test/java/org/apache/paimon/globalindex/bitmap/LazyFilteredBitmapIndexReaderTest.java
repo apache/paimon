@@ -89,14 +89,8 @@ public class LazyFilteredBitmapIndexReaderTest {
                     column.write(BinaryString.fromString("blue"), 90);
                     column.write(BinaryString.fromString("red"), 90_000);
                 };
-        byte[] originalMeta;
-        try (BitmapGlobalIndexWriter standalone = globalIndexer.createWriter(fileWriter)) {
-            tags.writeTo(standalone);
-            originalMeta = standalone.finish().get(0).meta();
-        }
         ResultEntry result;
-        try (CentroidBitmapIndex.Writer writer =
-                new CentroidBitmapIndex.Writer(fileWriter, 9, 2, 2)) {
+        try (CentroidBitmapIndex.Writer writer = new CentroidBitmapIndex.Writer(fileWriter, 2, 2)) {
             writer.writeColumn(
                     state,
                     new Options(),
@@ -107,22 +101,12 @@ public class LazyFilteredBitmapIndexReaderTest {
             writer.writeColumn(dataField, new Options(), tags);
             result = writer.finish();
         }
-        assertThat(CentroidBitmapIndex.schemaId(result.meta())).isEqualTo(9L);
         Path path = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
-        ByteBuffer directory = ByteBuffer.wrap(result.meta());
-        directory.position(Long.BYTES);
-        assertThat(directory.get()).isEqualTo((byte) 1);
-        long stateLength = directory.getLong();
-        int stateMetaLength = directory.getInt();
-        directory.position(directory.position() + stateMetaLength);
-        assertThat(directory.get()).isEqualTo((byte) 1);
-        assertThat(directory.getLong()).isEqualTo(meta.fileSize() - stateLength);
-        assertThat(directory.getInt()).isEqualTo(originalMeta.length);
-        byte[] storedMeta = new byte[directory.remaining()];
-        directory.get(storedMeta);
-        assertThat(storedMeta).isEqualTo(originalMeta);
+        assertThat(result.meta()).hasSize(Long.BYTES);
+        long secondSectionOffset = ByteBuffer.wrap(result.meta()).getLong();
+        assertThat(secondSectionOffset).isPositive().isLessThan(meta.fileSize());
 
         int[] extraFieldIds = {state.id(), dataField.id()};
         PredicateBuilder builder = new PredicateBuilder(fields);
@@ -138,7 +122,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                                 fileReader, meta, extraFieldIds, fields, fields, disjunction))
                 .containsExactly(90L, 90_000L);
         GlobalIndexIOMeta incomplete =
-                new GlobalIndexIOMeta(path, meta.fileSize() - 1, 2, result.meta());
+                new GlobalIndexIOMeta(path, secondSectionOffset, 2, result.meta());
         assertThatThrownBy(
                         () ->
                                 CentroidBitmapIndex.match(
@@ -152,6 +136,35 @@ public class LazyFilteredBitmapIndexReaderTest {
                                         fields,
                                         conjunction))
                 .hasMessageContaining("Invalid centroid bitmap section");
+    }
+
+    @Test
+    void singleCentroidBitmapSectionNeedsNoDirectory() throws IOException {
+        ResultEntry result;
+        try (CentroidBitmapIndex.Writer writer = new CentroidBitmapIndex.Writer(fileWriter, 1, 2)) {
+            writer.writeColumn(
+                    dataField,
+                    new Options(),
+                    column -> {
+                        column.write(null, 10);
+                        column.write(BinaryString.fromString("red"), 30);
+                    });
+            result = writer.finish();
+        }
+        assertThat(result.meta()).isNull();
+        Path path = new Path(basePath, result.fileName());
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.rowCount(), null);
+        RowType rowType = RowType.of(dataField);
+        assertThat(
+                        CentroidBitmapIndex.match(
+                                fileReader,
+                                meta,
+                                new int[] {dataField.id()},
+                                rowType,
+                                rowType,
+                                new PredicateBuilder(rowType).isNull(0)))
+                .containsExactly(10L);
     }
 
     @BeforeEach
