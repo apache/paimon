@@ -307,18 +307,18 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
 
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < numKeys; i++) {
-            expected.add("+I[" + i + "]");
+            expected.add("+I[" + i + ", 20]");
         }
 
         String mor = "/*+ OPTIONS('postpone.merge-on-read' = 'true') */";
-        assertThat(collect(tEnv.executeSql("SELECT k FROM T " + mor)))
+        assertThat(collect(tEnv.executeSql("SELECT k, seq FROM T " + mor)))
                 .containsExactlyInAnyOrderElementsOf(expected);
 
         // Force carriers to spill: 192kb buffer is the minimum of three 64kb pages.
         String spilled =
                 "/*+ OPTIONS('postpone.merge-on-read' = 'true',"
                         + " 'sort-spill-buffer-size' = '192 kb') */";
-        assertThat(collect(tEnv.executeSql("SELECT k FROM T " + spilled)))
+        assertThat(collect(tEnv.executeSql("SELECT k, seq FROM T " + spilled)))
                 .containsExactlyInAnyOrderElementsOf(expected);
     }
 
