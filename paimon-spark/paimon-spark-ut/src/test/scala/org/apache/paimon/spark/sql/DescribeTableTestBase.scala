@@ -348,6 +348,8 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
       sql("INSERT INTO dp_sys VALUES (1, 'a')")
       // An audit log table has the partition keys of its table but reports no statistics.
       val details = partitionDetailsOf("DESCRIBE FORMATTED `dp_sys$audit_log` PARTITION (p = 'a')")
+      // Only Paimon's exec writes a Database row; Spark 4.2's own exec does not.
+      assert(details.contains("Database"), details)
       assert(details("Partition Values") == "[p=a]", details)
       intercept[NoSuchPartitionException] {
         sql("DESCRIBE `dp_sys$audit_log` PARTITION (p = 'missing')")
