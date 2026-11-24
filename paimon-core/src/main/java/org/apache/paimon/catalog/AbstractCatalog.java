@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
@@ -30,7 +31,6 @@ import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -390,25 +390,15 @@ public abstract class AbstractCatalog implements Catalog {
         Set<Path> externalPaths = new HashSet<>();
         Path tablePath = getTableLocation(identifier);
         if (tableExistsInFileSystem(tablePath, DEFAULT_MAIN_BRANCH)) {
-            CoreOptions options = CoreOptions.fromMap(loadTableSchema(identifier).options());
-            if (options.type() == TableType.TABLE
-                    || options.type() == TableType.MATERIALIZED_TABLE) {
+            TableType tableType = CoreOptions.fromMap(loadTableSchema(identifier).options()).type();
+            if (tableType == TableType.TABLE || tableType == TableType.MATERIALIZED_TABLE) {
+                // Cleanup only needs persisted metadata, even if runtime options are invalid.
                 FileIO tableFileIO = fileIO(tablePath);
                 SchemaManager schemaManager = new FileSystemSchemaManager(tableFileIO, tablePath);
-                boolean isExternal = loadTableMetadata(identifier).isExternal();
-                List<String> branches = new ArrayList<>();
-                branches.add(DEFAULT_MAIN_BRANCH);
-                branches.addAll(FileSystemBranchManager.branches(tableFileIO, tablePath));
-                for (String branch : branches) {
-                    SchemaManager branchSchema = schemaManager.copyWithBranch(branch);
-                    externalPaths.addAll(getSchemaExternalPaths(branchSchema.listAll()));
-                    Optional<TableSchema> latest = branchSchema.latest();
-                    if (!isExternal
-                            && latest.isPresent()
-                            && TemplateFileDeletionPlan.isTemplate(latest.get())) {
-                        TemplateFileDeletionPlan.save(
-                                tableFileIO, tablePath, branch, latest.get(), false);
-                    }
+                externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                for (String branch : FileSystemBranchManager.branches(tableFileIO, tablePath)) {
+                    externalPaths.addAll(
+                            getSchemaExternalPaths(schemaManager.copyWithBranch(branch).listAll()));
                 }
             }
         }
@@ -428,9 +418,14 @@ public abstract class AbstractCatalog implements Catalog {
                 .flatMap(
                         schema -> {
                             Map<String, String> options = schema.toSchema().options();
+                            String strategy = options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
+                            boolean template =
+                                    ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE
+                                            .toString()
+                                            .equalsIgnoreCase(strategy);
                             return Arrays.stream(
                                     new String[] {
-                                        TemplateFileDeletionPlan.isTemplate(schema)
+                                        template
                                                 ? null
                                                 : options.get(DATA_FILE_EXTERNAL_PATHS.key()),
                                         options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
@@ -465,8 +460,6 @@ public abstract class AbstractCatalog implements Catalog {
         } catch (TableNotExistException ignored) {
         }
 
-        Path tablePath = getTableLocation(identifier);
-        TemplateFileDeletionPlan.checkCanCreateTable(fileIO(tablePath), tablePath);
         copyTableDefaultOptions(schema.options());
         validateCreateTable(schema, false);
 

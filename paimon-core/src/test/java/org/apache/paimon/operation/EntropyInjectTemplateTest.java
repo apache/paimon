@@ -20,28 +20,16 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Catalog.TableNotExistException;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
-import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -58,7 +46,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -127,62 +114,6 @@ public class EntropyInjectTemplateTest {
         assertThat(sharedTableFiles("t1")).hasSize(1);
     }
 
-    @Test
-    public void testDropTableOnlyDeletesItsOwnFiles() throws Exception {
-        FileStoreTable t1 = createTable("t1");
-        FileStoreTable t2 = createTable("t2");
-        write(t1, 1, "a");
-        write(t1, 2, "b");
-        write(t2, 3, "c");
-        Set<String> t2Files = sharedTableFiles("t2");
-        assertThat(sharedTableFiles("t1")).hasSize(2);
-        assertThat(t2Files).hasSize(1);
-
-        catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
-
-        assertThat(sharedTableFiles("t1")).isEmpty();
-        // the shared hash directories and the files of the other table are untouched
-        assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
-    }
-
-    /**
-     * Deletion walks one manifest at a time, and a file overwritten by a later snapshot is recorded
-     * as an {@code ADD} entry in one manifest and as a {@code DELETE} entry in another. Both kinds
-     * have to be followed, and following the same file twice has to stay harmless.
-     */
-    @Test
-    public void testDropTableAcrossManyManifests() throws Exception {
-        FileStoreTable t1 = createTable("t1");
-        FileStoreTable t2 = createTable("t2");
-        write(t2, 0, "keep");
-        Set<String> t2Files = sharedTableFiles("t2");
-
-        for (int i = 1; i <= 6; i++) {
-            write(t1, i, "v" + i);
-        }
-        overwrite(t1, 7, "v7");
-        for (int i = 8; i <= 10; i++) {
-            write(t1, i, "v" + i);
-        }
-        assertThat(sharedTableFiles("t1")).hasSize(10);
-        assertThat(manifestCount(t1)).isGreaterThan(1);
-
-        catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
-
-        assertThat(sharedTableFiles("t1")).isEmpty();
-        assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
-    }
-
-    /** The number of distinct manifests the deletion walks over. */
-    private int manifestCount(FileStoreTable t) throws Exception {
-        ManifestList manifestList = t.store().manifestListFactory().create();
-        Set<String> names = new HashSet<>();
-        for (Snapshot snapshot : t.snapshotManager().safelyGetAllSnapshots()) {
-            manifestList.readAllManifests(snapshot).forEach(meta -> names.add(meta.fileName()));
-        }
-        return names.size();
-    }
-
     /** The literal template path is excluded from recursive directory cleanup. */
     @Test
     public void testDropTablePreservesTheLiteralPlaceholderDirectory() throws Exception {
@@ -197,53 +128,16 @@ public class EntropyInjectTemplateTest {
         Files.createDirectories(literal);
         Files.write(literal.resolve("legacy.parquet"), new byte[] {1});
 
-        catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
+        Set<String> t1Files = sharedTableFiles("t1");
+        assertThat(t1Files).hasSize(2);
 
-        assertThat(sharedTableFiles("t1"))
-                .containsExactly(
-                        sharedRoot.relativize(literal.resolve("legacy.parquet")).toString());
+        Identifier identifier = Identifier.create(DATABASE, "t1");
+        catalog.dropTable(identifier, false);
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThat(sharedTableFiles("t1")).isEqualTo(t1Files);
         assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
-    }
-
-    /**
-     * An external table keeps its data, the way {@code HiveCatalog} leaves the directories of one
-     * alone. Dropping then leaves the files behind, and because they sit under prefixes shared with
-     * other tables they can no longer be told apart by path alone.
-     */
-    @Test
-    public void testDropTableKeepsTheFilesOfAnExternalTable() throws Exception {
-        java.nio.file.Path warehouse = tempPath.resolve("external-warehouse");
-        try (Catalog external =
-                new FileSystemCatalog(LocalFileIO.create(), new Path("file://" + warehouse)) {
-                    @Override
-                    protected TableMetadata loadTableMetadata(Identifier identifier)
-                            throws TableNotExistException {
-                        return new TableMetadata(loadTableSchema(identifier), true, null);
-                    }
-                }) {
-            external.createDatabase(DATABASE, true);
-            Identifier id = Identifier.create(DATABASE, "kept");
-            external.createTable(id, sharedSchema("kept"), false);
-            FileStoreTable t = (FileStoreTable) external.getTable(id);
-            write(t, 1, "a");
-            Set<String> files = sharedTableFiles("kept");
-            assertThat(files).hasSize(1);
-
-            external.dropTable(id, false);
-
-            assertThat(sharedTableFiles("kept")).isEqualTo(files);
-        }
-    }
-
-    @Test
-    public void testExecuteWithoutCleanupDirectoryPreservesTable() throws Exception {
-        FileStoreTable table = createTable("kept");
-        write(table, 1, "a");
-        Set<String> files = sharedTableFiles("kept");
-        TemplateFileDeletionPlan.init(table.fileIO(), table.location()).execute();
-        assertThat(catalog.getTable(Identifier.create(DATABASE, "kept")))
-                .isInstanceOf(FileStoreTable.class);
-        assertThat(sharedTableFiles("kept")).hasSize(1).isEqualTo(files);
     }
 
     @ParameterizedTest
@@ -321,173 +215,6 @@ public class EntropyInjectTemplateTest {
                                     .snapshotManager()
                                     .latestSnapshotId())
                     .isEqualTo(1L);
-        }
-    }
-
-    @Test
-    public void testDropTableReclaimsFilesFromDroppedBranch() throws Exception {
-        FileStoreTable table = createTable("t1");
-        write(table, 1, "main");
-        table.createTag("fork");
-        table.createBranch("dev", "fork");
-        write(table.switchToBranch("dev"), 2, "dev");
-        Set<String> files = sharedTableFiles("t1");
-        assertThat(files).hasSize(2);
-
-        table.branchManager().dropBranch("dev");
-
-        assertThat(table.branchManager().branches()).doesNotContain("dev");
-        assertThat(sharedTableFiles("t1")).isEqualTo(files);
-        table.createBranch("dev", "fork");
-        write(table.switchToBranch("dev"), 3, "new dev");
-        table.branchManager().dropBranch("dev");
-        assertThat(sharedTableFiles("t1")).hasSize(3);
-        catalog.dropTable(Identifier.create(DATABASE, "t1"), false);
-        assertThat(sharedTableFiles("t1")).isEmpty();
-    }
-
-    @Test
-    public void testDropSkipsTruncatedCleanupManifest() throws Exception {
-        FileStoreTable table = createTable("truncated");
-        write(table, 1, "main");
-        java.nio.file.Path plan =
-                java.nio.file.Paths.get(table.location().toUri())
-                        .resolve(".paimon-template-drops/branch-interrupted");
-        Files.createDirectories(plan);
-        Files.write(plan.resolve("manifest-incomplete.avro"), new byte[] {'O', 'b', 'j', 1});
-        assertThat(sharedTableFiles("truncated")).hasSize(1);
-
-        LocalFileIO unavailable =
-                new LocalFileIO() {
-                    @Override
-                    public SeekableInputStream newInputStream(Path path) throws IOException {
-                        throw new IOException("storage unavailable");
-                    }
-                };
-        assertThatThrownBy(
-                        () ->
-                                TemplateFileDeletionPlan.init(unavailable, table.location())
-                                        .execute())
-                .hasRootCauseMessage("storage unavailable");
-        assertThat(sharedTableFiles("truncated")).hasSize(1);
-
-        catalog.dropTable(Identifier.create(DATABASE, "truncated"), false);
-
-        assertThat(sharedTableFiles("truncated")).isEmpty();
-        assertThat(table.fileIO().exists(table.location())).isFalse();
-    }
-
-    @Test
-    public void testDropPlanRollsAtManifestTargetSize() throws Exception {
-        FileStoreTable table = createTable("batched");
-        CoreOptions options =
-                new CoreOptions(
-                        new Options()
-                                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofBytes(1)));
-        RollingFileWriter<Path, Path> plan =
-                TemplateFileDeletionPlan.newManifestWriter(
-                        table.fileIO(),
-                        new Path(table.location(), ".paimon-template-drops/branch-batched"),
-                        options);
-        for (int i = 0; i < 20_000; i++) {
-            plan.write(new Path("file://" + sharedRoot.resolve("file-" + i)));
-        }
-        plan.close();
-        try (Stream<java.nio.file.Path> files =
-                Files.walk(java.nio.file.Paths.get(table.location().toUri()))) {
-            assertThat(
-                            files.filter(path -> path.getFileName().toString().endsWith(".avro"))
-                                    .count())
-                    .isGreaterThan(1);
-        }
-        catalog.dropTable(Identifier.create(DATABASE, "batched"), false);
-        assertThat(table.fileIO().exists(table.location())).isFalse();
-    }
-
-    @Test
-    public void testEmptyCleanupDirectoryBlocksCreateUntilCleaned() throws Exception {
-        Path path = new Path(tempPath.toUri());
-        LocalFileIO io = LocalFileIO.create();
-        io.mkdirs(new Path(path, ".paimon-template-drops"));
-        assertThatThrownBy(() -> TemplateFileDeletionPlan.checkCanCreateTable(io, path))
-                .hasMessageContaining("before recreating the table");
-        TemplateFileDeletionPlan.init(io, path).execute();
-        TemplateFileDeletionPlan.checkCanCreateTable(io, path);
-    }
-
-    @Test
-    public void testResumeFailedTemplateDeletionFromTablePath() throws Exception {
-        Path warehouse = new Path("file://" + tempPath.resolve("retry-warehouse"));
-        LocalFileIO failingFileIO =
-                new LocalFileIO() {
-                    @Override
-                    public boolean delete(Path path, boolean recursive) throws IOException {
-                        if (path.getName().equals("already-deleted")) {
-                            throw new AssertionError(
-                                    "Missing file should be skipped before delete");
-                        }
-                        if (!recursive
-                                && path.toUri().getPath().startsWith(sharedRoot.toString() + "/")) {
-                            throw new IOException("transient data deletion failure");
-                        }
-                        return super.delete(path, recursive);
-                    }
-                };
-        Identifier identifier = Identifier.create(DATABASE, "retry");
-        Path tablePath = new Path(warehouse, DATABASE + ".db/retry");
-        try (Catalog retrying = new FileSystemCatalog(failingFileIO, warehouse)) {
-            retrying.createDatabase(DATABASE, true);
-            retrying.createTable(identifier, sharedSchema("retry"), false);
-            FileStoreTable table = (FileStoreTable) retrying.getTable(identifier);
-            write(table, 1, "a");
-
-            // A plan from an earlier branch drop can be reclaimed independently.
-            RollingFileWriter<Path, Path> branchPlan =
-                    TemplateFileDeletionPlan.newManifestWriter(
-                            failingFileIO,
-                            new Path(table.location(), ".paimon-template-drops/branch-archived"),
-                            table.coreOptions());
-            branchPlan.write(new Path(warehouse, "already-deleted"));
-            branchPlan.close();
-
-            assertThatThrownBy(() -> retrying.dropTable(identifier, false))
-                    .hasMessageContaining("file cleanup is incomplete")
-                    .hasMessageContaining("saved cleanup plan");
-
-            assertThat(retrying.listTables(DATABASE)).contains("retry");
-            assertThat(failingFileIO.exists(table.location())).isTrue();
-            assertThat(failingFileIO.exists(new Path(warehouse, ".paimon-template-drops")))
-                    .isFalse();
-            assertThat(sharedTableFiles("retry")).hasSize(1);
-            try (Stream<java.nio.file.Path> files =
-                    Files.walk(
-                            java.nio.file.Paths.get(tablePath.toUri())
-                                    .resolve(".paimon-template-drops"))) {
-                assertThat(
-                                files.filter(
-                                                path ->
-                                                        path.getFileName()
-                                                                .toString()
-                                                                .endsWith(".avro"))
-                                        .count())
-                        .isEqualTo(1);
-            }
-
-            assertThatThrownBy(
-                            () -> TemplateFileDeletionPlan.init(failingFileIO, tablePath).execute())
-                    .hasMessageContaining("file cleanup is incomplete");
-        }
-
-        TemplateFileDeletionPlan saved =
-                TemplateFileDeletionPlan.init(LocalFileIO.create(), tablePath);
-        saved.execute();
-        assertThat(LocalFileIO.create().exists(new Path(tablePath, "schema"))).isTrue();
-        TemplateFileDeletionPlan.checkCanCreateTable(LocalFileIO.create(), tablePath);
-        assertThat(sharedTableFiles("retry")).isEmpty();
-        try (Stream<java.nio.file.Path> files =
-                Files.walk(java.nio.file.Paths.get(warehouse.toUri()))) {
-            assertThat(files.noneMatch(path -> path.getFileName().toString().endsWith(".avro")))
-                    .isTrue();
         }
     }
 
@@ -589,23 +316,6 @@ public class EntropyInjectTemplateTest {
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(message);
-
-        // Simulate an existing table whose schema was persisted before validation.
-        schema.options().put(chainEnabled, "true");
-        long legacySchemaId = table.schema().id() + 1;
-        FileSystemSchemaManager schemaManager =
-                new FileSystemSchemaManager(table.fileIO(), table.location());
-        assertThat(
-                        table.fileIO()
-                                .tryToWriteAtomic(
-                                        schemaManager.toSchemaPath(legacySchemaId),
-                                        TableSchema.create(legacySchemaId, schema).toString()))
-                .isTrue();
-
-        assertThatThrownBy(() -> catalog.dropTable(identifier, false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(message);
-        assertThat(sharedTableFiles("chain_template")).hasSize(1);
     }
 
     @Test

@@ -36,7 +36,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictException;
 import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictKind;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -488,9 +487,6 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
-            Path path = getTableLocation(identifier);
-            TemplateFileDeletionPlan.init(fileIO, path).execute();
-
             int deletedRecords =
                     execute(
                             connections,
@@ -511,7 +507,7 @@ public class JdbcCatalog extends AbstractCatalog {
                         identifier.getDatabaseName(),
                         identifier.getTableName());
             }
-
+            Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
@@ -591,8 +587,6 @@ public class JdbcCatalog extends AbstractCatalog {
             }
             throw new TableAlreadyExistException(identifier);
         }
-        Path tablePath = getTableLocation(identifier);
-        TemplateFileDeletionPlan.checkCanCreateTable(fileIO(tablePath), tablePath);
         return true;
     }
 

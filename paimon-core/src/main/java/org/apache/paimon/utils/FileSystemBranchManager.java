@@ -27,7 +27,6 @@ import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.TemplateFileDeletionPlan;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -49,7 +48,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -181,10 +179,6 @@ public class FileSystemBranchManager implements BranchManager {
         checkArgument(
                 !BranchManager.isMainBranch(branchName), "The main branch cannot be deleted.");
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
-        Optional<TableSchema> schema = schemaManager.copyWithBranch(branchName).latest();
-        if (schema.isPresent() && TemplateFileDeletionPlan.isTemplate(schema.get())) {
-            TemplateFileDeletionPlan.save(fileIO, tablePath, branchName, schema.get(), true);
-        }
         try {
             // Delete branch directory
             fileIO.delete(branchPath(branchName), true);
