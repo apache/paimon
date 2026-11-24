@@ -1642,6 +1642,9 @@ class DataEvolutionSplitRead(SplitRead):
             selected = [logical_range]
             if self.row_ranges is not None:
                 selected = Range.and_(selected, Range.merge_sorted_as_possible(self.row_ranges))
+            # Apply LIMIT to live rows before choosing the merge path only if no filter can reject them.
+            if self.limit is not None and self.predicate is None and self._post_merge_filter is None:
+                selected = self._live_row_prefix(selected, self.limit, deletion_vector)
             if not selected:
                 return EmptyRecordBatchReader()
             vector_bunches = self._candidate_vector_bunches(vector_files)
@@ -1654,10 +1657,12 @@ class DataEvolutionSplitRead(SplitRead):
                 if inline_files or not self._vector_bunches_are_aligned(vector_bunches, logical_range, selected):
                     return self._create_range_merge_reader(fields_files, selected_plan, vector_ids, deletion_vector)
             fields_files.extend(vector_bunches)
-            if self.row_ranges is not None:
+            group_reader = self
+            if self.row_ranges is not None or selected != [logical_range]:
                 group_reader = copy(self)
                 group_reader.row_ranges = selected
-                return group_reader._merge_field_bunches(fields_files, need_merge_files, deletion_vector)
+            return group_reader._merge_field_bunches(
+                fields_files, need_merge_files, deletion_vector, coalesce=self.limit is None)
 
         return self._merge_field_bunches(fields_files, need_merge_files, deletion_vector)
 
@@ -1806,21 +1811,12 @@ class DataEvolutionSplitRead(SplitRead):
         source_projections = {}
         source_ranges = {}
         segments = []
-        # A residual filter can reject rows before LIMIT sees them.
-        remaining = self.limit if self.predicate is None and self._post_merge_filter is None else None
         for ranges, providers in selected_plan:
-            if remaining == 0:
-                break
             row_count = sum(row_range.count() for row_range in ranges)
             if deleted:
                 row_count -= sum(deleted.range_cardinality(r.from_ - dv_start, r.to - dv_start) for r in ranges)
             if not row_count:
                 continue
-            if remaining is not None:
-                if row_count > remaining:
-                    ranges = self._live_row_prefix(ranges, remaining, dv_start, deleted)
-                    row_count = remaining
-                remaining -= row_count
 
             sources = fixed_sources.copy()
             for file, field_ids in providers:
@@ -1862,14 +1858,25 @@ class DataEvolutionSplitRead(SplitRead):
             self.table.options.read_batch_size())
 
     @staticmethod
-    def _live_row_prefix(ranges: List[Range], limit: int, dv_start: int, deleted) -> List[Range]:
+    def _live_row_prefix(
+            ranges: List[Range], limit: int,
+            deletion_vector: Optional[Tuple[Range, DeletionVector]]) -> List[Range]:
         """Keep the physical prefix that contains the requested number of live rows."""
+        if limit <= 0:
+            return []
+        dv_start, deleted = 0, None
+        if deletion_vector is not None:
+            dv_range, dv = deletion_vector
+            dv_start, deleted = dv_range.from_, dv.bit_map()
+
         prefix = []
         for row_range in ranges:
             start = row_range.from_
             count = row_range.count()
             if deleted:
                 count -= deleted.range_cardinality(start - dv_start, row_range.to - dv_start)
+            if not count:
+                continue
             if count <= limit:
                 prefix.append(row_range)
                 limit -= count
@@ -1902,8 +1909,9 @@ class DataEvolutionSplitRead(SplitRead):
         field_ids.extend(field_id for field_id in partition_ids if field_id not in field_ids)
         return field_ids
 
-    def _merge_field_bunches(self, fields_files: List[FieldBunch],
-                             need_merge_files: List[DataFileMeta], deletion_vector) -> RecordReader:
+    def _merge_field_bunches(
+            self, fields_files: List[FieldBunch], need_merge_files: List[DataFileMeta],
+            deletion_vector, coalesce: bool = True) -> RecordReader:
 
         # Validate row counts and first row IDs (skip when row ranges are pushed down)
         row_count = fields_files[0].row_count()
@@ -1952,7 +1960,8 @@ class DataEvolutionSplitRead(SplitRead):
                     if row_offsets[j] == i:
                         field_offsets[j] = id_to_pos[read_field_index[j]]
 
-                file_record_readers[i] = self._create_bunch_reader(bunch, read_fields, deletion_vector)
+                file_record_readers[i] = self._create_bunch_reader(
+                    bunch, read_fields, deletion_vector, coalesce=coalesce)
 
         # Validate that all required fields are found
         for i, field in enumerate(all_read_fields):

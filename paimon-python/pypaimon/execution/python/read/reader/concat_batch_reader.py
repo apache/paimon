@@ -202,10 +202,9 @@ class DataEvolutionMergeReader(RecordBatchReader):
                     self._buffers[i] = None
                 else:
                     batch = reader.read_arrow_batch()
-                    if batch is None:
-                        batches[i] = None
-                    else:
-                        batches[i] = batch
+                    while batch is not None and batch.num_rows == 0:
+                        batch = reader.read_arrow_batch()
+                    batches[i] = batch
             else:
                 batches[i] = None
 
@@ -213,9 +212,6 @@ class DataEvolutionMergeReader(RecordBatchReader):
             return None
 
         min_rows = min(b.num_rows for b in batches if b is not None)
-        if min_rows == 0:
-            return None
-
         columns = []
         fields = list(self.schema)
         for i in range(len(self.row_offsets)):
