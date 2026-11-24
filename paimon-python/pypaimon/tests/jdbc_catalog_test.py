@@ -277,12 +277,23 @@ class JdbcCatalogTest(unittest.TestCase):
         upper = catalog.get_table("test_db.test_table$branch_MAIN")
         self.assertEqual(upper.current_branch(), "MAIN")
         self.assertEqual(catalog.get_table(upper.identifier).current_branch(), "MAIN")
+        # Its system table keeps the branch, also when loaded again by its identifier.
+        upper_options = catalog.get_table("test_db.test_table$branch_MAIN$options")
+        self.assertEqual(upper_options.identifier.get_object_name(), "test_table$branch_MAIN$options")
+        for options in (upper_options, catalog.get_table(upper_options.identifier)):
+            self.assertEqual(options.base_table.current_branch(), "MAIN")
+            self.assertIn({"key": "branch-option", "value": "dev"}, read(options))
 
         # A branch with a '$' keeps its name rather than being split into a system table.
         table.branch_manager().create_branch("dev$blue")
         blue = catalog.get_table(Identifier("test_db", "test_table", branch="dev$blue"))
         self.assertEqual(blue.current_branch(), "dev$blue")
         self.assertEqual(blue.identifier.get_branch_name(), "dev$blue")
+        blue_options = catalog.get_table(
+            Identifier("test_db", "test_table", branch="dev$blue", system_table="options"))
+        self.assertEqual(blue_options.identifier.get_branch_name(), "dev$blue")
+        self.assertEqual(blue_options.identifier.get_system_table_name(), "options")
+        self.assertEqual(catalog.get_table(blue_options.identifier).base_table.current_branch(), "dev$blue")
 
     def test_create_table_rolls_back_metadata_on_failure(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]

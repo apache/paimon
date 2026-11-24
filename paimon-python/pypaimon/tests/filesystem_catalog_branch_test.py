@@ -157,6 +157,15 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
             {"id": [1, 2], "payload": [b"main", b"branch"]},
         )
 
+    def test_system_table_identifier_keeps_branch_with_dollar(self):
+        # An encoded name would split dev$blue into a branch and a system table.
+        self.catalog.create_branch(self.identifier, "dev$blue")
+        options = self.catalog.get_table(
+            Identifier("default", "test_branch_table", branch="dev$blue", system_table="options"))
+        self.assertEqual(options.identifier.get_branch_name(), "dev$blue")
+        self.assertEqual(options.identifier.get_system_table_name(), "options")
+        self.assertEqual(self.catalog.get_table(options.identifier).base_table.current_branch(), "dev$blue")
+
     def test_create_branch_duplicate_raises(self):
         self.catalog.create_branch(self.identifier, "b1")
         with self.assertRaises(BranchAlreadyExistException) as cm:

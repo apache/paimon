@@ -27,7 +27,8 @@ raises :class:`NotImplementedError` to signal the read-only contract.
 from abc import abstractmethod
 from typing import TYPE_CHECKING, List, Optional
 
-from pypaimon.common.identifier import Identifier
+from pypaimon.common.identifier import (DEFAULT_MAIN_BRANCH, SYSTEM_BRANCH_PREFIX, SYSTEM_TABLE_SPLITTER,
+                                        Identifier)
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.schema.data_types import DataField, RowType
@@ -85,12 +86,18 @@ class SystemTable(Table):
         self.base_table = base_table
         self.file_io = base_table.file_io
         self.table_path = base_table.table_path
-        self.identifier = Identifier.create(
-            base_table.identifier.get_database_name(),
-            base_table.identifier.get_table_name(),
-            branch=base_table.identifier.get_branch_name(),
-            system_table=self.system_table_name(),
-        )
+        base = base_table.identifier
+        branch = base.get_branch_name()
+        if branch is not None and branch != DEFAULT_MAIN_BRANCH and branch.lower() == DEFAULT_MAIN_BRANCH:
+            # The branch argument of Identifier drops any case of main, so encode a branch such as MAIN.
+            self.identifier = Identifier(base.get_database_name(), base.get_table_name() + SYSTEM_TABLE_SPLITTER
+                                         + SYSTEM_BRANCH_PREFIX + branch + SYSTEM_TABLE_SPLITTER
+                                         + self.system_table_name())
+        else:
+            # The arguments keep a branch whose name has a '$', such as dev$blue, which a parsed name would split.
+            self.identifier = Identifier.create(
+                base.get_database_name(), base.get_table_name(), branch=branch,
+                system_table=self.system_table_name())
 
     @abstractmethod
     def system_table_name(self) -> str:
