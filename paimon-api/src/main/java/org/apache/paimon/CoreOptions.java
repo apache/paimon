@@ -2907,24 +2907,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
-    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATH =
-            key("global-index.external-path")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Global index root directory as a single URI, including any literal commas. "
-                                    + "If not set, global index files are stored under <table-root-directory>/index. "
-                                    + "Ignored for new files when global-index.external-paths is configured.");
-
     public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATHS =
             key("global-index.external-paths")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Comma-separated global index root directories. New index files are distributed "
-                                    + "in round-robin order. When configured, takes precedence over global-index.external-path; "
-                                    + "an empty value uses <table-root-directory>/index. If not configured, global-index.external-path is used. "
-                                    + "PyPaimon does not support this option for index writes.");
+                            "Comma-separated global index root directories. "
+                                    + "New index files are distributed in round-robin order. "
+                                    + "An empty value uses <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -4223,29 +4213,19 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    @Nullable
-    public Path globalIndexExternalPath() {
-        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
-        if (pathString == null || pathString.isEmpty()) {
-            return null;
-        }
-        Path path = new Path(pathString);
-        checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
-        return path;
-    }
-
     public List<Path> globalIndexExternalPaths() {
-        if (!options.contains(GLOBAL_INDEX_EXTERNAL_PATHS)) {
-            Path path = globalIndexExternalPath();
-            return path == null ? Collections.emptyList() : Collections.singletonList(path);
-        }
-        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATHS);
+        boolean multiple = options.contains(GLOBAL_INDEX_EXTERNAL_PATHS);
+        String pathString =
+                multiple
+                        ? options.get(GLOBAL_INDEX_EXTERNAL_PATHS)
+                        : options.get("global-index.external-path");
         if (pathString == null || pathString.isEmpty()) {
             return Collections.emptyList();
         }
+        String[] values = multiple ? pathString.split(",") : new String[] {pathString};
         List<Path> paths = new ArrayList<>();
-        for (String value : pathString.split(",")) {
-            Path path = new Path(value.trim());
+        for (String value : values) {
+            Path path = new Path(multiple ? value.trim() : value);
             checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
             paths.add(path);
         }

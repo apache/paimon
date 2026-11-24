@@ -426,9 +426,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .option("bucket", "-1")
-                        .option(
-                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
-                                legacyRoot.toUri().toString())
+                        .option("global-index.external-path", legacyRoot.toUri().toString())
                         .build(),
                 false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
@@ -449,7 +447,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
                         firstRoot.toUri() + ", " + secondRoot.toUri()));
         if (removeLegacyOption) {
-            changes.add(SchemaChange.removeOption(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key()));
+            changes.add(SchemaChange.removeOption("global-index.external-path"));
         }
         catalog.alterTable(identifier, changes, false);
         table = (FileStoreTable) catalog.getTable(identifier);
@@ -492,13 +490,11 @@ public class FileSystemCatalogTest extends CatalogTestBase {
 
         FileSystemSchemaManager branchSchemaManager = schemaManager.copyWithBranch("dev");
         Map<String, String> branchOptions = new HashMap<>(legacySchema.options());
-        branchOptions.put(
-                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), oldBranchPath.toUri().toString());
-        // An older engine ignores the new key and can still write to the legacy root.
+        branchOptions.put("global-index.external-path", oldBranchPath.toUri().toString());
+        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
+        branchOptions.remove("global-index.external-path");
         branchOptions.put(
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(), newBranchPath.toUri().toString());
-        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
-        branchOptions.remove(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key());
         writeLegacySchema(branchSchemaManager, legacySchema, 1, branchOptions);
 
         assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())

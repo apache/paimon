@@ -134,21 +134,17 @@ public class EntropyInjectTemplateTest {
         assertThat(t1Files).hasSize(2);
 
         Identifier identifier = Identifier.create(DATABASE, "t1");
-        java.nio.file.Path legacyIndex = tempPath.resolve("index,legacy");
         java.nio.file.Path firstIndex = tempPath.resolve("index-a");
         java.nio.file.Path secondIndex = tempPath.resolve("index-b");
         if (externalIndexes) {
             catalog.alterTable(
                     identifier,
-                    Arrays.asList(
-                            SchemaChange.setOption(
-                                    CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
-                                    legacyIndex.toUri().toString()),
+                    Collections.singletonList(
                             SchemaChange.setOption(
                                     CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
                                     firstIndex.toUri() + "," + secondIndex.toUri())),
                     false);
-            for (java.nio.file.Path index : Arrays.asList(legacyIndex, firstIndex, secondIndex)) {
+            for (java.nio.file.Path index : Arrays.asList(firstIndex, secondIndex)) {
                 Files.createDirectories(index);
                 Files.write(index.resolve("test.index"), new byte[] {1});
             }
@@ -159,7 +155,7 @@ public class EntropyInjectTemplateTest {
                 .isInstanceOf(Catalog.TableNotExistException.class);
         assertThat(sharedTableFiles("t1")).isEqualTo(t1Files);
         assertThat(sharedTableFiles("t2")).isEqualTo(t2Files);
-        for (java.nio.file.Path index : Arrays.asList(legacyIndex, firstIndex, secondIndex)) {
+        for (java.nio.file.Path index : Arrays.asList(firstIndex, secondIndex)) {
             assertThat(index).doesNotExist();
         }
     }

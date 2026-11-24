@@ -375,7 +375,6 @@ class DynamicBucketIndexMaintainer:
         ignore_existing: bool = False,
         snapshot=_SNAPSHOT_UNSET,
     ) -> None:
-        table.options.validate_index_write_path()
         self.table = table
         self.ignore_existing = ignore_existing
         self.snapshot = (
@@ -390,6 +389,7 @@ class DynamicBucketIndexMaintainer:
             Tuple[Tuple, int], Tuple[Set[int], bool]
         ] = {}
         self._new_paths: List[str] = []
+        self._path_factory = None
 
     def notify_new_record(
         self, partition: Tuple, bucket: int, key_hash: int
@@ -465,7 +465,9 @@ class DynamicBucketIndexMaintainer:
         self, partition: Tuple, bucket: int, hashes: Set[int]
     ) -> IndexManifestEntry:
         file_name = f"index-{uuid.uuid4()}-0"
-        path, external = self.table.path_factory().new_bucket_index_path(
+        if self._path_factory is None:
+            self._path_factory = self.table.path_factory()
+        path, external = self._path_factory.new_bucket_index_path(
             partition, bucket, file_name
         )
         self.table.file_io.check_or_mkdirs(path.rsplit("/", 1)[0])

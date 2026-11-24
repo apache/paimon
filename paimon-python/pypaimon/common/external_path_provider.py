@@ -68,12 +68,14 @@ class RoundRobinExternalPathProvider(ExternalPathProvider):
         self._relative_bucket_path = relative_bucket_path
         self._position = random.randint(0, len(external_table_paths) - 1)
 
-    def get_next_external_data_path(self, file_name: str) -> str:
+    def next_root(self) -> str:
         self._position += 1
         if self._position == len(self._external_table_paths):
             self._position = 0
+        return self._external_table_paths[self._position]
 
-        external_base = self._external_table_paths[self._position]
+    def get_next_external_data_path(self, file_name: str) -> str:
+        external_base = self.next_root()
         if self._relative_bucket_path:
             return to_file_io_path(resolve_path(resolve_path(external_base, self._relative_bucket_path), file_name))
         else:

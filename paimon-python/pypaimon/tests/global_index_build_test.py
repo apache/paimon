@@ -67,6 +67,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     DataEvolutionTestBase,
 )
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import IndexPathFactory
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 
@@ -815,93 +816,26 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
-    def test_create_global_index_rejects_external_paths_option_before_build(self):
-        from pypaimon.globalindex.index_dispatch import build_global_index
-
-        table = self._create_table()
+    def test_python_index_files_rotate_across_external_roots(self):
+        roots = ['file://%s' % os.path.join(self.tempdir, name) for name in ('index-a', 'index-b')]
+        options = {
+            **self.table_options,
+            'write.native.enabled': 'false',
+            'global-index.external-paths': ','.join(roots),
+        }
+        table = self._create_table(options=options)
         self._write_arrow(table, pa.table(
-            {'id': [1], 'name': ['a'], 'age': [10], 'city': ['x']},
+            {'id': [1, 2, 3, 4], 'name': ['a'] * 4, 'age': [10] * 4, 'city': ['x'] * 4},
             schema=self.pa_schema,
         ))
-        option = 'global-index.external-paths'
-        root_a = 'file://%s' % os.path.join(self.tempdir, 'external-a')
-        root_b = 'file://%s' % os.path.join(self.tempdir, 'external-b')
+        self.assertEqual(4, table.create_global_index('id', options={'sorted-index.records-per-file': '1'}))
         snapshot = table.snapshot_manager().get_latest_snapshot()
-        files_before = {
-            os.path.join(root, name)
-            for root, dirs, files in os.walk(self.tempdir)
-            for name in dirs + files
-        }
-
-        for paths in ('', root_a, root_a + ',' + root_b, root_a + ', ' + root_b + ','):
-            for native in ('false', 'true'):
-                for source in ('table', 'build', 'table-with-build-override'):
-                    with self.subTest(paths=paths, native=native, source=source):
-                        table_options = {'write.native.enabled': native, 'global-index.external-path': root_a}
-                        build_options = {}
-                        if source == 'build':
-                            build_options[option] = paths
-                        else:
-                            table_options[option] = paths
-                            if source == 'table-with-build-override':
-                                build_options[option] = root_a
-                        configured = table.copy(table_options)
-                        with patch(
-                            'pypaimon.globalindex.index_dispatch.build_global_index',
-                            wraps=build_global_index,
-                        ) as build:
-                            with patch.object(
-                                configured, 'new_batch_write_builder',
-                                wraps=configured.new_batch_write_builder,
-                            ) as write_builder:
-                                with self.assertRaisesRegex(
-                                    ValueError,
-                                    "does not support 'global-index.external-paths'",
-                                ):
-                                    configured.create_global_index('id', options=build_options)
-                                build.assert_not_called()
-                                write_builder.assert_not_called()
-                        self.assertEqual(
-                            snapshot.id, table.snapshot_manager().get_latest_snapshot().id)
-                        self.assertEqual([], IndexFileHandler(table).scan(snapshot))
-                        self.assertEqual(files_before, {
-                            os.path.join(root, name)
-                            for root, dirs, files in os.walk(self.tempdir)
-                            for name in dirs + files
-                        })
-
-    def test_vector_build_rejects_external_paths_option_before_backend_selection(self):
-        schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
-        option = 'global-index.external-paths'
-        root = 'file://%s' % os.path.join(self.tempdir, 'external')
-        files_before = {os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
-                        for name in dirs + files}
-
-        for layout in ('range', 'centroid'):
-            for paths in ('', root, root + ',' + root + '-other'):
-                for source in ('table', 'build', 'table-with-build-override'):
-                    with self.subTest(layout=layout, paths=paths, source=source):
-                        table_options = {'fields.embedding.sharding': layout, 'write.native.enabled': 'true'}
-                        build_options = {}
-                        if source == 'build':
-                            build_options[option] = paths
-                        else:
-                            table_options[option] = paths
-                            if source == 'table-with-build-override':
-                                build_options[option] = None
-                        configured = table.copy(table_options)
-                        with patch('pypaimon.globalindex.index_dispatch.build_global_index') as build:
-                            with self.assertRaisesRegex(ValueError, "does not support 'global-index.external-paths'"):
-                                configured.create_global_index(
-                                    'embedding', 'ivf-flat', options=build_options,
-                                    extra_fields={'status': 'bitmap'} if layout == 'centroid' else None)
-                            build.assert_not_called()
-                        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
-                        self.assertEqual(files_before, {
-                            os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
-                            for name in dirs + files
-                        })
+        paths = [entry.index_file.external_path for entry in IndexFileHandler(table).scan(snapshot)]
+        self.assertTrue(all(table.file_io.exists(path) for path in paths))
+        allocated = [path.rsplit('/', 1)[0] for path in paths]
+        self.assertEqual(2, allocated.count(roots[0]))
+        self.assertEqual(2, allocated.count(roots[1]))
+        self.assertEqual(allocated[:2], allocated[2:])
 
     def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
@@ -1865,7 +1799,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             (_FakeSplit([]), Range(10, 19)),
         ]), patch(module + '._to_index_manifest_entries', return_value=[]):
             return self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
     def test_batches_are_written_before_reading_the_next_batch(self):
         self.builder._index_type = 'lucene'
@@ -1974,7 +1908,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 ValueError, "global-index.build.parallelism.*greater than 0"):
             self._build([self._batch([[10.0]], [10])])
 
-    def test_parallel_build_is_bounded_and_keeps_shard_order(self):
+    def test_python_parallel_build_keeps_shard_order_and_rotates_paths(self):
         self.builder._core_options.global_index_build_parallelism.return_value = 2
         shards = [
             (_FakeSplit([]), Range(start, start + 9))
@@ -2005,15 +1939,20 @@ class GenericIndexStreamingTest(unittest.TestCase):
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
         module = 'pypaimon.execution.python.globalindex.create_global_index'
+        roots = ['file:///a', 'file:///b']
         with patch(module + '._split_by_global_index_shard', return_value=shards):
             messages = self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused', roots))
 
         self.assertEqual(2, max_active)
         self.assertEqual(
             [(0,), (10,), (20,), (30,)],
             [message.partition for message in messages],
         )
+        calls = self.builder._build_generic_shard.call_args_list
+        allocated = [call.args[-1] for call in sorted(calls, key=lambda call: call.args[1].from_)]
+        self.assertEqual(set(roots), set(allocated[:2]))
+        self.assertEqual(allocated[:2], allocated[2:])
 
     def test_parallel_failure_deletes_completed_uncommitted_indexes(self):
         self.builder._core_options.global_index_build_parallelism.return_value = 2
@@ -2048,7 +1987,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         self.builder._table.file_io.delete_quietly.assert_called_once_with(
             '/index/completed.index')
@@ -2100,7 +2039,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 patch.object(threading.Thread, 'start', failing_start), \
                 self.assertRaisesRegex(RuntimeError, "can't start new thread"):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         deleted = {
             call[0][0]
@@ -2141,7 +2080,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
-                [], [], Mock(), self.read, '/unused')
+                [], [], Mock(), self.read, IndexPathFactory('/unused'))
 
         self.builder._table.file_io.delete_quietly.assert_called_once_with(
             '/index/completed.index')

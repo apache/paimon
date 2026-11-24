@@ -147,14 +147,11 @@ public class CoreOptionsTest {
     void testLegacyGlobalIndexExternalPath() {
         Options options = new Options();
         CoreOptions core = new CoreOptions(options);
-        assertThat(core.globalIndexExternalPath()).isNull();
-        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, "");
-        assertThat(core.globalIndexExternalPath()).isNull();
+        options.set("global-index.external-path", "");
         assertThat(core.globalIndexExternalPaths()).isEmpty();
         for (String value :
                 new String[] {"file:///a", "file:///index,archive", "file:///a,", "file:///a,,"}) {
-            options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, value);
-            assertThat(core.globalIndexExternalPath()).isEqualTo(new Path(value));
+            options.set("global-index.external-path", value);
             assertThat(core.globalIndexExternalPaths()).containsExactly(new Path(value));
         }
     }
@@ -164,11 +161,10 @@ public class CoreOptionsTest {
         Options options = new Options();
         CoreOptions core = new CoreOptions(options);
         Path legacy = new Path("file:///index,archive");
-        options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, legacy.toString());
+        options.set("global-index.external-path", legacy.toString());
         options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "file:///a, file:///b");
         assertThat(core.globalIndexExternalPaths())
                 .containsExactly(new Path("file:///a"), new Path("file:///b"));
-        assertThat(core.globalIndexExternalPath()).isEqualTo(legacy);
 
         options.set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS, "");
         assertThat(core.globalIndexExternalPaths()).isEmpty();

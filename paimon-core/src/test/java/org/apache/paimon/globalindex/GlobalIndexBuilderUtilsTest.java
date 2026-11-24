@@ -83,7 +83,7 @@ class GlobalIndexBuilderUtilsTest {
             roots = Collections.singletonList(new Path(root, "index,archive"));
             coreOptions
                     .toConfiguration()
-                    .set(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, roots.get(0).toString());
+                    .set("global-index.external-path", roots.get(0).toString());
         } else {
             roots = Arrays.asList(new Path(root, "a"), new Path(root, "b"));
         }
