@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -25,6 +26,8 @@ import org.apache.paimon.globalindex.CentroidIndexFile;
 import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -32,6 +35,8 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.RawVectorSearchSplit;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.table.source.VectorSearchBuilder;
@@ -49,10 +54,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Opens Data Evolution tables and centroid manifests written by paimon-rust. */
 class CentroidTableInteropTest {
@@ -153,6 +160,29 @@ class CentroidTableInteropTest {
 
     private Path tablePath(String table) {
         return new Path(warehouse.resolve("test.db").resolve(table).toUri());
+    }
+
+    @Test
+    void rejectsCommitsThatOnlyDeleteCentroidShards() throws Exception {
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath("centroid_metrics"));
+        List<IndexFileMeta> shards =
+                indexFiles(table, "cos", "ivf-flat").stream()
+                        .filter(file -> !CentroidIndexMeta.isRoutingModel(file))
+                        .collect(Collectors.toList());
+        assertThat(shards).isNotEmpty();
+        CommitMessageImpl delete =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        DataIncrement.deleteIndexIncrement(
+                                Collections.singletonList(shards.get(0))),
+                        CompactIncrement.emptyIncrement());
+        try (TableCommitImpl commit = table.newCommit("delete-centroid-shards")) {
+            assertThatThrownBy(() -> commit.commit(Collections.singletonList(delete)))
+                    .hasStackTraceContaining("Cannot partially delete a centroid index generation");
+        }
+        assertThat(search(table, "cos", null, 1)).containsExactly(0);
     }
 
     private static List<IndexFileMeta> indexFiles(

@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -40,13 +41,7 @@ public final class BinaryIndexManifestEntry {
             Projection.create(
                     IndexManifestEntry.MANIFEST_ROW_TYPE.project(IndexManifestEntry.FILE_NAME));
 
-    public static final Projection FILE_PATH_PROJECTION =
-            Projection.create(
-                    IndexManifestEntry.MANIFEST_ROW_TYPE.project(
-                            IndexManifestEntry.PARTITION,
-                            IndexManifestEntry.BUCKET,
-                            IndexManifestEntry.FILE_NAME,
-                            IndexManifestEntry.EXTERNAL_PATH));
+    public static final Projection FILE_PATH_PROJECTION = createFilePathProjection();
 
     private final Projection projection;
     private @Nullable InternalRow row;
@@ -73,6 +68,25 @@ public final class BinaryIndexManifestEntry {
                                                         GlobalIndexMeta.ROW_RANGE_END,
                                                         GlobalIndexMeta.INDEX_FIELD_ID,
                                                         GlobalIndexMeta.EXTRA_FIELD_IDS)))));
+    }
+
+    private static Projection createFilePathProjection() {
+        RowType manifestType = IndexManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(IndexManifestEntry.PARTITION),
+                                manifestType.getField(IndexManifestEntry.BUCKET),
+                                manifestType.getField(IndexManifestEntry.FILE_NAME),
+                                manifestType.getField(IndexManifestEntry.FILE_SIZE),
+                                manifestType.getField(IndexManifestEntry.ROW_COUNT),
+                                manifestType.getField(IndexManifestEntry.EXTERNAL_PATH),
+                                manifestType
+                                        .getField(IndexManifestEntry.GLOBAL_INDEX)
+                                        .newType(
+                                                GlobalIndexMeta.SCHEMA.project(
+                                                        GlobalIndexMeta.INDEX_META)))));
     }
 
     BinaryIndexManifestEntry replace(InternalRow row) {
@@ -155,6 +169,28 @@ public final class BinaryIndexManifestEntry {
                                 projection.globalIndexPosition, IndexManifestEntry.GLOBAL_INDEX));
     }
 
+    public boolean isEmptyRouter() {
+        return current()
+                                .getLong(
+                                        requiredPosition(
+                                                projection.fileSizePosition,
+                                                IndexManifestEntry.FILE_SIZE))
+                        == 0
+                && current()
+                                .getLong(
+                                        requiredPosition(
+                                                projection.rowCountPosition,
+                                                IndexManifestEntry.ROW_COUNT))
+                        == 0
+                && hasGlobalIndexMeta()
+                && CentroidIndexMeta.isEmptyRouter(
+                        globalIndex()
+                                .getBinary(
+                                        requiredPosition(
+                                                projection.indexMetaPosition,
+                                                GlobalIndexMeta.INDEX_META)));
+    }
+
     public long rowRangeStart() {
         return globalIndex()
                 .getLong(
@@ -219,6 +255,8 @@ public final class BinaryIndexManifestEntry {
         private final int bucketPosition;
         private final int indexTypePosition;
         private final int fileNamePosition;
+        private final int fileSizePosition;
+        private final int rowCountPosition;
         private final int externalPathPosition;
         private final int globalIndexPosition;
         private final int projectedGlobalIndexFieldCount;
@@ -226,6 +264,7 @@ public final class BinaryIndexManifestEntry {
         private final int rowRangeEndPosition;
         private final int indexFieldIdPosition;
         private final int extraFieldIdsPosition;
+        private final int indexMetaPosition;
 
         private Projection(
                 RowType projectedType,
@@ -234,19 +273,24 @@ public final class BinaryIndexManifestEntry {
                 int bucketPosition,
                 int indexTypePosition,
                 int fileNamePosition,
+                int fileSizePosition,
+                int rowCountPosition,
                 int externalPathPosition,
                 int globalIndexPosition,
                 int projectedGlobalIndexFieldCount,
                 int rowRangeStartPosition,
                 int rowRangeEndPosition,
                 int indexFieldIdPosition,
-                int extraFieldIdsPosition) {
+                int extraFieldIdsPosition,
+                int indexMetaPosition) {
             this.projectedType = projectedType;
             this.kindPosition = kindPosition;
             this.partitionPosition = partitionPosition;
             this.bucketPosition = bucketPosition;
             this.indexTypePosition = indexTypePosition;
             this.fileNamePosition = fileNamePosition;
+            this.fileSizePosition = fileSizePosition;
+            this.rowCountPosition = rowCountPosition;
             this.externalPathPosition = externalPathPosition;
             this.globalIndexPosition = globalIndexPosition;
             this.projectedGlobalIndexFieldCount = projectedGlobalIndexFieldCount;
@@ -254,6 +298,7 @@ public final class BinaryIndexManifestEntry {
             this.rowRangeEndPosition = rowRangeEndPosition;
             this.indexFieldIdPosition = indexFieldIdPosition;
             this.extraFieldIdsPosition = extraFieldIdsPosition;
+            this.indexMetaPosition = indexMetaPosition;
         }
 
         public static Projection create(RowType projectedType) {
@@ -266,6 +311,7 @@ public final class BinaryIndexManifestEntry {
             int rowRangeEndPosition = -1;
             int indexFieldIdPosition = -1;
             int extraFieldIdsPosition = -1;
+            int indexMetaPosition = -1;
             if (globalIndexPosition >= 0) {
                 RowType globalIndexType =
                         (RowType) projectedType.getFields().get(globalIndexPosition).type();
@@ -277,6 +323,7 @@ public final class BinaryIndexManifestEntry {
                         globalIndexType.getFieldIndex(GlobalIndexMeta.INDEX_FIELD_ID);
                 extraFieldIdsPosition =
                         globalIndexType.getFieldIndex(GlobalIndexMeta.EXTRA_FIELD_IDS);
+                indexMetaPosition = globalIndexType.getFieldIndex(GlobalIndexMeta.INDEX_META);
             }
 
             return new Projection(
@@ -286,13 +333,16 @@ public final class BinaryIndexManifestEntry {
                     projectedType.getFieldIndex(IndexManifestEntry.BUCKET),
                     projectedType.getFieldIndex(IndexManifestEntry.INDEX_TYPE),
                     projectedType.getFieldIndex(IndexManifestEntry.FILE_NAME),
+                    projectedType.getFieldIndex(IndexManifestEntry.FILE_SIZE),
+                    projectedType.getFieldIndex(IndexManifestEntry.ROW_COUNT),
                     projectedType.getFieldIndex(IndexManifestEntry.EXTERNAL_PATH),
                     globalIndexPosition,
                     projectedGlobalIndexFieldCount,
                     rowRangeStartPosition,
                     rowRangeEndPosition,
                     indexFieldIdPosition,
-                    extraFieldIdsPosition);
+                    extraFieldIdsPosition,
+                    indexMetaPosition);
         }
 
         private static void validateProjection(RowType projectedType) {

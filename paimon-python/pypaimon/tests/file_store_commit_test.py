@@ -26,6 +26,9 @@ from unittest.mock import MagicMock, Mock, patch
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -80,6 +83,23 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
 
 
 class TestExplicitCommitAbort(unittest.TestCase):
+
+    def test_abort_skips_manifest_only_centroid_router(self):
+        partition = GenericRow([], [])
+        router = IndexFileMeta('ivf-flat', 'empty-router.index', 0, 0, global_index_meta=GlobalIndexMeta(
+            0, 1, 0, index_meta=b'PAIMCENT\x01R\x00\x00\x00\x00l2'))
+        bitmap = IndexFileMeta('bitmap', 'bitmap.index', 32, 1, external_path='/index/bitmap.index')
+        message = CommitMessage((), 0, [], index_adds=[
+            IndexManifestEntry(0, partition, 0, router),
+            IndexManifestEntry(0, partition, 0, bitmap),
+        ])
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.table = Mock()
+
+        commit.abort([message])
+
+        commit.table.path_factory.assert_not_called()
+        commit.table.file_io.delete_quietly.assert_called_once_with('/index/bitmap.index')
 
     def test_abort_deletes_new_data_sidecars_changelog_compact_and_indexes_only(self):
         with TemporaryDirectory() as directory:

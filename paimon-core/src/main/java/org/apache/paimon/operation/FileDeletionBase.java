@@ -331,7 +331,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             try (CloseableIterator<BinaryIndexManifestEntry> iterator = entries) {
                 while (iterator.hasNext()) {
                     BinaryIndexManifestEntry entry = iterator.next();
-                    if (skippingSet.add(entry.fileName())) {
+                    if (skippingSet.add(entry.fileName()) && !entry.isEmptyRouter()) {
                         indexFiles.add(indexFileHandler.filePath(entry));
                     }
                 }

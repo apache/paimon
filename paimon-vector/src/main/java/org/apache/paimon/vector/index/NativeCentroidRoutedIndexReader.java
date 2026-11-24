@@ -114,6 +114,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.metric = NativeCentroidVectorGlobalIndexer.routingMetric(modelMeta);
         this.vectorCount = count;
         int nlist = routing.nlist();
+        checkArgument(nlist == 0 || count > 0, "Centroid routing model has no vector shards.");
         boolean storesLocalNlist = storesLocalNlist(indexType, metric);
         for (Map.Entry<Integer, GlobalIndexIOMeta> shard : shards.entrySet()) {
             int centroid = shard.getKey();

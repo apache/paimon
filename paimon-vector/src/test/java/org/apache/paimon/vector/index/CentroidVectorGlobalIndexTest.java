@@ -408,6 +408,16 @@ class CentroidVectorGlobalIndexTest {
                     };
                 };
         long rowCount = 101L * (vectors.length - 1) + 1;
+        ResultEntry emptyRouterEntry =
+                CentroidIndexMeta.router(
+                        indexer.writeRoutingModel(files, files.newFileName("routing"), new byte[0]),
+                        0);
+        GlobalIndexIOMeta emptyRouter =
+                CentroidIndexMeta.file(
+                        new Path(directory, emptyRouterEntry.fileName()),
+                        0,
+                        0,
+                        emptyRouterEntry.meta());
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         indexer.createReader(fileReader, metas, rowCount, null, executor),
@@ -416,7 +426,7 @@ class CentroidVectorGlobalIndexTest {
             try (GlobalIndexReader empty =
                     indexer.createReader(
                             fileReader,
-                            Collections.singletonList(router),
+                            Collections.singletonList(emptyRouter),
                             rowCount,
                             null,
                             executor)) {
@@ -727,7 +737,7 @@ class CentroidVectorGlobalIndexTest {
     }
 
     @Test
-    void rejectsOutOfRangeShardsBeforeOpeningFiles() {
+    void rejectsIncompleteCentroidGroupsBeforeOpeningFiles() {
         CentroidIndexFile router =
                 new CentroidIndexFile(
                         new Path("router"),
@@ -739,18 +749,30 @@ class CentroidVectorGlobalIndexTest {
                         2);
         CentroidIndexFile shard =
                 new CentroidIndexFile(new Path("shard"), 100, 1, null, false, false, 2);
+        GlobalIndexFileReader input =
+                file -> {
+                    throw new AssertionError("Opened an invalid group.");
+                };
         assertThatThrownBy(
                         () ->
                                 new NativeCentroidRoutedIndexReader(
-                                        file -> {
-                                            throw new AssertionError("Opened an invalid group.");
-                                        },
+                                        input,
                                         Arrays.asList(router, shard),
                                         new ArrayType(new FloatType()),
                                         null,
                                         "diskann"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid shard centroid 2");
+        assertThatThrownBy(
+                        () ->
+                                new NativeCentroidRoutedIndexReader(
+                                        input,
+                                        Collections.singletonList(router),
+                                        new ArrayType(new FloatType()),
+                                        null,
+                                        "diskann"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Centroid routing model has no vector shards.");
     }
 
     @ParameterizedTest

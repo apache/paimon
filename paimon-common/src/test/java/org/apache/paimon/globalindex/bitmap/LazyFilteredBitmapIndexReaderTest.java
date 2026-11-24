@@ -89,14 +89,23 @@ public class LazyFilteredBitmapIndexReaderTest {
         RowType fields = RowType.of(dataField, state);
         long rangeSize = 1L << 32;
         long first = CentroidBitmapIndex.encodeRowId(0, rangeSize, 90);
+        long firstEnd = CentroidBitmapIndex.encodeRowId(0, rangeSize, rangeSize - 1);
+        long lastStart = CentroidBitmapIndex.encodeRowId(2, rangeSize, 0);
         long last = CentroidBitmapIndex.encodeRowId(2, rangeSize, 90_000);
         Map<Integer, GlobalIndexIOMeta> bitmaps = new HashMap<>();
         bitmaps.put(
                 dataField.id(),
-                writeData(Arrays.asList(Pair.of(str("red"), first), Pair.of(str("red"), last))));
+                writeData(
+                        Arrays.asList(
+                                Pair.of(str("red"), first),
+                                Pair.of(str("red"), firstEnd),
+                                Pair.of(str("red"), lastStart),
+                                Pair.of(str("red"), last))));
         try (BitmapGlobalIndexWriter writer =
                 new BitmapGlobalIndexer(state, new Options()).createWriter(fileWriter)) {
             writer.write(1, first);
+            writer.write(1, firstEnd);
+            writer.write(null, lastStart);
             writer.write(null, last);
             ResultEntry result = writer.finish().get(0);
             Path path = new Path(result.filePath());
@@ -124,12 +133,12 @@ public class LazyFilteredBitmapIndexReaderTest {
                         rangeSize,
                         3);
         assertThat(opens).hasValue(0);
-        assertThat(filter.apply(0)).containsExactly(90L);
-        assertThat(filter.apply(1)).isEmpty();
         RoaringNavigableMap64 matched = filter.apply(2);
-        assertThat(matched).containsExactly(90_000L);
+        assertThat(matched).containsExactly(0L, 90_000L);
+        assertThat(filter.apply(0)).containsExactly(90L, rangeSize - 1);
+        assertThat(filter.apply(1)).isEmpty();
         matched.clear();
-        assertThat(filter.apply(2)).containsExactly(90_000L);
+        assertThat(filter.apply(2)).containsExactly(0L, 90_000L);
         assertThat(opens).hasValue(2);
     }
 

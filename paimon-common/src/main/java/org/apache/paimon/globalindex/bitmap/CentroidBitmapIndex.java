@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
@@ -63,22 +64,33 @@ public final class CentroidBitmapIndex {
             int nlist) {
         checkArgument(rowRangeSize > 0 && nlist > 0, "Invalid centroid bitmap range.");
         return new IOFunction<Integer, RoaringNavigableMap64>() {
-            private Map<Integer, RoaringNavigableMap64> matches;
+            private RoaringNavigableMap64 matches;
 
             @Override
-            public synchronized RoaringNavigableMap64 apply(Integer centroid) throws IOException {
+            public RoaringNavigableMap64 apply(Integer centroid) throws IOException {
+                if (centroid < 0 || centroid >= nlist || centroid > Long.MAX_VALUE / rowRangeSize) {
+                    return new RoaringNavigableMap64();
+                }
+                long start = encodeRowId(centroid, rowRangeSize, 0);
+                long end = start + Math.min(rowRangeSize - 1, Long.MAX_VALUE - start);
+                return matches().relativeRange(new Range(start, end));
+            }
+
+            private synchronized RoaringNavigableMap64 matches() throws IOException {
                 if (matches == null) {
                     RoaringNavigableMap64 rows =
                             match(files, bitmaps, rowType, buildType, predicate);
-                    matches = splitByCentroid(rows, rowRangeSize, nlist);
+                    // Populate the rank cache before probe tasks share the encoded matches.
+                    if (rows.getLongCardinality() > 0) {
+                        long last = rows.last();
+                        checkState(
+                                last >= 0 && last / rowRangeSize < nlist,
+                                "Invalid centroid bitmap position: %s.",
+                                last);
+                    }
+                    matches = rows;
                 }
-                // The caller can intersect and serialize its bitmap independently.
-                RoaringNavigableMap64 result = new RoaringNavigableMap64();
-                RoaringNavigableMap64 rows = matches.get(centroid);
-                if (rows != null) {
-                    result.or(rows);
-                }
-                return result;
+                return matches;
             }
         };
     }
@@ -113,18 +125,6 @@ public final class CentroidBitmapIndex {
         } finally {
             IOUtils.closeAllQuietly(readers.values());
         }
-    }
-
-    private static Map<Integer, RoaringNavigableMap64> splitByCentroid(
-            RoaringNavigableMap64 rows, long rowRangeSize, int nlist) {
-        Map<Integer, RoaringNavigableMap64> matches = new HashMap<>();
-        for (long row : rows) {
-            long centroid = row / rowRangeSize;
-            checkState(row >= 0 && centroid < nlist, "Invalid centroid bitmap position: %s.", row);
-            matches.computeIfAbsent((int) centroid, ignored -> new RoaringNavigableMap64())
-                    .add(row % rowRangeSize);
-        }
-        return matches;
     }
 
     private static RoaringNavigableMap64 evaluate(

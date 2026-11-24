@@ -166,8 +166,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                 vectorCoverage.add(meta.rowRange());
             }
             // An all-null range still supplies coverage, but has no vectors to search or score.
-            if (files.stream().allMatch(file -> file.rowCount() == 0)
-                    && files.stream().anyMatch(CentroidIndexMeta::isRoutingModel)) {
+            if (files.size() == 1 && CentroidIndexMeta.isEmptyRouter(files.get(0))) {
                 continue;
             }
             String type = entry.getKey().getRight();

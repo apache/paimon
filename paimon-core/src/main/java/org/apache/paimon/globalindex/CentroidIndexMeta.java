@@ -72,7 +72,12 @@ public final class CentroidIndexMeta {
     }
 
     public static boolean isEmptyRouter(@Nullable byte[] meta) {
-        return isRoutingModel(meta) && ByteBuffer.wrap(meta).getInt(MAGIC.length + 2) == 0;
+        return meta != null
+                && meta.length >= HEADER_SIZE
+                && isWrapped(meta)
+                && meta[MAGIC.length] == VERSION
+                && meta[MAGIC.length + 1] == ROUTER
+                && ByteBuffer.wrap(meta).getInt(MAGIC.length + 2) == 0;
     }
 
     /** Whether the index definition includes Bitmap fields, even in an all-null range. */
