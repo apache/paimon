@@ -334,7 +334,15 @@ public class HiveCatalog extends AbstractCatalog {
                                             client.tableExists(
                                                     identifier.getDatabaseName(),
                                                     identifier.getTableName()));
-            return inHms || super.tableExists(identifier);
+            if (inHms) {
+                return true;
+            }
+            // The table location is derived from the database location, which cannot be
+            // resolved when the database does not exist.
+            if (!databaseExists(identifier.getDatabaseName())) {
+                return false;
+            }
+            return super.tableExists(identifier);
         } catch (TException e) {
             throw new RuntimeException(
                     "Cannot determine if table " + identifier.getFullName() + " exists.", e);
@@ -342,6 +350,15 @@ public class HiveCatalog extends AbstractCatalog {
             Thread.currentThread().interrupt();
             throw new RuntimeException(
                     "Interrupted in call to tableExists " + identifier.getFullName(), e);
+        }
+    }
+
+    private boolean databaseExists(String databaseName) {
+        try {
+            getDatabase(databaseName);
+            return true;
+        } catch (DatabaseNotExistException e) {
+            return false;
         }
     }
 
