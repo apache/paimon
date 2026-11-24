@@ -21,11 +21,16 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
 import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta}
 import org.apache.paimon.index.IndexFileMeta
+import org.apache.paimon.manifest.ManifestCommittable
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.table.source.RawVectorSearchSplit
+import org.apache.paimon.spark.globalindex.CentroidBitmapFieldAppender
+import org.apache.paimon.table.sink.CommitCallback
+import org.apache.paimon.table.source.{RawVectorSearchSplit, VectorSearchBuilderImpl}
 import org.apache.paimon.vector.index.VectorTrainingModelIO
 
 import org.apache.commons.io.FileUtils
+import org.apache.spark.sql.Row
 
 import java.io.File
 import java.nio.ByteBuffer
@@ -35,6 +40,8 @@ import scala.collection.JavaConverters._
 
 /** End-to-end centroid build over nonzero, disjoint source row-ID ranges. */
 class CentroidVectorIndexTest extends PaimonSparkTestBase {
+
+  private def runSql(statement: String): Seq[Row] = spark.sql(statement).collect().toSeq
 
   test("centroid interchange tables omit empty shards and carry canonical metrics") {
     val bitmapTable = "centroid_bitmap"
@@ -276,6 +283,224 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
                |index_type=>'ivf-flat')""".stripMargin)
         .collect()
       assert(files.isEmpty)
+    }
+  }
+
+  test("add_global_index_fields extends centroid Bitmaps in the selected partition") {
+    withTable("T") {
+      spark.sql("""CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, priority INT, p INT)
+                  |PARTITIONED BY (p) TBLPROPERTIES (
+                  |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+                  |'deletion-vectors.enabled'='true', 'vector-index.search-mode'='fast',
+                  |'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, array(0.0f, 0.0f), 'bulk', 0, 0)")
+      spark.sql("""INSERT INTO T VALUES
+                  |(10, array(0.0f, 0.0f), 'bulk', 0, 1),
+                  |(11, array(101.0f, 0.0f), 'legacy', 7, 1),
+                  |(12, array(20.0f, 0.0f), NULL, 0, 1),
+                  |(13, NULL, 'legacy', 7, 1),
+                  |(14, array(1.0f, 0.0f), 'bulk', 0, 1),
+                  |(15, array(200.0f, 0.0f), 'bulk', 0, 1)""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (2, array(1.0f, 0.0f), 'bulk', 0, 0)")
+      spark.sql("INSERT INTO T VALUES (16, NULL, 'legacy', 7, 1)")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"tenant":"bitmap","priority":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=2,ivf-flat.nlist=1,ivf-flat.train.sample-ratio=1')""".stripMargin)
+      spark.sql("ALTER TABLE T ADD COLUMNS (region STRING, tier INT)")
+      spark.sql("UPDATE T SET region = 'apac' WHERE id IN (12, 13, 14)").collect()
+      spark.sql("DELETE FROM T WHERE id = 14").collect()
+
+      def filesByPartition: Map[Int, Set[IndexFileMeta]] = {
+        val table = loadTable("T")
+        table
+          .store()
+          .newIndexFileHandler()
+          .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+          .asScala
+          .groupBy(_.partition().getInt(0))
+          .map { case (partition, entries) => partition -> entries.map(_.indexFile()).toSet }
+          .toMap
+      }
+
+      def addFields(): Unit = {
+        assert(
+          runSql("""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+                   |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap","tier":"bitmap","tenant":"bitmap"}',
+                   |partitions=>'p=1')""".stripMargin).head.getBoolean(0))
+      }
+
+      val table = loadTable("T")
+      val beforeSnapshot = table.snapshotManager().latestSnapshot()
+      val before = filesByPartition
+      addFields()
+      val after = filesByPartition
+      assert(after(0) == before(0))
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      val beforeFiles = before(1).map(f => (paths.toPath(f), f.fileSize()))
+      val afterFiles = after(1).map(f => (paths.toPath(f), f.fileSize()))
+      assert(beforeFiles.subsetOf(afterFiles))
+      assert(before(1).count(CentroidIndexMeta.isScalarIndex) == 2)
+      val fields = Seq("tenant", "priority", "region", "tier").map(table.rowType().getField(_).id())
+      val newFiles = after(1).filterNot(f => beforeFiles.contains((paths.toPath(f), f.fileSize())))
+      assert(newFiles.size == 2)
+      assert(newFiles.forall(CentroidIndexMeta.isScalarIndex))
+      val newFieldIds = newFiles.map(
+        f => CentroidIndexMeta.file(f, paths).asInstanceOf[CentroidIndexFile].fieldId())
+      assert(newFieldIds == fields.drop(2).toSet)
+      assert(after(1).forall(_.globalIndexMeta().extraFieldIds().toSeq == fields))
+
+      val combinedFilter = "(region = 'apac' OR (tenant = 'legacy' AND priority = 7))"
+      val query =
+        s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+           |map('centroid.nprobe','2','ivf.nprobe','1'))
+           |WHERE p = 1 AND $combinedFilter""".stripMargin
+      assert(runSql(query).map(_.getInt(0)) == Seq(12))
+      assert(
+        runSql(query.replace(combinedFilter, "tenant = 'legacy' AND priority = 7"))
+          .map(_.getInt(0)) == Seq(11))
+      assert(
+        runSql(query.replace(combinedFilter, "region = 'apac' AND tier IS NULL"))
+          .map(_.getInt(0)) == Seq(12))
+
+      sys.env.get("PAIMON_JAVA_CENTROID_FIXTURE").foreach {
+        directory =>
+          FileUtils.copyDirectory(
+            new File(tempDBDir, s"$dbName0.db/T"),
+            new File(directory, s"$dbName0.db/centroid_appended_bitmap"))
+      }
+
+      val historical = table
+        .newVectorSearchBuilder()
+        .asInstanceOf[VectorSearchBuilderImpl]
+        .withSnapshot(beforeSnapshot)
+        .withVectorColumn("v")
+        .withVector(Array(0.0f, 0.0f))
+        .withOption("centroid.nprobe", "2")
+        .withLimit(1)
+        .withFilter(new PredicateBuilder(table.rowType())
+          .isNull(table.rowType().getFieldIndex("tenant")))
+      assert(
+        historical
+          .newVectorRead()
+          .read(historical.newVectorScan().scan())
+          .results()
+          .getLongCardinality() == 1)
+
+      val addedSnapshot = table.snapshotManager().latestSnapshotId()
+      addFields()
+      assert(table.snapshotManager().latestSnapshotId() == addedSnapshot)
+      assert(filesByPartition == after)
+      intercept[Exception] {
+        runSql("UPDATE T SET region = 'eu' WHERE id = 12")
+      }
+      assert(runSql(query).map(_.getInt(0)) == Seq(12))
+      runSql("ALTER TABLE T SET TBLPROPERTIES ('global-index.column-update-action'='IGNORE')")
+      addFields()
+      assert(table.snapshotManager().latestSnapshotId() == addedSnapshot)
+      assert(filesByPartition == after)
+    }
+  }
+
+  test("add_global_index_fields rejects an existing Bitmap whose field type changed") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (v ARRAY<FLOAT>, flag INT, tag STRING) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (array(0.0f, 0.0f), 7, 'active')")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |extra_fields=>'{"flag":"bitmap","tag":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1')""".stripMargin)
+
+      def add(field: String): Boolean = {
+        val call =
+          s"""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+             |index_type=>'ivf-flat', extra_fields=>'{"$field":"bitmap"}')""".stripMargin
+        runSql(call).head.getBoolean(0)
+      }
+
+      assert(add("flag"))
+      runSql("ALTER TABLE T ALTER COLUMN flag TYPE BIGINT")
+      val widenedSnapshot = loadTable("T").snapshotManager().latestSnapshotId()
+      val failure = intercept[Exception](add("flag"))
+      val message = "Bitmap field 'flag' has changed type. Rebuild the centroid index."
+      assert(
+        Iterator
+          .iterate[Throwable](failure)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains(message))))
+      assert(add("tag"))
+      assert(loadTable("T").snapshotManager().latestSnapshotId() == widenedSnapshot)
+    }
+  }
+
+  test("centroid Bitmap append checks source snapshots and survives callback failure") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (id INT, v ARRAY<FLOAT>, status INT, region STRING)
+          |TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, array(0.0f, 0.0f), 10, 'old')")
+      val create =
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1'""".stripMargin
+      runSql(s"$create)")
+      val add =
+        """CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}')""".stripMargin
+      val unsupported = intercept[Exception](runSql(add))
+      assert(
+        Iterator
+          .iterate[Throwable](unsupported)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains("index with Bitmap fields"))))
+      runSql(s"""$create, extra_fields=>'{"status":"bitmap"}')""")
+
+      val table = loadTable("T")
+      val handler = table.store().newIndexFileHandler()
+      def currentFiles: Set[IndexFileMeta] = handler
+        .scan(table.snapshotManager().latestSnapshot(), "ivf-flat")
+        .asScala
+        .map(_.indexFile())
+        .toSet
+      val before = currentFiles
+      val messages = CentroidBitmapFieldAppender.build(
+        spark,
+        table,
+        "ivf-flat",
+        table.rowType().getField("v"),
+        Seq(table.rowType().getField("region")).asJava,
+        null)
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      runSql("UPDATE T SET region = 'new' WHERE id = 1")
+      val commit = table.newCommit("stale-bitmap-append")
+      try {
+        val failure = intercept[Exception](commit.commit(messages))
+        assert(
+          Iterator
+            .iterate[Throwable](failure)(_.getCause)
+            .takeWhile(_ != null)
+            .exists(
+              e => Option(e.getMessage).exists(_.contains("Centroid index source rows changed"))))
+      } finally {
+        commit.close()
+      }
+      assert(currentFiles == before)
+      assert(before.forall(file => table.fileIO().exists(paths.toPath(file))))
+
+      val callback = classOf[FailingCentroidBitmapAppendCallback].getName
+      runSql(s"ALTER TABLE T SET TBLPROPERTIES ('commit.callbacks'='$callback')")
+      val publishedFailure = intercept[Exception](runSql(add))
+      assert(
+        Iterator
+          .iterate[Throwable](publishedFailure)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).contains("Injected Bitmap post-commit failure")))
+      assert(currentFiles.forall(file => table.fileIO().exists(paths.toPath(file))))
+      assert(runSql("""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1)
+                      |WHERE region = 'new'""".stripMargin).map(_.getInt(0)) == Seq(1))
+      assert(runSql(add).head.getBoolean(0))
     }
   }
 
@@ -781,4 +1006,17 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       }
   }
 
+}
+
+class FailingCentroidBitmapAppendCallback extends CommitCallback {
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (context.snapshot.commitUser().startsWith("global-index-add-fields-")) {
+      throw new RuntimeException("Injected Bitmap post-commit failure")
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
 }

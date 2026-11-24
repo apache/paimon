@@ -94,6 +94,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import scala.Tuple2;
@@ -504,7 +505,7 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                         }));
     }
 
-    private static void closeOnTaskCompletion(AutoCloseable resource) {
+    static void closeOnTaskCompletion(AutoCloseable resource) {
         TaskContext.get()
                 .addTaskCompletionListener(
                         (TaskCompletionListener)
@@ -530,7 +531,15 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         while (input.hasNext() && input.peek()._1() < 0) {
             int key = input.peek()._1();
             DataField field = context.extraFields().get(-1 - key);
-            commits.add(context.finish(writeBitmap(context, io, input, key, field)));
+            commits.add(
+                    context.finish(
+                            writeBitmap(
+                                    new CoreOptions(context.options),
+                                    io,
+                                    input,
+                                    key,
+                                    field,
+                                    Tuple2::_2)));
         }
         while (input.hasNext()) {
             int centroid = input.peek()._1();
@@ -552,14 +561,14 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
         return commits.iterator();
     }
 
-    private static List<ResultEntry> writeBitmap(
-            BuildContext context,
+    static <T> List<ResultEntry> writeBitmap(
+            CoreOptions options,
             GlobalIndexFileReadWrite files,
-            PeekingIterator<Tuple2<Integer, Tuple2<Long, Tuple2<float[], byte[]>>>> input,
+            PeekingIterator<Tuple2<Integer, Tuple2<Long, T>>> input,
             int key,
-            DataField field)
+            DataField field,
+            Function<T, byte[]> encodedValue)
             throws Exception {
-        CoreOptions options = new CoreOptions(context.options);
         KeySerializer serializer = KeySerializer.create(field.type());
         try (IOManager ioManager = IOManager.create(System.getProperty("java.io.tmpdir"))) {
             BinaryExternalSortBuffer buffer =
@@ -574,8 +583,8 @@ public class CentroidGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilde
                             options.writeBufferSpillDiskSize());
             try {
                 while (input.hasNext() && input.peek()._1() == key) {
-                    Tuple2<Long, Tuple2<float[], byte[]>> row = input.next()._2();
-                    byte[] bytes = row._2()._2();
+                    Tuple2<Long, T> row = input.next()._2();
+                    byte[] bytes = encodedValue.apply(row._2());
                     Object value =
                             bytes == null ? null : serializer.deserialize(MemorySlice.wrap(bytes));
                     checkArgument(
