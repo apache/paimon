@@ -254,6 +254,75 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
+    @Timeout(300)
+    public void testMergeOnReadWithSpilledCarriers() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(3)
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  seq INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'sequence.field' = 'seq',\n"
+                        + "  'postpone.default-bucket-num' = '4',\n"
+                        + "  'source.split.target-size' = '1 B'\n"
+                        + ")");
+
+        String padding = new String(new char[200]).replace('\0', 'x');
+        int numKeys = 4000;
+        StringBuilder seed = new StringBuilder();
+        StringBuilder update = new StringBuilder();
+        for (int i = 0; i < numKeys; i++) {
+            if (i > 0) {
+                seed.append(", ");
+                update.append(", ");
+            }
+            seed.append(String.format("(0, %d, 'base-%d-%s', 10)", i, i, padding));
+            update.append(String.format("(0, %d, 'new-%d-%s', 20)", i, i, padding));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + seed).await();
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ "
+                                + "VALUES "
+                                + update)
+                .await();
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < numKeys; i++) {
+            expected.add("+I[" + i + "]");
+        }
+
+        String mor = "/*+ OPTIONS('postpone.merge-on-read' = 'true') */";
+        assertThat(collect(tEnv.executeSql("SELECT k FROM T " + mor)))
+                .containsExactlyInAnyOrderElementsOf(expected);
+
+        // Force carriers to spill: 192kb buffer is the minimum of three 64kb pages.
+        String spilled =
+                "/*+ OPTIONS('postpone.merge-on-read' = 'true',"
+                        + " 'sort-spill-buffer-size' = '192 kb') */";
+        assertThat(collect(tEnv.executeSql("SELECT k FROM T " + spilled)))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
     public void testOverwriteWithoutBatchWriteFixedBucket() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
