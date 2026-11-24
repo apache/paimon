@@ -197,8 +197,10 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        // wipe the Iceberg metadata directory, so the next commit rebuilds it without a base
+        // wipe the Iceberg metadata directory, so the next commit rebuilds it without a base;
+        // assert the wipe really happened, otherwise the with-base path would cover the rebuild
         table.fileIO().deleteDirectoryQuietly(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(new Path(table.location(), "metadata"))).isFalse();
 
         // a pure compaction commit rebuilds the metadata from scratch; the snapshot summary
         // must derive the operation from the commit kind instead of hardcoding "append"
@@ -213,6 +215,82 @@ public class IcebergCompatibilityTest {
         assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("replace");
 
         // the rebuilt metadata still exposes the table data
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testWithoutBaseRebuildOverwriteDerivesOperation() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // wipe the Iceberg metadata directory, so the next commit rebuilds it without a base;
+        // assert the wipe really happened, otherwise the with-base path would cover the rebuild
+        table.fileIO().deleteDirectoryQuietly(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(new Path(table.location(), "metadata"))).isFalse();
+
+        // an overwrite commit rebuilds the metadata from scratch; the snapshot summary
+        // must derive the operation from the commit kind instead of hardcoding "append"
+        write.write(GenericRow.of(3, 30));
+        commit.withOverwriteStaticPartitions(Collections.singletonList(BinaryRow.EMPTY_ROW))
+                .commit(2, write.prepareCommit(false, 2));
+
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"));
+        assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("overwrite");
+
+        // the rebuilt metadata exposes the overwritten data
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testWithoutBaseRebuildAppendKeepsAppendOperation() throws Exception {
+        // the very first commit has no base metadata file, so it is exported through the
+        // without-base rebuild path; a plain append commit must keep the "append" operation
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"));
+        assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("append");
+
+        // the rebuilt metadata exposes all appended data
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
         write.close();
