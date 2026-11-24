@@ -717,6 +717,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
                         .parallelism(1)
                         .build();
+        // Since Flink 2.3 only the minimum pause delays the first checkpoint. The writer switches
+        // to the new path at that checkpoint, so the first row has to arrive before it.
+        sEnv.getConfig().set("execution.checkpointing.min-pause", "500 ms");
 
         sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
         sEnv.executeSql("USE CATALOG testCatalog");
