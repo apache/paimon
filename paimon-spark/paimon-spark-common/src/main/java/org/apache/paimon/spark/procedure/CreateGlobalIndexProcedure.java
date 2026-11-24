@@ -116,8 +116,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         return new Options(tableOptions, parsedOptions);
     }
 
-    private static List<DataField> parseExtraFields(
-            String json, RowType rowType, DataField vectorField) throws IOException {
+    static List<DataField> parseExtraFields(String json, RowType rowType, DataField vectorField)
+            throws IOException {
         JsonNode fields =
                 JsonSerdeUtil.OBJECT_MAPPER_INSTANCE
                         .reader()

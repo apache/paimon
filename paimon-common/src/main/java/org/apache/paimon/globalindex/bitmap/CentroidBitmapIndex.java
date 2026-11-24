@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
@@ -52,6 +53,21 @@ public final class CentroidBitmapIndex {
     /** Positions for each centroid occupy a separate copy of the source row-ID range. */
     public static long encodeRowId(int centroid, long rowRangeSize, long relativeRowId) {
         return Math.addExact(Math.multiplyExact(centroid, rowRangeSize), relativeRowId);
+    }
+
+    /** Returns the encoded positions of all vectors in the range, including null scalar keys. */
+    public static RoaringNavigableMap64 rowIds(
+            GlobalIndexFileReader files, GlobalIndexIOMeta bitmap, DataField field)
+            throws IOException {
+        try (BitmapIndexReader reader =
+                new BitmapIndexReader(KeySerializer.create(field.type()), files, bitmap)) {
+            RoaringNavigableMap64 rows = reader.visitIsNull().get().results();
+            rows.or(reader.visitIsNotNull().get().results());
+            checkState(
+                    rows.getLongCardinality() == bitmap.rowCount(),
+                    "Centroid bitmap does not cover the range's vectors.");
+            return rows;
+        }
     }
 
     public static IOFunction<Integer, RoaringNavigableMap64> filter(

@@ -33,7 +33,7 @@ class CentroidKryoBuildTest extends PaimonSparkTestBase {
 
   test("centroid sampling and shuffle work with strict Kryo registration") {
     withTable("T") {
-      spark.sql("""CREATE TABLE T (v ARRAY<FLOAT>, tag INT) TBLPROPERTIES (
+      spark.sql("""CREATE TABLE T (v ARRAY<FLOAT>, tag INT, rank INT) TBLPROPERTIES (
                   |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
                   |'global-index.row-count-per-shard'='8')""".stripMargin)
       val table = loadTable("T")
@@ -42,7 +42,9 @@ class CentroidKryoBuildTest extends PaimonSparkTestBase {
       val commit = builder.newCommit()
       try {
         (0 until 32).foreach(
-          i => write.write(GenericRow.of(new GenericArray(Array(i.toFloat, 1f)), Int.box(i))))
+          i =>
+            write.write(
+              GenericRow.of(new GenericArray(Array(i.toFloat, 1f)), Int.box(i), Int.box(32 - i))))
         commit.commit(write.prepareCommit())
       } finally {
         write.close()
@@ -72,6 +74,16 @@ class CentroidKryoBuildTest extends PaimonSparkTestBase {
         .withFilter(new PredicateBuilder(table.rowType()).equal(1, Int.box(7)))
         .executeLocal()
       assert(filtered.results().toArray(1).toSeq == Seq(7L))
+      spark.sql("""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+                  |index_type=>'ivf-flat', extra_fields=>'{"rank":"bitmap"}')""".stripMargin)
+      val appended = table
+        .newVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withVector(Array(0f, 1f))
+        .withLimit(1)
+        .withFilter(new PredicateBuilder(table.rowType()).equal(2, Int.box(25)))
+        .executeLocal()
+      assert(appended.results().toArray(1).toSeq == Seq(7L))
     }
   }
 }

@@ -227,9 +227,13 @@ exact matches before ranking and skips opening the ANN file when no visible vect
 If any branch cannot be evaluated exactly by the field Bitmaps, the filter uses the existing
 scalar-filter path.
 
-To change the scalar columns, run the centroid build again with the new `extra_fields`. For the selected
-partitions, the build replaces the indexes of the same type on the vector column. Pass just the
-vector column as `index_column` to `sys.drop_global_index` to remove the group.
+Use Spark's [`sys.add_global_index_fields`](../../spark/procedures/indexes#add_global_index_fields)
+to add scalar columns to existing centroid ranges with Bitmap fields. The procedure writes the
+new fields' Bitmap files and reuses the existing Bitmap, router, and vector shard files. To set
+the full list of scalar columns, including the first Bitmap on a vector-only index, run the
+centroid build with `extra_fields`. For the selected partitions, the build replaces the indexes
+of the same type on the vector column. Pass the vector column as `index_column` to
+`sys.drop_global_index` to remove the group.
 
 ## Rebuild and Compatibility
 

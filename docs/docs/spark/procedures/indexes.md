@@ -97,6 +97,30 @@ CALL sys.create_global_index(
 );
 ```
 
+## add_global_index_fields
+
+Append scalar Bitmap fields to existing [Centroid Vector indexes](../../multimodal-table/global-index/centroid-vector)
+on a Data Evolution table. Each eligible row-ID range already has Bitmap fields configured.
+The procedure writes one Bitmap file per new field in each range with vectors and reuses its
+existing Bitmap, router, and vector shard files.
+It returns `true` on success, including when all requested fields are already indexed.
+
+Pass the table identifier in `table`, the vector column in `index_column`, and the
+existing vector index type in `index_type`. Set `extra_fields` to a JSON object
+mapping existing scalar column names to `bitmap`. Use the optional `partitions`
+argument to select partitions with the same syntax as `create_global_index`.
+At least one selected range must have a centroid index with Bitmap fields.
+
+```sql
+CALL sys.add_global_index_fields(
+  table => 'db.model_embeddings',
+  index_column => 'embedding',
+  index_type => 'ivf-pq',
+  extra_fields => '{"region":"bitmap"}',
+  partitions => 'dt="2026-11-17"'
+);
+```
+
 ## drop_global_index
 
 Drop global index files for a given column.

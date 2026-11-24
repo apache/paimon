@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.AddGlobalIndexFieldsProcedure;
 import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
@@ -118,6 +119,7 @@ public class SparkProcedures {
         procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("create_global_index", CreateGlobalIndexProcedure::builder);
+        procedureBuilders.put("add_global_index_fields", AddGlobalIndexFieldsProcedure::builder);
         procedureBuilders.put("drop_global_index", DropGlobalIndexProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("rename_branch", RenameBranchProcedure::builder);
