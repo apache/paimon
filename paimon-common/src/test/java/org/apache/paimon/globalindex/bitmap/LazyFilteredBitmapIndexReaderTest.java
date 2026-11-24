@@ -101,7 +101,7 @@ public class LazyFilteredBitmapIndexReaderTest {
             writer.writeColumn(dataField, new Options(), tags);
             result = writer.finish();
         }
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
         assertThat(result.meta()).hasSize(Long.BYTES);
@@ -152,7 +152,7 @@ public class LazyFilteredBitmapIndexReaderTest {
             result = writer.finish();
         }
         assertThat(result.meta()).isNull();
-        Path path = new Path(basePath, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.rowCount(), null);
         RowType rowType = RowType.of(dataField);
@@ -174,14 +174,15 @@ public class LazyFilteredBitmapIndexReaderTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(basePath, prefix + "-" + UUID.randomUUID() + ".index")
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(basePath, fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
         fileReader = meta -> fileIO.newInputStream(meta.filePath());
@@ -278,12 +279,12 @@ public class LazyFilteredBitmapIndexReaderTest {
         GlobalIndexFileWriter streamingFileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + ".index";
+                    public String newFilePath(String prefix) {
+                        return "memory://test/" + prefix + ".index";
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName) {
+                    public PositionOutputStream newOutputStream(String filePath) {
                         ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
                         output.set(stream);
                         return stream;
@@ -305,12 +306,12 @@ public class LazyFilteredBitmapIndexReaderTest {
         GlobalIndexFileWriter streamingFileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + ".index";
+                    public String newFilePath(String prefix) {
+                        return "memory://test/" + prefix + ".index";
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName) {
+                    public PositionOutputStream newOutputStream(String filePath) {
                         ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
                         output.set(stream);
                         return stream;
@@ -354,7 +355,7 @@ public class LazyFilteredBitmapIndexReaderTest {
         }
         writer.write(null, keys.length);
         ResultEntry result = writer.finish().get(0);
-        Path filePath = new Path(basePath, result.fileName());
+        Path filePath = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta());
 
@@ -752,7 +753,7 @@ public class LazyFilteredBitmapIndexReaderTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
         ResultEntry resultEntry = results.get(0);
-        Path filePath = new Path(basePath, resultEntry.fileName());
+        Path filePath = new Path(resultEntry.filePath());
         return new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), resultEntry.meta());
     }
 

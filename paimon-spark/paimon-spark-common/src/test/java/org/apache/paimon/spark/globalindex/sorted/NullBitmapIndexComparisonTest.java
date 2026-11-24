@@ -251,13 +251,14 @@ class NullBitmapIndexComparisonTest {
                     private int sequence;
 
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + sequence++ + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(base, prefix + "-" + sequence++ + ".index").toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String name) throws IOException {
-                        return io.newOutputStream(new Path(base, name), false);
+                    public PositionOutputStream newOutputStream(String filePath)
+                            throws IOException {
+                        return io.newOutputStream(new Path(filePath), false);
                     }
                 };
         List<GlobalIndexIOMeta> result = new ArrayList<>();
@@ -272,7 +273,7 @@ class NullBitmapIndexComparisonTest {
                 for (List<ResultEntry> group : writer.finish()) {
                     assertThat(group).hasSize(1);
                     ResultEntry entry = group.get(0);
-                    Path path = new Path(base, entry.fileName());
+                    Path path = new Path(entry.filePath());
                     result.add(
                             new GlobalIndexIOMeta(
                                     path, io.getFileSize(path), entry.rowCount(), entry.meta()));

@@ -473,6 +473,43 @@ sorting or guarantee lower elapsed time for every workload. Composite and
 Multivalue indexes retain their existing build paths. Evaluate CPU, network and
 spill costs on a representative cluster before enabling it for a workload.
 
+## Upgrade Java Index Plugins
+
+Support for multiple `global-index.external-paths` directories changes the Java
+global index writer interface from file names to allocated full paths. Plugins
+compiled against the previous interface must be upgraded together with Paimon.
+This applies even when the option is unset or contains only one directory.
+
+Deploy the Paimon engine connector/runtime and Paimon-provided Java index plugins,
+including `paimon-lumina`, from the same Paimon release. For snapshot or custom
+Paimon builds, build them from the same source revision; matching `SNAPSHOT`
+version strings alone do not ensure compatibility. Replace the old plugin JARs
+in the engine's classpath or plugin directory and restart the processes that
+load them.
+Updating only the `lumina-jni` dependency does not update Paimon's Java adapter.
+
+Custom Java index plugins must make these changes before being rebuilt against
+the target Paimon version:
+
+- Replace `GlobalIndexFileWriter.newFileName(prefix)` with
+  `newFilePath(prefix)`, which allocates and returns a full path.
+- Pass that path unchanged to `newOutputStream(filePath)`. Do not prepend
+  another directory or select an external directory again.
+- Pass the same full path as the first argument of `ResultEntry`. Its
+  constructor signature is unchanged, but this argument now represents a full
+  path rather than a file name.
+- Replace `ResultEntry.fileName()` with `filePath()` where the result is read;
+  extract the basename only when a file name is required.
+
+There is no compatibility adapter for the previous Java writer interface.
+Using an old plugin JAR with the new runtime can fail with `NoSuchMethodError`
+for `GlobalIndexFileWriter.newFileName`. Recompiling unchanged plugin source
+against the new interface is insufficient; migrate its calls first.
+
+This Java interface migration does not change index file contents or the
+persisted `IndexFileMeta` format. It does not by itself require rebuilding
+existing indexes.
+
 ## Shared Options
 
 These table options affect global index build and read behavior:
@@ -486,7 +523,8 @@ These table options affect global index build and read behavior:
 | `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
-| `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `global-index.external-path` | Not set | A single root URI for index files. Literal commas are part of the URI, for example `file:///tmp/index,archive`. Used when `global-index.external-paths` is absent. Supported by Java and PyPaimon. |
+| `global-index.external-paths` | Not set | Comma-separated root directories for index files, for example `s3://bucket-a/index,s3://bucket-b/index`. New files use round-robin selection independently of data-file external path settings. When present, this option takes precedence over `global-index.external-path`; an empty value uses the table index directory. Each file's actual path is saved in metadata, so changing these options does not relocate existing files. PyPaimon does not support `global-index.external-paths` for index writes. The key is rejected even if its value is empty or contains only one directory.  |
 | `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
 | `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. Falls back to `sorted-index.records-per-range`, then `btree-index.records-per-range`. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |

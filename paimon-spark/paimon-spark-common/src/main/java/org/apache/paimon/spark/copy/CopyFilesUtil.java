@@ -118,18 +118,15 @@ public class CopyFilesUtil {
                 null);
     }
 
-    public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {
-        String newExternalPath =
-                externalPathDir(oldFileMeta.externalPath())
-                        .map(dir -> dir + "/" + newFileName)
-                        .orElse(null);
+    public static IndexFileMeta toNewIndexFileMeta(
+            IndexFileMeta oldFileMeta, Path newFilePath, boolean isExternalPath) {
         return new IndexFileMeta(
                 oldFileMeta.indexType(),
-                newFileName,
+                newFilePath.getName(),
                 oldFileMeta.fileSize(),
                 oldFileMeta.rowCount(),
                 oldFileMeta.dvRanges(),
-                newExternalPath);
+                isExternalPath ? newFilePath.toString() : null);
     }
 
     public static Optional<String> externalPathDir(String externalPath) {

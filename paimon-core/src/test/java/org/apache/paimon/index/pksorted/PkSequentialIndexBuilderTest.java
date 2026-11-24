@@ -177,7 +177,7 @@ class PkSequentialIndexBuilderTest {
         Path root = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(root, fileName);
             }
 
@@ -189,6 +189,11 @@ class PkSequentialIndexBuilderTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

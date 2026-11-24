@@ -250,6 +250,8 @@ def merge_into(
         target_table, source, *, on, when_matched=(), when_not_matched=(),
         commit_user, commit_identifier=BATCH_COMMIT_IDENTIFIER):
     """Select MERGE execution before consuming source input or staging files."""
+    if any(clause.delete for clause in when_matched):
+        target_table.options.validate_index_write_path()
     if target_table.options.native_write_enabled():
         from pypaimon.write.backend_dispatch import prepare_native_merge_into
 

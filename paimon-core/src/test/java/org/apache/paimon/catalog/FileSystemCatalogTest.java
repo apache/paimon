@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -355,6 +356,120 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     }
 
     @ParameterizedTest
+    @EnumSource(
+            value = CoreOptions.ExternalPathStrategy.class,
+            names = {"NONE", "SPECIFIC_FS"})
+    public void testDropTableWithDynamicExternalPathStrategy(
+            CoreOptions.ExternalPathStrategy strategy) throws Exception {
+        Identifier identifier = Identifier.create("test_db", "dynamic_external_paths");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Path firstPath = new Path(tempFile.resolve("external-file").toUri().toString());
+        Path secondPath =
+                new Path(TraceableFileIO.SCHEME + "://" + tempFile.resolve("external-traceable"));
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                                " " + firstPath + " , " + secondPath + " ")
+                        .option(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                                strategy.toString())
+                        .option(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        if (strategy == CoreOptions.ExternalPathStrategy.NONE) {
+            assertThat(table.store().pathFactory().getExternalPaths()).isEmpty();
+        } else {
+            assertThat(table.store().pathFactory().getExternalPaths()).containsExactly(firstPath);
+        }
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "specific-fs");
+        dynamicOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), TraceableFileIO.SCHEME);
+        FileStoreTable writerTable = table.copy(dynamicOptions);
+        assertThat(writerTable.store().pathFactory().getExternalPaths())
+                .containsExactly(secondPath);
+        BatchWriteBuilder writeBuilder = writerTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(fileIO.exists(secondPath)).isTrue();
+        FileSystemSchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, table.location());
+        assertThat(schemaManager.listAll()).hasSize(1);
+        assertThat(schemaManager.latest().get().options())
+                .containsEntry(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), "file");
+
+        catalog.dropTable(identifier, false);
+        assertThat(fileIO.exists(secondPath)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testMigrateLegacyGlobalIndexExternalPath(boolean removeLegacyOption)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_db", "legacy_index_path");
+        java.nio.file.Path legacyRoot = tempFile.resolve("index,archive");
+        java.nio.file.Path firstRoot = tempFile.resolve("index-a");
+        java.nio.file.Path secondRoot = tempFile.resolve("index-b");
+        java.nio.file.Path unrelated = Files.createDirectory(tempFile.resolve("index"));
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option("bucket", "-1")
+                        .option(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                                legacyRoot.toUri().toString())
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Path oldIndexPath = table.store().pathFactory().globalIndexFileFactory().newPath();
+        assertThat(oldIndexPath.getParent()).isEqualTo(new Path(legacyRoot.toUri()));
+        fileIO.mkdirs(oldIndexPath.getParent());
+        fileIO.overwriteFileUtf8(oldIndexPath, "legacy-index");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<SchemaChange> changes = new ArrayList<>();
+        changes.add(
+                SchemaChange.setOption(
+                        CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(),
+                        firstRoot.toUri() + ", " + secondRoot.toUri()));
+        if (removeLegacyOption) {
+            changes.add(SchemaChange.removeOption(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key()));
+        }
+        catalog.alterTable(identifier, changes, false);
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.coreOptions().globalIndexExternalPaths())
+                .containsExactly(new Path(firstRoot.toUri()), new Path(secondRoot.toUri()));
+        assertThat(read(table, null, null, null, null))
+                .extracting(row -> row.getInt(0))
+                .containsExactly(1);
+        assertThat(fileIO.readFileUtf8(oldIndexPath)).isEqualTo("legacy-index");
+        Files.createDirectories(firstRoot);
+        Files.createDirectories(secondRoot);
+
+        catalog.dropTable(identifier, false);
+        assertThat(legacyRoot).doesNotExist();
+        assertThat(firstRoot).doesNotExist();
+        assertThat(secondRoot).doesNotExist();
+        assertThat(unrelated).exists();
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDropTableWithInvalidOptionsAndExternalPaths(boolean cacheEnabled)
             throws Exception {
@@ -364,7 +479,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         java.nio.file.Path oldMainPath = Files.createDirectory(tempFile.resolve("old-main-data"));
         java.nio.file.Path newMainPath = Files.createDirectory(tempFile.resolve("new-main-data"));
         java.nio.file.Path oldBranchPath =
-                Files.createDirectory(tempFile.resolve("old-branch-index"));
+                Files.createDirectory(tempFile.resolve("old-branch-index,archive"));
         java.nio.file.Path newBranchPath =
                 Files.createDirectory(tempFile.resolve("new-branch-index"));
         java.nio.file.Path unrelatedPath = Files.createDirectory(tempFile.resolve("unrelated"));
@@ -379,9 +494,11 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Map<String, String> branchOptions = new HashMap<>(legacySchema.options());
         branchOptions.put(
                 CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), oldBranchPath.toUri().toString());
-        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
+        // An older engine ignores the new key and can still write to the legacy root.
         branchOptions.put(
-                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), newBranchPath.toUri().toString());
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key(), newBranchPath.toUri().toString());
+        writeLegacySchema(branchSchemaManager, legacySchema, 0, branchOptions);
+        branchOptions.remove(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key());
         writeLegacySchema(branchSchemaManager, legacySchema, 1, branchOptions);
 
         assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())

@@ -199,14 +199,14 @@ public class LuminaVectorGlobalIndexScanTest {
         GlobalIndexFileWriter fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID();
+                    public String newFilePath(String prefix) {
+                        return new Path(indexDir, prefix + "-" + UUID.randomUUID()).toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(indexDir, fileName), false);
+                        return fileIO.newOutputStream(new Path(filePath), false);
                     }
                 };
 
@@ -222,14 +222,14 @@ public class LuminaVectorGlobalIndexScanTest {
         int fieldId = ipTable.rowType().getFieldIndex(vectorFieldName);
 
         for (ResultEntry entry : entries) {
-            long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));
+            long fileSize = fileIO.getFileSize(new Path(entry.filePath()));
             GlobalIndexMeta globalMeta =
                     new GlobalIndexMeta(0, vectors.length - 1, fieldId, null, entry.meta());
 
             metas.add(
                     new IndexFileMeta(
                             LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                            entry.fileName(),
+                            new Path(entry.filePath()).getName(),
                             fileSize,
                             entry.rowCount(),
                             globalMeta,
@@ -289,14 +289,14 @@ public class LuminaVectorGlobalIndexScanTest {
         GlobalIndexFileWriter fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID();
+                    public String newFilePath(String prefix) {
+                        return new Path(indexDir, prefix + "-" + UUID.randomUUID()).toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(indexDir, fileName), false);
+                        return fileIO.newOutputStream(new Path(filePath), false);
                     }
                 };
 
@@ -313,14 +313,14 @@ public class LuminaVectorGlobalIndexScanTest {
         int fieldId = rowType.getFieldIndex(vectorFieldName);
 
         for (ResultEntry entry : entries) {
-            long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));
+            long fileSize = fileIO.getFileSize(new Path(entry.filePath()));
             GlobalIndexMeta globalMeta =
                     new GlobalIndexMeta(0, vectors.length - 1, fieldId, null, entry.meta());
 
             metas.add(
                     new IndexFileMeta(
                             LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                            entry.fileName(),
+                            new Path(entry.filePath()).getName(),
                             fileSize,
                             entry.rowCount(),
                             globalMeta,

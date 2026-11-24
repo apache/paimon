@@ -2912,7 +2912,19 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+                            "Global index root directory as a single URI, including any literal commas. "
+                                    + "If not set, global index files are stored under <table-root-directory>/index. "
+                                    + "Ignored for new files when global-index.external-paths is configured.");
+
+    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATHS =
+            key("global-index.external-paths")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated global index root directories. New index files are distributed "
+                                    + "in round-robin order. When configured, takes precedence over global-index.external-path; "
+                                    + "an empty value uses <table-root-directory>/index. If not configured, global-index.external-path is used. "
+                                    + "PyPaimon does not support this option for index writes.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -4211,17 +4223,34 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
+    @Nullable
     public Path globalIndexExternalPath() {
         String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
         if (pathString == null || pathString.isEmpty()) {
             return null;
         }
         Path path = new Path(pathString);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
-        }
+        checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
         return path;
+    }
+
+    public List<Path> globalIndexExternalPaths() {
+        if (!options.contains(GLOBAL_INDEX_EXTERNAL_PATHS)) {
+            Path path = globalIndexExternalPath();
+            return path == null ? Collections.emptyList() : Collections.singletonList(path);
+        }
+        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATHS);
+        if (pathString == null || pathString.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String value : pathString.split(",")) {
+            Path path = new Path(value.trim());
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
+        }
+        checkArgument(!paths.isEmpty(), "global index external paths is empty");
+        return paths;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
@@ -4494,6 +4523,49 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    /** Returns all configured external data paths without applying the write strategy. */
+    public List<Path> dataFileExternalPathList() {
+        String externalPaths = dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            paths.add(new Path(pathString.trim()));
+        }
+        return paths;
+    }
+
+    /** Returns external data paths eligible for writing under the configured strategy. */
+    public List<Path> createExternalPaths() {
+        String externalPaths = dataFileExternalPaths();
+        ExternalPathStrategy strategy = externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = externalSpecificFS();
+        List<Path> paths = new ArrayList<>();
+        for (Path path : dataFileExternalPathList()) {
+            String scheme = path.toUri().getScheme();
+            checkArgument(scheme != null, "scheme should not be null: %s", path);
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     public ExternalPathStrategy externalPathStrategy() {

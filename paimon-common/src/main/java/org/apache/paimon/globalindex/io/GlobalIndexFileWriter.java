@@ -25,7 +25,9 @@ import java.io.IOException;
 /** Global index writer io operators. */
 public interface GlobalIndexFileWriter {
 
-    String newFileName(String prefix);
+    /** Allocates and returns the full path for a new index file. */
+    String newFilePath(String prefix);
 
-    PositionOutputStream newOutputStream(String fileName) throws IOException;
+    /** Opens the allocated file path without selecting another location. */
+    PositionOutputStream newOutputStream(String filePath) throws IOException;
 }

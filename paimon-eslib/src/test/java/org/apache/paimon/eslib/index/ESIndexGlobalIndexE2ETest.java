@@ -49,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -94,14 +95,15 @@ class ESIndexGlobalIndexE2ETest {
         }
 
         @Override
-        public String newFileName(String prefix) {
-            return prefix + "-" + UUID.randomUUID() + ".index";
+        public String newFilePath(String prefix) {
+            return new org.apache.paimon.fs.Path(
+                            dir.resolve(prefix + "-" + UUID.randomUUID() + ".index").toString())
+                    .toString();
         }
 
         @Override
-        public PositionOutputStream newOutputStream(String fileName) throws IOException {
-            return fio.newOutputStream(
-                    new org.apache.paimon.fs.Path(dir.resolve(fileName).toString()), true);
+        public PositionOutputStream newOutputStream(String filePath) throws IOException {
+            return fio.newOutputStream(new org.apache.paimon.fs.Path(filePath), true);
         }
     }
 
@@ -323,9 +325,8 @@ class ESIndexGlobalIndexE2ETest {
         assertThrows(IllegalStateException.class, () -> writer.write(new float[] {1, 1, 1, 1}, 20));
 
         // --- reconstruct reader over the archive ---
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
 
         ESIndexGlobalIndexReader reader =
@@ -545,10 +546,7 @@ class ESIndexGlobalIndexE2ETest {
                         new DataField(3, "cost", DataTypes.INT()));
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(),
-                        List.of(ioMeta(archiveDir, entry)),
-                        currentFields,
-                        buildOptions);
+                        new LocalFileReader(), List.of(ioMeta(entry)), currentFields, buildOptions);
         try {
             Optional<ScoredGlobalIndexResult> vector =
                     reader.visitVectorSearch(new VectorSearch(new float[] {0, 0}, 1, "vector"))
@@ -584,10 +582,7 @@ class ESIndexGlobalIndexE2ETest {
                         new DataField(3, "cost", DataTypes.BIGINT()));
         ESIndexGlobalIndexReader widenedReader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(),
-                        List.of(ioMeta(archiveDir, entry)),
-                        widenedFields,
-                        buildOptions);
+                        new LocalFileReader(), List.of(ioMeta(entry)), widenedFields, buildOptions);
         try {
             Optional<GlobalIndexResult> widenedFallback =
                     widenedReader
@@ -612,7 +607,7 @@ class ESIndexGlobalIndexE2ETest {
         ESIndexGlobalIndexReader resizedVectorReader =
                 new ESIndexGlobalIndexReader(
                         new LocalFileReader(),
-                        List.of(ioMeta(archiveDir, entry)),
+                        List.of(ioMeta(entry)),
                         resizedVectorFields,
                         buildOptions);
         try {
@@ -659,13 +654,13 @@ class ESIndexGlobalIndexE2ETest {
         ESIndexGlobalIndexReader oldReader =
                 new ESIndexGlobalIndexReader(
                         new LocalFileReader(),
-                        List.of(ioMeta(oldDir, oldEntry)),
+                        List.of(ioMeta(oldEntry)),
                         currentFields,
                         currentOptions);
         ESIndexGlobalIndexReader currentReader =
                 new ESIndexGlobalIndexReader(
                         new LocalFileReader(),
-                        List.of(ioMeta(currentDir, currentEntry)),
+                        List.of(ioMeta(currentEntry)),
                         currentFields,
                         currentOptions);
         UnionGlobalIndexReader union =
@@ -710,8 +705,8 @@ class ESIndexGlobalIndexE2ETest {
             ResultEntry entry = w.finish().get(0);
             GlobalIndexIOMeta ioMeta =
                     new GlobalIndexIOMeta(
-                            new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
-                            Files.size(dir.resolve(entry.fileName())),
+                            new org.apache.paimon.fs.Path(entry.filePath()),
+                            Files.size(Paths.get(entry.filePath())),
                             entry.meta());
             ESIndexGlobalIndexReader reader =
                     new ESIndexGlobalIndexReader(
@@ -754,8 +749,8 @@ class ESIndexGlobalIndexE2ETest {
         ResultEntry entry = writer.finish().get(0);
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
-                        new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
-                        Files.size(dir.resolve(entry.fileName())),
+                        new org.apache.paimon.fs.Path(entry.filePath()),
+                        Files.size(Paths.get(entry.filePath())),
                         entry.meta());
 
         ESIndexGlobalIndexReader reader =
@@ -802,8 +797,8 @@ class ESIndexGlobalIndexE2ETest {
         ResultEntry entry = writer.finish().get(0);
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
-                        new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
-                        Files.size(dir.resolve(entry.fileName())),
+                        new org.apache.paimon.fs.Path(entry.filePath()),
+                        Files.size(Paths.get(entry.filePath())),
                         entry.meta());
 
         ESIndexGlobalIndexReader reader =
@@ -876,9 +871,8 @@ class ESIndexGlobalIndexE2ETest {
         ResultEntry entry = entries.get(0);
         assertEquals(3L, entry.rowCount(), "row count");
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
@@ -936,9 +930,8 @@ class ESIndexGlobalIndexE2ETest {
         ResultEntry entry = entries.get(0);
         assertEquals((long) n, entry.rowCount(), "row count includes the null row");
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
@@ -980,7 +973,7 @@ class ESIndexGlobalIndexE2ETest {
 
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+                        new LocalFileReader(), List.of(ioMeta(entry)), fields, options);
         try {
             Optional<GlobalIndexResult> nullRows =
                     reader.visitIsNull(new FieldRef(0, "k", DataTypes.STRING())).join();
@@ -1019,9 +1012,8 @@ class ESIndexGlobalIndexE2ETest {
         List<ResultEntry> entries = writer.finish();
         ResultEntry entry = entries.get(0);
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
@@ -1091,11 +1083,10 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(BinaryString.fromString("admin_001"), 0);
         ResultEntry entry = writer.finish().get(0);
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
-                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+                        filePath, Files.size(Paths.get(entry.filePath())), entry.meta());
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();
         ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
         ExecutorService closeExecutor = Executors.newSingleThreadExecutor();
@@ -1153,7 +1144,7 @@ class ESIndexGlobalIndexE2ETest {
                 new ESIndexGlobalIndexWriter(new LocalDirWriter(dir), fields, options);
         writer.write(BinaryString.fromString("x"), 0);
         ResultEntry entry = writer.finish().get(0);
-        java.nio.file.Path badArchive = dir.resolve(entry.fileName());
+        java.nio.file.Path badArchive = Paths.get(entry.filePath());
         long declaredArchiveSize = Files.size(badArchive);
         // Keep the valid offset metadata, but truncate the archive so failure happens after the
         // root provider (and potentially Lucene forks) have actually been opened.
@@ -1215,9 +1206,8 @@ class ESIndexGlobalIndexE2ETest {
         List<ResultEntry> entries = writer.finish();
         ResultEntry entry = entries.get(0);
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
@@ -1293,11 +1283,10 @@ class ESIndexGlobalIndexE2ETest {
                         Double.POSITIVE_INFINITY));
         ResultEntry entry = writer.finish().get(0);
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
-                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+                        filePath, Files.size(Paths.get(entry.filePath())), entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
                         new LocalFileReader(), Arrays.asList(ioMeta), fields, options);
@@ -1365,11 +1354,10 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(3, GenericRow.of(null, null));
         ResultEntry entry = writer.finish().get(0);
 
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
         GlobalIndexIOMeta ioMeta =
                 new GlobalIndexIOMeta(
-                        filePath, Files.size(archiveDir.resolve(entry.fileName())), entry.meta());
+                        filePath, Files.size(Paths.get(entry.filePath())), entry.meta());
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
                         new LocalFileReader(), List.of(ioMeta), fields, options);
@@ -1443,7 +1431,7 @@ class ESIndexGlobalIndexE2ETest {
         writer.write(BinaryString.fromString("viewer"), 1);
         ResultEntry entry = writer.finish().get(0);
 
-        GlobalIndexIOMeta ioMeta = ioMeta(archiveDir, entry);
+        GlobalIndexIOMeta ioMeta = ioMeta(entry);
         // Deliberately use the current/default FULLTEXT options. The reader must instead use the
         // KEYWORD-primary layout persisted when this particular index was built.
         ESIndexOptions currentTableOptions = new ESIndexOptions(fields, new Options());
@@ -1484,7 +1472,7 @@ class ESIndexGlobalIndexE2ETest {
 
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+                        new LocalFileReader(), List.of(ioMeta(entry)), fields, options);
         try {
             Optional<GlobalIndexResult> tiny =
                     reader.visitEqual(new FieldRef(0, "tiny", DataTypes.TINYINT()), (byte) 1)
@@ -1538,8 +1526,7 @@ class ESIndexGlobalIndexE2ETest {
 
         TransientCloseFailureFileReader fileReader = new TransientCloseFailureFileReader();
         ESIndexGlobalIndexReader reader =
-                new ESIndexGlobalIndexReader(
-                        fileReader, List.of(ioMeta(archiveDir, entry)), fields, options);
+                new ESIndexGlobalIndexReader(fileReader, List.of(ioMeta(entry)), fields, options);
         assertTrue(reader.visitEqual(new FieldRef(0, "id", DataTypes.INT()), 1).join().isPresent());
 
         fileReader.setCloseFailures(true);
@@ -1564,7 +1551,7 @@ class ESIndexGlobalIndexE2ETest {
 
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+                        new LocalFileReader(), List.of(ioMeta(entry)), fields, options);
         try {
             FieldRef ts = new FieldRef(0, "ts", DataTypes.TIMESTAMP(6));
             Optional<GlobalIndexResult> fallback =
@@ -1596,7 +1583,7 @@ class ESIndexGlobalIndexE2ETest {
 
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+                        new LocalFileReader(), List.of(ioMeta(entry)), fields, options);
         String query =
                 "{\"boolean\":{\"must\":[{\"match\":{\"query\":\"administrater\","
                         + "\"fuzziness\":\"AUTO\",\"maxExpansions\":20,\"prefixLength\":0}}],"
@@ -1628,11 +1615,10 @@ class ESIndexGlobalIndexE2ETest {
         }
     }
 
-    private static GlobalIndexIOMeta ioMeta(java.nio.file.Path archiveDir, ResultEntry entry)
-            throws IOException {
+    private static GlobalIndexIOMeta ioMeta(ResultEntry entry) throws IOException {
         return new GlobalIndexIOMeta(
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString()),
-                Files.size(archiveDir.resolve(entry.fileName())),
+                new org.apache.paimon.fs.Path(entry.filePath()),
+                Files.size(Paths.get(entry.filePath())),
                 entry.meta());
     }
 
@@ -1656,7 +1642,7 @@ class ESIndexGlobalIndexE2ETest {
 
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(
-                        new LocalFileReader(), List.of(ioMeta(archiveDir, entry)), fields, options);
+                        new LocalFileReader(), List.of(ioMeta(entry)), fields, options);
         try {
             ScoredGlobalIndexResult result =
                     reader.visitVectorSearch(
@@ -1756,9 +1742,8 @@ class ESIndexGlobalIndexE2ETest {
                 "archive must not contain HNSW-specific files (.vex/.vem), got: " + exts);
 
         // --- reconstruct reader over the archive ---
-        org.apache.paimon.fs.Path filePath =
-                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
-        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        org.apache.paimon.fs.Path filePath = new org.apache.paimon.fs.Path(entry.filePath());
+        long fileSize = Files.size(Paths.get(entry.filePath()));
         GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
 
         BlockingCountingFileReader fileReader = new BlockingCountingFileReader();

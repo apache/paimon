@@ -36,6 +36,8 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -77,12 +79,12 @@ class PkSortedIndexFileTest {
                         options(),
                         new GlobalIndexFileWriter() {
                             @Override
-                            public String newFileName(String prefix) {
-                                return prefix + ".index";
+                            public String newFilePath(String prefix) {
+                                return "memory://test/" + prefix + ".index";
                             }
 
                             @Override
-                            public PositionOutputStream newOutputStream(String fileName) {
+                            public PositionOutputStream newOutputStream(String filePath) {
                                 throw new AssertionError("Writer must open output lazily.");
                             }
                         });
@@ -206,16 +208,16 @@ class PkSortedIndexFileTest {
                             public List<ResultEntry> finish() {
                                 List<ResultEntry> results = new ArrayList<>();
                                 for (int i = 0; i < 2; i++) {
-                                    String fileName = fileWriter.newFileName("test");
+                                    String filePath = fileWriter.newFilePath("test");
                                     try (PositionOutputStream output =
-                                            fileWriter.newOutputStream(fileName)) {
+                                            fileWriter.newOutputStream(filePath)) {
                                         output.write(new byte[] {1});
                                     } catch (IOException e) {
                                         throw new RuntimeException(e);
                                     }
                                     results.add(
                                             new ResultEntry(
-                                                    fileName, rowCount / 2, new byte[] {2}));
+                                                    filePath, rowCount / 2, new byte[] {2}));
                                 }
                                 return results;
                             }
@@ -302,7 +304,7 @@ class PkSortedIndexFileTest {
         Path path = new Path(directory.toUri());
         return new IndexPathFactory() {
             @Override
-            public Path toPath(String fileName) {
+            public Path newPathFromName(String fileName) {
                 return new Path(path, fileName);
             }
 
@@ -314,6 +316,11 @@ class PkSortedIndexFileTest {
             @Override
             public boolean isExternalPath() {
                 return false;
+            }
+
+            @Override
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return externalPath == null ? newPathFromName(fileName) : new Path(externalPath);
             }
         };
     }

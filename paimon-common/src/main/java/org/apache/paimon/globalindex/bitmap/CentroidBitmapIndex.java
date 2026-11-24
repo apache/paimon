@@ -167,7 +167,7 @@ public final class CentroidBitmapIndex {
     /** Writes one complete Bitmap per column to the same output stream. */
     public static final class Writer implements AutoCloseable {
 
-        private final String name;
+        private final String filePath;
         private final int fieldCount;
         private final long rowCount;
         private final PositionOutputStream output;
@@ -177,11 +177,11 @@ public final class CentroidBitmapIndex {
         public Writer(GlobalIndexFileWriter files, int fieldCount, long rowCount)
                 throws IOException {
             checkArgument(fieldCount > 0 && rowCount > 0, "Empty centroid bitmap file.");
-            this.name = files.newFileName("centroid-bitmap");
+            this.filePath = files.newFilePath("centroid-bitmap");
             this.fieldCount = fieldCount;
             this.rowCount = rowCount;
             this.directory = ByteBuffer.allocate(Math.multiplyExact(fieldCount - 1, Long.BYTES));
-            this.output = files.newOutputStream(name);
+            this.output = files.newOutputStream(filePath);
         }
 
         public void writeColumn(DataField field, Options options, ColumnRows rows)
@@ -191,12 +191,12 @@ public final class CentroidBitmapIndex {
             GlobalIndexFileWriter sectionWriter =
                     new GlobalIndexFileWriter() {
                         @Override
-                        public String newFileName(String prefix) {
-                            return name;
+                        public String newFilePath(String prefix) {
+                            return filePath;
                         }
 
                         @Override
-                        public PositionOutputStream newOutputStream(String fileName) {
+                        public PositionOutputStream newOutputStream(String filePath) {
                             return new CloseShieldOutputStream(output) {
                                 @Override
                                 public long getPos() throws IOException {
@@ -220,7 +220,7 @@ public final class CentroidBitmapIndex {
 
         public ResultEntry finish() {
             checkState(written == fieldCount, "Incomplete centroid bitmap file.");
-            return new ResultEntry(name, rowCount, fieldCount == 1 ? null : directory.array());
+            return new ResultEntry(filePath, rowCount, fieldCount == 1 ? null : directory.array());
         }
 
         @Override

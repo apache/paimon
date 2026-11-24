@@ -23,21 +23,22 @@ import javax.annotation.Nullable;
 /** Write result meta. */
 public class ResultEntry {
 
-    private final String fileName;
+    /** Full file path returned by the writer. */
+    private final String filePath;
 
     /** Number of source rows covered by this index file, including null or skipped rows. */
     private final long rowCount;
 
     @Nullable private final byte[] meta;
 
-    public ResultEntry(String fileName, long rowCount, @Nullable byte[] meta) {
-        this.fileName = fileName;
+    public ResultEntry(String filePath, long rowCount, @Nullable byte[] meta) {
+        this.filePath = filePath;
         this.rowCount = rowCount;
         this.meta = meta;
     }
 
-    public String fileName() {
-        return fileName;
+    public String filePath() {
+        return filePath;
     }
 
     public long rowCount() {

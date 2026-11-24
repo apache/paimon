@@ -948,7 +948,13 @@ under the License.
             <td><h5>global-index.external-path</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+            <td>Global index root directory as a single URI, including any literal commas. If not set, global index files are stored under &lt;table-root-directory&gt;/index. Ignored for new files when global-index.external-paths is configured.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.external-paths</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated global index root directories. New index files are distributed in round-robin order. When configured, takes precedence over global-index.external-path; an empty value uses &lt;table-root-directory&gt;/index. If not configured, global-index.external-path is used. PyPaimon does not support this option for index writes.</td>
         </tr>
         <tr>
             <td><h5>global-index.filter.refine-from-data</h5></td>
