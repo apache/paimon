@@ -868,6 +868,39 @@ class GlobalIndexBuildTest(
                             for name in dirs + files
                         })
 
+    def test_vector_build_rejects_external_paths_option_before_backend_selection(self):
+        schema = pa.schema([('embedding', pa.list_(pa.float32())), ('status', pa.string())])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        option = 'global-index.external-paths'
+        root = 'file://%s' % os.path.join(self.tempdir, 'external')
+        files_before = {os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
+                        for name in dirs + files}
+
+        for layout in ('range', 'centroid'):
+            for paths in ('', root, root + ',' + root + '-other'):
+                for source in ('table', 'build', 'table-with-build-override'):
+                    with self.subTest(layout=layout, paths=paths, source=source):
+                        table_options = {'fields.embedding.sharding': layout, 'write.native.enabled': 'true'}
+                        build_options = {}
+                        if source == 'build':
+                            build_options[option] = paths
+                        else:
+                            table_options[option] = paths
+                            if source == 'table-with-build-override':
+                                build_options[option] = None
+                        configured = table.copy(table_options)
+                        with patch('pypaimon.globalindex.index_dispatch.build_global_index') as build:
+                            with self.assertRaisesRegex(ValueError, "does not support 'global-index.external-paths'"):
+                                configured.create_global_index(
+                                    'embedding', 'ivf-flat', options=build_options,
+                                    extra_fields={'status': 'bitmap'} if layout == 'centroid' else None)
+                            build.assert_not_called()
+                        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                        self.assertEqual(files_before, {
+                            os.path.join(path, name) for path, dirs, files in os.walk(self.tempdir)
+                            for name in dirs + files
+                        })
+
     def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
