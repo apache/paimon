@@ -183,22 +183,10 @@ public class JdbcCatalog extends AbstractCatalog {
                     }
                 });
 
-        // Check and create table properties table.
-        connections.run(
-                conn -> {
-                    DatabaseMetaData dbMeta = conn.getMetaData();
-                    try (ResultSet tableExists =
-                            dbMeta.getTables(
-                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null)) {
-                        if (tableExists.next()) {
-                            return true;
-                        }
-                    }
-                    try (PreparedStatement statement =
-                            conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE)) {
-                        return statement.execute();
-                    }
-                });
+        // Check and create table properties table. It is only used to sync table properties.
+        if (syncTableProperties()) {
+            createTablePropertiesTableIfNeed();
+        }
 
         // Check and create view table.
         connections.run(
@@ -219,6 +207,36 @@ public class JdbcCatalog extends AbstractCatalog {
         // if lock enabled, Check and create distributed lock table.
         if (lockEnabled()) {
             JdbcUtils.createDistributedLockTable(connections, options);
+        }
+    }
+
+    private void createTablePropertiesTableIfNeed() throws SQLException, InterruptedException {
+        try {
+            connections.run(
+                    conn -> {
+                        DatabaseMetaData dbMeta = conn.getMetaData();
+                        try (ResultSet tableExists =
+                                dbMeta.getTables(
+                                        null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null)) {
+                            if (tableExists.next()) {
+                                return true;
+                            }
+                        }
+                        try (PreparedStatement statement =
+                                conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE)) {
+                            return statement.execute();
+                        }
+                    });
+        } catch (SQLException e) {
+            throw new SQLException(
+                    String.format(
+                            "Failed to create table '%s', which is used to sync table properties. "
+                                    + "Set '%s' to false if the sync is not needed, or create the "
+                                    + "table before the catalog starts (for example with shorter "
+                                    + "key columns on MySQL with utf8mb4).",
+                            JdbcUtils.TABLE_PROPERTIES_TABLE_NAME,
+                            CatalogOptions.SYNC_ALL_PROPERTIES.key()),
+                    e);
         }
     }
 
