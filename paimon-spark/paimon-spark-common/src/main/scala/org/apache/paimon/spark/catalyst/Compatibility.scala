@@ -29,8 +29,11 @@ import org.apache.spark.sql.types.DataType
 
 object Compatibility {
 
-  def repartitionByExpression(expressions: Seq[Expression], query: LogicalPlan): LogicalPlan = {
-    RepartitionByExpression(expressions, query, None)
+  def repartitionByExpression(
+      expressions: Seq[Expression],
+      query: LogicalPlan,
+      numPartitions: Option[Int]): LogicalPlan = {
+    RepartitionByExpression(expressions, query, numPartitions)
   }
 
   def resolveTableOutputColumns(

@@ -153,6 +153,12 @@ under the License.
             <td>Only effective when 'write.merge-schema' is true. If true, widen an existing column type when the incoming data has a wider compatible type (e.g. INT -&gt; BIGINT, DECIMAL precision increase). Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.</td>
         </tr>
         <tr>
+            <td><h5>write.parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>For fixed-bucket tables, a positive value sets the number of shuffle partitions for the write. If the option is unset, zero, or negative, Spark determines the write shuffle parallelism for each statement using its usual planning rules.</td>
+        </tr>
+        <tr>
             <td><h5>write.use-v2-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

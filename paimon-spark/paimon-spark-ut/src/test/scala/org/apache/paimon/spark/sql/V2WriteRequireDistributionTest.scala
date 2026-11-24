@@ -452,41 +452,48 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
     }
   }
 
-  for (enabled <- Seq(false, true)) {
-    test(s"Bucket write retains adaptive shuffle coalescing: v2=$enabled") {
-      withSparkSQLConf(
+  for (enabled <- Seq(false, true); parallelism <- Seq(None, Some(7), Some(0), Some(-1))) {
+    test(s"Bucket write with adaptive shuffle: v2=$enabled, write.parallelism=$parallelism") {
+      val options = Seq(
         "spark.paimon.write.use-v2-write" -> enabled.toString,
         "spark.sql.adaptive.enabled" -> "true",
         "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
         "spark.sql.adaptive.coalescePartitions.minPartitionNum" -> "1",
         "spark.sql.shuffle.partitions" -> "200"
-      ) {
+      ) ++ parallelism.map(n => "spark.paimon.write.parallelism" -> n.toString)
+      withSparkSQLConf(options: _*) {
         withTable("t1") {
           sql("""
                 |CREATE TABLE t1 (id INT) USING paimon
                 |TBLPROPERTIES ('bucket-key'='id', 'bucket'='1', 'file.format'='avro')
                 |""".stripMargin)
-          val group = UUID.randomUUID().toString
-          val stageTasks = new ConcurrentLinkedQueue[Int]()
-          val listener = new SparkListener {
-            override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
-              if (event.properties.getProperty("spark.jobGroup.id") == group) {
-                stageTasks.add(event.stageInfo.numTasks)
-              }
-            }
-          }
-          spark.sparkContext.addSparkListener(listener)
-          try {
-            spark.sparkContext.setJobGroup(group, group)
-            sql("INSERT INTO t1 SELECT CAST(id AS INT) FROM range(0, 40, 1, 4)").collect()
-            Utils.waitUntilEventEmpty(spark)
-          } finally {
-            spark.sparkContext.clearJobGroup()
-            spark.sparkContext.removeSparkListener(listener)
-          }
-          checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
+          checkWriteStageTasks(4, parallelism.filter(_ > 0).getOrElse(1))
           assertSingleBucketFile()
-          assert(stageTasks.asScala.toSeq == Seq(4, 1), s"Submitted stage tasks: $stageTasks")
+        }
+      }
+    }
+  }
+
+  test("Fixed bucket write uses table write.parallelism with a custom bucket function") {
+    withTable("t1") {
+      sql("""
+            |CREATE TABLE t1 (id INT) USING paimon TBLPROPERTIES (
+            |  'primary-key'='id', 'bucket'='16', 'bucket-function.provider'='spark-test-shifted',
+            |  'write.parallelism'='7', 'file.format'='avro')
+            |""".stripMargin)
+      checkWriteStageTasks(4, 7)
+    }
+  }
+
+  for (enabled <- Seq(false, true)) {
+    test(s"Unaware bucket write retains input partitions with write.parallelism: v2=$enabled") {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> enabled.toString) {
+        withTable("t1") {
+          sql("""
+                |CREATE TABLE t1 (id INT) USING paimon
+                |TBLPROPERTIES ('bucket'='-1', 'write.parallelism'='7', 'file.format'='avro')
+                |""".stripMargin)
+          checkWriteStageTasks(4)
         }
       }
     }
@@ -614,6 +621,29 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
     } finally {
       spark.listenerManager.unregister(listener)
     }
+  }
+
+  private def checkWriteStageTasks(expected: Int*): Unit = {
+    val group = UUID.randomUUID().toString
+    val stageTasks = new ConcurrentLinkedQueue[Int]()
+    val listener = new SparkListener {
+      override def onStageSubmitted(event: SparkListenerStageSubmitted): Unit = {
+        if (event.properties.getProperty("spark.jobGroup.id") == group) {
+          stageTasks.add(event.stageInfo.numTasks)
+        }
+      }
+    }
+    spark.sparkContext.addSparkListener(listener)
+    try {
+      spark.sparkContext.setJobGroup(group, group)
+      sql("INSERT INTO t1 SELECT CAST(id AS INT) FROM range(0, 40, 1, 4)").collect()
+      Utils.waitUntilEventEmpty(spark)
+    } finally {
+      spark.sparkContext.clearJobGroup()
+      spark.sparkContext.removeSparkListener(listener)
+    }
+    assert(stageTasks.asScala.toSeq == expected, s"Submitted stage tasks: $stageTasks")
+    checkAnswer(sql("SELECT * FROM t1"), (0 until 40).map(Row(_)))
   }
 
   private def assertSingleBucketFile(): Unit = {

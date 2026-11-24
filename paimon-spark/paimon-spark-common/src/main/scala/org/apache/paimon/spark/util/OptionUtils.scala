@@ -79,6 +79,12 @@ object OptionUtils extends SQLConfHelper with Logging {
       .toBoolean
   }
 
+  def writeParallelism(options: CoreOptions): Option[Int] = {
+    Option(options.toConfiguration.get(SparkConnectorOptions.WRITE_PARALLELISM))
+      .map(_.intValue())
+      .filter(_ > 0)
+  }
+
   def writeMergeSchemaEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
   }

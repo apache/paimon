@@ -31,6 +31,7 @@ import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkPostponeStagedCommitter, SparkRow}
+import org.apache.paimon.spark.SparkConnectorOptions.WRITE_PARALLELISM
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
@@ -217,11 +218,15 @@ case class PaimonSparkWriter(
       }
     }
 
-    def writeWithBucketProcessor(dataFrame: DataFrame, processor: BucketProcessor[Row]) = {
+    def writeWithBucketProcessor(
+        dataFrame: DataFrame,
+        processor: BucketProcessor[Row],
+        parallelism: Option[Integer] = None) = {
       val repartitioned = repartitionByPartitionsAndBucket(
         dataFrame
           .mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder)
-          .toDF())
+          .toDF(),
+        parallelism)
       writeWithBucket(repartitioned)
     }
 
@@ -356,6 +361,7 @@ case class PaimonSparkWriter(
         writeWithoutBucket(input)
 
       case HASH_FIXED =>
+        val writeParallelism = Option(coreOptions.toConfiguration.get(WRITE_PARALLELISM))
         if (
           paimonExtensionEnabled(sparkSession) &&
           !coreOptions.bucketFunctionProvider().isPresent && BucketFunction.supportsTable(table)
@@ -373,13 +379,15 @@ case class PaimonSparkWriter(
             lit(bucketNumber)) ++ bucketKeyCol
           val repartitioned =
             repartitionByPartitionsAndBucket(
-              data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))
+              data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)),
+              writeParallelism)
           writeWithBucket(repartitioned)
         } else {
           // Topology: input -> bucket-assigner -> shuffle by partition & bucket
           writeWithBucketProcessor(
             withInitBucketCol,
-            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
+            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol),
+            writeParallelism)
         }
 
       case _ =>
@@ -578,8 +586,14 @@ case class PaimonSparkWriter(
     )
   }
 
-  private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
-    df.repartition(partitionCols(df) ++ Seq(col(BUCKET_COL)): _*)
+  private def repartitionByPartitionsAndBucket(
+      df: DataFrame,
+      parallelism: Option[Integer] = None): DataFrame = {
+    val columns = partitionCols(df) :+ col(BUCKET_COL)
+    parallelism match {
+      case Some(n) if n > 0 => df.repartition(n, columns: _*)
+      case _ => df.repartition(columns: _*)
+    }
   }
 
   def partitionCols(df: DataFrame): Seq[Column] = {
