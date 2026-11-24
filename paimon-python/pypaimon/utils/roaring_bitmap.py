@@ -194,6 +194,11 @@ class RoaringBitmap:
         """Return the number of elements in the bitmap."""
         return len(self._data)
 
+    def range_cardinality(self, from_: int, to: int) -> int:
+        """Return the number of elements in the inclusive range."""
+        before = self._data.rank(from_ - 1) if from_ > 0 else 0
+        return self._data.rank(to) - before
+
     def __iter__(self) -> Iterator[int]:
         """Iterate over all values in the bitmap in sorted order."""
         return iter(self._data)

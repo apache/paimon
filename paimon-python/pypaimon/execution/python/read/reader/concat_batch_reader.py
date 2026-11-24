@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import pyarrow as pa
 from pyarrow import RecordBatch
 
+from pypaimon.execution.python.read.reader.field_bunch import FieldBunch
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.utils.arrow_utils import as_blob_data, is_blob_data, zero_column_batch
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -242,6 +243,81 @@ class DataEvolutionMergeReader(RecordBatchReader):
                     reader.close()
         except Exception as e:
             raise IOError("Failed to close inner readers") from e
+
+
+class DataEvolutionRangeMergeReader(RecordBatchReader):
+    """Merge successive row ranges while keeping each source reader open across its ranges."""
+
+    def __init__(self, suppliers: Dict[FieldBunch, Callable[[], RecordBatchReader]],
+                 ranges: List[Tuple[int, List[Optional[Tuple[FieldBunch, int]]]]],
+                 schema: pa.Schema, batch_size: int):
+        self._suppliers = suppliers
+        self._ranges = iter(ranges)
+        self._schema = schema
+        self._batch_size = max(1, batch_size)
+        self._readers = {}
+        self._buffers = {}
+        self._source_rows = collections.Counter()
+        for count, columns in ranges:
+            for source in {column[0] for column in columns if column is not None}:
+                self._source_rows[source] += count
+        self._remaining = 0
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        if not self._remaining:
+            segment = next(self._ranges, None)
+            if segment is None:
+                return None
+            self._remaining, self._columns = segment
+            self._sources = {column[0] for column in self._columns if column is not None}
+
+        count = min(self._remaining, self._batch_size)
+        for source in self._sources:
+            if source not in self._readers:
+                self._readers[source] = self._suppliers.pop(source)()
+            batch = self._buffers.get(source)
+            while batch is None or batch.num_rows == 0:
+                batch = self._readers[source].read_arrow_batch()
+                if batch is None:
+                    raise ValueError("Data evolution source ended before its selected rows were read.")
+            self._buffers[source] = batch
+            count = min(count, batch.num_rows)
+
+        fields = list(self._schema)
+        arrays = []
+        for i, column in enumerate(self._columns):
+            if column is None:
+                arrays.append(pa.nulls(count, type=fields[i].type))
+            else:
+                source, position = column
+                batch = self._buffers[source]
+                arrays.append(batch.column(position).slice(0, count))
+                if is_blob_data(batch.schema.field(position)):
+                    fields[i] = as_blob_data(fields[i])
+
+        for source in self._sources:
+            batch = self._buffers.pop(source)
+            self._source_rows[source] -= count
+            if self._source_rows[source] == 0:
+                self._readers.pop(source).close()
+            elif count < batch.num_rows:
+                self._buffers[source] = batch.slice(count)
+        self._remaining -= count
+        return pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields, metadata=self._schema.metadata))
+
+    def close(self) -> None:
+        self._buffers.clear()
+        readers = list(self._readers.values())
+        self._readers.clear()
+        self._suppliers.clear()
+        failure = None
+        for reader in readers:
+            try:
+                reader.close()
+            except Exception as error:
+                failure = failure or error
+        if failure is not None:
+            raise IOError("Failed to close data evolution source readers") from failure
 
 
 class BlobFallbackBatchReader(RecordBatchReader):

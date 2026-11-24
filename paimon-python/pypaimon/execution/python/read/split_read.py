@@ -50,7 +50,7 @@ from pypaimon.read.push_down_utils import (
 )
 from pypaimon.execution.python.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader, ConcatBatchReader,
-    MergeAllBatchReader, DataEvolutionMergeReader)
+    MergeAllBatchReader, DataEvolutionMergeReader, DataEvolutionRangeMergeReader)
 from pypaimon.execution.python.read.reader.concat_record_reader import ConcatRecordReader
 
 from pypaimon.execution.python.read.reader.auth_masking_reader import AuthFilterReader
@@ -1629,6 +1629,15 @@ class DataEvolutionSplitRead(SplitRead):
                     vector_files.append((file, field_ids))
 
         if vector_files:
+            vector_ids = set().union(*(ids for _, ids in vector_files))
+            # Changing the vector storage option can put versions of the same field in normal files.
+            inline_files = []
+            for bunch in fields_files:
+                if isinstance(bunch, DataBunch):
+                    file = bunch.files()[0]
+                    ids = vector_ids.intersection(self._get_field_ids_from_write_cols(file))
+                    if ids:
+                        inline_files.append((file, ids))
             logical_range = fields_files[0].files()[0].non_null_row_id_range()
             selected = [logical_range]
             if self.row_ranges is not None:
@@ -1636,22 +1645,14 @@ class DataEvolutionSplitRead(SplitRead):
             if not selected:
                 return EmptyRecordBatchReader()
             vector_bunches = self._candidate_vector_bunches(vector_files)
-            if not self._vector_bunches_are_aligned(vector_bunches, logical_range, selected):
-                plan = self._vector_read_ranges(vector_files, logical_range)
+            if inline_files or not self._vector_bunches_are_aligned(vector_bunches, logical_range, selected):
+                plan = self._vector_read_ranges(vector_files + inline_files, logical_range)
                 selected_plan = list(self._distribute_row_ranges(plan, selected))
-                vector_bunches = self._vector_bunches_from_providers(
-                    providers for _, providers in selected_plan)
-                if not self._vector_bunches_are_aligned(vector_bunches, logical_range, selected):
-                    suppliers = []
-                    for ranges, providers in selected_plan:
-                        # Positional merging requires the same row selection in every bunch.
-                        range_reader = copy(self)
-                        if self.row_ranges is not None or ranges != [logical_range]:
-                            range_reader.row_ranges = ranges
-                        bunches = fields_files + [VectorBunch([file], ids) for file, ids in providers]
-                        suppliers.append(partial(range_reader._merge_field_bunches, bunches,
-                                                 need_merge_files, deletion_vector))
-                    return ConcatBatchReader(suppliers)
+                if not inline_files:
+                    vector_bunches = self._vector_bunches_from_providers(
+                        providers for _, providers in selected_plan)
+                if inline_files or not self._vector_bunches_are_aligned(vector_bunches, logical_range, selected):
+                    return self._create_range_merge_reader(fields_files, selected_plan, vector_ids, deletion_vector)
             fields_files.extend(vector_bunches)
             if self.row_ranges is not None:
                 group_reader = copy(self)
@@ -1698,13 +1699,19 @@ class DataEvolutionSplitRead(SplitRead):
             bunches: List[VectorBunch], logical_range: Range, selected: List[Range]) -> bool:
         """Check that every field can read whole files in the same selected row order."""
         assigned = set()
+        assigned_files = set()
         selected_count = sum(row_range.count() for row_range in selected)
         for bunch in bunches:
             if not assigned.isdisjoint(bunch.field_ids):
                 return False
             assigned.update(bunch.field_ids)
 
-            ranges = [file.non_null_row_id_range() for file in bunch.files()]
+            files = bunch.files()
+            file_names = {file.file_name for file in files}
+            if not assigned_files.isdisjoint(file_names):
+                return False
+            assigned_files.update(file_names)
+            ranges = [file.non_null_row_id_range() for file in files]
             if ranges[0].from_ < logical_range.from_ or ranges[-1].to > logical_range.to:
                 return False
             if any(left.to >= right.from_ for left, right in zip(ranges, ranges[1:])):
@@ -1776,6 +1783,85 @@ class DataEvolutionSplitRead(SplitRead):
         return [(row_range, [(candidates[i][0], field_ids) for i, field_ids in providers])
                 for row_range, providers in plan]
 
+    def _create_range_merge_reader(
+            self, bunches: List[FieldBunch],
+            selected_plan: List[Tuple[List[Range], List[Tuple[DataFileMeta, Set[int]]]]],
+            vector_ids: Set[int], deletion_vector: Optional[Tuple[Range, DeletionVector]]) -> RecordBatchReader:
+        read_ids = {field.id for field in self.read_fields}
+        partition_ids = [field.id for field in self.table.fields if field.name in self.table.partition_keys]
+        file_bunches = {}
+        fixed_sources = {}
+        for bunch in bunches:
+            if isinstance(bunch, DataBunch):
+                file_bunches[bunch.files()[0].file_name] = bunch
+            for field_id in read_ids.intersection(self._bunch_field_ids(bunch, partition_ids)) - vector_ids:
+                fixed_sources.setdefault(field_id, bunch)
+
+        if deletion_vector is None:
+            dv_start, deleted = 0, None
+        else:
+            dv_range, dv = deletion_vector
+            dv_start, deleted = dv_range.from_, dv.bit_map()
+
+        source_projections = {}
+        source_ranges = {}
+        segments = []
+        for ranges, providers in selected_plan:
+            row_count = sum(row_range.count() for row_range in ranges)
+            if deleted:
+                row_count -= sum(deleted.range_cardinality(r.from_ - dv_start, r.to - dv_start) for r in ranges)
+            if not row_count:
+                continue
+
+            sources = fixed_sources.copy()
+            for file, field_ids in providers:
+                bunch = file_bunches.setdefault(file.file_name, DataBunch(file))
+                for field_id in field_ids:
+                    sources[field_id] = bunch
+            for field in self.read_fields:
+                if field.id not in sources and not field.type.nullable:
+                    raise ValueError(f"Field {field} is not null but can't find any file contains it.")
+            for field_id, source in sources.items():
+                source_projections.setdefault(source, set()).add(field_id)
+            for source in set(sources.values()):
+                source_ranges.setdefault(source, []).extend(ranges)
+            segments.append((row_count, sources))
+
+        # One projection and row selection per source, even when its columns change between ranges.
+        schema_pos = {field.id: i for i, field in enumerate(self.table.fields)}
+        suppliers = {}
+        offsets = {}
+        for source, ids in source_projections.items():
+            read_fields = sorted((field for field in self.read_fields if field.id in ids),
+                                 key=lambda field: schema_pos.get(field.id, float('inf')))
+            offsets[source] = {field.id: i for i, field in enumerate(read_fields)}
+            reader = copy(self)
+            row_ranges = Range.merge_sorted_as_possible(source_ranges[source])
+            full_range = (source.logical_range() if isinstance(source, BlobBunch)
+                          else source.files()[0].non_null_row_id_range())
+            reader.row_ranges = None if self.row_ranges is None and row_ranges == [full_range] else row_ranges
+            suppliers[source] = partial(reader._create_bunch_reader, source, read_fields, deletion_vector)
+
+        columns_by_range = [
+            (count, [(sources[field.id], offsets[sources[field.id]][field.id])
+                     if field.id in sources else None for field in self.read_fields])
+            for count, sources in segments
+        ]
+        return DataEvolutionRangeMergeReader(
+            suppliers, columns_by_range, read_arrow_schema(self.read_fields),
+            self.table.options.read_batch_size())
+
+    def _bunch_field_ids(self, bunch: FieldBunch, partition_ids: List[int]):
+        if isinstance(bunch, VectorBunch):
+            return bunch.field_ids
+        first_file = bunch.files()[0]
+        if isinstance(bunch, BlobBunch):
+            return [self._get_field_id_from_write_cols(first_file)]
+        field_ids = self._get_field_ids_from_write_cols(first_file)
+        field_ids.extend([SpecialFields.ROW_ID.id, SpecialFields.SEQUENCE_NUMBER.id])
+        field_ids.extend(field_id for field_id in partition_ids if field_id not in field_ids)
+        return field_ids
+
     def _merge_field_bunches(self, fields_files: List[FieldBunch],
                              need_merge_files: List[DataFileMeta], deletion_vector) -> RecordReader:
 
@@ -1806,33 +1892,7 @@ class DataEvolutionSplitRead(SplitRead):
         partition_ids = [field.id for field in self.table.fields if field.name in self.table.partition_keys]
 
         for i, bunch in enumerate(fields_files):
-            first_file = bunch.files()[0]
-
-            # Get field IDs for this bunch
-            if isinstance(bunch, VectorBunch):
-                field_ids = bunch.field_ids
-            elif DataFileMeta.is_blob_file(first_file.file_name):
-                field_ids = [self._get_field_id_from_write_cols(first_file)]
-            elif first_file.write_cols:
-                field_ids = self._get_field_ids_from_write_cols(first_file)
-                field_ids.extend([SpecialFields.ROW_ID.id, SpecialFields.SEQUENCE_NUMBER.id])
-            else:
-                # For regular files without write_cols, derive field IDs from
-                # the file's schema version, not the current table schema.
-                # The file only contains columns from when it was written.
-                file_schema = self._resolve_schema(first_file.schema_id)
-                field_ids = [
-                    field.id
-                    for field in file_schema.data_file_fields(None)
-                ]
-                field_ids.append(SpecialFields.ROW_ID.id)
-                field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
-
-            if isinstance(bunch, DataBunch) and not DataFileMeta.is_vector_file(first_file.file_name):
-                # Partition values belong to the split, even when write_cols
-                # omits them from every file. Let the normal reader's existing
-                # PartitionInfo provide them before the merged row is filtered.
-                field_ids.extend(field_id for field_id in partition_ids if field_id not in field_ids)
+            field_ids = self._bunch_field_ids(bunch, partition_ids)
 
             read_fields = []
             for j, read_field_id in enumerate(read_field_index):
@@ -1852,64 +1912,7 @@ class DataEvolutionSplitRead(SplitRead):
                     if row_offsets[j] == i:
                         field_offsets[j] = id_to_pos[read_field_index[j]]
 
-                read_field_names = self._remove_partition_fields(read_fields)
-                table_fields = self.read_fields
-                self.read_fields = read_fields  # create reader based on read_fields
-                batch_size = self.table.options.read_batch_size()
-                # DataEvolutionMergeReader aligns fields by row ordinal, so every
-                # non-empty bunch reader created below must return the same row-id
-                # sequence. Keep row_ranges and the group-level deletion vector
-                # applied uniformly across normal, blob, and vector bunches.
-                is_blob_bunch = isinstance(bunch, BlobBunch)
-                if (is_blob_bunch
-                        and (len(bunch.files()) != 1
-                             or not bunch.sequential_read_optimize())):
-                    file_reader_suppliers = [
-                        (
-                            file,
-                            partial(
-                                self._create_raw_blob_file_reader,
-                                file=file,
-                                read_fields=read_field_names,
-                            ),
-                        )
-                        for file in bunch.files()
-                    ]
-                    file_record_readers[i] = BlobFallbackBatchReader(
-                        file_reader_suppliers,
-                        read_fields[0].name,
-                        PyarrowFieldParser.from_paimon_schema(
-                            [read_fields[0]]
-                        ).field(0).type,
-                        self.row_ranges,
-                        self._read_blob_as_descriptor([read_fields[0].name]),
-                        deletion_vector=deletion_vector,
-                        batch_size=batch_size,
-                        blob_parallelism=self._blob_parallelism,
-                        logical_ranges=[bunch.logical_range()],
-                    )
-                elif len(bunch.files()) == 1:
-                    suppliers = [lambda r=self._create_file_reader(
-                        bunch.files()[0], read_field_names, deletion_vector
-                    ): r]
-                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
-                else:
-                    # Lazy readers must keep this bunch's projection after
-                    # self.read_fields is restored to the full projection.
-                    bunch_reader = copy(self)
-                    if isinstance(bunch, VectorBunch) and self.row_ranges is not None:
-                        file_ranges = ((file.non_null_row_id_range(), file) for file in bunch.files())
-                        files_to_read = self._distribute_row_ranges(file_ranges, self.row_ranges)
-                    else:
-                        files_to_read = ((None, file) for file in bunch.files())
-                    suppliers = [
-                        partial(bunch_reader._create_file_reader, file=file,
-                                read_fields=read_field_names,
-                                deletion_vector=deletion_vector, row_ranges=ranges)
-                        for ranges, file in files_to_read
-                    ]
-                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
-                self.read_fields = table_fields
+                file_record_readers[i] = self._create_bunch_reader(bunch, read_fields, deletion_vector)
 
         # Validate that all required fields are found
         for i, field in enumerate(all_read_fields):
@@ -1936,6 +1939,37 @@ class DataEvolutionSplitRead(SplitRead):
         # the same nested types when assembling their columns into one batch.
         output_schema = read_arrow_schema(all_read_fields)
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
+
+    def _create_bunch_reader(
+            self, bunch: FieldBunch, read_fields: List[DataField], deletion_vector) -> RecordBatchReader:
+        reader = copy(self)
+        reader.read_fields = read_fields
+        names = self._remove_partition_fields(read_fields)
+        files = bunch.files()
+        batch_size = self.table.options.read_batch_size()
+        if isinstance(bunch, BlobBunch) and (len(files) != 1 or not bunch.sequential_read_optimize()):
+            return BlobFallbackBatchReader(
+                [(file, partial(reader._create_raw_blob_file_reader, file, names)) for file in files],
+                read_fields[0].name,
+                PyarrowFieldParser.from_paimon_schema([read_fields[0]]).field(0).type,
+                self.row_ranges,
+                self._read_blob_as_descriptor([read_fields[0].name]),
+                deletion_vector=deletion_vector,
+                batch_size=batch_size,
+                blob_parallelism=self._blob_parallelism,
+                logical_ranges=[bunch.logical_range()],
+            )
+
+        if isinstance(bunch, VectorBunch) and len(files) > 1 and self.row_ranges is not None:
+            file_ranges = ((file.non_null_row_id_range(), file) for file in files)
+            files_to_read = self._distribute_row_ranges(file_ranges, self.row_ranges)
+        else:
+            files_to_read = ((None, file) for file in files)
+        suppliers = [
+            partial(reader._create_file_reader, file, names, deletion_vector, row_ranges=ranges)
+            for ranges, file in files_to_read
+        ]
+        return MergeAllBatchReader(suppliers, batch_size=batch_size)
 
     def _create_file_reader(
             self, file: DataFileMeta, read_fields: List[str], deletion_vector=None,
@@ -2028,7 +2062,7 @@ class DataEvolutionSplitRead(SplitRead):
         # them there so a rename cannot hide a newer column version, or rebind a
         # dropped/re-added name to a different field ID.
         file_schema = self._resolve_schema(file.schema_id)
-        return [field.id for field in file_schema.data_file_fields(file.write_cols)]
+        return [field.id for field in file_schema.data_file_fields(file.write_cols or None)]
 
     def _all_data_fields_from(self, fields):
         return SpecialFields.row_type_with_row_tracking(fields)
