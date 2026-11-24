@@ -24,6 +24,8 @@ import org.apache.paimon.spark.catalyst.analysis.{MergeSchemaEvolutionHelper, Pa
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, MergeIntoTable, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 /** Re-enter Spark's native rewrite with fresh, aligned commands that are not marked analyzed. */
 object Spark42RowLevelCommandRewrite
@@ -40,7 +42,7 @@ object Spark42RowLevelCommandRewrite
             u.assignments,
             fromStar = false,
             mergeSchemaEnabled = false)
-          RewriteUpdateTable(u.copy(assignments = assignments))
+          RewriteUpdateTable(u.copy(table = cleanAttrMetadata(u.table), assignments = assignments))
 
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.withSchemaEvolution && eligible(m.targetTable) =>
@@ -55,9 +57,20 @@ object Spark42RowLevelCommandRewrite
             .map(_._1)
             .getOrElse(m)
           val aligned = alignAllMergeActions(evolved, evolved.targetTable.output)
-          RewriteMergeIntoTable(aligned.copy())
+          RewriteMergeIntoTable(aligned.copy(targetTable = cleanAttrMetadata(aligned.targetTable)))
       }
     }
+  }
+
+  /**
+   * Drops the CHAR/VARCHAR type strings from the target's output once the assignments are aligned
+   * against it, as Spark's `ResolveRowLevelCommandAssignments` does. Spark's rewrite runs only on
+   * aligned commands, and with the type strings left in place an assignment to a VARCHAR column
+   * never counts as aligned.
+   */
+  private def cleanAttrMetadata(table: LogicalPlan): LogicalPlan = table.transform {
+    case r: DataSourceV2Relation =>
+      r.copy(output = r.output.map(CharVarcharUtils.cleanAttrMetadata))
   }
 
   private def eligible(table: LogicalPlan): Boolean =
