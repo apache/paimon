@@ -418,7 +418,8 @@ conn.export_to_lerobot(
 Supported versions: `v2.0`, `v2.1`, `v3.0`. V3 copies encoded MP4s; v2
 re-encodes per-Episode MP4s (requires PyAV; depth video and audio are unsupported).
 The exporter writes to `<Object Table>/<dataset_id>/` and rejects an existing
-directory. Use a different Object Table for another export of the same Dataset.
+directory. Run only one exporter per Dataset ID at a time; use a different Object
+Table for another export of the same Dataset.
 
 ## Capture LeRobot frames directly into Paimon
 

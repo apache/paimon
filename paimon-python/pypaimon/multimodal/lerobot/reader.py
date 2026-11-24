@@ -145,7 +145,7 @@ class _FrameLocator:
                 self._split_ranges,
                 self._split_range_index,
                 Range.sort_and_merge_overlap(ranges, True),
-            ), bool(unindexed)
+            ), bool(unindexed) or not evaluation.result.is_exact()
         except RuntimeError:
             raise
         except Exception as error:
