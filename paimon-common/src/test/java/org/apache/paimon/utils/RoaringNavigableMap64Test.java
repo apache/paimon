@@ -19,10 +19,14 @@
 package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.Test;
+import org.roaringbitmap.longlong.LongIterator;
+import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -218,6 +222,35 @@ public class RoaringNavigableMap64Test {
                         new Range(high + 20, high + 20_000));
         assertThat(bitmap.tryToRangeList(4, scope)).contains(expected);
         assertThat(bitmap.tryToRangeList(3, scope)).isEmpty();
+    }
+
+    @Test
+    public void testScopedRangeConversionSkipsExcludedRows() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public LongIterator getLongIterator() {
+                        throw new AssertionError("Scoped lookup iterated the original bitmap");
+                    }
+                };
+        for (int i = 0; i < 128; i++) {
+            source.add(2L * i);
+        }
+        long tail = 1_000_000;
+        source.addRange(256, tail);
+        for (int i = 0; i < 256; i++) {
+            source.add(tail + 1 + 2L * i);
+        }
+        Constructor<RoaringNavigableMap64> constructor =
+                RoaringNavigableMap64.class.getDeclaredConstructor(Roaring64NavigableMap.class);
+        constructor.setAccessible(true);
+        RoaringNavigableMap64 bitmap = constructor.newInstance(source);
+        List<Range> scope = Collections.singletonList(new Range(tail + 508, tail + 511));
+        List<Range> expected =
+                Arrays.asList(new Range(tail + 509, tail + 509), new Range(tail + 511, tail + 511));
+
+        assertThat(bitmap.tryToRangeList(2, scope)).contains(expected);
+        assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
     }
 
     @Test

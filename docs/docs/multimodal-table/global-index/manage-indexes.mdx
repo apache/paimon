@@ -510,8 +510,11 @@ Bitmap checks the cardinality of its compressed result before individually shift
 The range limit bounds conversion of the combined candidate bitmap.
 
 A lookup that exceeds a limit leaves its predicate for the data reader. Other conjuncts may still
-prune rows using indexes. When the candidate count can exceed the range limit, the planner checks
-the compressed bitmap against entire file groups in the ordinary scan plan before expanding
-row-ID ranges. If range conversion exceeds the limit, it emits ordinary splits for the groups
-that can still match, including groups with uncovered rows. The scan uses the same snapshot and
-retains the original predicate as a residual filter.
+prune rows using indexes. The planner first probes the number of disjoint candidate ranges. When
+the ranges fit, it pushes them down to prune manifests and builds indexed splits by intersecting
+the candidates with each split's merged file ranges. When the probe exceeds the limit, the
+planner prunes whole file groups from the ordinary scan plan and counts ranges again using only
+candidates within the retained groups' row-ID ranges. If the scoped ranges fit, it emits indexed
+splits. If the scoped ranges exceed the limit, it emits ordinary splits for the retained groups,
+including groups with uncovered rows. The scan uses the same snapshot and retains the original
+predicate as a residual filter.

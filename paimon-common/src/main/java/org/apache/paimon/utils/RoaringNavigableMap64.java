@@ -45,6 +45,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private static final int RANGE_LIST_SELECT_SAMPLE_SIZE = 64;
 
+    private static final int CONTAINER_BITS = 16;
+
     private final Roaring64NavigableMap roaring64NavigableMap;
 
     public RoaringNavigableMap64() {
@@ -236,48 +238,54 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private boolean forEachRange(
             @Nullable List<Range> scope, boolean skipLongRuns, RangeVisitor visitor) {
-        long cardinality = roaring64NavigableMap.getLongCardinality();
-        long endIndex =
-                scope == null
-                        ? cardinality
-                        : roaring64NavigableMap.rankLong(scope.get(scope.size() - 1).to);
-        if (endIndex == 0) {
+        if (scope != null) {
+            for (Range range : scope) {
+                if (!visitRangesInScope(range, visitor)) {
+                    return false;
+                }
+            }
             return true;
         }
-        RangeVisitor scopedVisitor = scope == null ? visitor : intersectRanges(scope, visitor);
+
+        long cardinality = roaring64NavigableMap.getLongCardinality();
+        if (cardinality == 0) {
+            return true;
+        }
         if (shouldUseSelectRanges(cardinality)) {
-            long start = scope == null ? 0 : scope.get(0).from;
-            long startIndex = start == 0 ? 0 : roaring64NavigableMap.rankLong(start - 1);
-            return visitRangesBySelect(startIndex, endIndex, scopedVisitor);
+            return visitRangesBySelect(0, cardinality, visitor);
         }
 
-        return visitRangesByIterator(endIndex, skipLongRuns, scopedVisitor);
+        return visitRangesByIterator(cardinality, skipLongRuns, visitor);
     }
 
-    private static RangeVisitor intersectRanges(List<Range> scope, RangeVisitor visitor) {
-        return new RangeVisitor() {
-            private int index;
+    private boolean visitRangesInScope(Range scope, RangeVisitor visitor) {
+        long startIndex = scope.from == 0 ? 0 : roaring64NavigableMap.rankLong(scope.from - 1);
+        long endIndex = roaring64NavigableMap.rankLong(scope.to);
+        if (startIndex == endIndex) {
+            return true;
+        }
+        if (startIndex == 0 && endIndex == getLongCardinality()) {
+            return forEachRange(null, true, visitor);
+        }
 
-            @Override
-            public boolean visit(long start, long end) {
-                while (index < scope.size()) {
-                    Range range = scope.get(index);
-                    if (range.from > end) {
-                        break;
-                    }
-                    if (range.to >= start
-                            && !visitor.visit(
-                                    Math.max(start, range.from), Math.min(end, range.to))) {
-                        return false;
-                    }
-                    if (range.to >= end) {
-                        break;
-                    }
-                    index++;
-                }
-                return true;
-            }
-        };
+        long first = roaring64NavigableMap.select(startIndex);
+        long last = roaring64NavigableMap.select(endIndex - 1);
+        long count = endIndex - startIndex;
+        long missing = (last - first) - (count - 1);
+        if (missing == 0) {
+            return visitor.visit(first, last);
+        }
+
+        // Use ordinal searches when the scope can only have a few runs relative to the
+        // number of mask containers. Otherwise intersect first to keep iteration local.
+        long containerSpan = (last >>> CONTAINER_BITS) - (first >>> CONTAINER_BITS) + 1;
+        if (containerSpan >= Math.min(count, missing + 1)) {
+            return visitRangesBySelect(startIndex, endIndex, visitor);
+        }
+        RoaringNavigableMap64 clipped = new RoaringNavigableMap64();
+        clipped.addRange(new Range(first, last));
+        clipped.and(this);
+        return clipped.forEachRange(null, true, visitor);
     }
 
     private boolean shouldUseSelectRanges(long cardinality) {
