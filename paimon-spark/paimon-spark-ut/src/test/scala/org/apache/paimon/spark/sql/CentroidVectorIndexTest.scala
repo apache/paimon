@@ -402,6 +402,39 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
+  test("add_global_index_fields rejects an existing Bitmap whose field type changed") {
+    withTable("T") {
+      spark.sql(
+        """CREATE TABLE T (v ARRAY<FLOAT>, flag INT, tag STRING) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (array(0.0f, 0.0f), 7, 'active')")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |extra_fields=>'{"flag":"bitmap","tag":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1')""".stripMargin)
+
+      def add(field: String): Boolean = {
+        val call =
+          s"""CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+             |index_type=>'ivf-flat', extra_fields=>'{"$field":"bitmap"}')""".stripMargin
+        runSql(call).head.getBoolean(0)
+      }
+
+      assert(add("flag"))
+      runSql("ALTER TABLE T ALTER COLUMN flag TYPE BIGINT")
+      val widenedSnapshot = loadTable("T").snapshotManager().latestSnapshotId()
+      val failure = intercept[Exception](add("flag"))
+      val message = "Bitmap field 'flag' has changed type. Rebuild the centroid index."
+      assert(
+        Iterator
+          .iterate[Throwable](failure)(_.getCause)
+          .takeWhile(_ != null)
+          .exists(e => Option(e.getMessage).exists(_.contains(message))))
+      assert(add("tag"))
+      assert(loadTable("T").snapshotManager().latestSnapshotId() == widenedSnapshot)
+    }
+  }
+
   test("centroid Bitmap append checks source snapshots and survives callback failure") {
     withTable("T") {
       spark.sql(

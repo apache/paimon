@@ -103,7 +103,8 @@ Append scalar Bitmap fields to existing [Centroid Vector indexes](../../multimod
 on a Data Evolution table. Each eligible row-ID range already has Bitmap fields configured.
 The procedure writes one Bitmap file per new field in each range with vectors and reuses its
 existing Bitmap, router, and vector shard files.
-It returns `true` on success, including when all requested fields are already indexed.
+It returns `true` on success, including when all requested fields already have compatible Bitmaps.
+Rebuild the centroid index if a Bitmap being reused was built with a different field type.
 
 Pass the table identifier in `table`, the vector column in `index_column`, and the
 existing vector index type in `index_type`. Set `extra_fields` to a JSON object

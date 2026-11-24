@@ -154,6 +154,10 @@ public final class CentroidBitmapFieldAppender {
         Set<DataField> projectedFields = new LinkedHashSet<>();
         Map<Long, RowType> buildSchemas = new HashMap<>();
         RowType rowType = table.rowType();
+        buildSchemas.put(table.schema().id(), rowType);
+        Map<Integer, DataField> requestedById =
+                requestedFields.stream()
+                        .collect(Collectors.toMap(DataField::id, Function.identity()));
         long snapshotId = snapshot.id();
         byte[] sourceMeta =
                 new DataEvolutionIndexSourceMeta(snapshotId, table.schema().id()).serialize();
@@ -169,6 +173,18 @@ public final class CentroidBitmapFieldAppender {
                                                     .noneMatch(id -> id == field.id()))
                             .collect(Collectors.toList());
             if (addedFields.isEmpty()) {
+                for (IndexManifestEntry entry : group) {
+                    IndexFileMeta file = entry.indexFile();
+                    if (!CentroidIndexMeta.isScalarIndex(file)) {
+                        continue;
+                    }
+                    CentroidIndexFile bitmap =
+                            (CentroidIndexFile) CentroidIndexMeta.file(file, paths);
+                    DataField field = requestedById.get(bitmap.fieldId());
+                    if (field != null) {
+                        checkBitmapFieldType(table, buildSchemas, file, field);
+                    }
+                }
                 continue;
             }
             checkArgument(
@@ -213,24 +229,12 @@ public final class CentroidBitmapFieldAppender {
                             "Unexpected centroid Bitmap file for field %s.",
                             fieldId);
                     long schemaId =
-                            DataEvolutionIndexSourceMeta.fromIndexFile(file).sourceSchemaId();
-                    checkState(schemaId >= 0, "Missing centroid Bitmap build schema.");
+                            checkBitmapFieldType(
+                                    table, buildSchemas, file, rowType.getField(fieldId));
                     checkState(
                             bitmapSchemaId == -1 || bitmapSchemaId == schemaId,
                             "Mixed centroid Bitmap schemas.");
                     bitmapSchemaId = schemaId;
-                    RowType buildType =
-                            buildSchemas.computeIfAbsent(
-                                    schemaId,
-                                    id -> table.schemaManager().schema(id).logicalRowType());
-                    DataField field = rowType.getField(fieldId);
-                    checkArgument(
-                            buildType.containsField(fieldId)
-                                    && field.type()
-                                            .equalsIgnoreNullable(
-                                                    buildType.getField(fieldId).type()),
-                            "Bitmap field '%s' has changed type. Rebuild the centroid index.",
-                            field.name());
                 } else {
                     vectorCount = Math.addExact(vectorCount, file.rowCount());
                 }
@@ -312,6 +316,24 @@ public final class CentroidBitmapFieldAppender {
         return messages;
     }
 
+    private static long checkBitmapFieldType(
+            FileStoreTable table,
+            Map<Long, RowType> buildSchemas,
+            IndexFileMeta file,
+            DataField field) {
+        long schemaId = DataEvolutionIndexSourceMeta.fromIndexFile(file).sourceSchemaId();
+        checkState(schemaId >= 0, "Missing centroid Bitmap build schema.");
+        RowType buildType =
+                buildSchemas.computeIfAbsent(
+                        schemaId, id -> table.schemaManager().schema(id).logicalRowType());
+        checkArgument(
+                buildType.containsField(field.id())
+                        && field.type().equalsIgnoreNullable(buildType.getField(field.id()).type()),
+                "Bitmap field '%s' has changed type. Rebuild the centroid index.",
+                field.name());
+        return schemaId;
+    }
+
     private static List<CommitMessage> writeBitmaps(
             SparkSession spark,
             FileStoreTable table,
@@ -334,14 +356,19 @@ public final class CentroidBitmapFieldAppender {
         List<Integer> ordinals =
                 IntStream.range(0, ranges.size()).boxed().collect(Collectors.toList());
         int[] outputRanges = new int[bitmapCount];
+        int[] rangeOutputOffsets = new int[ranges.size() + 1];
+        int[] outputFieldPositions = new int[bitmapCount];
         for (int i = 0; i < ranges.size(); i++) {
             BitmapRange range = ranges.get(i);
-            Arrays.fill(
-                    outputRanges,
-                    range.firstOutputId,
-                    range.firstOutputId + range.addedFields().size(),
-                    i);
+            int outputId = range.firstOutputId;
+            rangeOutputOffsets[i] = outputId;
+            for (DataField field : range.addedFields()) {
+                outputRanges[outputId] = i;
+                outputFieldPositions[outputId] = keyType.getFieldIndex(field.name());
+                outputId++;
+            }
         }
+        rangeOutputOffsets[ranges.size()] = bitmapCount;
         Broadcast<Tuple2<byte[], int[]>> rangePlans = sc.broadcast(serializeRanges(ranges));
         try {
             JavaPairRDD<Long, Tuple2<Integer, Long>> membership =
@@ -365,7 +392,12 @@ public final class CentroidBitmapFieldAppender {
             JavaPairRDD<Integer, Tuple2<Long, byte[]>> rowsByBitmap =
                     values.join(membership, Math.max(writeTasks, readTasks))
                             .mapPartitionsToPair(
-                                    rows -> bitmapValues(keyType, rangePlans.value(), rows));
+                                    rows ->
+                                            bitmapValues(
+                                                    keyType,
+                                                    rangeOutputOffsets,
+                                                    outputFieldPositions,
+                                                    rows));
             List<byte[]> outputs =
                     rowsByBitmap
                             .repartitionAndSortWithinPartitions(new HashPartitioner(writeTasks))
@@ -400,7 +432,8 @@ public final class CentroidBitmapFieldAppender {
 
     private static Iterator<Tuple2<Integer, Tuple2<Long, byte[]>>> bitmapValues(
             RowType keyType,
-            Tuple2<byte[], int[]> plans,
+            int[] rangeOutputOffsets,
+            int[] outputFieldPositions,
             Iterator<Tuple2<Long, Tuple2<byte[], Tuple2<Integer, Long>>>> rows) {
         InternalRowSerializer rowSerializer = new InternalRowSerializer(keyType);
         DataInputDeserializer input = new DataInputDeserializer();
@@ -410,18 +443,16 @@ public final class CentroidBitmapFieldAppender {
             getters[i] = InternalRow.createFieldGetter(keyType.getTypeAt(i), i);
             serializers[i] = KeySerializer.create(keyType.getTypeAt(i));
         }
-        Map<Integer, BitmapRange> ranges = new HashMap<>();
         return Iterators.concat(
                 Iterators.transform(
                         rows,
                         row -> {
                             Tuple2<Integer, Long> position = row._2()._2();
-                            BitmapRange range =
-                                    ranges.computeIfAbsent(
-                                            position._1(), id -> rangePlan(plans, id));
-                            List<DataField> fields = range.addedFields();
+                            int rangeId = position._1();
+                            int from = rangeOutputOffsets[rangeId];
+                            int to = rangeOutputOffsets[rangeId + 1];
                             List<Tuple2<Integer, Tuple2<Long, byte[]>>> values =
-                                    new ArrayList<>(fields.size());
+                                    new ArrayList<>(to - from);
                             input.setBuffer(row._2()._1());
                             InternalRow keys;
                             try {
@@ -429,15 +460,13 @@ public final class CentroidBitmapFieldAppender {
                             } catch (IOException e) {
                                 throw new UncheckedIOException(e);
                             }
-                            for (int i = 0; i < fields.size(); i++) {
-                                int column = keyType.getFieldIndex(fields.get(i).name());
+                            for (int outputId = from; outputId < to; outputId++) {
+                                int column = outputFieldPositions[outputId];
                                 Object value = getters[column].getFieldOrNull(keys);
                                 byte[] bytes =
                                         value == null ? null : serializers[column].serialize(value);
                                 values.add(
-                                        new Tuple2<>(
-                                                range.firstOutputId + i,
-                                                new Tuple2<>(position._2(), bytes)));
+                                        new Tuple2<>(outputId, new Tuple2<>(position._2(), bytes)));
                             }
                             return values.iterator();
                         }));
