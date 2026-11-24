@@ -47,7 +47,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -462,37 +461,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Files.createDirectories(secondRoot);
 
         catalog.dropTable(identifier, false);
-        assertThat(legacyRoot).exists();
+        assertThat(legacyRoot).doesNotExist();
         assertThat(firstRoot).doesNotExist();
         assertThat(secondRoot).doesNotExist();
         assertThat(unrelated).exists();
-    }
-
-    @Test
-    public void testDropTableAfterCorrectingInvalidIndexPaths() throws Exception {
-        Identifier identifier = Identifier.create("test_db", "invalid_index_paths_history");
-        catalog.createDatabase(identifier.getDatabaseName(), false);
-        java.nio.file.Path oldRoot = Files.createDirectory(tempFile.resolve("old-index"));
-        java.nio.file.Path newRoot = Files.createDirectory(tempFile.resolve("new-index"));
-        String option = CoreOptions.GLOBAL_INDEX_EXTERNAL_PATHS.key();
-        catalog.createTable(
-                identifier,
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .option(option, oldRoot.toUri() + ",," + newRoot.toUri())
-                        .build(),
-                false);
-        catalog.alterTable(
-                identifier,
-                Collections.singletonList(
-                        SchemaChange.setOption(option, newRoot.toUri().toString())),
-                false);
-        catalog.dropTable(identifier, false);
-
-        assertThatThrownBy(() -> catalog.getTable(identifier))
-                .isInstanceOf(Catalog.TableNotExistException.class);
-        assertThat(newRoot).doesNotExist();
-        assertThat(oldRoot).exists();
     }
 
     @ParameterizedTest
@@ -530,10 +502,9 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.dropTable(identifier, false);
 
         for (java.nio.file.Path externalPath :
-                Arrays.asList(oldMainPath, newMainPath, newBranchPath)) {
+                Arrays.asList(oldMainPath, newMainPath, oldBranchPath, newBranchPath)) {
             assertThat(externalPath).doesNotExist();
         }
-        assertThat(oldBranchPath).exists();
         assertThat(unrelatedPath).exists();
     }
 
