@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.options.Options
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
@@ -36,6 +37,7 @@ case class TruncatePaimonTableWithFilterExec(
   extends PaimonLeafV2CommandExec {
 
   override def run(): Seq[InternalRow] = {
+    rejectRewriteUnderQueryAuth(table, "DELETE")
     partitionPredicate match {
       case Some(p) =>
         table match {

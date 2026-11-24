@@ -56,6 +56,8 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteBeforeCommit;
+
 /** Delegated {@link FileStoreTable}. */
 public abstract class DelegatedFileStoreTable implements FileStoreTable {
 
@@ -364,7 +366,13 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCommitImpl newCommit(String commitUser) {
-        return wrapped.newCommit(commitUser);
+        TableCommitImpl commit = wrapped.newCommit(commitUser);
+        String rewriteOperation = coreOptions().commitRewriteOperation();
+        if (rewriteOperation != null) {
+            // also covers what this table reads besides the wrapped one, such as a fallback branch
+            commit.withCommitCheck(() -> rejectRewriteBeforeCommit(this, rewriteOperation));
+        }
+        return commit;
     }
 
     @Override

@@ -43,6 +43,8 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -105,6 +107,8 @@ public class CompactChainTableAction extends TableActionBase {
                 "compact_chain_table does not support %s.",
                 SCAN_DEDICATED_SPLIT_GENERATION.key());
 
+        // The chain table holds both branches, which carry their own identifiers.
+        rejectRewriteUnderQueryAuth(table, "Chain table compaction");
         ChainGroupReadTable chainTable =
                 (ChainGroupReadTable) ((FallbackReadFileStoreTable) table).other();
         FileStoreTable snapshotTable = chainTable.wrapped();
@@ -142,10 +146,13 @@ public class CompactChainTableAction extends TableActionBase {
 
         FlinkSinkBuilder sinkBuilder =
                 new FlinkSinkBuilder(
-                                snapshotTable.copy(
-                                        Collections.singletonMap(
-                                                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
-                                                "true")))
+                                rejectRewriteUnderQueryAuthOnCommit(
+                                        snapshotTable.copy(
+                                                Collections.singletonMap(
+                                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE
+                                                                .key(),
+                                                        "true")),
+                                        "Chain table compaction"))
                         .forRowData(source);
         if (partitionExists) {
             sinkBuilder.overwrite(partitionSpec);

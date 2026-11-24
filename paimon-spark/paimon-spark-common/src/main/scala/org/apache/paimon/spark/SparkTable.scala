@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit
 import org.apache.paimon.spark.read.ObjectTableScanBuilder
 import org.apache.paimon.spark.rowops.{PaimonSparkCopyOnWriteOperation, PaimonSparkDeltaOperation}
 import org.apache.paimon.table.`object`.ObjectTable
@@ -66,8 +67,10 @@ class SparkTableWithRowLevelOps(tableArg: Table)
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
       case t: FileStoreTable =>
-        if (SparkTable.supportsV2DeltaOps(this)) { () => new PaimonSparkDeltaOperation(t, info) }
-        else { () => new PaimonSparkCopyOnWriteOperation(t, info) }
+        val target = rejectRewriteUnderQueryAuthOnCommit(t, info.command().toString)
+        if (SparkTable.supportsV2DeltaOps(this)) {
+          () => new PaimonSparkDeltaOperation(target, info)
+        } else { () => new PaimonSparkCopyOnWriteOperation(target, info) }
       case _ =>
         throw new UnsupportedOperationException(
           "Row-level write operation is only supported for FileStoreTable. " +

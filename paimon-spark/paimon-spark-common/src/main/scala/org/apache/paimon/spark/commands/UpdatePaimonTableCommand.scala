@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.Snapshot
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -46,7 +47,10 @@ case class UpdatePaimonTableCommand(
     case (expr, attr) => Alias(expr, attr.name)()
   }
 
+  override protected def rewriteOperation: String = "UPDATE"
+
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    rejectRewriteUnderQueryAuth(table, rewriteOperation)
 
     val commitMessages = if (withPrimaryKeys) {
       performUpdateForPkTable(sparkSession)

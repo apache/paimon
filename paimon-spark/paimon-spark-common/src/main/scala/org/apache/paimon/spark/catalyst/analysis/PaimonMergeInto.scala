@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
@@ -79,6 +80,14 @@ case class PaimonMergeInto(spark: SparkSession)
           val aligned = alignAllMergeActions(resolvedMerge, targetOutput)
 
           if (!shouldFallbackToV1MergeInto(aligned)) {
+            // Spark appends an insert-only merge without a row-level operation, which checks query
+            // auth, so check it here.
+            if (
+              aligned.matchedActions.isEmpty &&
+              SparkShimLoader.shim.notMatchedBySourceActions(aligned).isEmpty
+            ) {
+              rejectRewriteUnderQueryAuth(v2Table.getTable, "MERGE")
+            }
             // Tag so the analyzer's idempotence re-run skips this node (V1 fallback is a different
             // node type and doesn't need the tag).
             PaimonMergeActionTags.markAligned(aligned)

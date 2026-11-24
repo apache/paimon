@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.data.{GenericRow, InternalRow => PaimonInternalRow, Timestamp}
 import org.apache.paimon.data.serializer.InternalRowSerializer
 import org.apache.paimon.options.Options
@@ -279,6 +280,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
+    rejectRewriteUnderQueryAuth(table, "TRUNCATE")
     table match {
       case fileStoreTable: FileStoreTable =>
         truncatePartitionsByValue(fileStoreTable, idents)

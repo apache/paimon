@@ -69,6 +69,10 @@ public class RowTrackingTable implements DataTable, ReadonlyTable {
         }
     }
 
+    public FileStoreTable wrapped() {
+        return wrapped;
+    }
+
     @Override
     public Optional<Snapshot> latestSnapshot() {
         return wrapped.latestSnapshot();

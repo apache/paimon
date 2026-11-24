@@ -95,6 +95,7 @@ import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteBeforeCommit;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -627,17 +628,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommitImpl newCommit(String commitUser) {
         CoreOptions options = coreOptions();
-        return new TableCommitImpl(
-                store().newCommit(commitUser, this),
-                newExpireRunnable(),
-                options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagAutoManager(this),
-                options.writeOnly() ? null : CoreOptions.fromMap(options()).consumerExpireTime(),
-                new ConsumerManager(fileIO, path, snapshotManager().branch()),
-                options.snapshotExpireExecutionMode(),
-                name(),
-                options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+        TableCommitImpl commit =
+                new TableCommitImpl(
+                        store().newCommit(commitUser, this),
+                        newExpireRunnable(),
+                        options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
+                        options.writeOnly() ? null : store().newTagAutoManager(this),
+                        options.writeOnly()
+                                ? null
+                                : CoreOptions.fromMap(options()).consumerExpireTime(),
+                        new ConsumerManager(fileIO, path, snapshotManager().branch()),
+                        options.snapshotExpireExecutionMode(),
+                        name(),
+                        options.forceCreatingSnapshot(),
+                        options.fileOperationThreadNum());
+        String rewriteOperation = options.commitRewriteOperation();
+        if (rewriteOperation != null) {
+            commit.withCommitCheck(() -> rejectRewriteBeforeCommit(this, rewriteOperation));
+        }
+        return commit;
     }
 
     @Override

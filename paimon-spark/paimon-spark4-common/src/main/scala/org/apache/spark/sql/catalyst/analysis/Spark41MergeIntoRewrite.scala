@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.{MergeSchemaEvolutionHelper, PaimonRelation}
 
@@ -105,6 +106,13 @@ object Spark41MergeIntoRewrite
       case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) =>
         validateMergeIntoConditions(m)
         val relation = r.asInstanceOf[DataSourceV2Relation]
+        if (matchedActions.isEmpty && notMatchedBySourceActions.isEmpty) {
+          // The insert-only plans append without a row-level operation, which checks query auth.
+          tbl match {
+            case t: SparkTable => rejectRewriteUnderQueryAuth(t.getTable, "MERGE")
+            case _ =>
+          }
+        }
         if (
           matchedActions.isEmpty && notMatchedBySourceActions.isEmpty &&
           notMatchedActions.size == 1

@@ -48,6 +48,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -117,6 +119,8 @@ public class CompactChainTableProcedure extends BaseProcedure {
                             table.other() instanceof ChainGroupReadTable,
                             "Table %s is not a chain table",
                             tableIdent);
+                    // The chain table holds both branches, which carry their own identifiers.
+                    rejectRewriteUnderQueryAuth(table, "Chain table compaction");
                     DataSourceV2Relation relation = createRelation(tableIdent);
                     boolean success =
                             execute(
@@ -175,9 +179,12 @@ public class CompactChainTableProcedure extends BaseProcedure {
         // preserving other groups that have no delta data under the same partial partition.
         PaimonSparkWriter writer =
                 PaimonSparkWriter.apply(
-                        snapshotTable.copy(
-                                Collections.singletonMap(
-                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "true")));
+                        rejectRewriteUnderQueryAuthOnCommit(
+                                snapshotTable.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
+                                                "true")),
+                                "Chain table compaction"));
         Map<String, String> targetPartition =
                 ParameterUtils.parseCommaSeparatedKeyValues(partitionStr);
         for (Map.Entry<String, String> entry : targetPartition.entrySet()) {

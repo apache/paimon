@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.globalindex.DataEvolutionBatchScan
@@ -61,7 +62,11 @@ trait PaimonRowLevelCommand
   with ScanPlanHelper
   with SQLConfHelper {
 
+  /** The rewrite this command runs, authorized again before the writer commits. */
+  protected def rewriteOperation: String
+
   lazy val writer: PaimonSparkWriter = {
+    val writeTable = rejectRewriteUnderQueryAuthOnCommit(table, rewriteOperation)
     if (table.primaryKeys().isEmpty && table.bucketMode() == BucketMode.HASH_FIXED) {
       // todo: fix out why fix bucket non-pk table need write only
       /**
@@ -72,9 +77,10 @@ trait PaimonRowLevelCommand
        *
        * For example: Update bucketed append table with deletion vectors enabled
        */
-      PaimonSparkWriter(table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true")))
+      PaimonSparkWriter(
+        writeTable.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true")))
     } else {
-      PaimonSparkWriter(table)
+      PaimonSparkWriter(writeTable)
     }
   }
 

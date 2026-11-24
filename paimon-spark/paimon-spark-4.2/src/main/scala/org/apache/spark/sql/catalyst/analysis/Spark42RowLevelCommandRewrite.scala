@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.{MergeSchemaEvolutionHelper, PaimonAssignmentUtils, PaimonRelation}
 
@@ -57,6 +58,11 @@ object Spark42RowLevelCommandRewrite
             .map(_._1)
             .getOrElse(m)
           val aligned = alignAllMergeActions(evolved, evolved.targetTable.output)
+          if (aligned.matchedActions.isEmpty && aligned.notMatchedBySourceActions.isEmpty) {
+            // Spark rewrites an insert-only merge as an append over an anti join, without the
+            // row-level operation that checks query auth.
+            rejectRewriteUnderQueryAuth(table.getTable, "MERGE")
+          }
           RewriteMergeIntoTable(aligned.copy(targetTable = cleanAttrMetadata(aligned.targetTable)))
       }
     }
