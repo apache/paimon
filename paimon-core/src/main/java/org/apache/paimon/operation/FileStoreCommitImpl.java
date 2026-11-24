@@ -73,6 +73,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -80,6 +81,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
+import org.apache.paimon.tag.TagPeriodHandler;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -1503,6 +1505,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     latestSnapshot, deltaFiles, indexFiles, commitKind);
         }
 
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        Long currentWatermark = latestSnapshot == null ? null : latestSnapshot.watermark();
+        if (watermark != null && (currentWatermark == null || watermark > currentWatermark)) {
+            TagPeriodHandler.validateWatermark(options, watermark);
+            // A separate tag maintainer uses the persisted options, even with writer overrides.
+            if (latestSchema.options().containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())) {
+                TagPeriodHandler.validateWatermark(
+                        CoreOptions.fromMap(latestSchema.options()), watermark);
+            }
+            currentWatermark = watermark;
+        }
+
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
@@ -1516,18 +1531,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
-            Long currentWatermark = watermark;
             if (latestSnapshot != null) {
                 previousTotalRecordCount = latestSnapshot.totalRecordCount();
                 // read all previous manifest files
                 mergeBeforeManifests = manifestList.readDataManifests(latestSnapshot);
-                Long latestWatermark = latestSnapshot.watermark();
-                if (latestWatermark != null) {
-                    currentWatermark =
-                            currentWatermark == null
-                                    ? latestWatermark
-                                    : Math.max(currentWatermark, latestWatermark);
-                }
                 oldIndexManifest = latestSnapshot.indexManifest();
             }
 
@@ -1599,10 +1606,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             indexManifest =
                     indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
 
-            long latestSchemaId =
-                    schemaManager
-                            .latestOrThrow("Cannot get latest schema for table " + tableName)
-                            .id();
+            long latestSchemaId = latestSchema.id();
 
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;

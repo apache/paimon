@@ -491,7 +491,7 @@ public class FlinkConnectorOptions {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional endInput watermark used in case of batch mode or bounded stream.");
+                            "Watermark in epoch milliseconds to use at the end of a batch job or bounded stream.");
 
     public static final ConfigOption<Boolean> PRECOMMIT_COMPACT =
             key("precommit-compact")
