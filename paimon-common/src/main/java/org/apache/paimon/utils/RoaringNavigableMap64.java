@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import org.roaringbitmap.longlong.LongIterator;
 import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -28,6 +30,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -185,19 +188,96 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
      * <p>This is useful for interoperability with APIs that expect List&lt;Range&gt;.
      */
     public List<Range> toRangeList() {
-        return tryToRangeList(Integer.MAX_VALUE)
-                .orElseThrow(() -> new IllegalStateException("Too many bitmap ranges for a list."));
+        List<Range> ranges = new ArrayList<>();
+        forEachRange(null, false, (start, end) -> ranges.add(new Range(start, end)));
+        return ranges;
     }
 
     /** Stops converting as soon as the bitmap requires more than the allowed number of ranges. */
     public Optional<List<Range>> tryToRangeList(int maxRanges) {
+        return tryToRangeList(maxRanges, null);
+    }
+
+    /**
+     * Tries to materialize at most {@code maxRanges} contiguous ranges of the bitmap within the
+     * given sorted, non-negative row ranges with overlaps and adjacency merged. A null scope uses
+     * the whole bitmap.
+     */
+    public Optional<List<Range>> tryToRangeList(int maxRanges, @Nullable List<Range> scope) {
         Preconditions.checkArgument(maxRanges > 0, "Maximum range count must be positive.");
-        long cardinality = roaring64NavigableMap.getLongCardinality();
-        if (!shouldUseSelectRanges(cardinality)) {
-            return toRangeListByIterator(maxRanges);
+        if (scope == null && getLongCardinality() <= maxRanges) {
+            return Optional.of(toRangeList());
+        }
+        if (scope != null && scope.isEmpty()) {
+            return Optional.of(Collections.emptyList());
         }
 
-        return toRangeListBySelect(cardinality, maxRanges);
+        // Materialize Range objects only after seeing that the result fits.
+        int[] rangeCount = {0};
+        boolean fits =
+                forEachRange(
+                        scope,
+                        true,
+                        (start, end) -> {
+                            if (rangeCount[0] == maxRanges) {
+                                return false;
+                            }
+                            rangeCount[0]++;
+                            return true;
+                        });
+        if (!fits) {
+            return Optional.empty();
+        }
+
+        List<Range> ranges = new ArrayList<>(rangeCount[0]);
+        forEachRange(scope, true, (start, end) -> ranges.add(new Range(start, end)));
+        return Optional.of(ranges);
+    }
+
+    private boolean forEachRange(
+            @Nullable List<Range> scope, boolean skipLongRuns, RangeVisitor visitor) {
+        long cardinality = roaring64NavigableMap.getLongCardinality();
+        long endIndex =
+                scope == null
+                        ? cardinality
+                        : roaring64NavigableMap.rankLong(scope.get(scope.size() - 1).to);
+        if (endIndex == 0) {
+            return true;
+        }
+        RangeVisitor scopedVisitor = scope == null ? visitor : intersectRanges(scope, visitor);
+        if (shouldUseSelectRanges(cardinality)) {
+            long start = scope == null ? 0 : scope.get(0).from;
+            long startIndex = start == 0 ? 0 : roaring64NavigableMap.rankLong(start - 1);
+            return visitRangesBySelect(startIndex, endIndex, scopedVisitor);
+        }
+
+        return visitRangesByIterator(endIndex, skipLongRuns, scopedVisitor);
+    }
+
+    private static RangeVisitor intersectRanges(List<Range> scope, RangeVisitor visitor) {
+        return new RangeVisitor() {
+            private int index;
+
+            @Override
+            public boolean visit(long start, long end) {
+                while (index < scope.size()) {
+                    Range range = scope.get(index);
+                    if (range.from > end) {
+                        break;
+                    }
+                    if (range.to >= start
+                            && !visitor.visit(
+                                    Math.max(start, range.from), Math.min(end, range.to))) {
+                        return false;
+                    }
+                    if (range.to >= end) {
+                        break;
+                    }
+                    index++;
+                }
+                return true;
+            }
+        };
     }
 
     private boolean shouldUseSelectRanges(long cardinality) {
@@ -219,9 +299,12 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
         // A high hit ratio can still mean many short runs (for example nine hits followed
         // by one gap). Repeated select calls are expensive for those; use the iterator.
-        return consecutive * 4 >= samples * 3
-                && hasLongRunAt(cardinality / 2)
-                && hasLongRunAt(cardinality - 2 * RANGE_LIST_SELECT_SAMPLE_SIZE - 1);
+        return consecutive * 4 >= samples * 3 && hasLongRuns(0, cardinality);
+    }
+
+    private boolean hasLongRuns(long startIndex, long endIndex) {
+        return hasLongRunAt(startIndex + (endIndex - startIndex) / 2)
+                && hasLongRunAt(endIndex - 2 * RANGE_LIST_SELECT_SAMPLE_SIZE - 1);
     }
 
     private boolean hasLongRunAt(long index) {
@@ -234,47 +317,50 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
                         middle + RANGE_LIST_SELECT_SAMPLE_SIZE);
     }
 
-    private Optional<List<Range>> toRangeListByIterator(int maxRanges) {
-        List<Range> ranges = new ArrayList<>();
+    private boolean visitRangesByIterator(
+            long endIndex, boolean skipLongRuns, RangeVisitor visitor) {
         LongIterator iterator = roaring64NavigableMap.getLongIterator();
-        if (!iterator.hasNext()) {
-            return Optional.of(ranges);
-        }
-
         long rangeStart = iterator.next();
         long rangeEnd = rangeStart;
-        while (iterator.hasNext()) {
+        for (long index = 1; index < endIndex; index++) {
             long current = iterator.next();
             if (isNext(rangeEnd, current)) {
                 rangeEnd = current;
+                // A sparse prefix can hide a long run of rows outside index coverage.
+                if (skipLongRuns && rangeEnd - rangeStart == RANGE_LIST_SELECT_MIN_CARDINALITY) {
+                    long startIndex = index - RANGE_LIST_SELECT_MIN_CARDINALITY;
+                    if (hasLongRuns(startIndex, endIndex)) {
+                        return visitRangesBySelect(startIndex, endIndex, visitor);
+                    }
+                }
             } else {
-                ranges.add(new Range(rangeStart, rangeEnd));
-                if (ranges.size() == maxRanges) {
-                    return Optional.empty();
+                if (!visitor.visit(rangeStart, rangeEnd)) {
+                    return false;
                 }
                 rangeStart = current;
                 rangeEnd = current;
             }
         }
-        ranges.add(new Range(rangeStart, rangeEnd));
-        return Optional.of(ranges);
+        return visitor.visit(rangeStart, rangeEnd);
     }
 
-    private Optional<List<Range>> toRangeListBySelect(long cardinality, int maxRanges) {
-        List<Range> ranges = new ArrayList<>();
-        long rangeStartIndex = 0;
-        while (rangeStartIndex < cardinality) {
-            if (ranges.size() == maxRanges) {
-                return Optional.empty();
-            }
+    private boolean visitRangesBySelect(long rangeStartIndex, long endIndex, RangeVisitor visitor) {
+        while (rangeStartIndex < endIndex) {
             long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
-            long rangeEndIndex = findRangeEndIndex(rangeStartIndex, cardinality, rangeStart);
+            long rangeEndIndex = findRangeEndIndex(rangeStartIndex, endIndex, rangeStart);
             long rangeOffset = rangeEndIndex - rangeStartIndex;
-            ranges.add(new Range(rangeStart, rangeStart + rangeOffset));
+            if (!visitor.visit(rangeStart, rangeStart + rangeOffset)) {
+                return false;
+            }
             rangeStartIndex = rangeEndIndex + 1;
         }
 
-        return Optional.of(ranges);
+        return true;
+    }
+
+    @FunctionalInterface
+    private interface RangeVisitor {
+        boolean visit(long start, long end);
     }
 
     private long findRangeEndIndex(long rangeStartIndex, long cardinality, long rangeStart) {

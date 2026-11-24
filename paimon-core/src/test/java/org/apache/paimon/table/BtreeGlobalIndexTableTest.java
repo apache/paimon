@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -387,12 +388,56 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                 .boxed()
                                 .collect(Collectors.toList()));
 
-        List<Split> compactSelection =
+        ReadBuilder scopedRead =
                 adaptive.newReadBuilder()
-                        .withFilter(predicates.in(1, Arrays.asList(match, other)))
+                        .withFilter(
+                                PredicateBuilder.and(
+                                        predicate, predicates.greaterOrEqual(0, rowCount)))
+                        .withProjection(new int[] {0});
+        TableScan.Plan scopedPlan = scopedRead.newScan().plan();
+        assertThat(scopedPlan.splits())
+                .singleElement()
+                .isInstanceOfSatisfying(
+                        IndexedSplit.class,
+                        split ->
+                                assertThat(split.rowRanges())
+                                        .containsExactly(new Range(rowCount + 2L, rowCount + 3L)));
+        List<Integer> scopedIds = new ArrayList<>();
+        scopedRead
+                .newRead()
+                .executeFilter()
+                .createReader(scopedPlan)
+                .forEachRemaining(row -> scopedIds.add(row.getInt(0)));
+        assertThat(scopedIds).containsExactly(rowCount + 2);
+
+        AtomicInteger manifestOpens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().startsWith("manifest-")) {
+                            manifestOpens.incrementAndGet();
+                        }
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable eager =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        Predicate compactFilter = predicates.in(1, Arrays.asList(match, other));
+        eager.newReadBuilder().withFilter(compactFilter).newScan().plan();
+        int eagerOpens = manifestOpens.getAndSet(0);
+        assertThat(eagerOpens).isPositive();
+
+        FileStoreTable trackedAdaptive =
+                FileStoreTableFactory.create(fileIO, adaptive.location(), adaptive.schema());
+        List<Split> compactSelection =
+                trackedAdaptive
+                        .newReadBuilder()
+                        .withFilter(compactFilter)
                         .newScan()
                         .plan()
                         .splits();
+        assertThat(manifestOpens.get()).isEqualTo(eagerOpens);
         assertThat(compactSelection)
                 .singleElement()
                 .isInstanceOfSatisfying(

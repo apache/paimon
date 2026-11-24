@@ -53,6 +53,12 @@ public class RowRangeIndex {
         return bitmap.tryToRangeList(maxRanges).map(RowRangeIndex::fromBitmapRanges);
     }
 
+    /** Builds a bounded index over the given sorted, merged, non-negative row ranges. */
+    public static Optional<RowRangeIndex> tryFromBitmap(
+            RoaringNavigableMap64 bitmap, int maxRanges, List<Range> scope) {
+        return bitmap.tryToRangeList(maxRanges, scope).map(RowRangeIndex::fromBitmapRanges);
+    }
+
     private static RowRangeIndex fromBitmapRanges(List<Range> ranges) {
         // Bitmap order is unsigned; mixed signs still require signed sorting and merging.
         if (ranges.size() > 1 && ranges.get(0).from > ranges.get(ranges.size() - 1).from) {

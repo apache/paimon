@@ -197,6 +197,30 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testBoundedRangesWithinScope() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        for (long id = 0; id < 256; id += 2) {
+            bitmap.add(id);
+        }
+        long high = 1L << 32;
+        bitmap.addRange(new Range(high - 20_000, high + 20_000));
+
+        List<Range> scope =
+                Arrays.asList(
+                        new Range(3, 6),
+                        new Range(high - 5_000, high + 10),
+                        new Range(high + 20, high + 30_000));
+        List<Range> expected =
+                Arrays.asList(
+                        new Range(4, 4),
+                        new Range(6, 6),
+                        new Range(high - 5_000, high + 10),
+                        new Range(high + 20, high + 20_000));
+        assertThat(bitmap.tryToRangeList(4, scope)).contains(expected);
+        assertThat(bitmap.tryToRangeList(3, scope)).isEmpty();
+    }
+
+    @Test
     public void testSelectPathForLargeRangesWithIsolatedGaps() throws Exception {
         Method useSelect =
                 RoaringNavigableMap64.class.getDeclaredMethod("shouldUseSelectRanges", long.class);

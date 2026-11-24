@@ -339,18 +339,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 GlobalIndexResult result = indexResult.get();
                 RoaringNavigableMap64 candidates = result.results();
                 int maxRanges = budget.maxSelectionRanges();
-                // Only a bitmap with more candidates than the range budget can overflow it.
-                // Keep the manifest-level range pushdown for smaller results.
-                if (maxRanges > 0
-                        && candidates.getLongCardinality() > maxRanges
-                        && batchScan.snapshotReader().hasNonPartitionFilter()) {
-                    return planWithFileGroupPruning(candidates, maxRanges);
-                }
                 rowRangeIndex =
                         maxRanges == 0
                                 ? RowRangeIndex.fromBitmap(candidates)
                                 : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
                 if (rowRangeIndex == null) {
+                    if (batchScan.snapshotReader().hasNonPartitionFilter()) {
+                        return planWithFileGroupPruning(candidates, maxRanges);
+                    }
                     LOG.info(
                             "Scan table '{}' without global index because the row-ID range limit was exceeded.",
                             table.name());
@@ -396,7 +392,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return prunedPlan;
         }
 
-        Optional<RowRangeIndex> ranges = RowRangeIndex.tryFromBitmap(candidates, maxRanges);
+        List<Range> plannedRanges = GlobalIndexBuilderUtils.calcRowRanges(prunedPlan.dataSplits());
+        Optional<RowRangeIndex> ranges =
+                RowRangeIndex.tryFromBitmap(candidates, maxRanges, plannedRanges);
         if (ranges.isPresent()) {
             return wrapToIndexSplits(prunedPlan.splits(), ranges.get(), null);
         }
