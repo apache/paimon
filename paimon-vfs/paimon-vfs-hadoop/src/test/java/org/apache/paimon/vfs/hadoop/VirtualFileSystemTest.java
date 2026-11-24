@@ -474,6 +474,36 @@ public abstract class VirtualFileSystemTest {
     }
 
     @Test
+    public void testRelativeWorkingDirectory() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "object_table";
+        createObjectTable(databaseName, tableName);
+
+        Path tablePath = new Path(vfsRoot, databaseName + "/" + tableName);
+        Path directory = new Path(tablePath, "data");
+        Path relativeFile = new Path("file.txt");
+        try (FileSystem fs = new PaimonVirtualFileSystem()) {
+            fs.initialize(vfsRoot.toUri(), vfs.getConf());
+            fs.setWorkingDirectory(tablePath);
+            fs.setWorkingDirectory(new Path("data"));
+            try (FSDataOutputStream out = fs.create(relativeFile)) {
+                out.writeInt(42);
+            }
+
+            assertThat(fs.getWorkingDirectory()).isEqualTo(directory);
+            assertThat(fs.exists(new Path(directory, relativeFile))).isTrue();
+            try (FSDataInputStream in = fs.open(relativeFile)) {
+                assertThat(in.readInt()).isEqualTo(42);
+            }
+
+            // An absolute path still replaces the current directory.
+            fs.setWorkingDirectory(new Path(tablePath.toUri().getPath()));
+            assertThat(fs.getWorkingDirectory()).isEqualTo(tablePath);
+            assertThat(fs.exists(relativeFile)).isFalse();
+        }
+    }
+
+    @Test
     public void testWorkingDirectoryIsCatalogRoot() throws Exception {
         String databaseName = "test_db";
         String tableName = "object_table";

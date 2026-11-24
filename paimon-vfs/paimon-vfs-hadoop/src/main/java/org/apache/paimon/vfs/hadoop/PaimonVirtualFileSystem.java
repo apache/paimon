@@ -467,7 +467,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
 
     @Override
     public void setWorkingDirectory(Path newDir) {
-        workingDirectory = newDir;
+        workingDirectory = newDir.makeQualified(uri, workingDirectory);
     }
 
     @Override
