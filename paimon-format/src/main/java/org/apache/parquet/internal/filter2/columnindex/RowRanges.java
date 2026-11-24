@@ -300,40 +300,67 @@ public class RowRanges {
 
     /** @return the ascending iterator of the row indexes contained in the ranges */
     public PrimitiveIterator.OfLong iterator() {
-        return new PrimitiveIterator.OfLong() {
-            private int currentRangeIndex = -1;
-            private Range currentRange;
-            private long next = findNext();
+        return new RowIndexIterator(ranges);
+    }
 
-            private long findNext() {
-                if (currentRange == null || next + 1 > currentRange.to) {
-                    if (currentRangeIndex + 1 < ranges.size()) {
-                        currentRange = ranges.get(++currentRangeIndex);
-                        next = currentRange.from;
-                    } else {
-                        return -1;
-                    }
+    /** Iterator that can consume the remaining row indexes individually or one range at a time. */
+    public static final class RowIndexIterator implements PrimitiveIterator.OfLong {
+
+        private final List<Range> ranges;
+        private int currentRangeIndex = -1;
+        private Range currentRange;
+        private long next;
+
+        private RowIndexIterator(List<Range> ranges) {
+            this.ranges = ranges;
+            this.next = findNext();
+        }
+
+        private long findNext() {
+            if (currentRange == null || next + 1 > currentRange.to) {
+                if (currentRangeIndex + 1 < ranges.size()) {
+                    currentRange = ranges.get(++currentRangeIndex);
+                    next = currentRange.from;
                 } else {
-                    ++next;
+                    return -1;
                 }
-                return next;
+            } else {
+                ++next;
             }
+            return next;
+        }
 
-            @Override
-            public boolean hasNext() {
-                return next >= 0;
-            }
+        @Override
+        public boolean hasNext() {
+            return next >= 0;
+        }
 
-            @Override
-            public long nextLong() {
-                long ret = next;
-                if (ret < 0) {
-                    throw new NoSuchElementException();
-                }
-                next = findNext();
-                return ret;
+        @Override
+        public long nextLong() {
+            long ret = next;
+            if (ret < 0) {
+                throw new NoSuchElementException();
             }
-        };
+            next = findNext();
+            return ret;
+        }
+
+        /**
+         * Returns and consumes the remaining part of the current range. For example, after reading
+         * rows 10, 11 and 12 from [10, 20], this returns [13, 20].
+         *
+         * @throws NoSuchElementException if there are no remaining row indexes
+         */
+        public Range nextRange() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            Range range =
+                    next == currentRange.from ? currentRange : new Range(next, currentRange.to);
+            currentRange = null;
+            next = findNext();
+            return range;
+        }
     }
 
     /**
