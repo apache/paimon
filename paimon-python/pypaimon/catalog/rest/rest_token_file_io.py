@@ -211,11 +211,11 @@ class RESTTokenFileIO(FileIO):
         return Options(merged_properties)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
-        """Apply this client's routing overrides without changing shared credentials."""
+        """Apply client cache and DLF overrides, preserving the server OSS endpoint."""
         merged_token = dict(token)
         if self.catalog_options:
             for key, value in self.catalog_options.to_map().items():
-                if (key == OssOptions.OSS_ENDPOINT.key() or key.startswith("io-cache.")) and value is not None:
+                if key.startswith("io-cache.") and value is not None:
                     merged_token[key] = value
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():

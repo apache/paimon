@@ -750,7 +750,26 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.assertEqual("server-cache", server_options[OssOptions.OSS_ENDPOINT.key()])
         self.assertEqual("client-endpoint", catalog_options.get(OssOptions.OSS_ENDPOINT))
 
-    def test_standard_client_endpoint_and_empty_cache_overrides(self):
+    def test_server_endpoint_precedes_standard_client_endpoint(self):
+        for endpoint in ("server-cache", None):
+            with self.subTest(server_endpoint=endpoint):
+                client = Options({OssOptions.OSS_ENDPOINT.key(): "client-endpoint"})
+                file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, client)
+                server = {OssOptions.OSS_SECURITY_TOKEN.key(): "server-credentials"}
+                if endpoint is not None:
+                    server[OssOptions.OSS_ENDPOINT.key()] = endpoint
+                file_io.token = RESTToken(server, int(time.time() * 1000) + 7_200_000)
+                with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                        patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+                    self.assertEqual(
+                        endpoint or "client-endpoint",
+                        file_io.file_io().options.get(OssOptions.OSS_ENDPOINT))
+                    self.assertEqual(endpoint, file_io.valid_token().token.get(OssOptions.OSS_ENDPOINT.key()))
+                    self.assertEqual(endpoint, file_io._existing_valid_token().token.get(OssOptions.OSS_ENDPOINT.key()))
+                self.assertEqual("server-credentials", file_io.token.token[OssOptions.OSS_SECURITY_TOKEN.key()])
+                self.assertEqual("client-endpoint", client.get(OssOptions.OSS_ENDPOINT))
+
+    def test_server_endpoint_and_empty_client_cache_overrides(self):
         server = {
             OssOptions.OSS_ENDPOINT.key(): "server-cache",
             CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
@@ -767,7 +786,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
                                       CatalogOptions.DLF_OSS_ENDPOINT.key(): " "})
                     file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, client)
                     options = file_io._merged_options(RESTToken(server, 0))
-                    self.assertEqual("client-endpoint", options.get(OssOptions.OSS_ENDPOINT))
+                    self.assertEqual("server-cache", options.get(OssOptions.OSS_ENDPOINT))
                     self.assertEqual(value, options.to_map()[key])
                     io = CachePolicyFileIO.create(self.warehouse_path, options)
                     self.addCleanup(io.close)

@@ -2173,7 +2173,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @ParameterizedTest
     @CsvSource({
         ",,server-cache",
-        "client-endpoint,,client-endpoint",
+        "client-endpoint,,server-cache",
         ",client-dlf-endpoint,client-dlf-endpoint",
         "client-endpoint,client-dlf-endpoint,client-dlf-endpoint"
     })

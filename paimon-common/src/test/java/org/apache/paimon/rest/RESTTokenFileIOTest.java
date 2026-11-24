@@ -60,14 +60,14 @@ import static org.mockito.Mockito.when;
 class RESTTokenFileIOTest {
 
     @Test
-    void testClientEndpointOverridesTokenAndDlfEndpointHasHighestPriority() throws IOException {
+    void testServerEndpointOverridesClientAndDlfEndpointHasHighestPriority() throws IOException {
         for (String[] endpoints :
                 new String[][] {
                     {null, null, "server-cache"},
-                    {"client-endpoint", null, "client-endpoint"},
+                    {"client-endpoint", null, "server-cache"},
                     {"client-endpoint", "client-dlf-endpoint", "client-dlf-endpoint"},
                     {null, "client-dlf-endpoint", "client-dlf-endpoint"},
-                    {"client-endpoint", "  ", "client-endpoint"}
+                    {"client-endpoint", "  ", "server-cache"}
                 }) {
             Options options = new Options();
             if (endpoints[0] != null) {
@@ -91,6 +91,24 @@ class RESTTokenFileIOTest {
             assertThat(tokenOptions.get("fs.oss.endpoint")).isEqualTo("server-cache");
             assertThat(options.get("fs.oss.endpoint")).isEqualTo(endpoints[0]);
         }
+    }
+
+    @Test
+    void testClientEndpointIsUsedWhenServerOmitsEndpoint() throws IOException {
+        Options options = new Options();
+        options.set("fs.oss.endpoint", "client-endpoint");
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "client-origin");
+        Map<String, String> tokenOptions = tokenOptions();
+        tokenOptions.remove("fs.oss.endpoint");
+        RESTTokenFileIO rest = restFileIO(options, tokenOptions);
+        HadoopOptionsProvider provider = (HadoopOptionsProvider) rest.fileIO();
+        Path data = new Path("oss://bucket/table/bucket-0/data.orc");
+        assertThat(provider.hadoopOptions(data, "read").get("fs.oss.endpoint"))
+                .isEqualTo("client-endpoint");
+        assertThat(provider.hadoopOptions(data, "write").get("fs.oss.endpoint"))
+                .isEqualTo("client-origin");
+        assertThat(rest.validToken().token()).doesNotContainKey("fs.oss.endpoint");
+        assertThat(tokenOptions).doesNotContainKey("fs.oss.endpoint");
     }
 
     @Test

@@ -345,12 +345,11 @@ public class RESTTokenFileIO implements FileIO {
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
         Options catalogOptions = catalogContext.options();
-        // Include client routing overrides in the token used by both native callers and the
-        // token-keyed FileIO cache. Credentials still come from the server token.
+        // Include client cache settings in the token used by native callers and FileIO reuse.
+        // Keep the server's standard OSS endpoint; the explicit DLF override is applied below.
         for (Map.Entry<String, String> entry : catalogOptions.toMap().entrySet()) {
             String key = entry.getKey();
-            if ((key.equals("fs.oss.endpoint") || key.startsWith("io-cache."))
-                    && entry.getValue() != null) {
+            if (key.startsWith("io-cache.") && entry.getValue() != null) {
                 newToken.put(key, entry.getValue());
             }
         }
