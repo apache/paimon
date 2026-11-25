@@ -947,6 +947,51 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: merge into keeps vector files that start inside a touched range") {
+    Seq("x", "embedding").foreach {
+      column =>
+        withTable("s", "t") {
+          // The vector file rolls every 1000 rows, so one normal file covers four vector files.
+          sql("""
+                |CREATE TABLE t (id INT, x INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+                |  'row-tracking.enabled' = 'true',
+                |  'data-evolution.enabled' = 'true',
+                |  'file.format' = 'parquet',
+                |  'vector.file.format' = 'parquet',
+                |  'vector-field' = 'embedding',
+                |  'field.embedding.vector-dim' = '8',
+                |  'vector.target-file-size' = '1 kb')
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), 0,
+                |  array_repeat(CAST(id AS FLOAT), 8) FROM range(0, 4000)
+                |""".stripMargin)
+          val vectorFiles = loadTable("t")
+            .store()
+            .newScan()
+            .plan()
+            .files()
+            .asScala
+            .map(_.file())
+            .filter(_.fileName().contains(".vector."))
+          assert(vectorFiles.exists(_.firstRowId() == 1000L), vectorFiles)
+
+          sql("CREATE TABLE s (id INT, x INT, embedding ARRAY<FLOAT>)")
+          sql("INSERT INTO s VALUES (1000, 7, array_repeat(CAST(-1 AS FLOAT), 8))")
+          sql(s"""
+                 |MERGE INTO t USING s ON t._ROW_ID = s.id
+                 |WHEN MATCHED THEN UPDATE SET t.$column = s.$column
+                 |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT count(*) FROM t WHERE id <> 1000 AND embedding[0] = CAST(id AS FLOAT)"),
+            Seq(Row(3999)))
+          val expected = if (column == "x") Row(1000, 7, 1000.0f) else Row(1000, 0, -1.0f)
+          checkAnswer(sql("SELECT id, x, embedding[0] FROM t WHERE id = 1000"), Seq(expected))
+        }
+    }
+  }
+
   test("Data Evolution: merge into with a spilling append write buffer") {
     withTable("s", "t") {
       sql("""CREATE TABLE t (id INT, b STRING, c INT) TBLPROPERTIES
