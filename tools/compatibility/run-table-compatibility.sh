@@ -28,18 +28,23 @@ current_version=$(mvn -q -f "$repo_root/pom.xml" help:evaluate \
 for version in 1.0.1 1.4.2 2.0.0 "$current_version"; do
     mvn -q -f "$script_dir/pom.xml" "-Dpaimon.version=$version" \
         org.apache.maven.plugins:maven-dependency-plugin:3.7.1:build-classpath \
+        -Dmdep.includeScope=test \
         "-Dmdep.outputFile=$test_dir/classpath-$version"
     mkdir -p "$test_dir/classes-$version"
     javac -source 8 -target 8 \
         -cp "$(cat "$test_dir/classpath-$version")" \
         -d "$test_dir/classes-$version" \
-        "$script_dir/src/test/java/org/apache/paimon/compatibility/ReleaseTableCompatibility.java"
+        "$script_dir/src/test/java/org/apache/paimon/compatibility/ReleaseTableCompatibilityTest.java"
 done
 
 run() {
     local version=$1 warehouse=$2 stage=$3
-    java -cp "$test_dir/classes-$version:$(cat "$test_dir/classpath-$version")" \
-        org.apache.paimon.compatibility.ReleaseTableCompatibility "$warehouse" "$stage"
+    echo "Testing $stage with Paimon $version"
+    java "-Dcompat.warehouse=$warehouse" "-Dcompat.stage=$stage" \
+        -cp "$test_dir/classes-$version:$(cat "$test_dir/classpath-$version")" \
+        org.junit.platform.console.ConsoleLauncher execute \
+        --select-class org.apache.paimon.compatibility.ReleaseTableCompatibilityTest \
+        --disable-banner --disable-ansi-colors --details=none
 }
 
 for newer in 1.4.2 2.0.0 "$current_version"; do
@@ -53,12 +58,5 @@ for newer in 1.4.2 2.0.0 "$current_version"; do
 
     # A newer type is not covered by the basic read/write compatibility result.
     run "$newer" "$warehouse" createBlob
-    if run 1.0.1 "$warehouse" readBlob > "$test_dir/blob-$newer.log" 2>&1; then
-        echo "Paimon 1.0.1 unexpectedly opened a $newer BLOB table" >&2
-        exit 1
-    fi
-    if ! grep -q 'Input type string: BLOB' "$test_dir/blob-$newer.log"; then
-        cat "$test_dir/blob-$newer.log" >&2
-        exit 1
-    fi
+    run 1.0.1 "$warehouse" readBlob
 done

@@ -36,14 +36,23 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class ReleaseTableCompatibility {
-    public static void main(String[] args) throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(args[0])));
-        String stage = args[1];
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+public class ReleaseTableCompatibilityTest {
+    @Test
+    public void testTableInteroperability() throws Exception {
+        Catalog catalog =
+                CatalogFactory.createCatalog(
+                        CatalogContext.create(new Path(System.getProperty("compat.warehouse"))));
+        String stage = System.getProperty("compat.stage");
         if ("createBlob".equals(stage)) {
             DataType blob = (DataType) DataTypes.class.getMethod("BLOB").invoke(null);
             catalog.createTable(
@@ -56,12 +65,19 @@ public class ReleaseTableCompatibility {
                             .option("bucket", "-1")
                             .build(),
                     false);
-            System.out.println("created BLOB table");
             return;
         }
         if ("readBlob".equals(stage)) {
-            catalog.getTable(Identifier.create("db", "new_feature"));
-            System.out.println("opened BLOB table");
+            Exception failure =
+                    assertThrows(
+                            Exception.class,
+                            () -> catalog.getTable(Identifier.create("db", "new_feature")));
+            Throwable cause = failure;
+            while (cause != null
+                    && !String.valueOf(cause.getMessage()).contains("Input type string: BLOB")) {
+                cause = cause.getCause();
+            }
+            assertNotNull(cause);
             return;
         }
         if ("create".equals(stage)) {
@@ -91,7 +107,6 @@ public class ReleaseTableCompatibility {
         }
         for (String name : new String[] {"append", "pk"}) {
             List<String> rows = read(catalog.getTable(Identifier.create("db", name)));
-            System.out.println(stage + " " + name + " " + rows);
             List<String> expected = new ArrayList<>();
             boolean initial = "create".equals(stage) || "read1".equals(stage);
             expected.add("1:" + (initial ? "one" : "pk".equals(name) ? "updated" : "one"));
@@ -101,9 +116,7 @@ public class ReleaseTableCompatibility {
             if ("write3".equals(stage) || "read3".equals(stage)) {
                 expected.add("3:three");
             }
-            if (!rows.equals(expected)) {
-                throw new AssertionError(name + " expected " + expected + " but got " + rows);
-            }
+            assertEquals(expected, rows, name);
         }
     }
 

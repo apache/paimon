@@ -22,7 +22,7 @@ Run `bash tools/compatibility/run-table-compatibility.sh` after installing the
 current `paimon-bundle` into the local Maven repository. CI runs it in the Java 8
 core job after the reactor build.
 
-Each released bundle runs in its own JVM. Paimon 1.0.1 creates append and primary
+Each test invocation runs in its own JVM. Paimon 1.0.1 creates append and primary
 key tables, then 1.4.2, 2.0.0, and the current build take turns reading and writing
 each table with 1.0.1. The test also checks that 1.0.1 rejects the newer BLOB type.
 
