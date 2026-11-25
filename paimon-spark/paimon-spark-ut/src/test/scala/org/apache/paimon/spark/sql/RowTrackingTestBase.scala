@@ -31,7 +31,6 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.expressions.{EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
@@ -754,7 +753,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
       val parsed = spark.sessionState.sqlParser.parsePlan("DELETE FROM t WHERE _row_id = 550")
       val lowerCaseDelete = spark.sessionState.analyzer
-        .executeAndCheck(parsed, new QueryPlanningTracker)
+        .execute(parsed)
         .asInstanceOf[DeleteFromPaimonTableCommand]
       val lowerCaseFiles =
         fileCount(probe.candidates(lowerCaseDelete.condition, lowerCaseDelete.relation))
