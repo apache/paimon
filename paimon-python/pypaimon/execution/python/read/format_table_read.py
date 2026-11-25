@@ -38,6 +38,18 @@ def _text_format_schema_column(table: FormatTable) -> Optional[str]:
     )
 
 
+def _columnar_read_schema(
+    table: FormatTable, projection: Optional[List[str]]
+) -> Optional[pyarrow.Schema]:
+    if table.format() not in (Format.PARQUET, Format.ORC):
+        return None
+    fields = table.fields
+    if projection:
+        fields_by_name = {f.name: f for f in fields}
+        fields = [fields_by_name[name] for name in projection]
+    return PyarrowFieldParser.from_paimon_schema(fields)
+
+
 def _read_file_to_arrow(
     file_io: Any,
     split: FormatDataSplit,
@@ -45,6 +57,7 @@ def _read_file_to_arrow(
     partition_spec: Optional[Dict[str, str]],
     read_fields: Optional[List[str]],
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
+    columnar_schema: Optional[pyarrow.Schema] = None,
     text_column_name: Optional[str] = None,
     text_line_delimiter: str = "\n",
 ) -> pyarrow.Table:
@@ -143,6 +156,20 @@ def _read_file_to_arrow(
                 arr = arr.cast(pa_type)
             tbl = tbl.append_column(k, arr)
 
+    if columnar_schema is not None:
+        if tbl.schema.equals(columnar_schema):
+            return tbl
+        file_columns = set(tbl.column_names)
+        arrays = []
+        for field in columnar_schema:
+            if field.name in file_columns:
+                arrays.append(tbl[field.name])
+            elif field.nullable:
+                arrays.append(pyarrow.nulls(tbl.num_rows, type=field.type))
+            else:
+                raise ValueError(f"Missing required column {field.name!r} in {path}")
+        return pyarrow.Table.from_arrays(arrays, schema=columnar_schema)
+
     if read_fields and tbl.num_columns > 0:
         existing = [c for c in read_fields if c in tbl.column_names]
         if existing:
@@ -170,6 +197,7 @@ def to_arrow(
 ) -> pyarrow.Table:
     read_fields = self.projection
     fmt = self.table.format()
+    columnar_schema = _columnar_read_schema(self.table, self.projection)
     partition_key_types = _partition_key_types(self.table)
     text_col = (
         _text_format_schema_column(self.table)
@@ -191,6 +219,7 @@ def to_arrow(
             split.partition,
             read_fields,
             partition_key_types,
+            columnar_schema=columnar_schema,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
         )
@@ -204,6 +233,8 @@ def to_arrow(
                     tables[-1] = last.slice(0, last.num_rows - excess)
                 break
     if not tables:
+        if columnar_schema is not None:
+            return columnar_schema.empty_table()
         fields = self.table.fields
         if read_fields:
             fields = [
@@ -224,6 +255,7 @@ def to_iterator(
     self,
     splits: List[FormatDataSplit],
 ) -> Iterator[Any]:
+    columnar_schema = _columnar_read_schema(self.table, self.projection)
     partition_key_types = _partition_key_types(self.table)
     fmt = self.table.format()
     text_col = (
@@ -247,6 +279,7 @@ def to_iterator(
             split.partition,
             self.projection,
             partition_key_types,
+            columnar_schema=columnar_schema,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
         )

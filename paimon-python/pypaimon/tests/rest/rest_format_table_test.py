@@ -19,10 +19,13 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.format import FormatTable
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -85,6 +88,47 @@ class RESTFormatTableTest(RESTBaseTest):
             if col in actual.columns and actual[col].dtype != expected[col].dtype:
                 actual[col] = actual[col].astype(expected[col].dtype)
         pd.testing.assert_frame_equal(actual, expected)
+
+    @parameterized.expand([("parquet",), ("orc",)])
+    def test_format_table_read_added_column(self, file_format):
+        if file_format == "orc":
+            pytest.importorskip("pyarrow.orc")
+
+        name = "default.evolving_format_table"
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([("id", pa.int64())]),
+            options={"type": "format-table", "file.format": file_format},
+        )
+        self.rest_catalog.create_table(name, schema, False)
+
+        def write(data):
+            builder = self.rest_catalog.get_table(name).new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+        write(pa.table({"id": [1, 2]}))
+        self.rest_catalog.alter_table(
+            name, [SchemaChange.add_column("campaign", AtomicType("STRING"))])
+        write(pa.table({"id": [3], "campaign": ["spring"]}, schema=pa.schema([
+            pa.field("id", pa.int64()), pa.field("campaign", pa.string(), nullable=False),
+        ])))
+
+        table = self.rest_catalog.get_table(name)
+        builder = table.new_read_builder()
+        splits = builder.new_scan().plan().splits()
+        expected = pa.table({"id": [1, 2, 3], "campaign": [None, None, "spring"]})
+        self.assertTrue(builder.new_read().to_arrow(splits).sort_by("id").equals(expected))
+
+        reader = builder.with_projection(["campaign"]).new_read()
+        batches = list(reader.to_iterator(splits))
+        self.assertTrue(all(batch.schema.names == ["campaign"] for batch in batches))
+        actual = pa.Table.from_batches(batches)
+        self.assertCountEqual(actual.column("campaign").to_pylist(), [None, None, "spring"])
 
     def test_format_table_write_rolls_by_row_count(self):
         pa_schema = pa.schema([("id", pa.int32())])
