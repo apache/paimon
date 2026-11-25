@@ -472,6 +472,14 @@ class _VideoFileCursor(io.RawIOBase):
         return len(data)
 
 
+class _PooledVideoInputStream(OffsetInputStream):
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast("B")
+        if view.readonly:
+            raise TypeError("readinto requires a writable buffer")
+        return super().readinto(view)
+
+
 class _VideoFilePool:
     def __init__(self, capacity):
         self._capacity = capacity
@@ -839,19 +847,20 @@ class VideoFrameCollator:
     def _open_video_stream(self, descriptor):
         file_io = self.file_io
         if self._max_cached_video_files and descriptor.uri.endswith(".video"):
-            from pyarrow.fs import S3FileSystem
+            import pyarrow.fs as pafs
             from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
             from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
             if type(file_io) is RESTTokenFileIO:
                 file_io = file_io.file_io()
-            if type(file_io) is PyArrowFileIO and isinstance(file_io.filesystem, S3FileSystem):
+            if type(file_io) is PyArrowFileIO and isinstance(
+                    file_io.filesystem, getattr(pafs, "S3FileSystem", ())):
                 if self._video_file_pool is None:
                     self._video_file_pool = _VideoFilePool(self._max_cached_video_files)
                 cursor = self._video_file_pool.open(file_io, descriptor.uri)
                 if cursor is not None:
                     try:
-                        return OffsetInputStream(cursor, descriptor.offset, descriptor.length)
+                        return _PooledVideoInputStream(cursor, descriptor.offset, descriptor.length)
                     except BaseException:
                         cursor.close()
                         raise
