@@ -65,6 +65,10 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
         this.returned = false;
     }
 
+    void enableAccessLog() {
+        ((AbstractBlobElementReader) elementReader).enableAccessLog();
+    }
+
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {

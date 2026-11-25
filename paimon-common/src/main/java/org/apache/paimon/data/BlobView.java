@@ -56,7 +56,11 @@ public class BlobView implements Blob, Serializable {
 
     /** Resolves this blob view in place by setting the reader and descriptor. */
     public void resolve(UriReader reader, BlobDescriptor desc) {
-        this.resolvedBlob = new BlobRef(reader, desc);
+        resolve(reader, desc, false);
+    }
+
+    public void resolve(UriReader reader, BlobDescriptor desc, boolean accessLogEnabled) {
+        this.resolvedBlob = new BlobRef(reader, desc, accessLogEnabled);
     }
 
     @Override

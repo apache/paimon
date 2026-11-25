@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobAccessLogger;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
@@ -71,6 +72,11 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.OutputStreamAppender;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -79,7 +85,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1116,6 +1124,105 @@ public class BlobTableTest extends TableTestBase {
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Cannot rename BLOB column");
+    }
+
+    @Test
+    void testBlobAccessLog() throws Exception {
+        createTableDefault();
+        FileStoreTable source = getTableDefault();
+        write(
+                source,
+                GenericRow.of(1, null, new BlobData(new byte[] {0})),
+                GenericRow.of(2, null, new BlobData(blobBytes)));
+        int fieldId = source.rowType().getFields().get(2).id();
+        Identifier viewId = identifier("access_view");
+        catalog.createTable(
+                viewId,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("image", DataTypes.BLOB())
+                        .options(schemaDefault().options())
+                        .option(CoreOptions.BLOB_VIEW_FIELD.key(), "image")
+                        .build(),
+                false);
+        FileStoreTable view = getTable(viewId);
+        write(view, GenericRow.of(1, Blob.fromView(new BlobViewStruct(identifier(), fieldId, 1L))));
+
+        Map<String, String> descriptorOptions =
+                Collections.singletonMap(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true");
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OutputStreamAppender appender =
+                OutputStreamAppender.newBuilder()
+                        .setName("blob-access-test")
+                        .setTarget(output)
+                        .setLayout(PatternLayout.newBuilder().withPattern("%msg%n").build())
+                        .build();
+        Logger logger = (Logger) LogManager.getLogger(BlobAccessLogger.class);
+        Level previousLevel = logger.getLevel();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            logger.setLevel(Level.INFO);
+            BlobDescriptor descriptor =
+                    readBlobForAccessLog(source.copy(descriptorOptions), 2, 1).toDescriptor();
+            assertThat(readBlobForAccessLog(view, 1, 0).toData()).isEqualTo(blobBytes);
+            assertThat(output.size()).isZero();
+
+            catalog.alterTable(
+                    identifier(),
+                    SchemaChange.setOption(CoreOptions.BLOB_ACCESS_LOG_ENABLED.key(), "true"),
+                    false);
+            source = getTableDefault();
+            assertThat(descriptor.offset()).isPositive();
+            String range =
+                    String.format(
+                            " path=%s offset=%s length=%s%n",
+                            descriptor.uri(), descriptor.offset(), blobBytes.length);
+            String contentEvent = "event=CONTENT_ACCESS" + range;
+            String descriptorEvent = "event=DESCRIPTOR_ACCESS" + range;
+
+            assertThat(readBlobForAccessLog(source, 2, 1).toData()).isEqualTo(blobBytes);
+            assertThat(output.toString(StandardCharsets.UTF_8.name())).isEqualTo(contentEvent);
+            output.reset();
+
+            Blob ref = readBlobForAccessLog(source.copy(descriptorOptions), 2, 1);
+            assertThat(output.size()).isZero();
+            assertThat(ref.toDescriptor()).isEqualTo(descriptor);
+            assertThat(output.toString(StandardCharsets.UTF_8.name())).isEqualTo(descriptorEvent);
+            try (SeekableInputStream stream = ref.newInputStream()) {
+                assertThat(stream.getPos()).isZero();
+            }
+            assertThat(output.toString(StandardCharsets.UTF_8.name()))
+                    .isEqualTo(descriptorEvent + contentEvent);
+            output.reset();
+
+            assertThat(readBlobForAccessLog(view, 1, 0).toData()).isEqualTo(blobBytes);
+            assertThat(output.toString(StandardCharsets.UTF_8.name()))
+                    .isEqualTo(descriptorEvent + contentEvent);
+
+            output.reset();
+            source.fileIO().delete(new Path(descriptor.uri()), false);
+            assertThatThrownBy(ref::newInputStream).isInstanceOf(IOException.class);
+            assertThatThrownBy(ref::toData).hasCauseInstanceOf(IOException.class);
+            assertThat(output.size()).isZero();
+        } finally {
+            logger.removeAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+    }
+
+    private static Blob readBlobForAccessLog(FileStoreTable table, int column, long rowId)
+            throws IOException {
+        ReadBuilder builder = table.newReadBuilder().withProjection(new int[] {column});
+        builder.withRowRanges(Collections.singletonList(new Range(rowId, rowId)));
+        List<Blob> blobs = new ArrayList<>();
+        builder.newRead()
+                .createReader(builder.newScan().plan())
+                .forEachRemaining(row -> blobs.add(row.getBlob(0)));
+        assertThat(blobs.size()).isEqualTo(1);
+        return blobs.get(0);
     }
 
     @Test

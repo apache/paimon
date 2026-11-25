@@ -40,14 +40,21 @@ public class BlobRef implements Blob {
 
     private final UriReader uriReader;
     private final BlobDescriptor descriptor;
+    private final boolean accessLogEnabled;
 
     public BlobRef(UriReader uriReader, BlobDescriptor descriptor) {
+        this(uriReader, descriptor, false);
+    }
+
+    public BlobRef(UriReader uriReader, BlobDescriptor descriptor, boolean accessLogEnabled) {
         this.uriReader = uriReader;
         this.descriptor = descriptor;
+        this.accessLogEnabled = accessLogEnabled;
     }
 
     @Override
     public byte[] toData() {
+        byte[] data;
         try {
             long length = descriptor.length();
             if (length > MAX_ARRAY_SIZE) {
@@ -56,26 +63,45 @@ public class BlobRef implements Blob {
                                 "Blob is too large to materialize as byte[]: %d, maximum is %d",
                                 length, MAX_ARRAY_SIZE));
             }
-            try (SeekableInputStream inputStream = newInputStream()) {
+            // An explicit stream open and a completed whole-object read are different events.
+            try (SeekableInputStream inputStream =
+                    accessLogEnabled ? openInputStream() : newInputStream()) {
                 if (length >= 0) {
-                    byte[] data = new byte[(int) length];
+                    data = new byte[(int) length];
                     IOUtils.readFully(inputStream, data);
-                    return data;
+                } else {
+                    data = IOUtils.readFully(inputStream, false);
                 }
-                return IOUtils.readFully(inputStream, false);
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        logContentAccess();
+        return data;
     }
 
     @Override
     public BlobDescriptor toDescriptor() {
+        if (accessLogEnabled) {
+            BlobAccessLogger.logDescriptor(descriptor);
+        }
         return descriptor;
     }
 
     @Override
     public SeekableInputStream newInputStream() throws IOException {
+        SeekableInputStream stream = openInputStream();
+        logContentAccess();
+        return stream;
+    }
+
+    private void logContentAccess() {
+        if (accessLogEnabled) {
+            BlobAccessLogger.logContent(descriptor.uri(), descriptor.offset(), descriptor.length());
+        }
+    }
+
+    private SeekableInputStream openInputStream() throws IOException {
         return new OffsetSeekableInputStream(
                 uriReader.newInputStream(descriptor.uri()),
                 descriptor.offset(),

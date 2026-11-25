@@ -78,7 +78,7 @@ public class BlobViewLookup {
         PreloadedBlobViews cached = preloadDescriptors(catalogContext, viewStructs, catalogLoader);
         return new BlobViewResolver() {
 
-            private final Map<Identifier, UriReader> cache = new HashMap<>();
+            private final Map<Identifier, Pair<UriReader, Boolean>> cache = new HashMap<>();
 
             @Override
             public void resolve(BlobView blobView) {
@@ -91,18 +91,21 @@ public class BlobViewLookup {
                     }
                     throw missingBlobViewStruct(viewStruct, cached);
                 }
-                UriReader uriReader =
+                Pair<UriReader, Boolean> source =
                         cache.computeIfAbsent(
                                 viewStruct.identifier(),
                                 identifier -> {
                                     try (Catalog catalog = catalogLoader.create(catalogContext)) {
-                                        return UriReader.fromFile(
-                                                catalog.getTable(identifier).fileIO());
+                                        Table table = catalog.getTable(identifier);
+                                        return Pair.of(
+                                                UriReader.fromFile(table.fileIO()),
+                                                CoreOptions.fromMap(table.options())
+                                                        .blobAccessLogEnabled());
                                     } catch (Exception e) {
                                         throw new RuntimeException(e);
                                     }
                                 });
-                blobView.resolve(uriReader, descriptor);
+                blobView.resolve(source.getLeft(), descriptor, source.getRight());
             }
 
             @Override

@@ -38,6 +38,9 @@ public class BlobFileFormatFactory implements FileFormatFactory {
         int copyBufferSize =
                 CoreOptions.checkedBlobCopyBufferSize(
                         formatContext.options().get(CoreOptions.BLOB_COPY_BUFFER_SIZE).getBytes());
-        return new BlobFileFormat(blobAsDescriptor, copyBufferSize);
+        return new BlobFileFormat(
+                blobAsDescriptor,
+                copyBufferSize,
+                formatContext.options().get(CoreOptions.BLOB_ACCESS_LOG_ENABLED));
     }
 }
