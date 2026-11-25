@@ -405,7 +405,6 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon DDL: self-referencing RTAS on a partitioned table keeps the table") {
-    assume(gteqSpark3_4)
     withTable("q") {
       sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
       sql("INSERT INTO q VALUES (1, 'a'), (2, 'b'), (3, 'c')")
@@ -428,6 +427,40 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT * FROM q ORDER BY id"),
         Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: RTAS reading the table in a subquery reads the old rows") {
+    withTable("t", "src") {
+      sql("CREATE TABLE src (id INT, dt STRING) USING paimon")
+      sql("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      sql("CREATE TABLE t (id INT, dt STRING) USING paimon")
+      sql("INSERT INTO t VALUES (1, 'x'), (2, 'y')")
+
+      sql("CREATE OR REPLACE TABLE t AS SELECT * FROM src WHERE id IN (SELECT id FROM t)")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(1, "a") :: Row(2, "b") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: non-atomic RTAS reading the table in a subquery keeps the table") {
+    withTable("q", "src") {
+      sql("CREATE TABLE src (id INT, dt STRING) USING paimon")
+      sql("INSERT INTO src VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
+      sql("INSERT INTO q VALUES (1, 'x'), (2, 'y')")
+
+      val e = intercept[RuntimeException] {
+        sql("REPLACE TABLE q AS SELECT * FROM src WHERE id IN (SELECT id FROM q)")
+      }
+      val messages = Iterator
+        .iterate(e: Throwable)(_.getCause)
+        .takeWhile(_ != null)
+        .map(t => String.valueOf(t.getMessage))
+        .mkString(" | ")
+      Assertions.assertTrue(messages.contains("Cannot replace table"), messages)
+
+      checkAnswer(sql("SELECT * FROM q ORDER BY id"), Row(1, "x") :: Row(2, "y") :: Nil)
     }
   }
 

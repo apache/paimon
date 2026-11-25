@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwriteByExpression, OverwritePartitionsDynamic, TableSpec}
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Identifier, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.internal.SQLConf.PartitionOverwriteMode
 import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -85,8 +85,9 @@ object PaimonTableAsSelectHelper {
 
   /**
    * Pin snapshot for self-referencing RTAS queries. When the query reads from the same table being
-   * replaced, this rewrites the DataSourceV2Relation to pin it to the pre-truncation snapshot.
-   * Relations with user-specified time travel options are left unchanged.
+   * replaced, this rewrites the DataSourceV2Relation to pin it to the pre-truncation snapshot,
+   * including relations inside subquery expressions. Relations with user-specified time travel
+   * options are left unchanged.
    */
   def pinSnapshotInQuery(
       catalog: TableCatalog,
@@ -104,7 +105,7 @@ object PaimonTableAsSelectHelper {
       }
     if (snapshotId == null) return query
 
-    query.transformDown {
+    query.transformDownWithSubqueries {
       case r: DataSourceV2Relation if r.catalog.contains(catalog) && r.identifier.contains(ident) =>
         r.table match {
           case sparkTable: SparkTable
@@ -123,11 +124,14 @@ object PaimonTableAsSelectHelper {
       catalog: TableCatalog,
       ident: Identifier,
       query: LogicalPlan): Unit = {
-    val referencesTarget = query.exists {
-      case r: DataSourceV2Relation =>
-        r.catalog.contains(catalog) && r.identifier.contains(ident)
-      case _ => false
-    }
+    def isTarget(r: DataSourceV2Relation): Boolean =
+      r.catalog.contains(catalog) && r.identifier.contains(ident)
+    // Spark 3.2 and 3.3 plan the replace from the optimized query, where scans are
+    // DataSourceV2ScanRelation.
+    val referencesTarget = query.collectWithSubqueries {
+      case r: DataSourceV2Relation if isTarget(r) => r
+      case s: DataSourceV2ScanRelation if isTarget(s.relation) => s.relation
+    }.nonEmpty
     if (referencesTarget) {
       throw new UnsupportedOperationException(
         s"Cannot replace table $ident because the replacement query reads from the same table " +
@@ -176,16 +180,25 @@ object PaimonTableAsSelectHelper {
       catalog: SparkBaseCatalog,
       ident: Identifier,
       tableSpec: TableSpec,
+      parts: Seq[Transform]): Boolean =
+    canAtomicReplace(catalog, ident, tableSpec.provider, tableSpec.properties, parts)
+
+  // Spark 3.2 does not define TableSpec.
+  def canAtomicReplace(
+      catalog: SparkBaseCatalog,
+      ident: Identifier,
+      provider: Option[String],
+      properties: Map[String, String],
       parts: Seq[Transform]): Boolean = {
     try {
       val existing = catalog.loadTable(ident)
       if (!existing.isInstanceOf[SparkTable]) return false
       val existingProvider =
         Option(existing.properties().get(TableCatalog.PROP_PROVIDER)).getOrElse(SparkSource.NAME)
-      val targetProvider = tableSpec.provider.getOrElse(SparkSource.NAME)
+      val targetProvider = provider.getOrElse(SparkSource.NAME)
       if (!existingProvider.equalsIgnoreCase(targetProvider)) return false
       val existingType = Options.fromMap(existing.properties()).get(TYPE)
-      val targetType = Options.fromMap(tableSpec.properties.asJava).get(TYPE)
+      val targetType = Options.fromMap(properties.asJava).get(TYPE)
       if (existingType != targetType) return false
       val existingParts = existing.partitioning().toSeq
       existingParts.size == parts.size &&

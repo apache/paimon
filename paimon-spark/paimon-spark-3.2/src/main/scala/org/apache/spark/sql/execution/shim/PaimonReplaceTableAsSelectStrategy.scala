@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, TableCatalog}
-import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.{canAtomicReplace, checkNonAtomicSelfReference, supportsCatalog}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 
@@ -35,7 +35,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
   // Keep Spark's replacement planning and prepare the write after the target table is created.
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
     plan match {
-      case ReplaceTableAsSelect(catalog: SparkBaseCatalog, ident, parts, _, props, _, _)
+      case ReplaceTableAsSelect(catalog: SparkBaseCatalog, ident, parts, query, props, _, _)
           if supportsCatalog(catalog, props.get(TableCatalog.PROP_PROVIDER).orNull) =>
         val properties = CatalogV2Util.withDefaultOwnership(props)
         catalog match {
@@ -46,6 +46,12 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
               parts.nonEmpty,
               properties.asJava)
           case _ =>
+        }
+        // A replace that cannot happen in place drops the old table before the query reads it.
+        if (
+          !canAtomicReplace(catalog, ident, props.get(TableCatalog.PROP_PROVIDER), props, parts)
+        ) {
+          checkNonAtomicSelfReference(catalog, ident, query)
         }
         return new DataSourceV2Strategy(spark)
           .apply(plan)
