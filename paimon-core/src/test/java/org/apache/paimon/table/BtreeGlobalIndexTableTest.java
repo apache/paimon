@@ -321,10 +321,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
             commit.commit(write.prepareCommit());
         }
         createIndex("f1", null, indexType);
+        // In older groups the new column is implicitly null, even without file min/max stats.
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.INT()), false);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        writes = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writes.newWrite();
                 BatchTableCommit commit = writes.newCommit()) {
-            write.write(GenericRow.of(rowCount + 2, match, other));
-            write.write(GenericRow.of(rowCount + 3, other, other));
+            write.write(GenericRow.of(rowCount + 2, match, other, 1));
+            write.write(GenericRow.of(rowCount + 3, other, other, 1));
             commit.commit(write.prepareCommit());
         }
 
@@ -390,9 +394,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         ReadBuilder scopedRead =
                 adaptive.newReadBuilder()
-                        .withFilter(
-                                PredicateBuilder.and(
-                                        predicate, predicates.greaterOrEqual(0, rowCount)))
+                        .withFilter(PredicateBuilder.and(predicate, predicates.isNotNull(3)))
                         .withProjection(new int[] {0});
         TableScan.Plan scopedPlan = scopedRead.newScan().plan();
         assertThat(scopedPlan.splits())
