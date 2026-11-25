@@ -94,8 +94,10 @@ and BLOB APIs. See
 
 Use `to_arrow_batch_reader` to read blob data in batches. When
 `blob_parallelism` is omitted, native reads use the Rust reader's default
-(currently 8 concurrent BLOB range reads per active split group). Python reads,
-including native preparation fallback, retain a default of 1. Set
+(currently 8 concurrent BLOB range reads per active split group) when the installed
+extension supports HTTP BLOB retries. Older extensions retain a default of 1,
+so upgrading PyPaimon alone does not introduce failures on throttled HTTP origins.
+Python reads, including native preparation fallback, also default to 1. Set
 `blob_parallelism=1` explicitly to keep BLOB reads serial within each split.
 
 Native execution that materializes BLOB payloads caps the combined range-read

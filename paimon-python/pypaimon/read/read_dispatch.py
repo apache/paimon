@@ -167,8 +167,9 @@ def to_arrow(
             serially when a limit may discard rows, so discarded payloads
             are not fetched by speculative split workers.
         blob_parallelism: maximum concurrent blob range reads within each
-            split reader. ``None`` uses the native reader default (8), or 1
-            for Python reads and native preparation fallback. Explicit ``1``
+            split reader. ``None`` uses the native reader default (8) when the
+            extension supports HTTP BLOB retries, otherwise 1. Python reads
+            and native preparation fallback also default to 1. Explicit ``1``
             keeps BLOB reads serial within each split; values must be >= 1.
             Native execution that materializes BLOB payloads caps combined
             range reads at 64 per read. Python reduces per-split concurrency

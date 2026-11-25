@@ -563,6 +563,31 @@ def test_native_read_forwards_one_global_limit(method_name, limit):
     assert native.call_args.kwargs['parallelism'] == 2
 
 
+@pytest.mark.parametrize('capability, requested, expected', [
+    (None, None, 1), (False, None, 1), (True, None, None),
+    (None, 1, 1), (None, 8, 8), (True, 8, 8),
+])
+def test_native_blob_default_requires_http_retry_support(capability, requested, expected):
+    from pypaimon.execution.native.read import table_read as native
+
+    extension = ModuleType('pypaimon_rust')
+    if capability is not None:
+        extension.HTTP_BLOB_RETRY_SUPPORTED = capability
+    read = _table_read()
+    builder = Mock()
+    builder.with_blob_parallelism.return_value = builder
+    with patch.dict('sys.modules', {'pypaimon_rust': extension}), \
+            patch.object(native.runtime, 'native_runtime_available', return_value=True), \
+            patch.object(native.native_table, '_native_query_auth_supported', return_value=True), \
+            patch.object(native.native_builder, '_native_read_builder', return_value=builder), \
+            patch.object(native.native_builder, '_configure_native_read_builder', return_value=builder):
+        native._prepare_native_read(read.table, read_type=read.read_type, blob_parallelism=requested)
+    if expected is None:
+        builder.with_blob_parallelism.assert_not_called()
+    else:
+        builder.with_blob_parallelism.assert_called_once_with(expected)
+
+
 def test_native_row_iterator_keeps_serial_blob_reads():
     read = _table_read()
     split = _Split()

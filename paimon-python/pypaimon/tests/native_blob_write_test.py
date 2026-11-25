@@ -114,10 +114,11 @@ def test_native_blob_default_and_overrides_reach_core(
     assert sorted(result.to_pylist(), key=lambda row: row['id']) == sorted(
         expected, key=lambda row: row['id'])
     assert len(configured) == 1
-    if blob_parallelism is None:
+    from pypaimon.execution.native.runtime import native_http_blob_retry_supported
+    if blob_parallelism is None and native_http_blob_retry_supported():
         configured[0].with_blob_parallelism.assert_not_called()
     else:
-        configured[0].with_blob_parallelism.assert_called_once_with(blob_parallelism)
+        configured[0].with_blob_parallelism.assert_called_once_with(blob_parallelism or 1)
 
 
 def _physical_files(tmp_path):
@@ -541,10 +542,13 @@ def throttled_http_blob_uri():
 
 
 @pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader', 'scan_serial'])
-def test_native_blob_default_retries_throttled_http_origin(
+def test_native_blob_default_handles_throttled_http_origin(
         tmp_path, throttled_http_blob_uri, method_name):
+    from pypaimon.execution.native.runtime import native_http_blob_retry_supported
+
     uri, state = throttled_http_blob_uri
-    state['hold'] = method_name != 'scan_serial'
+    retries_supported = native_http_blob_retry_supported()
+    state['hold'] = retries_supported and method_name != 'scan_serial'
     table = _table(tmp_path, {'blob-descriptor-field': 'large',
                               'target-file-row-num': '100',
                               'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
@@ -573,7 +577,7 @@ def test_native_blob_default_retries_throttled_http_origin(
                 result = result.read_all()
     assert result.to_pylist() == [
         {'id': i, 'large': ('img%02d' % i).encode(), 'small': None} for i in range(8)]
-    if method_name == 'scan_serial':
+    if method_name == 'scan_serial' or not retries_supported:
         assert state['throttled'] == 0
         assert all(len(times) == 1 for times in state['requests'].values())
         return
