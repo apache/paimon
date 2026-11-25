@@ -77,16 +77,22 @@ class _IndexedTorchCodecDecoder:
                             + list(index.metadata_ranges))
             cache = getattr(stream, "video_metadata_cache", None)
             cache_key = ("timeline", getattr(stream, "video_metadata_key", None))
-            timeline = cache.get(cache_key) if cache is not None else None
-            if timeline is None:
-                timeline = _SharedTimeline(source, self._length, index if hasattr(index, "pts") else None)
+
+            def load_timeline():
+                return _SharedTimeline(source, self._length, index if hasattr(index, "pts") else None)
+            if callable(getattr(cache, "get_or_load", None)):
+                timeline = cache.get_or_load(cache_key, load_timeline)
+            else:
+                timeline = cache.get(cache_key) if cache is not None else None
+                if timeline is None:
+                    timeline = load_timeline()
+                    if cache is not None:
+                        cache[cache_key] = timeline
             self._pts, self._durations, self._scale = timeline.pts, timeline.durations, timeline.scale
             if index.keyframes[-1][0] >= len(self._pts):
                 raise ValueError("Keyframe ordinal exceeds the MP4 timeline.")
             self._timeline = timeline
             self._pts_tolerance = timeline.tolerance
-            if cache is not None:
-                cache[cache_key] = timeline
             self._decoder = VideoDecoder(
                 source, stream_index=timeline.stream_index, device="cpu",
                 num_ffmpeg_threads=codec_threads, seek_mode="approximate")

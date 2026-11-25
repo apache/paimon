@@ -16,6 +16,9 @@
 # under the License.
 
 import io
+import multiprocessing
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import os
 import tempfile
 import unittest
@@ -24,9 +27,115 @@ from types import SimpleNamespace
 from parameterized import parameterized
 
 from pypaimon.common.file_io import FileIO
-from pypaimon.multimodal import VideoFrameCollator
+from pypaimon.multimodal import VideoFrameCollator, VideoMetadataCache
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
 from pypaimon.table.row.blob import VideoFrameDescriptor
+
+
+class _CachedIndex:
+    nbytes = 16
+
+
+class _LockingFinalizerIndex(_CachedIndex):
+    def __init__(self, lock):
+        self.lock = lock
+
+    def __del__(self):
+        with self.lock:
+            pass
+
+
+def _read_with_inherited_metadata(cache, table, row, connection):
+    def factory(stream):
+        index = stream.video_metadata_cache.get_or_load("fork", _CachedIndex)
+        return SimpleNamespace(index=index, close=lambda: None)
+
+    collator = VideoFrameCollator(
+        table, video_column="video", decoder_factory=factory,
+        decode_fn=lambda decoder, ordinal, row: decoder.index.nbytes,
+        collate_fn=list, metadata_cache=cache)
+    try:
+        try:
+            collator([row])
+        except RuntimeError as error:
+            assert "new VideoMetadataCache" in str(error)
+            connection.send("rejected")
+        else:
+            connection.send("unexpected inherited cache access")
+    finally:
+        collator.close()
+        connection.close()
+
+
+def _call_inherited_collator(collator, connection):
+    try:
+        connection.send("started")
+        cache_id = id(collator._video_metadata_cache)
+        for _ in range(2):
+            try:
+                collator([])
+            except RuntimeError as error:
+                assert "new VideoMetadataCache" in str(error)
+            else:
+                raise AssertionError("inherited shared cache accepted")
+            assert id(collator._video_metadata_cache) == cache_id
+            assert not collator._metadata_cache_owned
+        connection.send("rejected")
+    except BaseException as error:
+        connection.send(repr(error))
+    finally:
+        connection.close()
+
+
+def _read_inherited_cache_concurrently(cache, connection):
+    from concurrent.futures import Future
+    from unittest.mock import patch
+
+    try:
+        # Both first readers must reject inherited state without mutating it.
+        barrier = threading.Barrier(2)
+
+        def inherited_read():
+            barrier.wait(timeout=5)
+            try:
+                cache.get_or_load("child", _CachedIndex)
+            except RuntimeError as error:
+                assert "new VideoMetadataCache" in str(error)
+                return
+            raise AssertionError("inherited cache accepted")
+
+        with ThreadPoolExecutor(2) as executor:
+            results = [executor.submit(inherited_read) for _ in range(2)]
+            for result in results:
+                result.result(timeout=5)
+        assert cache._owner_pid != os.getpid()
+        fresh_cache = VideoMetadataCache()
+        started, waiting = threading.Event(), threading.Event()
+        builds = []
+
+        class WaitingFuture(Future):
+            def result(self, timeout=None):
+                waiting.set()
+                return super().result(timeout=5)
+
+        def load():
+            builds.append(1)
+            started.set()
+            assert waiting.wait(5), "second reader did not join the pending load"
+            return _CachedIndex()
+
+        with patch("pypaimon.multimodal.video.Future", WaitingFuture):
+            with ThreadPoolExecutor(2) as executor:
+                first = executor.submit(fresh_cache.get_or_load, "child", load)
+                assert started.wait(5)
+                second = executor.submit(fresh_cache.get_or_load, "child", load)
+                assert first.result(timeout=5) is second.result(timeout=5)
+        assert builds == [1]
+        connection.send("ok")
+    except BaseException as error:
+        connection.send(repr(error))
+    finally:
+        connection.close()
 
 
 class _Decoder:
@@ -208,6 +317,242 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_metadata_cache_shared_across_collators(self):
+        cache = VideoMetadataCache()
+        builds = []
+
+        class Index:
+            nbytes = 16
+
+        def factory(stream):
+            key = ("container", stream.video_metadata_key)
+
+            def load():
+                builds.append(key)
+                return Index()
+
+            index = stream.video_metadata_cache.get_or_load(key, load)
+            return SimpleNamespace(index=index, close=lambda: None)
+
+        def collator():
+            return VideoFrameCollator(
+                self.table, video_column="video", decoder_factory=factory,
+                decode_fn=lambda decoder, index, row: decoder.index,
+                collate_fn=list, metadata_cache=cache)
+
+        row = {"video": self._descriptor("shared", b"video", 0)}
+        first, second = collator(), collator()
+        try:
+            original = first([row])[0]["frame"]
+            first.close()
+            self.assertIs(second([row])[0]["frame"], original)
+            self.assertEqual(1, len(builds))
+        finally:
+            first.close()
+            second.close()
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "requires fork")
+    def test_metadata_cache_rejects_parent_load_in_new_child_collator(self):
+        context = multiprocessing.get_context("fork")
+        row = {"video": self._descriptor("fork", b"video", 0)}
+        for hold_lock in (False, True):
+            with self.subTest(hold_lock=hold_lock):
+                cache = VideoMetadataCache()
+                started, release = threading.Event(), threading.Event()
+
+                def load():
+                    if hold_lock:
+                        cache._lock.acquire()
+                    try:
+                        started.set()
+                        if not release.wait(15):
+                            raise TimeoutError("parent loader not released")
+                        return _CachedIndex()
+                    finally:
+                        if hold_lock:
+                            cache._lock.release()
+
+                with ThreadPoolExecutor(1) as executor:
+                    pending = executor.submit(cache.get_or_load, "fork", load)
+                    self.assertTrue(started.wait(5))
+                    receive, send = context.Pipe(duplex=False)
+                    child = context.Process(
+                        target=_read_with_inherited_metadata,
+                        args=(cache, self.table, row, send))
+                    child.start()
+                    send.close()
+                    try:
+                        self.assertTrue(receive.poll(10), "child waited on parent's cache")
+                        self.assertEqual(receive.recv(), "rejected")
+                        child.join(5)
+                        self.assertEqual(child.exitcode, 0)
+                    finally:
+                        if child.is_alive():
+                            child.terminate()
+                        child.join(5)
+                        receive.close()
+                        release.set()
+                    original = pending.result(timeout=5)
+                    self.assertIs(cache.get("fork"), original)
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "requires fork")
+    def test_metadata_cache_child_reads_require_fresh_cache(self):
+        cache = VideoMetadataCache()
+        original = _CachedIndex()
+        cache["parent"] = original
+        context = multiprocessing.get_context("fork")
+        receive, send = context.Pipe(duplex=False)
+        child = context.Process(target=_read_inherited_cache_concurrently, args=(cache, send))
+        child.start()
+        send.close()
+        try:
+            self.assertTrue(receive.poll(15), "child readers hung")
+            self.assertEqual(receive.recv(), "ok")
+            child.join(5)
+            self.assertEqual(child.exitcode, 0)
+        finally:
+            if child.is_alive():
+                child.terminate()
+            child.join(5)
+            receive.close()
+        self.assertIs(cache["parent"], original)
+        self.assertIsNone(cache.get("child"))
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "requires fork")
+    def test_metadata_cache_fork_does_not_finalize_inherited_values(self):
+        cache = VideoMetadataCache()
+        lock = threading.Lock()
+        cache["parent"] = _LockingFinalizerIndex(lock)
+        held, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with lock:
+                held.set()
+                release.wait(20)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        self.assertTrue(held.wait(5))
+        context = multiprocessing.get_context("fork")
+        receive, send = context.Pipe(duplex=False)
+        child = context.Process(target=_read_inherited_cache_concurrently, args=(cache, send))
+        try:
+            child.start()
+            send.close()
+            self.assertTrue(receive.poll(10), "fork ran a finalizer using an inherited lock")
+            self.assertEqual(receive.recv(), "ok")
+            child.join(5)
+            self.assertEqual(child.exitcode, 0)
+        finally:
+            if child.is_alive():
+                child.terminate()
+            child.join(5)
+            receive.close()
+            send.close()
+            release.set()
+            thread.join(5)
+        cache.clear()
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "requires fork")
+    def test_inherited_collator_keeps_sole_shared_cache_reference(self):
+        import weakref
+
+        lock = threading.Lock()
+        cache = VideoMetadataCache()
+        cache["parent"] = _LockingFinalizerIndex(lock)
+        reference = weakref.ref(cache)
+        collator = VideoFrameCollator(
+            self.table, video_column="video", collate_fn=list,
+            decoder_factory=lambda stream: None,
+            decode_fn=lambda decoder, index, row: None, metadata_cache=cache)
+        del cache  # Only the collator retains the cache and its index.
+        held, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with lock:
+                held.set()
+                release.wait(20)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        context = multiprocessing.get_context("fork")
+        receive, send = context.Pipe(duplex=False)
+        child = context.Process(target=_call_inherited_collator, args=(collator, send))
+        try:
+            self.assertTrue(held.wait(5))
+            child.start()
+            send.close()
+            self.assertTrue(receive.poll(5), "child did not return from fork")
+            self.assertEqual(receive.recv(), "started")
+            self.assertTrue(receive.poll(5), "collator finalized the inherited cache")
+            self.assertEqual(receive.recv(), "rejected")
+            child.join(5)
+            self.assertEqual(child.exitcode, 0)
+        finally:
+            if child.is_alive():
+                child.terminate()
+            if child.pid is not None:
+                child.join(5)
+            receive.close()
+            send.close()
+            release.set()
+            thread.join(5)
+            collator.close()
+        self.assertIs(reference(), collator._video_metadata_cache)
+        self.assertEqual(collator([]), [])
+        collator._video_metadata_cache.clear()
+
+    def test_metadata_cache_rejects_all_inherited_operations(self):
+        cache = VideoMetadataCache()
+        value = _CachedIndex()
+        cache["parent"] = value
+        cache._owner_pid = -1
+        operations = [lambda: cache.get("parent"), lambda: cache["parent"],
+                      lambda: cache.__setitem__("child", value),
+                      lambda: cache.__delitem__("parent"), lambda: len(cache),
+                      lambda: cache.get_or_load("child", _CachedIndex), cache.clear]
+        for operation in operations:
+            with self.assertRaisesRegex(RuntimeError, "new VideoMetadataCache"):
+                operation()
+
+    def test_metadata_cache_delete_releases_retention(self):
+        import gc
+        import weakref
+
+        cache = VideoMetadataCache()
+        value = _CachedIndex()
+        reference = weakref.ref(value)
+        cache["index"] = value
+        self.assertIs(cache["index"], value)
+        del value
+        del cache["index"]
+        gc.collect()
+        self.assertIsNone(reference())
+        self.assertEqual(cache._bytes, 0)
+        self.assertEqual(len(cache), 0)
+        with self.assertRaises(KeyError):
+            cache["index"]
+        with self.assertRaises(KeyError):
+            del cache["index"]
+
+    def test_metadata_cache_retries_failed_load(self):
+        cache = VideoMetadataCache()
+
+        class Index:
+            nbytes = 16
+
+        errors = []
+
+        def fail():
+            errors.append(1)
+            raise ValueError("bad MP4")
+
+        with self.assertRaisesRegex(ValueError, "bad MP4"):
+            cache.get_or_load("broken", fail)
+        self.assertEqual(1, len(errors))
+        recovered = cache.get_or_load("broken", Index)
+        self.assertIs(cache.get("broken"), recovered)
 
     def test_parallel_direct_calls_preserve_order_and_bound_cache(self):
         import threading

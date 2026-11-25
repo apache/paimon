@@ -52,7 +52,7 @@ from pypaimon.multimodal.temporal import (
     join_asof,
     join_window,
 )
-from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.multimodal.video import VideoFrameCollator, VideoMetadataCache
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
 from pypaimon.table.data_evolution_merge_into import (
     lit,
@@ -83,6 +83,7 @@ __all__ = [
     "TemporalAlignment",
     "VectorRoute",
     "VideoFrameCollator",
+    "VideoMetadataCache",
     "VideoFrameDescriptor",
     "connect",
     "interpolate",
