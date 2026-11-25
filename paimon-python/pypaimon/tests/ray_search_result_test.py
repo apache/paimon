@@ -19,11 +19,10 @@ from unittest.mock import patch
 
 import pytest
 
-ray = pytest.importorskip("ray")
-
-from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.multimodal.query import _PreFilterQuery
+from pypaimon.tests import ray_vector_search_test as fixtures
 
+ray = pytest.importorskip("ray")
 ray_cluster = fixtures.ray_cluster
 table = fixtures.table
 
@@ -58,7 +57,9 @@ def test_filters_empty_scores_and_metadata_only(table, ray_cluster):
     assert dataset.take_all() == []
     assert dataset.schema().names == ["id", "_score"]
     query = table.search([1., 1.]).select(["_ROW_ID"]).with_score().order_by_score().limit(3)
-    assert query.to_ray().take_all() == query.to_list()
+    dataset = query.to_ray()
+    assert isinstance(dataset, ray.data.dataset.MaterializedDataset)
+    assert dataset.take_all() == query.to_list()
 
 
 def test_batch_search_datasets(table, ray_cluster):
@@ -91,6 +92,7 @@ def test_blob_descriptors_can_be_resolved_on_workers(tmp_path, ray_cluster):
 def test_empty_table_retains_scored_schema(table, ray_cluster, projection, execution):
     query = table.search([1., 1.]).select(projection).with_score().order_by_score()
     dataset = query.to_ray(execution=execution)
+    assert isinstance(dataset, ray.data.dataset.MaterializedDataset)
     assert dataset.take_all() == []
     assert dataset.schema().names == projection + ["_score"]
     batch = table.search_vectors([[1., 1.]]).select(projection).with_score().order_by_score()
