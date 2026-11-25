@@ -120,7 +120,14 @@ case class MergeIntoPaimonTable(
       // Step2: generate dataset that should contains ROW_KIND, FILE_PATH, ROW_INDEX columns
       val filteredDf = createDataset(
         sparkSession,
-        createNewScanPlan(candidateDataSplits, relation, targetOnlyCondition))
+        createNewScanPlan(
+          candidateReadSplits(
+            candidateDataSplits,
+            targetOnlyCondition.getOrElse(TrueLiteral),
+            relation),
+          relation,
+          targetOnlyCondition)
+      )
       val ds = constructChangedRows(
         sparkSession,
         selectWithDvMeta(filteredDf),

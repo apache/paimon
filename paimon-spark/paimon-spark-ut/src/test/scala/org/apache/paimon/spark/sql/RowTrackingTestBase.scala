@@ -756,6 +756,78 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: row id delete reads aligned split blob files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, picture BINARY NOT NULL, expected BINARY NOT NULL) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'blob-field' = 'picture',
+            |  'blob.target-file-size' = '1 b')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, X'01', X'01' FROM range(0, 1250)")
+
+      val files = loadTable("t")
+        .newSnapshotReader()
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .flatMap(_.dataFiles().asScala)
+      assert(files.exists(file => file.firstRowId() == 0L && file.rowCount() == 1250L))
+      val blobFiles = files.filter(_.fileName().endsWith(".blob"))
+      assert(blobFiles.exists(_.nonNullRowIdRange().from == 0L))
+      assert(blobFiles.exists(_.nonNullRowIdRange().from > 0L))
+
+      sql("DELETE FROM t WHERE picture = expected AND _ROW_ID = 0")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1249L)))
+      sql("DELETE FROM t WHERE _ROW_ID = 1050")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1248L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 1049 AND 1051 ORDER BY id"),
+        Seq(Row(1049, 1049L), Row(1051, 1051L)))
+    }
+  }
+
+  test("Data Evolution: row id delete reads aligned split vector files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2',
+            |  'vector.target-file-size' = '1 b')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */
+            |  CAST(id AS INT), array(CAST(id AS FLOAT), 0.0f) FROM range(0, 1250)
+            |""".stripMargin)
+
+      val files = loadTable("t")
+        .newSnapshotReader()
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .flatMap(_.dataFiles().asScala)
+      assert(files.exists(file => file.firstRowId() == 0L && file.rowCount() == 1250L))
+      val vectorFiles = files.filter(_.fileName().contains(".vector."))
+      assert(vectorFiles.exists(file => file.firstRowId() == 0L && file.rowCount() == 1000L))
+      assert(vectorFiles.exists(file => file.firstRowId() == 1000L && file.rowCount() == 250L))
+
+      sql("DELETE FROM t WHERE _ROW_ID = 1050")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1249L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 1049 AND 1051 ORDER BY id"),
+        Seq(Row(1049, 1049L), Row(1051, 1051L)))
+    }
+  }
+
   test("Row Tracking: delete preserves row tracking metadata for update") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")

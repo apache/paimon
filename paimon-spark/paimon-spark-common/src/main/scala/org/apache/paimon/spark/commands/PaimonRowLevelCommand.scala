@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
+import org.apache.paimon.globalindex.DataEvolutionBatchScan
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.operation.DataEvolutionSplitRead
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -30,9 +31,10 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile
 import org.apache.paimon.utils.Range
+import org.apache.paimon.utils.RowRangeIndex
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -102,6 +104,31 @@ trait PaimonRowLevelCommand
     snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toSeq
   }
 
+  /** Preserve the selected row range when reading a pruned Data Evolution file group. */
+  protected def candidateReadSplits(
+      candidateDataSplits: Seq[DataSplit],
+      condition: Expression,
+      relation: DataSourceV2Relation): Seq[Split] = {
+    if (!coreOptions.dataEvolutionEnabled()) {
+      candidateDataSplits
+    } else {
+      PaimonRowLevelCommand
+        .conjunctiveRowIdRange(condition, relation.output ++ relation.metadataOutput)
+        .map {
+          range =>
+            DataEvolutionBatchScan
+              .wrapToIndexSplits(
+                candidateDataSplits.map(split => split: Split).asJava,
+                RowRangeIndex.create(Collections.singletonList(range)),
+                null)
+              .splits()
+              .asScala
+              .toSeq
+        }
+        .getOrElse(candidateDataSplits)
+    }
+  }
+
   protected def findTouchedFiles(
       candidateDataSplits: Seq[DataSplit],
       condition: Expression,
@@ -114,7 +141,11 @@ trait PaimonRowLevelCommand
       }
     }
 
-    val filteredRelation = createNewScanPlan(candidateDataSplits, relation, Some(condition))
+    val filteredRelation =
+      createNewScanPlan(
+        candidateReadSplits(candidateDataSplits, condition, relation),
+        relation,
+        Some(condition))
     findTouchedFiles(createDataset(sparkSession, filteredRelation), sparkSession)
   }
 
@@ -161,7 +192,10 @@ trait PaimonRowLevelCommand
       sparkSession: SparkSession,
       dataEvolutionEnabled: Boolean = false): Dataset[SparkDeletionVector] = {
     val filteredRelation =
-      createNewScanPlan(candidateDataSplits, relation, Some(condition))
+      createNewScanPlan(
+        candidateReadSplits(candidateDataSplits, condition, relation),
+        relation,
+        Some(condition))
     val dataset = createDataset(sparkSession, filteredRelation)
     val deletionTargets =
       if (dataEvolutionEnabled) {
