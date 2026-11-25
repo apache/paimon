@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -274,6 +275,63 @@ public class AppendOnlyTableCompactionTest {
         commit(doCompact(tasks));
         assertThat(appendOnlyFileStoreTable.store().newScan().plan().files())
                 .hasSize((numberOfFiles + fileLimit - 1) / fileLimit);
+        assertThat(readRows()).containsExactlyInAnyOrderElementsOf(expectedRows);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLaterBatchRejectsConcurrentCompaction(boolean replaceBeforeRewrite)
+            throws Exception {
+        commit(writeCommit(6));
+        List<String> expectedRows = readRows();
+        FileStoreTable compactTable =
+                appendOnlyFileStoreTable.copy(singletonMap("compaction.file-num-limit", "2"));
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(compactTable, snapshotManager.latestSnapshot(), null);
+
+        List<AppendCompactTask> firstBatch = batchCoordinator.run();
+        assertThat(firstBatch).hasSize(1);
+        try (TableCommitImpl firstCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            firstCommit.commit(doCompact(firstBatch));
+        }
+        assertThat(batchCoordinator.batchRemainFiles()).isTrue();
+        String firstBatchOutput = firstBatch.get(0).compactAfter().get(0).fileName();
+
+        List<AppendCompactTask> laterBatch = batchCoordinator.run();
+        assertThat(laterBatch).hasSize(1);
+        assertThat(laterBatch.get(0).compactBefore()).hasSize(2);
+        AppendCompactTask concurrentTask =
+                new AppendCompactTask(
+                        laterBatch.get(0).partition(), laterBatch.get(0).compactBefore());
+        List<CommitMessage> staleMessages =
+                replaceBeforeRewrite ? Collections.emptyList() : doCompact(laterBatch);
+        try (TableCommitImpl concurrentCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            concurrentCommit.commit(doCompact(Collections.singletonList(concurrentTask)));
+        }
+        long concurrentSnapshotId = snapshotManager.latestSnapshotId();
+        List<String> committedFiles =
+                appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(committedFiles).hasSize(4).contains(firstBatchOutput);
+
+        // The same conflict must be detected whether the rewrite starts before or after the
+        // concurrent commit replaces its input files.
+        List<CommitMessage> laterMessages =
+                replaceBeforeRewrite ? doCompact(laterBatch) : staleMessages;
+        try (TableCommitImpl laterCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            assertThatThrownBy(() -> laterCommit.commit(laterMessages))
+                    .hasMessageContaining("File deletion conflicts detected");
+        }
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(concurrentSnapshotId);
+        assertThat(
+                        appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(committedFiles);
         assertThat(readRows()).containsExactlyInAnyOrderElementsOf(expectedRows);
     }
 

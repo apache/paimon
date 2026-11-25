@@ -28,7 +28,7 @@ import org.apache.paimon.fs.{Path, SeekableInputStream}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta}
-import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.manifest.{FileSource, ManifestCommittable}
 import org.apache.paimon.operation.LocalOrphanFilesClean
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
 import org.apache.paimon.partition.PartitionPredicate
@@ -39,7 +39,7 @@ import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable}
 import org.apache.paimon.table.BucketMode.UNAWARE_BUCKET
-import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, TableCommitImpl}
+import org.apache.paimon.table.sink.{CommitCallback, CommitMessage, CommitMessageImpl, TableCommitImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
@@ -620,6 +620,394 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         "p1") :: Row(6, "f", "p2") :: Nil)
   }
 
+  Seq(
+    ("by default", false, "", 2, 5, 1),
+    ("when dynamically disabled", true, ",compaction.multi-batch.enabled=false", 2, 5, 1),
+    ("when the first batch has no task", false, "", 1, 6, 0)
+  ).foreach {
+    case (
+          description,
+          tableEnabled,
+          dynamicOptions,
+          fileNumLimit,
+          expectedFiles,
+          expectedCommits) =>
+      test(s"Paimon Procedure: compact unaware bucket append table scans one batch $description") {
+        withTable("T") {
+          val multiBatchProperty =
+            if (tableEnabled) ", 'compaction.multi-batch.enabled'='true'" else ""
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT)
+                       |TBLPROPERTIES (
+                       |  'bucket'='-1',
+                       |  'write-only'='true',
+                       |  'compaction.min.file-num'='2'$multiBatchProperty)
+                       |""".stripMargin)
+
+          (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id)"))
+          val table = loadTable("T")
+          val snapshotBefore = lastSnapshotId(table)
+
+          spark.sql(
+            "CALL sys.compact(table => 'T', options => " +
+              s"'compaction.file-num-limit=$fileNumLimit$dynamicOptions')")
+
+          Assertions
+            .assertThat(
+              table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+            .isEqualTo(expectedFiles)
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + expectedCommits)
+          if (expectedCommits > 0) {
+            Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.COMPACT)
+          }
+          checkAnswer(spark.sql("SELECT * FROM T"), (0 until 6).map(Row(_)))
+        }
+      }
+  }
+
+  Seq((1, false), (2, false), (2, true)).foreach {
+    case (fileNumLimit, writeOnly) =>
+      val writeOnlySuffix = if (writeOnly) " with write-only" else ""
+      test(
+        s"Paimon Procedure: compact unaware bucket append table across batches with limit $fileNumLimit$writeOnlySuffix") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT)
+                       |TBLPROPERTIES (
+                       |  'bucket'='-1',
+                       |  'write-only'='true',
+                       |  'compaction.min.file-num'='2',
+                       |  'compaction.multi-batch.enabled'='${fileNumLimit == 2}',
+                       |  'manifest.target-file-size'='1 B',
+                       |  'manifest.merge-min-count'='1',
+                       |  'scan.manifest.parallelism'='1',
+                       |  'snapshot.num-retained.min'='1',
+                       |  'snapshot.num-retained.max'='1',
+                       |  'snapshot.time-retained'='0 ms')
+                       |""".stripMargin)
+
+          (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id)"))
+          val table = loadTable("T")
+          val snapshotBefore = lastSnapshotId(table)
+          Assertions
+            .assertThat(
+              table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+            .isEqualTo(6)
+
+          // Later batches read manifests from storage; expiration must wait until scanning finishes.
+          table.setManifestCache(null)
+          table.setManifestSidecarCache(null)
+          val enableMultiBatch =
+            if (fileNumLimit == 1) "compaction.multi-batch.enabled=true," else ""
+          val writeOnlyOption = if (writeOnly) ",write-only=true" else ""
+          spark.sql(
+            s"CALL sys.compact(table => 'T', options => '${enableMultiBatch}compaction.file-num-limit=$fileNumLimit," +
+              s"manifest.target-file-size=8 MB$writeOnlyOption')")
+
+          Assertions
+            .assertThat(
+              table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+            .isEqualTo(3)
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 3)
+          if (writeOnly) {
+            Assertions.assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(1L)
+          } else {
+            Assertions
+              .assertThat(table.snapshotManager().earliestSnapshotId())
+              .isGreaterThan(snapshotBefore)
+          }
+          Assertions.assertThat(table.tagManager().allTagNames().isEmpty).isTrue
+          checkAnswer(spark.sql("SELECT * FROM T"), (0 until 6).map(Row(_)))
+        }
+      }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches defers partition expiration") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, dt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'compaction.min.file-num'='2')
+                  |PARTITIONED BY (dt)
+                  |""".stripMargin)
+
+      val expiredDt = "20000101"
+      val activeDt = LocalDate.now.plusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+      (0 until 4).foreach {
+        id => spark.sql(s"INSERT INTO T VALUES ($id, '$expiredDt'), ($id, '$activeDt')")
+      }
+      val table = loadTable("T")
+      val snapshotBefore = lastSnapshotId(table)
+      Assertions.assertThat(partitionFileCounts(table)(expiredDt)).isEqualTo(4)
+
+      // Expiration starts with compaction, after all input files have been written.
+      spark.sql(
+        "CALL sys.compact(table => 'T', options => " +
+          "'compaction.multi-batch.enabled=true,compaction.file-num-limit=2,write-only=false," +
+          "partition.expiration-time=7d,partition.expiration-check-interval=0ms," +
+          "partition.timestamp-formatter=yyyyMMdd')")
+
+      val commitKinds = (snapshotBefore + 1 to lastSnapshotId(table))
+        .map(table.snapshotManager().snapshot(_).commitKind())
+      Assertions.assertThat(commitKinds.size).isGreaterThanOrEqualTo(3)
+      Assertions.assertThat(commitKinds.last).isEqualTo(CommitKind.OVERWRITE)
+      Assertions.assertThat(commitKinds.dropRight(1).forall(_ == CommitKind.COMPACT)).isTrue
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts.asJava).containsOnlyKeys(activeDt)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(2)
+      checkAnswer(spark.sql("SELECT * FROM T"), (0 until 4).map(id => Row(id, activeDt)))
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches skips expiration before commit") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, dt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'compaction.min.file-num'='2',
+                  |  'snapshot.num-retained.min'='1',
+                  |  'snapshot.num-retained.max'='1',
+                  |  'snapshot.time-retained'='0 ms')
+                  |PARTITIONED BY (dt)
+                  |""".stripMargin)
+
+      val expiredDt = "20000101"
+      (0 until 4).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id, '$expiredDt')"))
+      val table = loadTable("T")
+      val snapshotBefore = lastSnapshotId(table)
+      Assertions.assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(1L)
+
+      // Make the first batch fail while reading its inputs, before any commit is attempted.
+      table.newSnapshotReader.read.dataSplits.asScala.foreach {
+        split =>
+          split.dataFiles.asScala.foreach {
+            file => table.fileIO().delete(new Path(split.bucketPath(), file.fileName()), false)
+          }
+      }
+
+      assertThatThrownBy(
+        () =>
+          spark
+            .sql("CALL sys.compact(table => 'T', options => " +
+              "'compaction.multi-batch.enabled=true,compaction.file-num-limit=2,write-only=false," +
+              "partition.expiration-time=7d,partition.expiration-check-interval=0ms," +
+              "partition.timestamp-formatter=yyyyMMdd')")
+            .collect())
+        .hasStackTraceContaining("FileNotFoundException")
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore)
+      Assertions.assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(1L)
+      Assertions.assertThat(partitionFileCounts(table)(expiredDt)).isEqualTo(4)
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches skips expiration when first commit is rejected") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, dt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'compaction.min.file-num'='2',
+                  |  'snapshot.num-retained.min'='1',
+                  |  'snapshot.num-retained.max'='1',
+                  |  'snapshot.time-retained'='0 ms')
+                  |PARTITIONED BY (dt)
+                  |""".stripMargin)
+
+      val expiredDt = "20000101"
+      val activeDt = LocalDate.now.plusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+      (0 until 4).foreach {
+        id => spark.sql(s"INSERT INTO T VALUES ($id, '$expiredDt'), ($id, '$activeDt')")
+      }
+      val table = loadTable("T")
+
+      // Create a strict-mode conflict only in the active partition, leaving expired inputs intact.
+      spark.sql(
+        s"""CALL sys.compact(table => 'T', partitions => 'dt="$activeDt"', """ +
+          "options => 'compaction.file-num-limit=2,write-only=true')")
+      val snapshotBefore = lastSnapshotId(table)
+      Assertions.assertThat(snapshotBefore).isEqualTo(5L)
+      Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.COMPACT)
+      Assertions.assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(1L)
+
+      assertThatThrownBy(
+        () =>
+          spark
+            .sql(
+              s"""CALL sys.compact(table => 'T', partitions => 'dt="$activeDt"', """ +
+                "options => 'compaction.multi-batch.enabled=true,compaction.file-num-limit=2," +
+                "write-only=false,commit.last-safe-snapshot=1,commit.strict-mode.enabled=true')")
+            .collect())
+        .hasStackTraceContaining("Giving up committing as commit.strict-mode.enabled is true.")
+
+      // A rejected first commit must keep existing snapshots and input data.
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore)
+      Assertions.assertThat(table.snapshotManager().earliestSnapshotId()).isEqualTo(1L)
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(4)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(3)
+      checkAnswer(
+        spark.sql("SELECT * FROM T"),
+        (0 until 4).flatMap(id => Seq(Row(id, expiredDt), Row(id, activeDt))))
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches expires after post-commit failure") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'compaction.min.file-num'='2',
+                  |  'snapshot.num-retained.min'='1',
+                  |  'snapshot.num-retained.max'='1',
+                  |  'snapshot.time-retained'='0 ms')
+                  |""".stripMargin)
+
+      (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id)"))
+      val table = loadTable("T")
+      val snapshotBefore = lastSnapshotId(table)
+      val callback = classOf[FailingAppendCompactCallback].getName
+
+      assertThatThrownBy(
+        () =>
+          spark
+            .sql("CALL sys.compact(table => 'T', options => " +
+              s"'compaction.multi-batch.enabled=true,compaction.file-num-limit=2,commit.callbacks=$callback')")
+            .collect())
+        .hasStackTraceContaining("Injected append compact post-commit failure")
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 1)
+      Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.COMPACT)
+      Assertions
+        .assertThat(
+          table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+        .isEqualTo(5)
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(lastSnapshotId(table))
+      checkAnswer(spark.sql("SELECT * FROM T"), (0 until 6).map(Row(_)))
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches expires after post-commit failure with a newer append snapshot") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'compaction.min.file-num'='2',
+                  |  'snapshot.num-retained.min'='1',
+                  |  'snapshot.num-retained.max'='1',
+                  |  'snapshot.time-retained'='0 ms')
+                  |""".stripMargin)
+
+      (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id)"))
+      val table = loadTable("T")
+      val snapshotBefore = lastSnapshotId(table)
+      val callback = classOf[AppendThenFailCompactCallback].getName
+
+      assertThatThrownBy(
+        () =>
+          spark
+            .sql("CALL sys.compact(table => 'T', options => " +
+              s"'compaction.multi-batch.enabled=true,compaction.file-num-limit=2,commit.callbacks=$callback')")
+            .collect())
+        .hasStackTraceContaining("Injected append compact failure after another writer committed")
+
+      // The published compaction must still trigger expiration after another writer advances latest.
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.APPEND)
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(lastSnapshotId(table))
+      Assertions
+        .assertThat(
+          table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+        .isEqualTo(6)
+      checkAnswer(spark.sql("SELECT * FROM T"), (0 until 6).map(Row(_)) :+ Row(999))
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches with partition filter") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, pt STRING)
+                  |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
+                  |PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id, 'p1'), ($id, 'p2')"))
+      val table = loadTable("T")
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', " +
+          "options => 'compaction.multi-batch.enabled=true,compaction.file-num-limit=2')")
+
+      val filesByPartition = partitionFileCounts(table)
+      Assertions.assertThat(filesByPartition("p1")).isEqualTo(3)
+      Assertions.assertThat(filesByPartition("p2")).isEqualTo(6)
+      checkAnswer(
+        spark.sql("SELECT * FROM T"),
+        (0 until 6).flatMap(id => Seq(Row(id, "p1"), Row(id, "p2"))))
+    }
+  }
+
+  test(
+    "Paimon Procedure: compact unaware bucket append table across batches preserves deletion vectors") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, pt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket'='-1',
+                  |  'write-only'='true',
+                  |  'deletion-vectors.enabled'='true',
+                  |  'compaction.min.file-num'='2')
+                  |PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      (0 until 6).foreach {
+        id =>
+          spark.sql(
+            "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+              s"(${id * 2}, 'p0'), (${id * 2 + 1}, 'p0') AS S(id, pt)")
+      }
+      spark.sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ * " +
+          "FROM VALUES (12, 'p1'), (13, 'p1') AS S(id, pt)")
+      spark.sql("DELETE FROM T WHERE id % 2 = 0")
+
+      val table = loadTable("T")
+      Assertions.assertThat(partitionFileCounts(table)("p0")).isEqualTo(6)
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isPositive()
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', partitions => 'pt=\"p0\"', " +
+          "options => 'compaction.multi-batch.enabled=true,compaction.file-num-limit=2')")
+
+      val filesByPartition = partitionFileCounts(table)
+      Assertions.assertThat(filesByPartition("p0")).isEqualTo(3)
+      Assertions.assertThat(filesByPartition("p1")).isEqualTo(1)
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isPositive()
+      checkAnswer(
+        spark.sql("SELECT * FROM T"),
+        (0 until 6).map(id => Row(id * 2 + 1, "p0")) :+ Row(13, "p1"))
+    }
+  }
+
   test("Paimon Procedure: compact unaware bucket append table with many small files") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, value STRING, pt STRING)
@@ -920,7 +1308,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     Thread.sleep(10000);
     spark.sql(s"INSERT INTO T VALUES (9, '9', '2024-01-01', 0), (10, '10', '2024-01-02', 0)")
 
-    spark.sql("CALL sys.compact(table => 'T', partition_idle_time => '10s')")
+    spark.sql(
+      "CALL sys.compact(table => 'T', partition_idle_time => '10s', " +
+        "options => 'compaction.multi-batch.enabled=true,compaction.file-num-limit=1')")
     val dataSplits = table.newSnapshotReader.read.dataSplits.asScala.toList
     Assertions
       .assertThat(dataSplits.size)
@@ -3468,4 +3858,52 @@ private class DvRewriteFailureFileIO(unreadable: String, readable: String) exten
     }
     super.newInputStream(path)
   }
+}
+
+class FailingAppendCompactCallback extends CommitCallback {
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (context.snapshot.commitKind() == CommitKind.COMPACT) {
+      throw new RuntimeException("Injected append compact post-commit failure")
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
+}
+
+class AppendThenFailCompactCallback extends CommitCallback {
+
+  private var table: FileStoreTable = _
+
+  override def setTable(table: FileStoreTable): Unit = {
+    this.table = table
+  }
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (context.snapshot.commitKind() == CommitKind.COMPACT) {
+      val builder = table
+        .copy(Map("write-only" -> "true", "commit.callbacks" -> "").asJava)
+        .newBatchWriteBuilder()
+      val write = builder.newWrite()
+      try {
+        write.write(GenericRow.of(Integer.valueOf(999)))
+        val messages = write.prepareCommit()
+        val commit = builder.newCommit()
+        try {
+          commit.commit(messages)
+        } finally {
+          commit.close()
+        }
+      } finally {
+        write.close()
+      }
+      throw new RuntimeException("Injected append compact failure after another writer committed")
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
 }

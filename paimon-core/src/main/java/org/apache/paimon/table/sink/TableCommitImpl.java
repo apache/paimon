@@ -97,6 +97,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
+    private boolean expireOnCommit = true;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -170,6 +171,15 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
         this.expireForEmptyCommit = expireForEmptyCommit;
+        return this;
+    }
+
+    /**
+     * Controls automatic expiration after commits, without affecting explicit expiration or
+     * automatic tag creation.
+     */
+    public TableCommitImpl expireOnCommit(boolean expireOnCommit) {
+        this.expireOnCommit = expireOnCommit;
         return this;
     }
 
@@ -447,26 +457,33 @@ public class TableCommitImpl implements InnerTableCommit {
             if (tagAutoCreation != null) {
                 tagAutoCreation.run();
             }
+        }
 
+        if (doExpire && expireOnCommit) {
+            expire(identifier);
+        }
+    }
+
+    /** Runs configured tag, partition, consumer and snapshot expiration. */
+    public void expire(long identifier) {
+        if (tagAutoManager != null) {
             TagTimeExpire tagTimeExpire = tagAutoManager.getTagTimeExpire();
-            if (doExpire && tagTimeExpire != null) {
+            if (tagTimeExpire != null) {
                 tagTimeExpire.expire();
             }
         }
 
-        if (doExpire && partitionExpire != null) {
+        if (partitionExpire != null) {
             partitionExpire.expire(identifier);
         }
 
         // expire consumer first to avoid preventing snapshot expiration
-        if (doExpire && consumerExpireTime != null) {
+        if (consumerExpireTime != null) {
             consumerManager.expire(Instant.now().minus(consumerExpireTime).toEpochMilli());
         }
 
         // snapshot expiration usually take the most time, so put it at the end
-        if (doExpire && expireSnapshots != null) {
-            expireSnapshots.run();
-        }
+        expireSnapshots();
     }
 
     public void expireSnapshots() {

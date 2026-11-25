@@ -46,6 +46,30 @@ Compact files.
 - `buckets` (`STRING`, optional): fixed-bucket IDs, comma-separated IDs, or inclusive ranges, for example `'0-3,7'`. Omit to include all buckets. Valid only for fixed-bucket tables without sort compaction.
 - `options_map` (`MAP<STRING, STRING>`, optional): additional dynamic table options, including values containing commas. Options are applied in the order `options`, then `options_map`, so map entries override matching keys in `options`. Both apply only to this invocation and do not modify stored table properties. This argument is appended after `buckets` for positional calls.
 
+For ordinary bucket-unaware append tables without sorting or incremental clustering,
+`compaction.file-num-limit` limits the number of candidate files scanned per batch (default:
+100,000); it does not limit the number of files committed in one commit. Candidate files can
+accumulate across batches before they form a compaction task, and only batches that produce tasks
+are committed. `compaction.multi-batch.enabled` defaults to `false`, so a call scans only one batch.
+Set it to `true` to continue scanning the selected starting snapshot through all batches,
+including batches that produce no compaction tasks. Each batch with tasks is committed separately,
+so completed batches remain committed if a later batch fails.
+
+Appends committed after the starting snapshot are left for a later call. If another operation
+replaces a candidate file, or changes its deletion vector after a task reads it, commit conflict
+detection rejects the stale result. The call fails while keeping earlier committed batches;
+rerun the call to plan from the latest snapshot.
+
+When multiple batches are enabled, automatic snapshot, partition, consumer, and tag time expiration
+triggered by this call is deferred until scanning and rewriting end, including exceptional exits
+after a batch has been committed. The call triggers deferred expiration only if it can confirm at
+least one committed compaction batch, including a batch whose post-commit callback failed.
+The final expiration check follows the table's expiration policies and check intervals. A failure
+during this final cleanup may make the call report an error even when all batches succeeded;
+batches committed before the failure are not rolled back. Automatic tag creation still runs after
+each commit. Other writers or separate expiration jobs may still clean up input files or manifests
+and cause the call to fail.
+
 ```sql
 SET spark.sql.shuffle.partitions=10; --set the compact parallelism
 
@@ -64,6 +88,12 @@ CALL sys.compact(
 CALL sys.compact(table => 'T', partition_idle_time => '60s');
 
 CALL sys.compact(table => 'T', compact_strategy => 'minor');
+
+-- Process multiple batches for an ordinary bucket-unaware append table.
+CALL sys.compact(
+  table => 'T',
+  options => 'compaction.multi-batch.enabled=true,compaction.file-num-limit=10000'
+);
 
 -- Limit full compaction to these buckets of a fixed-bucket table with at least 8 buckets.
 CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-3,7');

@@ -95,6 +95,24 @@ public class AppendCompactCoordinator {
             FileStoreTable table,
             boolean isStreaming,
             @Nullable PartitionPredicate partitionPredicate) {
+        this(table, isStreaming, partitionPredicate, null);
+    }
+
+    /**
+     * Creates a batch coordinator that scans the supplied snapshot without following new commits.
+     */
+    public AppendCompactCoordinator(
+            FileStoreTable table,
+            Snapshot snapshot,
+            @Nullable PartitionPredicate partitionPredicate) {
+        this(table, false, partitionPredicate, snapshot);
+    }
+
+    private AppendCompactCoordinator(
+            FileStoreTable table,
+            boolean isStreaming,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Snapshot snapshot) {
         checkArgument(table.primaryKeys().isEmpty());
         this.snapshotManager = table.snapshotManager();
         CoreOptions options = table.coreOptions();
@@ -106,9 +124,9 @@ public class AppendCompactCoordinator {
         this.fileNumLimit = options.compactionFileNumLimit();
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
-                        ? new DvMaintainerCache(table.store().newIndexFileHandler())
+                        ? new DvMaintainerCache(table.store().newIndexFileHandler(), snapshot)
                         : null;
-        this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate);
+        this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate, snapshot);
         this.isStreaming = isStreaming;
     }
 
@@ -381,12 +399,14 @@ public class AppendCompactCoordinator {
     private class DvMaintainerCache {
 
         private final IndexFileHandler indexFileHandler;
+        @Nullable private final Snapshot snapshot;
 
         /** Should be thread safe, ManifestEntryFilter will be invoked in many threads. */
         private final Map<BinaryRow, AppendDeleteFileMaintainer> cache = new ConcurrentHashMap<>();
 
-        private DvMaintainerCache(IndexFileHandler indexFileHandler) {
+        private DvMaintainerCache(IndexFileHandler indexFileHandler, @Nullable Snapshot snapshot) {
             this.indexFileHandler = indexFileHandler;
+            this.snapshot = snapshot;
         }
 
         private void refresh() {
@@ -398,7 +418,9 @@ public class AppendCompactCoordinator {
                     partition,
                     p ->
                             BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                    indexFileHandler, snapshotManager.latestSnapshot(), p));
+                                    indexFileHandler,
+                                    snapshot == null ? snapshotManager.latestSnapshot() : snapshot,
+                                    p));
         }
     }
 
@@ -407,6 +429,7 @@ public class AppendCompactCoordinator {
 
         private final SnapshotReader snapshotReader;
         private final boolean streamingMode;
+        @Nullable private final Snapshot snapshot;
 
         @Nullable private Long nextSnapshot = null;
         @Nullable private Iterator<ManifestEntry> currentIterator;
@@ -415,7 +438,8 @@ public class AppendCompactCoordinator {
         public FilesIterator(
                 FileStoreTable table,
                 boolean isStreaming,
-                @Nullable PartitionPredicate partitionPredicate) {
+                @Nullable PartitionPredicate partitionPredicate,
+                @Nullable Snapshot snapshot) {
             this.snapshotReader = table.newSnapshotReader();
             if (partitionPredicate != null) {
                 snapshotReader.withPartitionFilter(partitionPredicate);
@@ -425,12 +449,16 @@ public class AppendCompactCoordinator {
                 snapshotReader.dropStats();
             }
             this.streamingMode = isStreaming;
+            this.snapshot = snapshot;
         }
 
         private void assignNewIterator() {
             currentIterator = null;
             if (nextSnapshot == null) {
-                nextSnapshot = snapshotManager.latestSnapshotId();
+                nextSnapshot =
+                        snapshot == null
+                                ? snapshotManager.latestSnapshotId()
+                                : Long.valueOf(snapshot.id());
                 if (nextSnapshot == null) {
                     if (!streamingMode) {
                         throw new EndOfScanException();
@@ -445,11 +473,12 @@ public class AppendCompactCoordinator {
                 snapshotReader.withMode(ScanMode.DELTA);
             }
 
-            if (!snapshotManager.snapshotExists(nextSnapshot)) {
+            if (snapshot == null && !snapshotManager.snapshotExists(nextSnapshot)) {
                 return;
             }
 
-            Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
+            Snapshot inputSnapshot =
+                    snapshot == null ? snapshotManager.snapshot(nextSnapshot) : snapshot;
             nextSnapshot++;
 
             if (dvMaintainerCache != null) {
@@ -459,7 +488,7 @@ public class AppendCompactCoordinator {
                     snapshotReader
                             .withManifestEntryFilter(
                                     entry -> shouldCompact(entry.partition(), entry.file()))
-                            .withSnapshot(snapshot)
+                            .withSnapshot(inputSnapshot)
                             .readFileIterator();
         }
 
