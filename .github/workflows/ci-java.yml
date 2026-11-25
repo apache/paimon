@@ -63,6 +63,9 @@ jobs:
           CI_SCALA: ${{ matrix.scala }}
           CI_JAVA: ${{ matrix.java }}
         run: bash tools/ci/run-java-tests.sh "$CI_SUITE" "$CI_SCALA" "$CI_JAVA"
+      - name: Test released table interoperability
+        if: matrix.suite == 'core' && matrix.java == 8
+        run: bash tools/compatibility/run-table-compatibility.sh
       - name: Upload failed test reports
         if: failure()
         uses: actions/upload-artifact@v6
