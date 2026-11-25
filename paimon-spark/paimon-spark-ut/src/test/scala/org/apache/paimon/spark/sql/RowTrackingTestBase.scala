@@ -664,6 +664,24 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: delete by row id range keeps other file groups") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+      sql("INSERT INTO t VALUES (3, 30), (4, 40)")
+
+      sql("DELETE FROM t WHERE id = 3 AND _ROW_ID BETWEEN 2 AND 2")
+      checkAnswer(
+        sql("SELECT id, data, _ROW_ID FROM t ORDER BY id"),
+        Seq(Row(1, 10, 0), Row(2, 20, 1), Row(4, 40, 3)))
+
+      // A row-id condition under OR cannot restrict the scan to that row-id range.
+      sql("DELETE FROM t WHERE _ROW_ID = 0 OR id = 4")
+      checkAnswer(sql("SELECT id, data, _ROW_ID FROM t"), Seq(Row(2, 20, 1)))
+    }
+  }
+
   test("Row Tracking: delete preserves row tracking metadata for update") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")

@@ -32,16 +32,18 @@ import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile
+import org.apache.paimon.utils.Range
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.types.LongType
 
 import java.util.Collections
 import java.util.function.Function
@@ -86,6 +88,11 @@ trait PaimonRowLevelCommand
       val filter =
         convertConditionToPaimonPredicate(condition, output, rowType, ignorePartialFailure = true)
       filter.foreach(snapshotReader.withFilter)
+      if (coreOptions.dataEvolutionEnabled()) {
+        PaimonRowLevelCommand.conjunctiveRowIdRange(condition).foreach {
+          range => snapshotReader.withRowRanges(Collections.singletonList(range))
+        }
+      }
     }
 
     snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toSeq
@@ -309,6 +316,54 @@ trait PaimonRowLevelCommand
 }
 
 object PaimonRowLevelCommand {
+
+  /** Push down only row-id bounds guaranteed by top-level conjuncts. */
+  private[commands] def conjunctiveRowIdRange(condition: Expression): Option[Range] = {
+    def isRowId(expression: Expression): Boolean = expression match {
+      case attribute: Attribute => attribute.name.equalsIgnoreCase(ROW_ID_COLUMN)
+      case _ => false
+    }
+
+    def literalLong(expression: Expression): Option[Long] = expression match {
+      case literal: Literal if literal.dataType == LongType && literal.value != null =>
+        Some(literal.value.asInstanceOf[Long])
+      case _ => None
+    }
+
+    def bounds(expression: Expression): Seq[(Option[Long], Option[Long])] = expression match {
+      case And(left, right) => bounds(left) ++ bounds(right)
+      case EqualTo(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (Some(value), Some(value)))
+      case EqualTo(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (Some(value), Some(value)))
+      case GreaterThanOrEqual(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (Some(value), None))
+      case LessThanOrEqual(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (None, Some(value)))
+      case GreaterThanOrEqual(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (None, Some(value)))
+      case LessThanOrEqual(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (Some(value), None))
+      case GreaterThan(left, right) if isRowId(left) =>
+        literalLong(right).filter(_ < Long.MaxValue).toSeq.map(value => (Some(value + 1), None))
+      case LessThan(left, right) if isRowId(left) =>
+        literalLong(right).filter(_ > Long.MinValue).toSeq.map(value => (None, Some(value - 1)))
+      case GreaterThan(left, right) if isRowId(right) =>
+        literalLong(left).filter(_ > Long.MinValue).toSeq.map(value => (None, Some(value - 1)))
+      case LessThan(left, right) if isRowId(right) =>
+        literalLong(left).filter(_ < Long.MaxValue).toSeq.map(value => (Some(value + 1), None))
+      case _ => Seq.empty
+    }
+
+    val extracted = bounds(condition)
+    if (extracted.isEmpty) {
+      None
+    } else {
+      val from = extracted.flatMap(_._1).foldLeft(Long.MinValue)(Math.max)
+      val to = extracted.flatMap(_._2).foldLeft(Long.MaxValue)(Math.min)
+      if (from <= to) Some(new Range(from, to)) else None
+    }
+  }
 
   /** A data-evolution anchor file and its covered row-id range. */
   final private[commands] case class AnchorRange(from: Long, to: Long, filePath: String)
