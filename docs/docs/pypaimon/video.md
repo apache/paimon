@@ -247,6 +247,9 @@ physical video range, so different frame descriptors reuse one decoder session
 in each DataLoader worker. `decoder_factory(stream)` opens any codec library;
 `decode_fn(decoder, frame_index, row)` receives the embedded frame ordinal.
 
+Set `max_cached_video_files` to reuse Arrow S3/OSS input handles across MP4
+payloads in the same `.video` file. The pool is per collator and defaults to off.
+
 ```python
 import av
 import torch

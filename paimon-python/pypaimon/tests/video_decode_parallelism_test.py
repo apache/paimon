@@ -23,12 +23,17 @@ import threading
 import unittest
 from collections import OrderedDict
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import pyarrow as pa
+from pyarrow.fs import S3FileSystem
+
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
-from pypaimon.table.row.blob import BlobDescriptor
+from pypaimon.table.row.blob import BlobDescriptor, VideoFrameDescriptor
 
 
 def identity(value):
@@ -53,6 +58,48 @@ def decode_worker(collator, pool, connection):
 
 
 class VideoDecodeParallelismTest(unittest.TestCase):
+    def test_video_file_pool(self):
+        first = object.__new__(PyArrowFileIO)
+        second = object.__new__(PyArrowFileIO)
+        opens = []
+
+        def open_stream(path):
+            stream = pa.BufferReader(b"abcd")
+            opens.append((path, stream))
+            return stream
+
+        for file_io in (first, second):
+            file_io.filesystem = Mock(spec=S3FileSystem)
+            file_io.new_input_stream = open_stream
+        token_io = object.__new__(RESTTokenFileIO)
+        token_io.file_io = Mock(return_value=first)
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=token_io), video_column="camera",
+            decoder_factory=identity, decode_fn=lambda source, _, row: source.read(),
+            max_cached_video_files=1, max_open_videos=2, decode_parallelism=2,
+            collate_fn=list)
+
+        def row(path, offset):
+            descriptor = VideoFrameDescriptor("oss://bucket/" + path, offset, 2, 0)
+            return {"camera": descriptor.serialize()}
+
+        def read(*rows):
+            return [item["frame"] for item in collator(rows)]
+
+        try:
+            self.assertEqual(read(row("a.video", 2), row("a.video", 0)), [b"cd", b"ab"])
+            self.assertEqual(len(opens), 1)
+            self.assertEqual(read(row("b.video", 0)), [b"ab"])
+            self.assertEqual(len(opens), 2)
+            self.assertFalse(opens[0][1].closed)
+            token_io.file_io.return_value = second
+            self.assertEqual(read(row("a.video", 2)), [b"cd"])
+            self.assertTrue(opens[0][1].closed)
+            self.assertEqual(len(opens), 3)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for _, stream in opens))
+
     def collator(self, capacity=2):
         return VideoFrameCollator(
             SimpleNamespace(file_io="test-file-io"), video_column="camera",
