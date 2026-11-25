@@ -1045,7 +1045,7 @@ class TestShreddingWrite(unittest.TestCase):
             ('missing', 'DOUBLE'),
         ])
         target = shredding_schema_to_arrow_type(obj_fields)
-        for field_count, field_width in ((180, 8), (320, 300)):
+        for field_count, field_width in ((256, 8), (320, 300)):
             with self.subTest(field_count=field_count, field_width=field_width):
                 # Reversed insertion order exercises object offsets that are
                 # not monotonic in key order. The larger row needs 24-bit offsets.

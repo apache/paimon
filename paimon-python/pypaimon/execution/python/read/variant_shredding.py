@@ -43,8 +43,8 @@ _NULL_TYPE_ID = 0
 _TRUE_TYPE_ID = 1
 _FALSE_TYPE_ID = 2
 _NULL_VALUE_BYTES: bytes = bytes([_primitive_header(_NULL_TYPE_ID)])
-# Avoid allocating NumPy temporaries for small objects.
-_MIN_BULK_OBJECT_FIELDS = 128
+# Use the bulk decoder only when enough fields amortize the array allocations.
+_MIN_BULK_OBJECT_FIELDS = 256
 
 
 def _metadata_id_to_name(metadata: bytes) -> Dict[int, str]:
