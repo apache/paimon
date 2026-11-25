@@ -235,6 +235,56 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testSpecifiedModeCDCOperations() throws Exception {
+        String mongoDatabase = createRecordsToMongoDB("event-insert", "table/event");
+
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", mongoDatabase);
+        mongodbConfig.put("collection", "event");
+        mongodbConfig.put("field.name", "_id,name,description");
+        mongodbConfig.put("parser.path", "$._id,$.name,$.description");
+        mongodbConfig.put("schema.start.mode", "specified");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        JobClient client = runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+        List<String> primaryKeys = Collections.singletonList("_id");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"_id", "name", "description"});
+        waitForResult(
+                client,
+                Arrays.asList(
+                        "+I[100000000000000000000101, scooter, Small 2-wheel scooter]",
+                        "+I[100000000000000000000102, car battery, 12V car battery]",
+                        "+I[100000000000000000000103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3]"),
+                table,
+                rowType,
+                primaryKeys);
+
+        // Update, replace and delete events carry only the _id in their document key.
+        writeRecordsToMongoDB("event-update", mongoDatabase, "table/event");
+        writeRecordsToMongoDB("event-replace", mongoDatabase, "table/event");
+        writeRecordsToMongoDB("event-delete", mongoDatabase, "table/event");
+        waitForResult(
+                client,
+                Arrays.asList(
+                        "+I[100000000000000000000101, scooter, Updated scooter description]",
+                        "+I[100000000000000000000102, new car battery, New 12V car battery]"),
+                table,
+                rowType,
+                primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
     public void testMongoDBCDCOperations() throws Exception {
         writeRecordsToMongoDB("event-insert", database, "table/event");
 

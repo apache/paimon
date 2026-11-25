@@ -30,6 +30,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
 import org.apache.flink.configuration.Configuration;
 
 import java.util.Collections;
@@ -138,7 +139,15 @@ public interface MongoVersionStrategy {
         Map<String, String> parsedRow = new HashMap<>();
 
         for (int i = 0; i < parseNames.length; i++) {
-            Object evaluate = JsonPath.read(record, parseNames[i]);
+            Object evaluate;
+            try {
+                evaluate = JsonPath.read(record, parseNames[i]);
+            } catch (PathNotFoundException e) {
+                // A delete or update event carries only the _id of the document, and a document
+                // does not have to contain every configured field.
+                parsedRow.put(columnNames[i], null);
+                continue;
+            }
             String stringValue = evaluate != null ? evaluate.toString() : null;
             parsedRow.put(columnNames[i], Optional.ofNullable(stringValue).orElse("{}"));
         }
