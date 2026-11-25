@@ -30,7 +30,7 @@ const config = {
   },
 
   customFields: {
-    version: '2.1.0',
+    version: '2.1.1',
     versionTitle: '2.1',
     branch: 'release-2.1',
     flinkVersion: '1.20',
