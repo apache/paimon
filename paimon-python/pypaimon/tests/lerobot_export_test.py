@@ -32,10 +32,15 @@ import pyarrow.parquet as pq
 import pytest
 
 import pypaimon.multimodal as pm
+from pypaimon import Schema
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import FuseLocalFileIO
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot import export as export_module
-from pypaimon.multimodal.lerobot.export import _safe_path, _write_v3_episodes
+from pypaimon.multimodal.lerobot.export import (
+    _safe_path, _video_episode_offset, _write_v3_episodes,
+)
 from pypaimon.multimodal.lerobot.reader import _FrameLocator
 from pypaimon.table.object.object_table import ObjectTable
 from pypaimon.tests.lerobot_aggregate_test import source
@@ -81,6 +86,14 @@ class MemoryOss:
     def new_input_stream(self, uri):
         with self.lock:
             return io.BytesIO(self.objects[uri])
+
+    def try_to_write_atomic(self, uri, content):
+        with self.lock:
+            if uri in self.objects:
+                return False
+            self.objects[uri] = content.encode("utf-8")
+            self.writes.append(uri)
+            return True
 
     def delete(self, uri, recursive=False):
         with self.lock:
@@ -180,7 +193,14 @@ def test_export_v2_creates_one_exact_video_per_episode(tmp_path, version):
     assert info["total_videos"] == 2
     assert (output / "meta/episodes_stats.jsonl").exists() == (version == "v2.1")
     if version == "v2.1":
-        assert len((output / "meta/episodes_stats.jsonl").read_text().splitlines()) == 2
+        stats = [json.loads(line)["stats"] for line in
+                 (output / "meta/episodes_stats.jsonl").read_text().splitlines()]
+        assert len(stats) == 2
+        for name in ("action", "observation.state"):
+            assert all(name in item for item in stats)
+            assert sum(item[name]["count"][0] for item in stats) == 5
+        assert stats[0]["action"]["mean"] == [0.5, -0.5]
+        assert stats[1]["action"]["mean"] == [3.0, -3.0]
     assert len((output / "meta/episodes.jsonl").read_text().splitlines()) == 2
     assert _open_video_frames(output / "videos/chunk-000/camera/episode_000000.mp4") == 2
     assert _open_video_frames(output / "videos/chunk-000/camera/episode_000001.mp4") == 3
@@ -284,6 +304,61 @@ def test_export_v3_remuxed_episode_videos(tmp_path):
     assert conn.get_table("roundtrip_frames").scan().to_arrow().num_rows == 5
 
 
+def test_export_v3_rewrites_noncanonical_data_path(tmp_path):
+    original = Path(source(tmp_path / "input")[7:])
+    info_path = original / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["data_path"] = "frames/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+    info_path.write_text(json.dumps(info))
+    data = original / "data/chunk-000/file-000.parquet"
+    moved = original / "frames/chunk-000/file-000.parquet"
+    moved.parent.mkdir(parents=True)
+    data.rename(moved)
+
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original.as_uri())
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
+    exported_info = json.loads((output / "meta/info.json").read_text())
+    assert exported_info["data_path"] == export_module._V3_DATA_PATH
+    assert (output / "data/chunk-000/file-000.parquet").exists()
+    conn.load_from_lerobot("roundtrip", output.as_uri())
+
+
+def test_export_v3_remuxed_literal_video_path(tmp_path):
+    original = Path(source(tmp_path / "input", video=True)[7:])
+    info_path = original / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["video_path"] = "videos/camera/all.mp4"
+    info_path.write_text(json.dumps(info))
+    video = original / "videos/camera/chunk-000/file-000.mp4"
+    video.rename(original / "videos/camera/all.mp4")
+
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot(
+        "robot", original.as_uri(),
+        options={"write.lerobot.remux-episodes": "true"})
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
+    paths = sorted(output.glob("videos/**/*.mp4"))
+    assert len(paths) == 2
+    assert len({path.read_bytes() for path in paths}) == 2
+    assert json.loads((output / "meta/info.json").read_text())[
+        "video_path"] == export_module._V3_VIDEO_PATH
+    conn.load_from_lerobot("roundtrip", output.as_uri())
+
+
+def test_export_video_offset_checks_every_episode_frame():
+    descriptors = [SimpleNamespace(frame_index=0),
+                   SimpleNamespace(frame_index=1)]
+    times = [0.200075, 0.299925]
+    timestamps = [0.0, 0.1]
+    assert _video_episode_offset(
+        times, descriptors, timestamps, 0.2, pa.float32()) == 0.2
+    with pytest.raises(ValueError, match="no common Episode offset"):
+        _video_episode_offset(
+            [0.200075, 0.2997], descriptors,
+            timestamps, 0.2, pa.float32())
+
+
 def test_export_reads_one_tagged_group_snapshot(tmp_path):
     first = source(tmp_path / "a")
     second = source(tmp_path / "b", value=20)
@@ -298,8 +373,7 @@ def test_export_reads_one_tagged_group_snapshot(tmp_path):
     assert pq.read_table(output / "data/chunk-000/file-000.parquet").num_rows == 5
 
 
-@pytest.mark.parametrize("version", ["v2.0", "v2.1", "v3.0"])
-def test_export_image_feature_roundtrip(tmp_path, version):
+def _export_image_source(tmp_path, version):
     image = pytest.importorskip("PIL.Image")
     original = Path(source(tmp_path / "input")[7:])
     buffer = io.BytesIO()
@@ -322,18 +396,32 @@ def test_export_image_feature_roundtrip(tmp_path, version):
     output = _export_to_disk(conn, "robot", tmp_path / version,
                              version=version)
     data_files = sorted(output.glob("data/**/*.parquet"))
+    return conn, output, data_files, payload
+
+
+@pytest.mark.parametrize("version", ["v2.0", "v2.1", "v3.0"])
+def test_export_image_feature_roundtrip(tmp_path, version):
+    conn, output, data_files, payload = _export_image_source(tmp_path, version)
     images = [value for path in data_files for value in
               pq.read_table(path)["camera.image"].to_pylist()]
     assert [value["bytes"] for value in images] == [payload] * 5
-    from datasets import load_dataset
-    from PIL import Image
-    loaded = load_dataset(
-        "parquet", data_files=[str(path) for path in data_files],
-        split="train")
-    assert isinstance(loaded[0]["camera.image"], Image.Image)
+    metadata = pq.read_schema(data_files[0]).metadata
+    assert json.loads(metadata[b"huggingface"])["info"]["features"][
+        "camera.image"] == {"_type": "Image"}
     if version == "v3.0":
         conn.load_from_lerobot("roundtrip", output.as_uri())
         assert conn.get_table("roundtrip_frames").scan().to_arrow().num_rows == 5
+
+
+@pytest.mark.parametrize("version", ["v2.0", "v2.1", "v3.0"])
+def test_export_image_decodes_with_datasets(tmp_path, version):
+    datasets = pytest.importorskip("datasets")
+    from PIL import Image
+    _, _, data_files, _ = _export_image_source(tmp_path, version)
+    loaded = datasets.load_dataset(
+        "parquet", data_files=[str(path) for path in data_files],
+        split="train")
+    assert isinstance(loaded[0]["camera.image"], Image.Image)
 
 
 def test_export_direct_writer_group(tmp_path):
@@ -378,6 +466,28 @@ def test_export_v3_preserves_uint64_episode_extension(tmp_path):
         output / "meta/episodes/chunk-000/file-000.parquet")
     assert exported.schema.field("meta/large_id").type == pa.uint64()
     assert exported["meta/large_id"].to_pylist() == [2**64 - 1, None]
+    conn.load_from_lerobot("roundtrip", output.as_uri())
+
+
+def test_export_v3_preserves_nested_uint64_episode_extensions(tmp_path):
+    original = Path(source(tmp_path / "input")[7:])
+    path = original / "meta/episodes/chunk-000/file-000.parquet"
+    episodes = pq.read_table(path)
+    episodes = episodes.append_column("vendor/nested_ids", pa.array(
+        [[2**64 - 1], [7]], type=pa.list_(pa.uint64())))
+    episodes = episodes.append_column("vendor/details", pa.array(
+        [{"large_id": 2**64 - 1}, {"large_id": 7}],
+        type=pa.struct([("large_id", pa.uint64())])))
+    pq.write_table(episodes, path)
+    conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
+    conn.load_from_lerobot("robot", original.as_uri())
+
+    output = _export_to_disk(conn, "robot", tmp_path / "v3")
+    restored = pq.read_table(
+        output / "meta/episodes/chunk-000/file-000.parquet")
+    assert restored.schema.field("vendor/nested_ids").type == pa.list_(pa.uint64())
+    assert restored.schema.field("vendor/details").type == pa.struct([
+        ("large_id", pa.uint64())])
     conn.load_from_lerobot("roundtrip", output.as_uri())
 
 
@@ -443,7 +553,8 @@ def test_export_uses_object_table_wrapped_file_io(tmp_path):
     target = MemoryOss()
     wrapped = SimpleNamespace(
         exists=target.exists, list_status=target.list_status,
-        new_output_stream=target.new_output_stream)
+        new_output_stream=target.new_output_stream,
+        try_to_write_atomic=target.try_to_write_atomic)
     with _target_object_table(conn, wrapped):
         output = conn.export_to_lerobot(
             "robot", output_table="exports")
@@ -463,7 +574,8 @@ def test_export_to_fuse_object_table(tmp_path):
     assert (fuse_root / dataset_id / "meta/info.json").exists()
 
 
-def test_export_to_fuse_retries_after_interrupted_upload(tmp_path):
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_export_to_fuse_retries_after_interrupted_upload(tmp_path, error_type):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     fuse_root = tmp_path / "fuse"
@@ -474,16 +586,79 @@ def test_export_to_fuse_retries_after_interrupted_upload(tmp_path):
 
     def interrupted_upload(path, uri, file_io):
         original_upload(path, uri, file_io)
-        raise OSError("upload response lost")
+        raise error_type("upload interrupted")
 
     with _target_object_table(conn, fuse):
         with mock.patch.object(export_module, "_upload_file",
                                side_effect=interrupted_upload):
-            with pytest.raises(OSError, match="upload response lost"):
+            with pytest.raises(error_type, match="upload interrupted"):
                 conn.export_to_lerobot("robot", output_table="exports")
         assert not (fuse_root / dataset_id).exists()
         conn.export_to_lerobot("robot", output_table="exports")
     assert (fuse_root / dataset_id / "meta/info.json").exists()
+
+
+def test_failed_fuse_export_does_not_delete_another_publication(tmp_path):
+    fuse_root = tmp_path / "fuse"
+    fuse_root.mkdir()
+    fuse = FuseLocalFileIO("oss://test-bucket/lerobot", str(fuse_root))
+    prefix = "oss://test-bucket/lerobot/dataset-a"
+    stages = [tmp_path / "stage-a", tmp_path / "stage-b"]
+    for stage, payload in zip(stages, (b"a", b"b")):
+        (stage / "data").mkdir(parents=True)
+        (stage / "meta").mkdir()
+        (stage / "data/file.parquet").write_bytes(payload)
+        (stage / "meta/info.json").write_bytes(payload)
+    paused, resume = threading.Event(), threading.Event()
+    original_upload = export_module._upload_file
+
+    def pause_first_upload(path, uri, file_io):
+        if stages[0] in path.parents:
+            paused.set()
+            assert resume.wait(10)
+        original_upload(path, uri, file_io)
+
+    with mock.patch.object(export_module, "_upload_file",
+                           side_effect=pause_first_upload):
+        with ThreadPoolExecutor(1) as pool:
+            first = pool.submit(
+                export_module._upload_to_object_table, stages[0], prefix, fuse)
+            assert paused.wait(10)
+            export_module._upload_to_object_table(stages[1], prefix, fuse)
+            resume.set()
+            with pytest.raises(FileExistsError):
+                first.result()
+    assert (fuse_root / "dataset-a/data/file.parquet").read_bytes() == b"b"
+    assert (fuse_root / "dataset-a/meta/info.json").read_bytes() == b"b"
+
+
+def test_fuse_info_marker_is_invisible_until_complete(tmp_path):
+    fuse_root = tmp_path / "fuse"
+    fuse_root.mkdir()
+    fuse = FuseLocalFileIO("oss://test-bucket/lerobot", str(fuse_root))
+    stage = tmp_path / "stage"
+    (stage / "meta").mkdir(parents=True)
+    (stage / "meta/info.json").write_text('{"complete":true}')
+    prefix = "oss://test-bucket/lerobot/dataset-a"
+    paused, resume = threading.Event(), threading.Event()
+    original_rename = fuse.rename
+
+    def pause_rename(src, dst):
+        if dst == prefix + "/meta/info.json":
+            paused.set()
+            assert resume.wait(10)
+        return original_rename(src, dst)
+
+    with mock.patch.object(fuse, "rename", side_effect=pause_rename):
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(
+                export_module._upload_to_object_table, stage, prefix, fuse)
+            assert paused.wait(10)
+            assert not (fuse_root / "dataset-a/meta/info.json").exists()
+            resume.set()
+            future.result()
+    assert (fuse_root / "dataset-a/meta/info.json").read_text() == \
+        '{"complete":true}'
 
 
 def test_export_rejects_unsafe_dataset_id(tmp_path):
@@ -567,7 +742,9 @@ def test_export_to_object_table_rejects_existing_name(tmp_path):
 def test_export_resolves_group_when_plain_table_has_same_name(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
-    conn.create_table("robot", schema=pa.schema([("id", pa.int64())]))
+    conn.catalog.create_table(
+        "default.robot",
+        Schema.from_pyarrow_schema(pa.schema([("id", pa.int64())])), False)
 
     output = _export_to_disk(conn, "robot", tmp_path / "v3")
     assert pq.read_table(
@@ -598,33 +775,19 @@ def test_export_cleans_unpublished_upload_after_failure(tmp_path):
     assert prefix + "/meta/info.json" in target.objects
 
 
-@pytest.mark.parametrize("complete", [True, False])
-def test_export_checks_info_after_lost_upload_response(tmp_path, complete):
+def test_export_checks_info_after_lost_upload_response(tmp_path):
     conn = pm.connect(options={"warehouse": str(tmp_path / "warehouse")})
     conn.load_from_lerobot("robot", source(tmp_path / "input"))
     target = MemoryOss()
-    original_upload = export_module._upload_file
+    original_write = target.try_to_write_atomic
 
-    def interrupted_info(path, uri, file_io):
-        if uri.endswith("/meta/info.json"):
-            if complete:
-                original_upload(path, uri, file_io)
-            else:
-                target.objects[uri] = b"incomplete"
-            raise OSError("info response lost")
-        original_upload(path, uri, file_io)
+    def interrupted_info(uri, content):
+        original_write(uri, content)
+        raise OSError("info response lost")
 
     with _target_object_table(conn, target):
-        with mock.patch.object(export_module, "_upload_file",
+        with mock.patch.object(target, "try_to_write_atomic",
                                side_effect=interrupted_info):
-            if complete:
-                prefix = conn.export_to_lerobot(
-                    "robot", output_table="exports")
-            else:
-                with pytest.raises(OSError, match="info response lost"):
-                    conn.export_to_lerobot("robot", output_table="exports")
-        if not complete:
-            assert not target.objects
             prefix = conn.export_to_lerobot("robot", output_table="exports")
     assert prefix + "/meta/info.json" in target.objects
 
@@ -633,8 +796,7 @@ def test_export_checks_info_after_lost_upload_response(tmp_path, complete):
 def test_frame_locator_retains_filter_for_inexact_index(exact):
     locator = _FrameLocator.__new__(_FrameLocator)
     locator._process_id = os.getpid()
-    locator._table = SimpleNamespace(options=SimpleNamespace(
-        scalar_index_search_mode=lambda: "ALL"))
+    locator._table = SimpleNamespace(options=CoreOptions(Options.from_none()))
     locator._splits = []
     locator._split_ranges = []
     locator._split_range_index = SimpleNamespace(find=lambda ranges: [])

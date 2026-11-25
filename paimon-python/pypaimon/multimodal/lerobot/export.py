@@ -19,6 +19,7 @@
 import copy
 import hashlib
 import json
+import math
 import re
 import shutil
 import tempfile
@@ -28,10 +29,12 @@ from urllib.parse import urlparse
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import numpy as np
 
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.multimodal.lerobot.dataset import _component_table, _read_arrow
+from pypaimon.multimodal.lerobot.loader import _VIDEO_TIMESTAMP_TOLERANCE
 from pypaimon.multimodal.lerobot.metadata import (
     _companion_identifier, _companion_table_identifiers, _dataset_fps,
     _validate_tag_name,
@@ -76,20 +79,21 @@ def export_to_lerobot(connection, table_name, *, output_table,
     parsed = urlparse(object_location)
     if parsed.scheme != "oss" or not parsed.netloc:
         raise ValueError("Object Table output must use OSS storage.")
+    catalog = connection.catalog
     try:
-        frames = connection.get_table(table_name)
+        candidate = catalog.get_table(connection._identifier(table_name))
     except TableNotExistException:
-        frames = None
-    if frames is None or not all(
-            frames.raw_table.table_schema.options.get(
+        candidate = None
+    if candidate is not None and all(
+            candidate.table_schema.options.get(
                 "pypaimon.lerobot.%s-table" % name)
             for name in ("datasets", "episodes")):
+        raw_frames = connection.get_table(table_name).raw_table
+    else:
         frames_name = _companion_identifier(
             connection._identifier(table_name), "_frames")
-        frames = connection.get_table(frames_name)
-    raw_frames = frames.raw_table
+        raw_frames = connection.get_table(frames_name).raw_table
     identifiers = _companion_table_identifiers(raw_frames)
-    catalog = connection.catalog
     read_frames = _component_table(catalog, raw_frames, tag_name)
     datasets = _component_table(
         catalog, catalog.get_table(identifiers["datasets"]), tag_name)
@@ -154,44 +158,74 @@ def _upload_to_object_table(stage, prefix, file_io):
     if _prefix_has_files(file_io, prefix):
         raise FileExistsError(prefix)
     info = stage / "meta/info.json"
+    uploaded = []
+    pending = None
     try:
         for path in sorted(stage.rglob("*")):
             if not path.is_file() or path == info:
                 continue
-            uri = prefix + "/" + path.relative_to(stage).as_posix()
-            _upload_file(path, uri, file_io)
-    except Exception as error:
-        # No info.json was published, so this attempt cannot be consumed yet.
-        # The destination is owned by one exporter at a time.
-        _clean_failed_upload(prefix, file_io, error)
+            pending = prefix + "/" + path.relative_to(stage).as_posix()
+            _upload_file(path, pending, file_io)
+            uploaded.append(pending)
+            pending = None
+    except BaseException as error:
+        if not isinstance(error, FileExistsError):
+            _clean_failed_upload(prefix, uploaded + ([pending] if pending else []),
+                                 file_io, error)
         raise
     info_uri = prefix + "/meta/info.json"
     try:
-        _upload_file(info, info_uri, file_io)
-    except Exception as error:
+        if not file_io.try_to_write_atomic(
+                info_uri, info.read_text(encoding="utf-8")):
+            raise FileExistsError(info_uri)
+    except BaseException as error:
+        if isinstance(error, FileExistsError):
+            raise
         # The final response may be lost after a complete object was published.
         try:
             if file_io.exists(info_uri):
                 with file_io.new_input_stream(info_uri) as stream:
                     if stream.read() == info.read_bytes():
                         return
-        except Exception as read_error:
+                raise RuntimeError(
+                    "LeRobot export info.json differs from the attempted "
+                    "publication: %s" % info_uri)
+        except (OSError, KeyError) as read_error:
             raise RuntimeError(
                 "LeRobot export info.json status is uncertain: %s"
                 % info_uri) from read_error
-        _clean_failed_upload(prefix, file_io, error)
+        _clean_failed_upload(prefix, uploaded, file_io, error)
         raise
 
 
-def _clean_failed_upload(prefix, file_io, error):
+def _clean_failed_upload(prefix, uris, file_io, error):
     try:
-        file_io.delete(prefix, recursive=True)
-        cleaned = not _prefix_has_files(file_io, prefix)
+        info_uri = prefix + "/meta/info.json"
+        if file_io.exists(info_uri):
+            return
+        for uri in reversed(uris):
+            if file_io.exists(info_uri):
+                return
+            file_io.delete(uri)
+        parents = set()
+        for uri in uris:
+            parent = uri.rsplit("/", 1)[0]
+            while parent.startswith(prefix):
+                parents.add(parent)
+                if parent == prefix:
+                    break
+                parent = parent.rsplit("/", 1)[0]
+        for parent in sorted(parents, key=len, reverse=True):
+            try:
+                file_io.delete(parent)
+            except OSError:
+                pass
+        cleaned = not any(file_io.exists(uri) for uri in uris)
     except Exception:
         cleaned = False
     if not cleaned:
         raise RuntimeError(
-            "LeRobot export upload failed and could not clean up %s"
+            "LeRobot export upload failed and could not clean up its files in %s"
             % prefix) from error
 
 
@@ -324,8 +358,8 @@ def _write_dataset(stage, reader, source, info, episodes, episode_schema,
         output_info.setdefault("chunks_size", 1000)
         output_info.setdefault("data_files_size_in_mb", 100)
         output_info.setdefault("video_files_size_in_mb", 200)
-        output_info.setdefault("data_path", _V3_DATA_PATH)
-        output_info.setdefault("video_path", _V3_VIDEO_PATH if video_keys else None)
+        output_info["data_path"] = _V3_DATA_PATH
+        output_info["video_path"] = _V3_VIDEO_PATH if video_keys else None
         for episode in episodes:
             episode.setdefault("data/chunk_index", episode["episode_index"] // 1000)
             episode.setdefault("data/file_index", 0)
@@ -337,11 +371,19 @@ def _write_dataset(stage, reader, source, info, episodes, episode_schema,
     v3_video_files = {}
     v3_video_times = {}
     episode_stats = []
+    source_stats = json.loads(source["stats"]) if source["stats"] else {}
     source_video_cache = stage / ".source-videos"
     try:
         for episode in episodes:
             episode_index = episode["episode_index"]
             begin, end = episode["dataset_from_index"], episode["dataset_to_index"]
+            existing_stats = _episode_stats(episode) if version == "v2.1" else {}
+            missing_stats = {
+                name: _RunningStats() for name in source_stats
+                if name not in existing_stats and name in frame_schema.names
+                and info["features"][name]["dtype"].startswith(
+                    ("float", "int", "uint", "bool"))
+            } if version == "v2.1" else {}
             if version.startswith("v2."):
                 data_path = stage / _V2_DATA_PATH.format(
                     episode_chunk=episode_index // 1000,
@@ -360,6 +402,7 @@ def _write_dataset(stage, reader, source, info, episodes, episode_schema,
                 current_data_file = data_path
                 parquet_writer = None
             video_frames = {key: [] for key in video_keys}
+            frame_timestamps = []
             for offset in range(begin, end, batch_size):
                 indices = list(range(offset, min(offset + batch_size, end)))
                 table = reader.read_keys(
@@ -373,7 +416,10 @@ def _write_dataset(stage, reader, source, info, episodes, episode_schema,
                                or row["episode_index"] != episode_index
                                for row in rows):
                     raise ValueError("LeRobot source Frame keys are inconsistent.")
+                for name, stats in missing_stats.items():
+                    stats.update([row[name] for row in rows])
                 for row in rows:
+                    frame_timestamps.append(row["timestamp"])
                     del row["dataset_id"]
                     for key in video_keys:
                         video_frames[key].append(
@@ -418,20 +464,22 @@ def _write_dataset(stage, reader, source, info, episodes, episode_schema,
                         key_files[identity] = (chunk_index, file_index, video_path)
                     chunk_index, file_index, video_path = key_files[identity]
                     prefix = "videos/%s/" % key
+                    original_offset = episode.get(prefix + "from_timestamp")
                     episode[prefix + "chunk_index"] = chunk_index
                     episode[prefix + "file_index"] = file_index
                     if identity not in v3_video_times:
                         v3_video_times[identity] = _video_frame_times(video_path)
-                    frame_index = descriptors[0].frame_index
-                    if frame_index >= len(v3_video_times[identity]):
-                        raise ValueError(
-                            "LeRobot video descriptor points beyond the MP4 frames.")
-                    start = v3_video_times[identity][frame_index]
+                    start = _video_episode_offset(
+                        v3_video_times[identity], descriptors,
+                        frame_timestamps, original_offset,
+                        frame_schema.field("timestamp").type)
                     episode[prefix + "from_timestamp"] = start
                     episode[prefix + "to_timestamp"] = start + len(descriptors) / info["fps"]
             if version.startswith("v2."):
+                existing_stats.update({name: stats.result()
+                                       for name, stats in missing_stats.items()})
                 episode_stats.append({"episode_index": episode_index,
-                                      "stats": _episode_stats(episode)})
+                                      "stats": existing_stats})
         if parquet_writer is not None:
             parquet_writer.close()
             parquet_writer = None
@@ -483,17 +531,15 @@ def _write_v3_episodes(stage, episodes, source_schema=None):
     preserved = {field.name: field for field in source_schema or []
                  if field.name in names}
     unsigned = {
-        name: pa.field(name, pa.uint64()) for name in names
-        if name not in preserved and any(
-            isinstance(episode.get(name), Decimal)
-            and episode[name] == episode[name].to_integral_value()
-            and (1 << 63) <= episode[name] < (1 << 64)
-            for episode in episodes)
+        name: pa.field(name, _arrow_type_with_uint64(
+            [episode.get(name) for episode in episodes]))
+        for name in names if name not in preserved and any(
+            _contains_decimal(episode.get(name)) for episode in episodes)
     }
     for episode in episodes:
         for name in unsigned:
             if episode.get(name) is not None:
-                episode[name] = int(episode[name])
+                episode[name] = _restore_variant_integer(episode[name])
     inferred_names = [name for name in names
                       if name not in preserved and name not in unsigned]
     inferred = pa.unify_schemas([
@@ -511,6 +557,50 @@ def _write_v3_episodes(stage, episodes, source_schema=None):
         path.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(pa.Table.from_pylist(chunk_rows(begin), schema=schema),
                        path)
+
+
+def _contains_decimal(value):
+    if isinstance(value, Decimal):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_decimal(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_decimal(item) for item in value)
+    return False
+
+
+def _arrow_type_with_uint64(values):
+    present = [value for value in values if value is not None]
+    if any(isinstance(value, Decimal) for value in present):
+        if any(isinstance(value, bool) or not isinstance(value, (int, Decimal))
+               or value != int(value) or not 0 <= value < (1 << 64)
+               for value in present):
+            raise ValueError("LeRobot Episode extension has invalid uint64 values.")
+        return pa.uint64()
+    if any(isinstance(value, list) for value in present):
+        if not all(isinstance(value, list) for value in present):
+            raise ValueError("LeRobot Episode extension has mixed list values.")
+        return pa.list_(_arrow_type_with_uint64([
+            item for value in present for item in value]))
+    if any(isinstance(value, dict) for value in present):
+        if not all(isinstance(value, dict) for value in present):
+            raise ValueError("LeRobot Episode extension has mixed object values.")
+        names = list(dict.fromkeys(key for value in present for key in value))
+        return pa.struct([
+            pa.field(name, _arrow_type_with_uint64([
+                value.get(name) for value in present])) for name in names])
+    return pa.array(values).type
+
+
+def _restore_variant_integer(value):
+    if isinstance(value, Decimal):
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _restore_variant_integer(item)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [_restore_variant_integer(item) for item in value]
+    return value
 
 
 def _safe_path(root, relative):
@@ -531,6 +621,42 @@ def _episode_stats(episode):
             feature, name = key[6:].rsplit("/", 1)
             stats.setdefault(feature, {})[name] = value
     return stats
+
+
+class _RunningStats:
+    def __init__(self):
+        self.count = 0
+        self.minimum = None
+        self.maximum = None
+        self.mean = None
+        self.m2 = None
+
+    def update(self, values):
+        batch = np.asarray(values)
+        if batch.ndim == 1:
+            batch = batch[:, None]
+        count = len(batch)
+        minimum = batch.min(axis=0)
+        maximum = batch.max(axis=0)
+        numeric = batch.astype(np.float64)
+        mean = numeric.mean(axis=0)
+        m2 = ((numeric - mean) ** 2).sum(axis=0)
+        if self.count:
+            delta = mean - self.mean
+            total = self.count + count
+            m2 += self.m2 + delta ** 2 * self.count * count / total
+            mean = self.mean + delta * count / total
+            minimum = np.minimum(self.minimum, minimum)
+            maximum = np.maximum(self.maximum, maximum)
+        self.count += count
+        self.minimum, self.maximum, self.mean, self.m2 = (
+            minimum, maximum, mean, m2)
+
+    def result(self):
+        return {"min": self.minimum.tolist(), "max": self.maximum.tolist(),
+                "mean": self.mean.tolist(),
+                "std": np.sqrt(np.maximum(self.m2 / self.count, 0)).tolist(),
+                "count": [self.count]}
 
 
 def _write_jsonl(path, rows):
@@ -559,6 +685,30 @@ def _video_frame_times(path):
     with av.open(str(path)) as container:
         return [float(frame.pts * frame.time_base)
                 for frame in container.decode(video=0)]
+
+
+def _video_episode_offset(times, descriptors, timestamps, original, timestamp_type):
+    if len(descriptors) != len(timestamps) or any(
+            item.frame_index < 0 or item.frame_index >= len(times)
+            for item in descriptors):
+        raise ValueError("LeRobot video descriptor points beyond the MP4 frames.")
+
+    def matches(offset):
+        return offset >= 0 and all(math.isclose(
+            float(timestamp),
+            float(pa.scalar(times[item.frame_index] - offset,
+                            type=timestamp_type).as_py()),
+            rel_tol=0.0, abs_tol=_VIDEO_TIMESTAMP_TOLERANCE)
+            for item, timestamp in zip(descriptors, timestamps))
+
+    if original is not None and matches(float(original)):
+        return float(original)
+    offsets = [times[item.frame_index] - float(timestamp)
+               for item, timestamp in zip(descriptors, timestamps)]
+    candidate = max(0.0, (min(offsets) + max(offsets)) / 2)
+    if not matches(candidate):
+        raise ValueError("LeRobot stored video frames have no common Episode offset.")
+    return candidate
 
 
 def _encode_episode_video(source_path, output_path, descriptors, fps):
