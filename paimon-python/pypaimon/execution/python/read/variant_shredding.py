@@ -20,9 +20,13 @@
 import struct
 from functools import lru_cache
 from typing import Dict, List, Optional, Set, Tuple
+import numpy as np
 import pyarrow as pa
 from pypaimon.data.generic_variant import GenericVariant, _Type, _variant_get_type
-from pypaimon.data._variant_binary import _OBJECT, _U32_SIZE, _read_unsigned, _primitive_header
+from pypaimon.data._variant_binary import (
+    _OBJECT, _U8_MAX, _U32_SIZE, _get_int_size, _object_header,
+    _primitive_header, _read_unsigned,
+)
 
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
@@ -39,6 +43,8 @@ _NULL_TYPE_ID = 0
 _TRUE_TYPE_ID = 1
 _FALSE_TYPE_ID = 2
 _NULL_VALUE_BYTES: bytes = bytes([_primitive_header(_NULL_TYPE_ID)])
+# Avoid allocating NumPy temporaries for small objects.
+_MIN_BULK_OBJECT_FIELDS = 128
 
 
 def _metadata_id_to_name(metadata: bytes) -> Dict[int, str]:
@@ -414,6 +420,106 @@ def _decompose_field_bytes(
     return {'value': field_bytes, 'typed_value': None}
 
 
+def _read_object_int_array(data, start, count, width):
+    """Read the little-endian IDs or offsets without allocating Python integers."""
+    if width != 3:
+        return np.frombuffer(data, dtype='<u{}'.format(width), count=count, offset=start)
+    parts = np.frombuffer(data, dtype='u1', count=count * width, offset=start).reshape(-1, width)
+    return (parts[:, 0].astype('u4')
+            | (parts[:, 1].astype('u4') << 8)
+            | (parts[:, 2].astype('u4') << 16))
+
+
+def _pack_object_ints(values, width):
+    if width != 3:
+        return values.astype('<u{}'.format(width), copy=False).tobytes()
+    return values.astype('<u4', copy=False).view('u1').reshape(-1, 4)[:, :3].tobytes()
+
+
+def _copy_object_residual(data, ids, starts, ends):
+    """Encode IDs and new offsets, then copy adjacent cold values in one slice."""
+    offsets = np.empty(len(ids) + 1, dtype='<u4')
+    offsets[0] = 0
+    np.cumsum(ends - starts, out=offsets[1:])
+    id_width = _get_int_size(int(ids.max()))
+    offset_width = _get_int_size(int(offsets[-1]))
+    large = len(ids) > _U8_MAX
+    size_width = _U32_SIZE if large else 1
+    header = bytes([_object_header(large, id_width, offset_width)])
+    parts = [
+        header,
+        len(ids).to_bytes(size_width, 'little'),
+        _pack_object_ints(ids, id_width),
+        _pack_object_ints(offsets, offset_width),
+    ]
+    breaks = np.flatnonzero(ends[:-1] != starts[1:])
+    left = starts[np.r_[0, breaks + 1]].tolist()
+    right = ends[np.r_[breaks, len(ids) - 1]].tolist()
+    parts.extend(data[lo:hi] for lo, hi in zip(left, right))
+    return b''.join(parts)
+
+
+def _split_wide_object(value, size, lookup):
+    """Extract hot fields and encode the residual in the existing field order.
+
+    Return None for layouts outside the bulk path so the original decoder
+    keeps handling their ordering, bounds, and error semantics.
+    """
+    names, ranks, hot_ids = lookup
+    header = value[0]
+    size_width = _U32_SIZE if header & 0x40 else 1
+    id_width = ((header >> 4) & 3) + 1
+    offset_width = ((header >> 2) & 3) + 1
+    ids_start = 1 + size_width
+    offsets_start = ids_start + size * id_width
+    data_start = offsets_start + (size + 1) * offset_width
+    if data_start > len(value):
+        return None
+
+    ids = _read_object_int_array(value, ids_start, size, id_width)
+    if int(ids.max()) >= len(ranks):
+        return None
+    key_ranks = ranks[ids]
+    if np.any(key_ranks[1:] <= key_ranks[:-1]):
+        return None
+
+    offsets = _read_object_int_array(value, offsets_start, size + 1, offset_width)
+    starts = offsets[:-1]
+    # Key order and physical data order need not match. Find value boundaries
+    # in data order, then restore key order for the residual writer.
+    order = np.argsort(starts, kind='stable')
+    sorted_starts = starts[order]
+    if (int(sorted_starts[0]) != 0
+            or int(offsets[-1]) != len(value) - data_start
+            or np.any(sorted_starts[1:] <= sorted_starts[:-1])
+            or int(sorted_starts[-1]) >= int(offsets[-1])):
+        return None
+    ends = np.empty_like(starts)
+    ends[order[:-1]] = sorted_starts[1:]
+    ends[order[-1]] = offsets[-1]
+
+    hot = hot_ids[ids]
+    shredded = {
+        names[int(ids[i])]: value[data_start + int(starts[i]):data_start + int(ends[i])]
+        for i in np.flatnonzero(hot)
+    }
+    cold = ~hot
+    residual = (_copy_object_residual(memoryview(value)[data_start:], ids[cold], starts[cold], ends[cold])
+                if np.any(cold) else None)
+    return residual, shredded
+
+
+def _decompose_object_fields(obj_fields, shredded_by_name, metadata, id_to_name):
+    return {
+        field.field_name: (
+            _decompose_field_bytes(
+                shredded_by_name[field.field_name], field.schema, metadata, id_to_name)
+            if field.field_name in shredded_by_name else {'value': None, 'typed_value': None}
+        )
+        for field in obj_fields
+    }
+
+
 def decompose_variant(
     gv: 'GenericVariant',
     obj_fields: List[ObjectField],
@@ -452,16 +558,7 @@ def decompose_variant(
     overflow_pairs, shredded_by_name = _split_object_fields(
         all_fields, id_to_name, shredded_names)
 
-    typed_value = {}
-    for of in obj_fields:
-        fname = of.field_name
-        if fname in shredded_by_name:
-            typed_value[fname] = _decompose_field_bytes(
-                shredded_by_name[fname], of.schema, metadata, id_to_name
-            )
-        else:
-            typed_value[fname] = {'value': None, 'typed_value': None}
-
+    typed_value = _decompose_object_fields(obj_fields, shredded_by_name, metadata, id_to_name)
     overflow_bytes = (_build_object_value(overflow_pairs, already_sorted=True)
                       if overflow_pairs else None)
     return {'metadata': metadata, 'value': overflow_bytes, 'typed_value': typed_value}
@@ -493,15 +590,37 @@ def shred_variant_column(
     def metadata_names(metadata: bytes) -> Dict[int, str]:
         return _metadata_id_to_name(metadata)
 
+    @lru_cache(maxsize=16)
+    def wide_object_lookup(metadata):
+        id_to_name = metadata_names(metadata)
+        if any(index not in id_to_name for index in range(len(id_to_name))):
+            return None
+        names = tuple(id_to_name[index] for index in range(len(id_to_name)))
+        ranks = np.empty(len(names), dtype='i4')
+        for rank, index in enumerate(sorted(range(len(names)), key=names.__getitem__)):
+            ranks[index] = rank
+        return names, ranks, np.asarray([name in shredded_names for name in names], dtype=bool)
+
     result = []
     for row in rows:
         if row is None:
             result.append(None)
-        else:
-            gv = GenericVariant.from_arrow_struct(row)
-            value = gv.value()
-            id_to_name = (metadata_names(gv.metadata())
-                          if value and (value[0] & 0x3) == _OBJECT else None)
-            result.append(decompose_variant(
-                gv, obj_fields, shredded_names, id_to_name))
+            continue
+
+        gv = GenericVariant.from_arrow_struct(row)
+        value = gv.value()
+        metadata = gv.metadata()
+        id_to_name = None
+        if value and (value[0] & 0x3) == _OBJECT:
+            id_to_name = metadata_names(metadata)
+            size = _read_unsigned(value, 1, _U32_SIZE if value[0] & 0x40 else 1)
+            if size >= _MIN_BULK_OBJECT_FIELDS:
+                lookup = wide_object_lookup(metadata)
+                parts = _split_wide_object(value, size, lookup) if lookup is not None else None
+                if parts is not None:
+                    residual, shredded = parts
+                    typed = _decompose_object_fields(obj_fields, shredded, metadata, id_to_name)
+                    result.append({'metadata': metadata, 'value': residual, 'typed_value': typed})
+                    continue
+        result.append(decompose_variant(gv, obj_fields, shredded_names, id_to_name))
     return pa.array(result, type=target_type)
