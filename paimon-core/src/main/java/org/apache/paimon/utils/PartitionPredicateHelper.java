@@ -42,13 +42,13 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static org.apache.commons.lang3.StringUtils.countMatches;
-
 /**
  * Helper for applying partition predicate pushdown in system tables (BucketsTable, FilesTable,
  * FileKeyRangesTable).
  */
 public class PartitionPredicateHelper {
+
+    private static final String PARTITION_SEPARATOR = ", ";
 
     public static boolean applyPartitionFilter(
             SnapshotReader snapshotReader,
@@ -66,8 +66,9 @@ public class PartitionPredicateHelper {
                         .anyMatch(
                                 literal ->
                                         literal != null
-                                                && countMatches(literal.toString(), ", ")
-                                                        >= partitionKeys.size())) {
+                                                && hasExtraSeparators(
+                                                        literal.toString(),
+                                                        partitionKeys.size()))) {
             snapshotReader.withPartitionFilter(
                     new RenderedPartitionPredicate(partitionType, partitionPredicate));
             return true;
@@ -137,7 +138,7 @@ public class PartitionPredicateHelper {
         if (partitionStr.endsWith("}")) {
             partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
         }
-        String[] partFields = partitionStr.split(", ", partitionKeys.size());
+        String[] partFields = partitionStr.split(PARTITION_SEPARATOR, partitionKeys.size());
         if (partitionKeys.size() != partFields.length) {
             return null;
         }
@@ -146,6 +147,18 @@ public class PartitionPredicateHelper {
             partSpec.put(partitionKeys.get(i), partFields[i]);
         }
         return partSpec;
+    }
+
+    private static boolean hasExtraSeparators(String partition, int keyCount) {
+        int start = 0;
+        for (int i = 0; i < keyCount; i++) {
+            int separator = partition.indexOf(PARTITION_SEPARATOR, start);
+            if (separator < 0) {
+                return false;
+            }
+            start = separator + PARTITION_SEPARATOR.length();
+        }
+        return true;
     }
 
     private static class RenderedPartitionPredicate implements PartitionPredicate {
