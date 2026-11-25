@@ -239,7 +239,7 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    void testFastRangeOverflowPreservesCompositeDisjunctionCoverage() throws Exception {
+    void testFastRangeOverflowScansUncoveredCompositeMatches() throws Exception {
         createTableDefault();
         FileStoreTable table = table();
         append(table, 0, 40);
@@ -261,8 +261,9 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
         assertThat(read(fast, predicate)).containsExactlyInAnyOrder("p7", "p27", "p41");
         assertThat(capped.newReadBuilder().withFilter(predicate).newScan().plan().splits())
                 .isNotEmpty()
-                .hasOnlyElementsOfType(IndexQuerySplit.class);
-        assertThat(read(capped, predicate)).containsExactlyInAnyOrder("p7", "p27", "p41");
+                .hasOnlyElementsOfType(DataSplit.class);
+        assertThat(read(capped, predicate))
+                .containsExactlyInAnyOrder("p7", "p27", "p41", "p47", "p67");
     }
 
     @Test

@@ -23,9 +23,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
-import org.apache.paimon.globalindex.GlobalIndexEvaluator.IndexLookup;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
 import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
@@ -49,7 +46,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -58,7 +54,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -116,12 +111,6 @@ class GlobalIndexQuery {
             List<IndexFileMeta> files,
             IndexPathFactory pathFactory,
             Options options) {
-        return createForPredicate(
-                predicate, rowType, indexGroups(rowType, files, pathFactory), options);
-    }
-
-    private static Map<Integer, List<IndexGroup>> indexGroups(
-            RowType rowType, List<IndexFileMeta> files, IndexPathFactory pathFactory) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(
                         files.stream()
@@ -139,41 +128,7 @@ class GlobalIndexQuery {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return groups;
-    }
-
-    @Nullable
-    static GlobalIndexQuery fromEvaluatedLookup(
-            IndexLookup lookup,
-            RowType rowType,
-            List<IndexFileMeta> files,
-            IndexPathFactory pathFactory) {
-        return fromEvaluatedLookup(lookup, indexGroups(rowType, files, pathFactory));
-    }
-
-    @Nullable
-    private static GlobalIndexQuery fromEvaluatedLookup(
-            IndexLookup lookup, Map<Integer, List<IndexGroup>> groups) {
-        if (lookup.predicate != null) {
-            List<IndexGroup> fieldGroups =
-                    groups.getOrDefault(lookup.fieldId, Collections.emptyList()).stream()
-                            .filter(group -> group.extraFields.isEmpty())
-                            .collect(Collectors.toList());
-            // Keep the exact file list used by the eager evaluator, including its lookup budget.
-            return fieldGroups.isEmpty()
-                    ? null
-                    : new GlobalIndexQuery(
-                            lookup.predicate, false, Collections.emptyList(), fieldGroups);
-        }
-        List<GlobalIndexQuery> children = new ArrayList<>();
-        for (IndexLookup child : lookup.children) {
-            GlobalIndexQuery selected = fromEvaluatedLookup(child, groups);
-            if (selected == null) {
-                return null;
-            }
-            children.add(selected);
-        }
-        return new GlobalIndexQuery(null, lookup.union, children, Collections.emptyList());
+        return createForPredicate(predicate, rowType, groups, options);
     }
 
     @Nullable
@@ -480,122 +435,11 @@ class GlobalIndexQuery {
         return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
     }
 
-    boolean canReplayFast() {
-        if (predicate != null) {
-            return !groups.isEmpty()
-                    && groups.stream()
-                            .allMatch(
-                                    group ->
-                                            !group.routed()
-                                                    && (BTreeGlobalIndexerFactory.IDENTIFIER.equals(
-                                                                    group.type)
-                                                            || BitmapGlobalIndexerFactory.IDENTIFIER
-                                                                    .equals(group.type)));
-        }
-        return children.stream().allMatch(GlobalIndexQuery::canReplayFast);
-    }
-
-    /** Selects replayable index groups for each retained data split during FAST fallback. */
-    static final class FastReplay {
-
-        private final GlobalIndexQuery query;
-        private final List<FastReplay> children;
-        private final List<IndexGroup> sortedGroups;
-        private final long[] maxEnds;
-
-        FastReplay(GlobalIndexQuery query) {
-            this.query = query;
-            this.children =
-                    query.children.stream().map(FastReplay::new).collect(Collectors.toList());
-            this.sortedGroups = new ArrayList<>(query.groups);
-            sortedGroups.sort(Comparator.comparingLong(group -> group.range.from));
-            this.maxEnds = new long[sortedGroups.size()];
-            indexMaxEnds(0, sortedGroups.size());
-        }
-
-        GlobalIndexQuery forRanges(List<Range> ranges) {
-            return forRanges(ranges, RowRangeIndex.create(ranges));
-        }
-
-        private GlobalIndexQuery forRanges(List<Range> ranges, RowRangeIndex splitRows) {
-            if (query.predicate == null) {
-                List<GlobalIndexQuery> selectedChildren =
-                        children.stream()
-                                .map(child -> child.forRanges(ranges, splitRows))
-                                .collect(Collectors.toList());
-                return new GlobalIndexQuery(
-                        null, query.union, selectedChildren, Collections.emptyList());
-            }
-
-            List<IndexGroup> selected = new ArrayList<>();
-            selectGroups(splitRows, 0, sortedGroups.size(), selected);
-
-            RowRangeIndex coverage =
-                    RowRangeIndex.create(
-                            selected.stream()
-                                    .map(group -> group.range)
-                                    .collect(Collectors.toList()));
-            for (Range range : ranges) {
-                addUncoveredGroups(range, coverage, selected);
-            }
-            return new GlobalIndexQuery(query.predicate, false, Collections.emptyList(), selected);
-        }
-
-        private void addUncoveredGroups(
-                Range range, RowRangeIndex coverage, List<IndexGroup> selected) {
-            // The existing query format treats a group without files as a known empty result
-            // in its range. This keeps uncovered rows false for each FAST branch before AND/OR.
-            IndexGroup template = sortedGroups.get(0);
-            long start = range.from;
-            for (Range covered : coverage.intersectedRanges(start, range.to)) {
-                if (covered.from > start) {
-                    selected.add(template.withNoMatchingFiles(new Range(start, covered.from - 1)));
-                }
-                if (covered.to == range.to) {
-                    return;
-                }
-                start = covered.to + 1;
-            }
-            selected.add(template.withNoMatchingFiles(new Range(start, range.to)));
-        }
-
-        private long indexMaxEnds(int from, int to) {
-            if (from == to) {
-                return Long.MIN_VALUE;
-            }
-            int middle = from + (to - from) / 2;
-            long maxEnd =
-                    Math.max(
-                            sortedGroups.get(middle).range.to,
-                            Math.max(indexMaxEnds(from, middle), indexMaxEnds(middle + 1, to)));
-            maxEnds[middle] = maxEnd;
-            return maxEnd;
-        }
-
-        private void selectGroups(
-                RowRangeIndex splitRows, int from, int to, List<IndexGroup> selected) {
-            if (from == to) {
-                return;
-            }
-            int middle = from + (to - from) / 2;
-            // Prune whole subtrees even when one wide shard overlaps many smaller ones.
-            if (!splitRows.intersects(sortedGroups.get(from).range.from, maxEnds[middle])) {
-                return;
-            }
-            selectGroups(splitRows, from, middle, selected);
-            IndexGroup group = sortedGroups.get(middle);
-            if (splitRows.intersects(group.range.from, group.range.to)) {
-                selected.add(group);
-            }
-            selectGroups(splitRows, middle + 1, to, selected);
-        }
-    }
-
     GlobalIndexResult evaluate(FileIO fileIO, Options options, List<Range> ranges)
             throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluateWithExecutor(fileIO, options, ranges, executor, false, null).get().result();
+        return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
     }
 
     /** Retain candidates wherever a child predicate cannot be evaluated by an index. */
@@ -651,18 +495,9 @@ class GlobalIndexQuery {
     /** Preserve unsupported-reader fallback and coverage of the paths that actually contributed. */
     Optional<Evaluation> evaluateWithCoverage(FileIO fileIO, Options options, List<Range> ranges)
             throws IOException {
-        return evaluateWithCoverage(fileIO, options, ranges, null);
-    }
-
-    Optional<Evaluation> evaluateWithCoverage(
-            FileIO fileIO,
-            Options options,
-            List<Range> ranges,
-            @Nullable Map<GlobalIndexQuery, GlobalIndexQuery> evaluatedQueries)
-            throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluateWithExecutor(fileIO, options, ranges, executor, true, evaluatedQueries);
+        return evaluateWithExecutor(fileIO, options, ranges, executor, true);
     }
 
     private Optional<Evaluation> evaluateWithExecutor(
@@ -670,24 +505,16 @@ class GlobalIndexQuery {
             Options options,
             List<Range> ranges,
             ExecutorService executor,
-            boolean allowUnsupported,
-            @Nullable Map<GlobalIndexQuery, GlobalIndexQuery> evaluatedQueries)
+            boolean allowUnsupported)
             throws IOException {
         if (predicate == null) {
             GlobalIndexResult result = null;
             Set<Integer> fields = new HashSet<>();
             List<Range> coverage = null;
-            List<GlobalIndexQuery> evaluatedChildren =
-                    evaluatedQueries == null ? null : new ArrayList<>();
             for (GlobalIndexQuery child : children) {
                 Optional<Evaluation> evaluation =
                         child.evaluateWithExecutor(
-                                fileIO,
-                                options,
-                                ranges,
-                                executor,
-                                allowUnsupported,
-                                evaluatedQueries);
+                                fileIO, options, ranges, executor, allowUnsupported);
                 if (!evaluation.isPresent()) {
                     if (union) {
                         return Optional.empty();
@@ -700,34 +527,20 @@ class GlobalIndexQuery {
                 fields.addAll(evaluation.get().contributingFieldIds());
                 List<Range> childCoverage = evaluation.get().coveredRanges();
                 coverage = coverage == null ? childCoverage : Range.and(coverage, childCoverage);
-                if (evaluatedChildren != null) {
-                    evaluatedChildren.add(evaluatedQueries.get(child));
-                }
             }
-            if (result == null) {
-                return Optional.empty();
-            }
-            if (evaluatedQueries != null) {
-                evaluatedQueries.put(
-                        this,
-                        new GlobalIndexQuery(
-                                null, union, evaluatedChildren, Collections.emptyList()));
-            }
-            return Optional.of(new Evaluation(result, fields, coverage));
+            return result == null
+                    ? Optional.empty()
+                    : Optional.of(new Evaluation(result, fields, coverage));
         }
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
         Set<Integer> fields = new HashSet<>();
         List<Range> coverage = new ArrayList<>();
-        List<IndexGroup> evaluatedGroups = evaluatedQueries == null ? null : new ArrayList<>();
         boolean supported = groups.isEmpty();
         for (IndexGroup group : groups) {
             if (group.files.isEmpty()) {
                 supported = true;
                 fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
                 coverage.add(group.range);
-                if (evaluatedGroups != null) {
-                    evaluatedGroups.add(group);
-                }
                 continue;
             }
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
@@ -756,9 +569,6 @@ class GlobalIndexQuery {
                 supported = true;
                 fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
                 coverage.add(group.range);
-                if (evaluatedGroups != null) {
-                    evaluatedGroups.add(group);
-                }
                 // Clip in index-local coordinates before offset() iterates the retained rows.
                 result = result.or(splitRows.and(matches.get()).offset(group.range.from));
             } catch (InterruptedException e) {
@@ -768,17 +578,10 @@ class GlobalIndexQuery {
                 throw new IOException("Failed to evaluate index query split", e.getCause());
             }
         }
-        if (!supported) {
-            return Optional.empty();
-        }
-        if (evaluatedQueries != null) {
-            evaluatedQueries.put(
-                    this,
-                    new GlobalIndexQuery(
-                            predicate, false, Collections.emptyList(), evaluatedGroups));
-        }
-        return Optional.of(
-                new Evaluation(result, fields, Range.sortAndMergeOverlap(coverage, true)));
+        return supported
+                ? Optional.of(
+                        new Evaluation(result, fields, Range.sortAndMergeOverlap(coverage, true)))
+                : Optional.empty();
     }
 
     private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
@@ -995,10 +798,6 @@ class GlobalIndexQuery {
 
         private boolean isCompositeBTree() {
             return "btree".equals(type) && !extraFields.isEmpty();
-        }
-
-        private IndexGroup withNoMatchingFiles(Range gap) {
-            return new IndexGroup(type, field, extraFields, gap, Collections.emptyList());
         }
 
         private boolean routed() {

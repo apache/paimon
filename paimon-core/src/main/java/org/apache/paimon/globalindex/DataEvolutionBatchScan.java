@@ -24,7 +24,6 @@ import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.PlanningEvaluation;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -75,7 +74,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
@@ -328,25 +326,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (rowRangeIndex == null) {
             Optional<GlobalIndexResult> indexResult;
             int maxRanges = 0;
-            Supplier<GlobalIndexQuery> fastReplay = null;
             if (canPushDownGlobalIndexTopN()) {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
                 maxRanges = scalarSelectionRangeLimit();
-                CoreOptions options = table.coreOptions();
-                boolean fast =
-                        maxRanges > 0
-                                && options.scalarScanSearchMode() == GlobalIndexSearchMode.FAST;
-                Optional<ScalarIndexResult> scalar =
-                        evalGlobalIndex(fast && supportsIndexQuery(options));
-                indexResult = scalar.map(result -> result.matches);
-                if (fast) {
-                    fastReplay = scalar.map(result -> result.fastReplay).orElse(null);
-                    if (fastReplay == null) {
-                        maxRanges = 0;
-                    }
-                }
+                indexResult = evalGlobalIndex();
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
@@ -356,20 +341,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 ? RowRangeIndex.fromBitmap(candidates)
                                 : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
                 if (rowRangeIndex == null) {
-                    if (fastReplay != null) {
-                        GlobalIndexQuery query = fastReplay.get();
-                        if (query != null && query.canReplayFast()) {
-                            return planWithFileGroupPruning(candidates, maxRanges, query);
-                        }
-                        // Lookups without a replayable query require the exact FAST selection.
-                        rowRangeIndex = RowRangeIndex.fromBitmap(candidates);
-                    } else if (batchScan.snapshotReader().hasNonPartitionFilter()) {
-                        return planWithFileGroupPruning(candidates, maxRanges, null);
-                    } else {
-                        LOG.info(
-                                "Scan table '{}' without global index because the row-ID range limit was exceeded.",
-                                table.name());
+                    GlobalIndexSearchMode searchMode = table.coreOptions().scalarScanSearchMode();
+                    if (searchMode == GlobalIndexSearchMode.FAST
+                            || batchScan.snapshotReader().hasNonPartitionFilter()) {
+                        return planWithFileGroupPruning(candidates, maxRanges, searchMode);
                     }
+                    LOG.info(
+                            "Scan table '{}' without global index because the row-ID range limit was exceeded.",
+                            table.name());
                 }
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
@@ -400,12 +379,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private Plan planWithFileGroupPruning(
-            RoaringNavigableMap64 candidates, int maxRanges, @Nullable GlobalIndexQuery fastQuery) {
+            RoaringNavigableMap64 candidates, int maxRanges, GlobalIndexSearchMode searchMode) {
         // The snapshot is pinned by index evaluation. Keep the regular predicate on the scan
         // and plan without a row-level LIMIT or TopN before removing any file groups.
         Plan plan = batchScan.plan();
         if (!(plan instanceof SnapshotReader.Plan)) {
-            return fastQuery == null ? plan : planFastReplay(plan, fastQuery);
+            return plan;
         }
         SnapshotReader.Plan dataPlan = (SnapshotReader.Plan) plan;
         SnapshotReader.Plan prunedPlan = pruneFileGroups(dataPlan, candidates);
@@ -419,41 +398,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (ranges.isPresent()) {
             return wrapToIndexSplits(prunedPlan.splits(), ranges.get(), null);
         }
-        if (fastQuery != null) {
-            return planFastReplay(prunedPlan, fastQuery);
-        }
+        // In FAST, file groups dropped using index coverage can still contain matching rows.
+        SnapshotReader.Plan fallbackPlan =
+                searchMode == GlobalIndexSearchMode.FAST ? dataPlan : prunedPlan;
         LOG.info(
                 "Scan table '{}' with {} because the row-ID range limit was exceeded.",
                 table.name(),
-                prunedPlan == dataPlan ? "the original data plan" : "file group pruning");
-        return prunedPlan;
-    }
-
-    private Plan planFastReplay(Plan plan, GlobalIndexQuery query) {
-        List<Split> splits = plan.splits();
-        if (splits.isEmpty()) {
-            return plan;
-        }
-        GlobalIndexQuery.FastReplay replay = new GlobalIndexQuery.FastReplay(query);
-        Map<String, String> indexOptions = indexQueryOptions(GlobalIndexSearchMode.FAST);
-        List<Split> replaySplits = new ArrayList<>(splits.size());
-        for (Split split : splits) {
-            DataSplit dataSplit = dataSplit(split);
-            List<Range> ranges =
-                    GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
-            replaySplits.add(
-                    withAuth(
-                            split,
-                            new IndexQuerySplit(
-                                    dataSplit,
-                                    replay.forRanges(ranges),
-                                    indexOptions,
-                                    Collections.emptyList())));
-        }
-        LOG.info(
-                "Scan table '{}' with split-local FAST index queries because the row-ID range limit was exceeded.",
-                table.name());
-        return () -> replaySplits;
+                fallbackPlan == dataPlan ? "the original data plan" : "file group pruning");
+        return fallbackPlan;
     }
 
     @VisibleForTesting
@@ -604,7 +556,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (indexQuery == null) {
             return dataPlan;
         }
-        Map<String, String> indexOptions = indexQueryOptions(searchMode);
+        // Store the effective mode so restored splits keep the original scan semantics.
+        Map<String, String> indexOptions = new HashMap<>(table.options());
+        indexOptions.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), searchMode.toString());
         List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = dataSplit(split);
@@ -624,13 +578,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;
-    }
-
-    private Map<String, String> indexQueryOptions(GlobalIndexSearchMode searchMode) {
-        // Store the effective mode so restored splits keep the original scan semantics.
-        Map<String, String> options = new HashMap<>(table.options());
-        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), searchMode.toString());
-        return options;
     }
 
     @Override
@@ -701,7 +648,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return maxSelectionRanges;
     }
 
-    private Optional<ScalarIndexResult> evalGlobalIndex(boolean captureFastQuery) {
+    private Optional<GlobalIndexResult> evalGlobalIndex() {
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
         // can hand in one that was computed off the raw values.
@@ -709,7 +656,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return Optional.empty();
         }
         if (this.globalIndexResult != null) {
-            return Optional.of(new ScalarIndexResult(globalIndexResult, null));
+            return Optional.of(globalIndexResult);
         }
         if (filter == null) {
             return Optional.empty();
@@ -727,11 +674,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForPredicate(
-                        table,
-                        batchScan.prepareSnapshot(),
-                        partitionFilter,
-                        globalIndexFilter,
-                        captureFastQuery);
+                        table, batchScan.prepareSnapshot(), partitionFilter, globalIndexFilter);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -739,16 +682,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             long lookupStart = System.nanoTime();
-            Optional<PlanningEvaluation> result = scanner.scanForPlanning(globalIndexFilter);
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(globalIndexFilter);
             long lookupDuration = System.nanoTime() - lookupStart;
             if (result.isPresent()) {
-                PlanningEvaluation evaluated = result.get();
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        evaluated
-                                .evaluation
-                                .result()
-                                .or(scanner.unindexedRowsForEvaluation(evaluated.evaluation));
+                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(
@@ -759,22 +699,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         metadataDuration / 1_000_000,
                         lookupDuration / 1_000_000,
                         coverageDuration / 1_000_000);
-                return Optional.of(new ScalarIndexResult(finalResult, evaluated.fastReplay));
+                return Optional.of(finalResult);
             }
             return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    private static final class ScalarIndexResult {
-        private final GlobalIndexResult matches;
-        @Nullable private final Supplier<GlobalIndexQuery> fastReplay;
-
-        private ScalarIndexResult(
-                GlobalIndexResult matches, @Nullable Supplier<GlobalIndexQuery> fastReplay) {
-            this.matches = matches;
-            this.fastReplay = fastReplay;
         }
     }
 

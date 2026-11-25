@@ -47,7 +47,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
@@ -72,20 +71,11 @@ public class GlobalIndexEvaluator implements Closeable {
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
     private final ContainsRefinementEvaluator containsRefinementEvaluator;
-    private final boolean captureIndexPredicate;
 
     public GlobalIndexEvaluator(
             RowType rowType, IntFunction<Collection<GlobalIndexReader>> readersFunction) {
-        this(rowType, readersFunction, false);
-    }
-
-    public GlobalIndexEvaluator(
-            RowType rowType,
-            IntFunction<Collection<GlobalIndexReader>> readersFunction,
-            boolean captureIndexPredicate) {
         this.rowType = rowType;
         this.readersFunction = readersFunction;
-        this.captureIndexPredicate = captureIndexPredicate;
         this.indexReadersCache = new ConcurrentHashMap<>();
         this.containsRefinementEvaluator =
                 new ContainsRefinementEvaluator(
@@ -164,9 +154,7 @@ public class GlobalIndexEvaluator implements Closeable {
         }
         FieldRef fieldRef = fieldRefOptional.get();
         return visitFieldAsync(
-                fieldRef,
-                captureIndexPredicate ? lookup : null,
-                reader -> lookup.function().visit(reader, fieldRef, lookup.literals()));
+                fieldRef, reader -> lookup.function().visit(reader, fieldRef, lookup.literals()));
     }
 
     static LeafPredicate indexLookup(LeafPredicate leaf) {
@@ -180,7 +168,6 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private CompletableFuture<Optional<Evaluation>> visitFieldAsync(
             FieldRef fieldRef,
-            @Nullable Predicate lookup,
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
@@ -215,16 +202,7 @@ public class GlobalIndexEvaluator implements Closeable {
                             return compoundResult.map(
                                     result ->
                                             new Evaluation(
-                                                    result,
-                                                    Collections.singleton(fieldId),
-                                                    null,
-                                                    lookup == null
-                                                            ? null
-                                                            : new IndexLookup(
-                                                                    lookup,
-                                                                    fieldId,
-                                                                    false,
-                                                                    Collections.emptyList())));
+                                                    result, Collections.singleton(fieldId), null));
                         });
     }
 
@@ -261,10 +239,6 @@ public class GlobalIndexEvaluator implements Closeable {
                     range =
                             visitFieldAsync(
                                     field,
-                                    captureIndexPredicate
-                                            ? new CompoundPredicate(
-                                                    And.INSTANCE, Arrays.asList(lower, upper))
-                                            : null,
                                     reader ->
                                             reader.visitRange(
                                                     field,
@@ -308,47 +282,35 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private Optional<Evaluation> combineResults(
             List<Optional<Evaluation>> results, CompoundPredicate predicate) {
-        boolean union = predicate.function() instanceof Or;
-        GlobalIndexResult compoundResult = union ? GlobalIndexResult.createEmpty() : null;
         Set<Integer> contributingFieldIds = new HashSet<>();
-        List<IndexLookup> indexLookups = captureIndexPredicate ? new ArrayList<>() : null;
-        for (Optional<Evaluation> child : results) {
-            if (!child.isPresent()) {
-                if (union) {
+        if (predicate.function() instanceof Or) {
+            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
+            for (Optional<Evaluation> child : results) {
+                if (!child.isPresent()) {
                     return Optional.empty();
                 }
-                continue;
+                compoundResult = compoundResult.or(child.get().result());
+                contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            Evaluation evaluation = child.get();
-            GlobalIndexResult matches = evaluation.result();
-            compoundResult =
-                    compoundResult == null
-                            ? matches
-                            : union ? compoundResult.or(matches) : compoundResult.and(matches);
-            contributingFieldIds.addAll(evaluation.contributingFieldIds());
-            if (indexLookups != null) {
-                IndexLookup lookup = evaluation.indexLookup();
-                if (lookup == null) {
-                    indexLookups = null;
-                } else {
-                    indexLookups.add(lookup);
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
+        } else {
+            Optional<GlobalIndexResult> compoundResult = Optional.empty();
+            for (Optional<Evaluation> child : results) {
+                if (child.isPresent()) {
+                    if (compoundResult.isPresent()) {
+                        compoundResult =
+                                Optional.of(compoundResult.get().and(child.get().result()));
+                    } else {
+                        compoundResult = Optional.of(child.get().result());
+                    }
+                    contributingFieldIds.addAll(child.get().contributingFieldIds());
+                }
+                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
+                    break;
                 }
             }
-            if (!union && compoundResult.results().isEmpty()) {
-                break;
-            }
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
         }
-        if (compoundResult == null) {
-            return Optional.empty();
-        }
-        IndexLookup indexLookup = null;
-        if (indexLookups != null && !indexLookups.isEmpty()) {
-            indexLookup =
-                    indexLookups.size() == 1
-                            ? indexLookups.get(0)
-                            : new IndexLookup(null, -1, union, indexLookups);
-        }
-        return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null, indexLookup));
     }
 
     /**
@@ -359,20 +321,11 @@ public class GlobalIndexEvaluator implements Closeable {
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
         @Nullable private final List<Range> coveredRanges;
-        @Nullable private final IndexLookup indexLookup;
 
         Evaluation(
                 GlobalIndexResult result,
                 Collection<Integer> contributingFieldIds,
                 @Nullable List<Range> coveredRanges) {
-            this(result, contributingFieldIds, coveredRanges, null);
-        }
-
-        private Evaluation(
-                GlobalIndexResult result,
-                Collection<Integer> contributingFieldIds,
-                @Nullable List<Range> coveredRanges,
-                @Nullable IndexLookup indexLookup) {
             this.result = result;
             this.coveredRanges =
                     coveredRanges == null
@@ -380,7 +333,6 @@ public class GlobalIndexEvaluator implements Closeable {
                             : Collections.unmodifiableList(new ArrayList<>(coveredRanges));
             this.contributingFieldIds =
                     Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));
-            this.indexLookup = indexLookup;
         }
 
         public GlobalIndexResult result() {
@@ -394,31 +346,6 @@ public class GlobalIndexEvaluator implements Closeable {
 
         public Set<Integer> contributingFieldIds() {
             return contributingFieldIds;
-        }
-
-        /** The supported lookups in boolean order, when they can be replayed independently. */
-        @Nullable
-        IndexLookup indexLookup() {
-            return indexLookup;
-        }
-    }
-
-    /** Lookup tree captured during planning. A paired range is a single lookup. */
-    static final class IndexLookup {
-        @Nullable final Predicate predicate;
-        final int fieldId;
-        final boolean union;
-        final List<IndexLookup> children;
-
-        private IndexLookup(
-                @Nullable Predicate predicate,
-                int fieldId,
-                boolean union,
-                List<IndexLookup> children) {
-            this.predicate = predicate;
-            this.fieldId = fieldId;
-            this.union = union;
-            this.children = children;
         }
     }
 
