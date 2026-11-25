@@ -77,7 +77,7 @@ trait PaimonRowLevelCommand
 
   protected def findCandidateDataSplits(
       condition: Expression,
-      output: Seq[Attribute]): Seq[DataSplit] = {
+      relation: DataSourceV2Relation): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
     // dropStats after filter push down
@@ -86,12 +86,16 @@ trait PaimonRowLevelCommand
     }
     if (condition != TrueLiteral) {
       val filter =
-        convertConditionToPaimonPredicate(condition, output, rowType, ignorePartialFailure = true)
+        convertConditionToPaimonPredicate(
+          condition,
+          relation.output,
+          rowType,
+          ignorePartialFailure = true)
       filter.foreach(snapshotReader.withFilter)
       if (coreOptions.dataEvolutionEnabled()) {
-        PaimonRowLevelCommand.conjunctiveRowIdRange(condition).foreach {
-          range => snapshotReader.withRowRanges(Collections.singletonList(range))
-        }
+        PaimonRowLevelCommand
+          .conjunctiveRowIdRange(condition, relation.output ++ relation.metadataOutput)
+          .foreach(range => snapshotReader.withRowRanges(Collections.singletonList(range)))
       }
     }
 
@@ -318,9 +322,14 @@ trait PaimonRowLevelCommand
 object PaimonRowLevelCommand {
 
   /** Push down only row-id bounds guaranteed by top-level conjuncts. */
-  private[commands] def conjunctiveRowIdRange(condition: Expression): Option[Range] = {
+  private[commands] def conjunctiveRowIdRange(
+      condition: Expression,
+      targetAttributes: Seq[Attribute]): Option[Range] = {
+    // A user column named _row_id is legal; only the target's exact metadata attribute is safe.
+    val rowIdExprIds = targetAttributes.filter(_.name == ROW_ID_COLUMN).map(_.exprId).toSet
     def isRowId(expression: Expression): Boolean = expression match {
-      case attribute: Attribute => attribute.name.equalsIgnoreCase(ROW_ID_COLUMN)
+      case attribute: Attribute =>
+        attribute.name == ROW_ID_COLUMN && rowIdExprIds.contains(attribute.exprId)
       case _ => false
     }
 

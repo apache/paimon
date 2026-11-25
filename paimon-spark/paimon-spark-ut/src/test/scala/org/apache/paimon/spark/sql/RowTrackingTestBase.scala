@@ -31,7 +31,7 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, EqualTo, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.QueryExecution
@@ -39,7 +39,6 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.Utils
-import org.apache.spark.sql.types.LongType
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -686,6 +685,35 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: user _row_id predicate does not prune metadata row id files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, `_row_id` BIGINT, data INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '100')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 100, 10)")
+      sql("INSERT INTO t VALUES (2, 100, 20)")
+
+      val relation = createRelationV2("t")
+      val userRowId = relation.output.find(_.name == "_row_id").get
+      case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
+
+        def candidates(condition: Expression): Seq[DataSplit] =
+          findCandidateDataSplits(condition, relation)
+      }
+      def fileCount(splits: Seq[DataSplit]): Int =
+        splits.flatMap(_.dataFiles().asScala.map(_.fileName())).distinct.size
+
+      val probe = RowLevelProbe(loadTable("t"))
+      assert(fileCount(probe.candidates(Literal.TrueLiteral)) == 2)
+      assert(fileCount(probe.candidates(EqualTo(userRowId, Literal(100L)))) == 2)
+    }
+  }
+
   test("Data Evolution: row id delete prunes a multi-file table") {
     withTable("t") {
       sql("""
@@ -700,20 +728,23 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           s"INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range(${batch * 100}, ${(batch + 1) * 100})")
       }
 
-      val rowId = AttributeReference("_ROW_ID", LongType)()
+      val relation = createRelationV2("t")
+      val rowId = (relation.output ++ relation.metadataOutput)
+        .find(_.name == "_ROW_ID")
+        .get
       case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
         override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
 
-        def candidates(condition: Expression, output: Seq[Attribute]): Seq[DataSplit] =
-          findCandidateDataSplits(condition, output)
+        def candidates(condition: Expression): Seq[DataSplit] =
+          findCandidateDataSplits(condition, relation)
       }
       val probe = RowLevelProbe(loadTable("t"))
       def fileCount(splits: Seq[DataSplit]): Int =
         splits.flatMap(_.dataFiles().asScala.map(_.fileName())).distinct.size
 
-      val unprunedFiles = fileCount(probe.candidates(Literal.TrueLiteral, Seq(rowId)))
+      val unprunedFiles = fileCount(probe.candidates(Literal.TrueLiteral))
       val prunedFiles =
-        fileCount(probe.candidates(EqualTo(rowId, Literal(550L)), Seq(rowId)))
+        fileCount(probe.candidates(EqualTo(rowId, Literal(550L))))
       assert(unprunedFiles == 12)
       assert(prunedFiles == 1)
 

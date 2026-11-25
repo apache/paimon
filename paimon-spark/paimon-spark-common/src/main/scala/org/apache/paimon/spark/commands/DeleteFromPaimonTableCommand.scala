@@ -70,7 +70,7 @@ case class DeleteFromPaimonTableCommand(
   private def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     val readSnapshot = table.snapshotManager().latestSnapshot()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
-    val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
+    val candidateDataSplits = findCandidateDataSplits(condition, relation)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (deletionVectorsEnabled) {
