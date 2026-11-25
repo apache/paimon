@@ -43,8 +43,8 @@ _NULL_TYPE_ID = 0
 _TRUE_TYPE_ID = 1
 _FALSE_TYPE_ID = 2
 _NULL_VALUE_BYTES: bytes = bytes([_primitive_header(_NULL_TYPE_ID)])
-# Use the bulk decoder only when enough fields amortize the array allocations.
-_MIN_BULK_OBJECT_FIELDS = 256
+# Allow enough root fields to amortize setup even when the dictionary is new.
+_MIN_BULK_OBJECT_FIELDS = 1024
 
 
 def _metadata_id_to_name(metadata: bytes) -> Dict[int, str]:
@@ -520,6 +520,16 @@ def _decompose_object_fields(obj_fields, shredded_by_name, metadata, id_to_name)
     }
 
 
+def _build_wide_object_lookup(id_to_name, shredded_names):
+    if any(index not in id_to_name for index in range(len(id_to_name))):
+        return None
+    names = tuple(id_to_name[index] for index in range(len(id_to_name)))
+    ranks = np.empty(len(names), dtype='i4')
+    for rank, index in enumerate(sorted(range(len(names)), key=names.__getitem__)):
+        ranks[index] = rank
+    return names, ranks, np.asarray([name in shredded_names for name in names], dtype=bool)
+
+
 def decompose_variant(
     gv: 'GenericVariant',
     obj_fields: List[ObjectField],
@@ -592,14 +602,7 @@ def shred_variant_column(
 
     @lru_cache(maxsize=16)
     def wide_object_lookup(metadata):
-        id_to_name = metadata_names(metadata)
-        if any(index not in id_to_name for index in range(len(id_to_name))):
-            return None
-        names = tuple(id_to_name[index] for index in range(len(id_to_name)))
-        ranks = np.empty(len(names), dtype='i4')
-        for rank, index in enumerate(sorted(range(len(names)), key=names.__getitem__)):
-            ranks[index] = rank
-        return names, ranks, np.asarray([name in shredded_names for name in names], dtype=bool)
+        return _build_wide_object_lookup(metadata_names(metadata), shredded_names)
 
     result = []
     for row in rows:
@@ -614,7 +617,9 @@ def shred_variant_column(
         if value and (value[0] & 0x3) == _OBJECT:
             id_to_name = metadata_names(metadata)
             size = _read_unsigned(value, 1, _U32_SIZE if value[0] & 0x40 else 1)
-            if size >= _MIN_BULK_OBJECT_FIELDS:
+            # The lookup sorts the entire dictionary. Bound the extra work
+            # when many keys belong to nested values that remain in the residual.
+            if size >= _MIN_BULK_OBJECT_FIELDS and len(id_to_name) <= size + size // 4:
                 lookup = wide_object_lookup(metadata)
                 parts = _split_wide_object(value, size, lookup) if lookup is not None else None
                 if parts is not None:

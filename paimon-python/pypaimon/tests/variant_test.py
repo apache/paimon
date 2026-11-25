@@ -1045,7 +1045,7 @@ class TestShreddingWrite(unittest.TestCase):
             ('missing', 'DOUBLE'),
         ])
         target = shredding_schema_to_arrow_type(obj_fields)
-        for field_count, field_width in ((256, 8), (320, 300)):
+        for field_count, field_width in ((1024, 8), (1100, 300)):
             with self.subTest(field_count=field_count, field_width=field_width):
                 # Reversed insertion order exercises object offsets that are
                 # not monotonic in key order. The larger row needs 24-bit offsets.
@@ -1072,8 +1072,8 @@ class TestShreddingWrite(unittest.TestCase):
                 self.assertEqual(GenericVariant.from_arrow_struct(rebuilt[0].as_py()).to_python(), value)
 
     def test_wide_objects_with_unsorted_or_invalid_ids_use_existing_decoder(self):
-        obj_fields = self._obj_fields_for('payload', [('field_000', 'BIGINT')])
-        variant = GenericVariant.from_python({'field_{:03d}'.format(i): i for i in range(320)})
+        obj_fields = self._obj_fields_for('payload', [('field_0000', 'BIGINT')])
+        variant = GenericVariant.from_python({'field_{:04d}'.format(i): i for i in range(1024)})
         fields = _extract_overflow_fields(variant.value())
         target = shredding_schema_to_arrow_type(obj_fields)
 
@@ -1085,10 +1085,31 @@ class TestShreddingWrite(unittest.TestCase):
         fallback.assert_called_once()
         self.assertEqual(result.to_pylist(), [decompose_variant(unordered, obj_fields)])
 
-        fields[-1] = (999, fields[-1][1])
+        fields[-1] = (2048, fields[-1][1])
         malformed = GenericVariant(_build_object_value(fields, already_sorted=True), variant.metadata())
         with self.assertRaisesRegex(ValueError, 'key id out of range'):
             shred_variant_column(GenericVariant.to_arrow_array([malformed]), obj_fields, target)
+
+    def test_oversized_metadata_skips_building_the_wide_lookup(self):
+        obj_fields = self._obj_fields_for('payload', [('field_0000', 'DOUBLE')])
+        target = shredding_schema_to_arrow_type(obj_fields)
+        variants = []
+        for index, nested_count in enumerate((257, 256, 257)):
+            value = {'field_{:04d}'.format(i): float(i) for i in range(1023)}
+            value['nested'] = {
+                'nested_{}_{}'.format(index, i): i for i in range(nested_count)
+            }
+            variants.append(GenericVariant.from_python(value))
+        column = GenericVariant.to_arrow_array(variants)
+        expected = [decompose_variant(variant, obj_fields) for variant in variants]
+        from pypaimon.execution.python.read import variant_shredding
+        with patch.object(variant_shredding, '_build_wide_object_lookup',
+                          wraps=variant_shredding._build_wide_object_lookup) as lookup:
+            self.assertEqual(shred_variant_column(column, obj_fields, target).to_pylist(), expected)
+        # Only the middle row's dictionary fits. The neighbouring rows have
+        # distinct metadata and must not build the sorted lookup at all.
+        lookup.assert_called_once()
+        self.assertEqual(len(lookup.call_args[0][0]), 1280)
 
     def test_reuses_metadata_for_nested_shredding(self):
         obj_fields = self._obj_fields_for('payload', [
