@@ -317,6 +317,11 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES.default_value()
         )
+        max_cached_video_files = (
+            table_options.read_video_max_cached_files()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_MAX_CACHED_FILES.default_value()
+        )
         self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
@@ -330,6 +335,7 @@ class PaimonDatasetReader(ABC):
                 collate_fn=_identity,
                 range_parallelism=self.blob_parallelism,
                 max_open_videos=cache_size,
+                max_cached_video_files=max_cached_video_files,
                 prefetch_max_bytes=prefetch_max_bytes,
             )
             for key in self._video_keys

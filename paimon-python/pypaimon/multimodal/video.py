@@ -33,6 +33,7 @@ try:
 except ImportError:  # Python 3.6
     copy_context = None
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.uri_reader import FileUriReader
 from pypaimon.table.row.blob import Blob, OffsetInputStream, VideoFrameDescriptor
 
@@ -535,7 +536,7 @@ class VideoFrameCollator:
     and worker; decoder buffers, RGB outputs and temporary copies are additional.
 
     The cache is process-local and keyed by physical video payload identity.
-    ``max_cached_video_files`` bounds pooled Arrow S3/OSS input files per collator.
+    ``max_cached_video_files`` overrides the table's ``read.video.max-cached-files``.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
     """
@@ -554,7 +555,7 @@ class VideoFrameCollator:
             range_parallelism=4,
             prefetch_max_bytes=0,
             decode_parallelism=1,
-            max_cached_video_files=0):
+            max_cached_video_files=None):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -588,15 +589,18 @@ class VideoFrameCollator:
                 or not isinstance(decode_parallelism, int)
                 or decode_parallelism <= 0):
             raise ValueError("decode_parallelism must be a positive int.")
-        if (isinstance(max_cached_video_files, bool)
-                or not isinstance(max_cached_video_files, int)
-                or max_cached_video_files < 0):
-            raise ValueError("max_cached_video_files must be a non-negative int.")
-
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
             raise ValueError("table must provide raw_table.file_io or file_io.")
+        if max_cached_video_files is None:
+            options = getattr(raw_table, "options", None)
+            max_cached_video_files = (options.read_video_max_cached_files()
+                                      if isinstance(options, CoreOptions) else 0)
+        elif (isinstance(max_cached_video_files, bool)
+              or not isinstance(max_cached_video_files, int)
+              or max_cached_video_files < 0):
+            raise ValueError("max_cached_video_files must be a non-negative int.")
 
         self.file_io = file_io
         self.video_column = video_column

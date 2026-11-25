@@ -73,10 +73,12 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             file_io.new_input_stream = open_stream
         token_io = object.__new__(RESTTokenFileIO)
         token_io.file_io = Mock(return_value=first)
+        table = SimpleNamespace(file_io=token_io, options=CoreOptions(Options({
+            "read.video.max-cached-files": "1"})))
         collator = VideoFrameCollator(
-            SimpleNamespace(file_io=token_io), video_column="camera",
+            table, video_column="camera",
             decoder_factory=identity, decode_fn=lambda source, _, row: source.read(),
-            max_cached_video_files=1, max_open_videos=2, decode_parallelism=2,
+            max_open_videos=2, decode_parallelism=2,
             collate_fn=list)
 
         def row(path, offset):
