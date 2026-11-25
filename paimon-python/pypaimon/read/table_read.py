@@ -133,7 +133,8 @@ class TableRead:
         splits and CPUs. Native workers buffer at most one batch each; batches
         from different split groups are emitted as they become ready because
         table reads do not guarantee row order. Python fallback reads remain
-        serial.
+        serial. ``blob_parallelism`` follows the backend-specific defaults
+        and total worker budget described in :meth:`to_arrow`.
         """
         from pypaimon.read.read_support import to_arrow_batch_reader
         return to_arrow_batch_reader(self, splits, blob_parallelism, parallelism)
@@ -206,12 +207,13 @@ class TableRead:
                 serially when a limit may discard rows, so discarded payloads
                 are not fetched by speculative split workers.
             blob_parallelism: maximum concurrent blob range reads within each
-                split reader. ``None`` or ``1`` (default) reads blobs serially;
-                ``>= 2`` enables concurrent ranged reads. On the
-                parallel path, peak blob threads (``parallelism`` *
-                ``blob_parallelism``) are capped at
-                ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
-                shrunk to stay within it.
+                split reader. ``None`` uses the native reader default (8), or 1
+                for Python reads and native preparation fallback. Explicit ``1``
+                keeps BLOB reads serial within each split; values must be >= 1.
+                Native execution caps active BLOB split groups and their combined
+                range reads at 64, reducing per-group concurrency using the actual
+                number of active groups. Python parallel reads also cap combined
+                BLOB workers at 64.
         """
         from pypaimon.read.read_dispatch import to_arrow
         return to_arrow(self, splits, parallelism, blob_parallelism)

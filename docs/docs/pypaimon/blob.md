@@ -92,8 +92,20 @@ and BLOB APIs. See
 
 ### Batch reading (recommended)
 
-Use `to_arrow_batch_reader` to read blob data in batches. Set
-`blob_parallelism` to enable concurrent blob reads within each batch:
+Use `to_arrow_batch_reader` to read blob data in batches. When
+`blob_parallelism` is omitted, native reads use the Rust reader's default
+(currently 8 concurrent BLOB range reads per active split group). Python reads,
+including native preparation fallback, retain a default of 1. Set
+`blob_parallelism=1` explicitly to keep BLOB reads serial within each split.
+
+Native execution caps the combined BLOB range-read concurrency at 64 and reduces
+per-group concurrency when needed. BLOB reads with a LIMIT retain a single split
+group and check the row quota before materializing output payloads. Python
+parallel reads also retain their existing worker cap. These rules apply to both
+`to_arrow_batch_reader` and `to_arrow`; row-by-row reading is unchanged.
+
+Set a positive `blob_parallelism` to override the per-group default within the
+backend's concurrency budget:
 
 ```python
 read_builder = table.new_read_builder()

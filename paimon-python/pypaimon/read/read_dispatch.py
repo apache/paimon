@@ -128,7 +128,7 @@ def _new_arrow_batch_reader(
         splits,
         schema,
         parallelism=effective,
-        blob_parallelism=effective_bp,
+        blob_parallelism=blob_parallelism,
         ordered=False,
     )
     if native_batches is not None:
@@ -167,12 +167,13 @@ def to_arrow(
             serially when a limit may discard rows, so discarded payloads
             are not fetched by speculative split workers.
         blob_parallelism: maximum concurrent blob range reads within each
-            split reader. ``None`` or ``1`` (default) reads blobs serially;
-            ``>= 2`` enables concurrent ranged reads. On the
-            parallel path, peak blob threads (``parallelism`` *
-            ``blob_parallelism``) are capped at
-            ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
-            shrunk to stay within it.
+            split reader. ``None`` uses the native reader default (8), or 1
+            for Python reads and native preparation fallback. Explicit ``1``
+            keeps BLOB reads serial within each split; values must be >= 1.
+            Native execution caps active BLOB split groups and their combined
+            range reads at 64, reducing per-group concurrency using the actual
+            number of active groups. Python parallel reads also cap combined
+            BLOB workers at 64.
     """
     effective_bp = self._resolve_blob_parallelism(blob_parallelism)
     effective = self._resolve_parallelism(parallelism, len(splits))
@@ -185,7 +186,7 @@ def to_arrow(
         splits,
         schema,
         parallelism=effective,
-        blob_parallelism=effective_bp,
+        blob_parallelism=blob_parallelism,
         ordered=True,
     )
     if native_batches is not None:

@@ -70,6 +70,56 @@ def _read(table, planner, reader):
         return sorted(read.to_arrow(plan.splits()).to_pylist(), key=lambda row: row['id'])
 
 
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+@pytest.mark.parametrize('split_count, blob_parallelism', [
+    (1, None), (16, None), (128, None), (1, 1), (16, 8),
+])
+def test_native_blob_default_and_overrides_reach_core(
+        tmp_path, method_name, split_count, blob_parallelism):
+    from unittest.mock import Mock
+    from pypaimon.execution.native.read import builder as native_builder
+
+    table = _table(tmp_path)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(_data())
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    table = table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
+    read_builder = table.new_read_builder()
+    splits = read_builder.new_scan().plan().splits()
+    assert len(splits) == 1
+    # Repeated real splits exercise Core grouping with fewer/more splits than
+    # its BLOB worker budget, without manufacturing storage metadata.
+    splits = splits * split_count
+    configured = []
+    configure = native_builder._configure_native_read_builder
+
+    def observe_builder(*args, **kwargs):
+        builder = Mock(wraps=configure(*args, **kwargs))
+        configured.append(builder)
+        return builder
+
+    with patch.object(native_builder, '_configure_native_read_builder', side_effect=observe_builder), \
+            patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                  side_effect=AssertionError('Python fallback')):
+        result = getattr(read_builder.new_read(), method_name)(
+            splits, parallelism=128, blob_parallelism=blob_parallelism)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    expected = _data().to_pylist() * split_count
+    assert sorted(result.to_pylist(), key=lambda row: row['id']) == sorted(
+        expected, key=lambda row: row['id'])
+    assert len(configured) == 1
+    if blob_parallelism is None:
+        configured[0].with_blob_parallelism.assert_not_called()
+    else:
+        configured[0].with_blob_parallelism.assert_called_once_with(blob_parallelism)
+
+
 def _physical_files(tmp_path):
     return {path for path in tmp_path.rglob('*')
             if path.is_file() and path.suffix in ('.parquet', '.blob', '.index')}
@@ -395,6 +445,36 @@ def http_blob_uri():
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+def test_native_blob_default_limit_reads_only_selected_http_payload(
+        tmp_path, http_blob_uri, method_name):
+    uri, requests = http_blob_uri
+    table = _table(tmp_path, {'blob-descriptor-field': 'large',
+                              'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
+    selected = BlobDescriptor(uri + '/payload', 7, 7).serialize()
+    missing = BlobDescriptor(uri + '/missing', 0, 7).serialize()
+    data = pa.table({'id': [0, 1, 2], 'large': [missing, selected, missing],
+                     'small': [None, None, None]}, schema=_SCHEMA)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    builder = table.new_read_builder().with_limit(1)
+    builder.with_filter(builder.new_predicate_builder().greater_than('id', 0))
+    splits = builder.new_scan().plan().splits()
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+               side_effect=AssertionError('Python fallback')):
+        result = getattr(builder.new_read(), method_name)(splits, parallelism=128)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.to_pylist() == [{'id': 1, 'large': b'payload', 'small': None}]
+    assert requests == ['/payload']
 
 
 @pytest.mark.parametrize('encoding', ['payload', 'gzip', 'deflate'])
