@@ -275,6 +275,9 @@ public class FilesTableTest extends TableTestBase {
                 commaTable,
                 GenericRow.of(
                         2, BinaryString.fromString("other"), BinaryString.fromString("x"), 2));
+        write(
+                commaTable,
+                GenericRow.of(3, BinaryString.fromString("a, b"), BinaryString.fromString("c"), 3));
 
         FilesTable commaFilesTable =
                 (FilesTable)
@@ -283,14 +286,14 @@ public class FilesTableTest extends TableTestBase {
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
 
         assertThat(readPartBucketLevel(commaFilesTable, null))
-                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{other, x}-0-0");
+                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{a, b, c}-0-0", "{other, x}-0-0");
 
-        // the last partition value contains the ", " separator of the rendered form
+        // Both partitions with the same rendered value match the equality filter.
         assertThat(
                         readPartBucketLevel(
                                 commaFilesTable,
                                 builder.equal(0, BinaryString.fromString("{a, b, c}"))))
-                .containsExactlyInAnyOrder("{a, b, c}-0-0");
+                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{a, b, c}-0-0");
 
         // the IN branch keeps the literal whose rendered partition contains the separator
         DataField partitionField = FilesTable.TABLE_TYPE.getFields().get(0);
@@ -304,7 +307,37 @@ public class FilesTableTest extends TableTestBase {
                                 BinaryString.fromString("{a, b, c}"),
                                 BinaryString.fromString("{other, x}")));
         assertThat(readPartBucketLevel(commaFilesTable, inPredicate))
-                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{other, x}-0-0");
+                .containsExactlyInAnyOrder("{a, b, c}-0-0", "{a, b, c}-0-0", "{other, x}-0-0");
+    }
+
+    @Test
+    public void testReadWithSeparatorBeforeIntegerPartitionKey() throws Exception {
+        String tableName = "StringAndIntPartitionFilesTable";
+        Identifier tableIdentifier = identifier(tableName);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt1", DataTypes.STRING())
+                        .column("pt2", DataTypes.INT())
+                        .partitionKeys("pt1", "pt2")
+                        .primaryKey("pk", "pt1", "pt2")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .build();
+        catalog.createTable(tableIdentifier, schema, true);
+
+        FileStoreTable table = getTable(tableIdentifier);
+        write(table, GenericRow.of(1, BinaryString.fromString("a, b"), 42));
+        write(table, GenericRow.of(2, BinaryString.fromString("other"), 99));
+
+        FilesTable filesTable =
+                (FilesTable)
+                        catalog.getTable(
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+        BinaryString partition = BinaryString.fromString("{a, b, 42}");
+        assertThat(readPartBucketLevel(filesTable, builder.equal(0, partition)))
+                .containsExactly("{a, b, 42}-0-0");
+        assertThat(readPartBucketLevel(filesTable, builder.lessThan(0, partition))).isEmpty();
     }
 
     @Test

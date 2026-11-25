@@ -18,6 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -26,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -33,6 +41,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+
+import static org.apache.commons.lang3.StringUtils.countMatches;
 
 /**
  * Helper for applying partition predicate pushdown in system tables (BucketsTable, FilesTable,
@@ -46,6 +56,20 @@ public class PartitionPredicateHelper {
             List<String> partitionKeys,
             RowType partitionType) {
         if (partitionPredicate == null) {
+            return true;
+        }
+
+        if (partitionKeys.size() > 1
+                && (partitionPredicate.function() instanceof LeafBinaryFunction
+                        || partitionPredicate.function() instanceof In)
+                && partitionPredicate.literals().stream()
+                        .anyMatch(
+                                literal ->
+                                        literal != null
+                                                && countMatches(literal.toString(), ", ")
+                                                        >= partitionKeys.size())) {
+            snapshotReader.withPartitionFilter(
+                    new RenderedPartitionPredicate(partitionType, partitionPredicate));
             return true;
         }
 
@@ -122,5 +146,43 @@ public class PartitionPredicateHelper {
             partSpec.put(partitionKeys.get(i), partFields[i]);
         }
         return partSpec;
+    }
+
+    private static class RenderedPartitionPredicate implements PartitionPredicate {
+
+        private static final long serialVersionUID = 1L;
+
+        private final RowType partitionType;
+        private final LeafPredicate predicate;
+        private transient volatile CastExecutor<InternalRow, BinaryString> renderer;
+
+        private RenderedPartitionPredicate(RowType partitionType, LeafPredicate predicate) {
+            this.partitionType = partitionType;
+            this.predicate = predicate;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public boolean test(BinaryRow partition) {
+            CastExecutor<InternalRow, BinaryString> cast = renderer;
+            if (cast == null) {
+                cast =
+                        (CastExecutor<InternalRow, BinaryString>)
+                                CastExecutors.resolveToString(partitionType);
+                renderer = cast;
+            }
+            return predicate
+                    .function()
+                    .test(VarCharType.STRING_TYPE, cast.cast(partition), predicate.literals());
+        }
+
+        @Override
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            return true;
+        }
     }
 }
