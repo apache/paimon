@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -28,7 +29,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Test class for DebeziumSchemaUtils. */
 public class DebeziumSchemaUtilsTest {
@@ -149,5 +152,26 @@ public class DebeziumSchemaUtilsTest {
                     DataTypes.FIELD(1, "field2", DataTypes.INT(), null)
                 };
         Assertions.assertEquals(DataTypes.ROW(expectedFields), recordType);
+    }
+
+    @Test
+    public void testAvroToPaimonDataTypeWithTypeMapping() {
+        // TINYINT(1) as described by debezium with "column.propagate.source.type"
+        Schema tinyint1Schema = Schema.create(Schema.Type.INT);
+        Map<String, String> connectParameters = new HashMap<>();
+        connectParameters.put("__debezium.source.column.type", "TINYINT");
+        connectParameters.put("__debezium.source.column.length", "1");
+        tinyint1Schema.addProp("connect.parameters", connectParameters);
+
+        Assertions.assertEquals(
+                DataTypes.BOOLEAN(), DebeziumSchemaUtils.avroToPaimonDataType(tinyint1Schema));
+        Assertions.assertEquals(
+                DataTypes.TINYINT(),
+                DebeziumSchemaUtils.avroToPaimonDataType(
+                        tinyint1Schema,
+                        TypeMapping.parse(
+                                new String[] {
+                                    TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL.configString()
+                                })));
     }
 }
