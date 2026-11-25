@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -73,7 +74,6 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED;
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
@@ -81,10 +81,6 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequ
 public class DataEvolutionBatchScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
-
-    private static final long MAX_SCALAR_INDEX_READ_BYTES = 16L * 1024 * 1024;
-    private static final long MAX_SCALAR_INDEX_ROW_IDS = 1_000_000L;
-    private static final int MAX_SCALAR_INDEX_SELECTION_RANGES = 100_000;
 
     private final FileStoreTable table;
     private final AppendBatchTableScan batchScan;
@@ -609,17 +605,25 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return GlobalIndexScanBudget.UNLIMITED;
         }
         CoreOptions options = table.coreOptions();
+        Options configuration = options.toConfiguration();
         // FAST intentionally restricts reads to index coverage. A data-scan fallback would
         // widen that search scope.
-        if (!options.toConfiguration().get(DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED)
+        if (!configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED)
                 || !options.globalIndexEnabled()
                 || options.scalarScanSearchMode() == GlobalIndexSearchMode.FAST) {
             return GlobalIndexScanBudget.UNLIMITED;
         }
-        return new GlobalIndexScanBudget(
-                MAX_SCALAR_INDEX_READ_BYTES,
-                MAX_SCALAR_INDEX_ROW_IDS,
-                MAX_SCALAR_INDEX_SELECTION_RANGES);
+        long maxIndexBytes =
+                configuration
+                        .get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_INDEX_READ_SIZE)
+                        .getBytes();
+        long maxRowIds = configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_ROW_IDS);
+        int maxSelectionRanges =
+                configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES);
+        if (maxIndexBytes == 0 && maxRowIds == 0 && maxSelectionRanges == 0) {
+            return GlobalIndexScanBudget.UNLIMITED;
+        }
+        return new GlobalIndexScanBudget(maxIndexBytes, maxRowIds, maxSelectionRanges);
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex(GlobalIndexScanBudget budget) {

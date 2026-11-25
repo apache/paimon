@@ -3217,6 +3217,33 @@ public class CoreOptions implements Serializable {
                                     + "Data Evolution batch scan planning in full or detail mode "
                                     + "and fall back to filtering the data when limits are exceeded.");
 
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_SCALAR_INDEX_MAX_INDEX_READ_SIZE =
+            key("data-evolution.scalar-index.max-index-read-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(16))
+                    .withDescription(
+                            "Maximum index bytes charged across BTree and Bitmap shards during "
+                                    + "one adaptive scalar scan plan. BTree charges cached block "
+                                    + "accesses too. Set to 0 for no byte limit.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_SCALAR_INDEX_MAX_ROW_IDS =
+            key("data-evolution.scalar-index.max-row-ids")
+                    .longType()
+                    .defaultValue(1_000_000L)
+                    .withDescription(
+                            "Maximum individual row ID decodes and shifts charged across index "
+                                    + "shards during one adaptive scalar scan plan. Operations on "
+                                    + "compressed bitmaps can avoid these charges. Set to 0 for no row ID limit.");
+
+    public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
+            key("data-evolution.scalar-index.max-selection-ranges")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "Maximum number of disjoint row-ID ranges when materializing adaptive "
+                                    + "index selections during planning. When exceeded, file group "
+                                    + "pruning can still apply. Set to 0 for no range limit.");
+
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
             key("scalar-index.prefilter.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
