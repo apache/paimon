@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator.IndexLookup;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -50,6 +51,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +60,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
@@ -82,6 +85,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final FileStoreTable table;
     private final List<IndexFileMeta> indexFiles;
     private final FileIO fileIO;
+    private final boolean captureFastQuery;
 
     private DataEvolutionGlobalIndexScanner(
             FileStoreTable table,
@@ -90,12 +94,14 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexSearchMode searchMode,
             Collection<IndexFileMeta> coverageIndexFiles,
             Collection<IndexFileMeta> indexFiles,
-            DataEvolutionIndexSchema schema) {
+            DataEvolutionIndexSchema schema,
+            boolean captureFastQuery) {
         this.table = table;
         this.indexFiles = new ArrayList<>(indexFiles);
         this.fileIO = table.fileIO();
         this.options = table.coreOptions().toConfiguration();
         this.rowType = table.rowType();
+        this.captureFastQuery = captureFastQuery;
         this.executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
@@ -118,7 +124,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                     }
                     return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
                 };
-        this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
+        this.globalIndexEvaluator =
+                new GlobalIndexEvaluator(rowType, readersFunction, captureFastQuery);
     }
 
     /** Groups metadata for both planning-time readers and reader-side query plans. */
@@ -265,7 +272,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         searchMode,
                         globalIndexFiles,
                         globalIndexFiles,
-                        schema));
+                        schema,
+                        false));
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -280,6 +288,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
+        return createForPredicate(table, snapshot, partitionFilter, filter, false);
+    }
+
+    static Optional<DataEvolutionGlobalIndexScanner> createForPredicate(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            boolean captureFastQuery) {
         if (snapshot == null) {
             return Optional.empty();
         }
@@ -301,7 +318,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
                         indexFiles,
-                        schema));
+                        schema,
+                        captureFastQuery));
     }
 
     /**
@@ -349,7 +367,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
                         selectedIndexFiles,
-                        schema));
+                        schema,
+                        false));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -420,6 +439,47 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
+        GlobalIndexQuery query = compositeQuery(predicate);
+        return query == null
+                ? globalIndexEvaluator.evaluateWithContributingFields(predicate)
+                : evaluateCompositeQuery(query, null);
+    }
+
+    Optional<PlanningEvaluation> scanForPlanning(Predicate predicate) {
+        if (!captureFastQuery) {
+            return scanWithCoverage(predicate)
+                    .map(evaluation -> new PlanningEvaluation(evaluation, null));
+        }
+        GlobalIndexQuery query = compositeQuery(predicate);
+        if (query != null) {
+            Map<GlobalIndexQuery, GlobalIndexQuery> evaluatedQueries = new IdentityHashMap<>();
+            return evaluateCompositeQuery(query, evaluatedQueries)
+                    .map(
+                            evaluation -> {
+                                GlobalIndexQuery evaluatedQuery = evaluatedQueries.get(query);
+                                return new PlanningEvaluation(evaluation, () -> evaluatedQuery);
+                            });
+        }
+        return globalIndexEvaluator
+                .evaluateWithContributingFields(predicate)
+                .map(
+                        evaluation -> {
+                            IndexLookup lookup = evaluation.indexLookup();
+                            Supplier<GlobalIndexQuery> fastReplay =
+                                    lookup == null
+                                            ? null
+                                            : () ->
+                                                    GlobalIndexQuery.fromEvaluatedLookup(
+                                                            lookup,
+                                                            rowType,
+                                                            indexFiles,
+                                                            indexPathFactory);
+                            return new PlanningEvaluation(evaluation, fastReplay);
+                        });
+    }
+
+    @Nullable
+    private GlobalIndexQuery compositeQuery(Predicate predicate) {
         GlobalIndexQuery query =
                 predicate == null
                                 || indexFiles.stream()
@@ -428,19 +488,35 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         ? null
                         : GlobalIndexQuery.create(
                                 rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query != null && query.hasCompositeQuery()) {
-            try {
-                return query.evaluateWithCoverage(
-                        fileIO,
-                        options,
-                        indexFiles.stream()
-                                .map(file -> file.globalIndexMeta().rowRange())
-                                .collect(Collectors.toList()));
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to evaluate composite global index query", e);
-            }
+        return query != null && query.hasCompositeQuery() ? query : null;
+    }
+
+    private Optional<GlobalIndexEvaluator.Evaluation> evaluateCompositeQuery(
+            GlobalIndexQuery query,
+            @Nullable Map<GlobalIndexQuery, GlobalIndexQuery> evaluatedQueries) {
+        try {
+            return query.evaluateWithCoverage(
+                    fileIO,
+                    options,
+                    indexFiles.stream()
+                            .map(file -> file.globalIndexMeta().rowRange())
+                            .collect(Collectors.toList()),
+                    evaluatedQueries);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to evaluate composite global index query", e);
         }
-        return globalIndexEvaluator.evaluateWithContributingFields(predicate);
+    }
+
+    static final class PlanningEvaluation {
+        final GlobalIndexEvaluator.Evaluation evaluation;
+        @Nullable final Supplier<GlobalIndexQuery> fastReplay;
+
+        private PlanningEvaluation(
+                GlobalIndexEvaluator.Evaluation evaluation,
+                @Nullable Supplier<GlobalIndexQuery> fastReplay) {
+            this.evaluation = evaluation;
+            this.fastReplay = fastReplay;
+        }
     }
 
     public Optional<GlobalIndexResult> scan(TopN topN) {

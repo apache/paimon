@@ -30,6 +30,7 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.DataEvolutionIndexSchema;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
@@ -57,6 +58,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.SplitSerializer;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
@@ -238,6 +240,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .forEachRemaining(row -> ids.add(row.getInt(0)));
         assertThat(ids).containsExactlyInAnyOrder(0, 2, 4, 6);
 
+        FileStoreTable fastAtLimit = tableWithSearchMode(limited, "fast");
+        assertThat(fastAtLimit.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+
         FileStoreTable unlimited = limited.copy(Collections.singletonMap(rangeLimit, "0"));
         assertThat(unlimited.newReadBuilder().withFilter(predicate).newScan().plan().splits())
                 .isNotEmpty()
@@ -320,12 +327,105 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .isNotEmpty()
                 .hasOnlyElementsOfType(IndexedSplit.class);
 
-        FileStoreTable fast = tableWithSearchMode(table.copy(adaptiveOptions), "fast");
-        List<Range> fastRanges =
-                fast.newReadBuilder().withFilter(predicate).newScan().plan().splits().stream()
-                        .flatMap(split -> ((IndexedSplit) split).rowRanges().stream())
-                        .collect(Collectors.toList());
+        FileStoreTable fast = tableWithSearchMode(adaptive, "fast");
+        List<Split> fastSplits =
+                fast.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+        assertThat(fastSplits.stream().map(Object::getClass).collect(Collectors.toSet()))
+                .containsExactly(IndexQuerySplit.class);
+        List<Range> fastRanges = new ArrayList<>();
+        for (Split split : fastSplits) {
+            IndexQuerySplit replay = (IndexQuerySplit) split;
+            assertThat(replay.dataSplit().snapshotId()).isEqualTo(indexedSnapshot);
+            fastRanges.addAll(replay.evaluate(fast.fileIO()).rowRanges());
+        }
         assertThat(fastRanges).hasSize(rowCount / 2).allMatch(range -> range.to < rowCount);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testFastRangeOverflowPreservesEachBranchCoverage(String indexType)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BinaryString match = BinaryString.fromString("match");
+        BinaryString other = BinaryString.fromString("other");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        for (int start = 0; start < 32; start += 8) {
+            try (BatchTableWrite write = writes.newWrite();
+                    BatchTableCommit commit = writes.newCommit()) {
+                for (int id = start; id < start + 8; id++) {
+                    int position = id % 8;
+                    write.write(
+                            GenericRow.of(
+                                    id,
+                                    position == 0 || position >= 4 && id % 2 == 0 ? match : other,
+                                    position <= 4 && id % 2 == 0 ? match : other));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        createIndex("f1", Collections.singletonList(new Range(0, 15)), indexType);
+        createIndex("f2", Collections.singletonList(new Range(8, 23)), indexType);
+
+        FileStoreTable fast = tableWithSearchMode(table, "fast");
+        FileStoreTable capped =
+                fast.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "1"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate left =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(1, match),
+                        builder.lessThan(1, BinaryString.fromString("match-z")));
+        Predicate right = builder.equal(2, match);
+        assertFastOverflowMatchesExact(
+                fast,
+                capped,
+                PredicateBuilder.or(left, right),
+                Arrays.asList(0, 4, 6, 8, 10, 12, 14, 16, 18, 20));
+        assertFastOverflowMatchesExact(
+                fast, capped, PredicateBuilder.and(left, right), Arrays.asList(8, 12));
+        assertFastOverflowMatchesExact(
+                fast,
+                capped.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b")),
+                PredicateBuilder.and(builder.greaterThan(0, 3), PredicateBuilder.or(left, right)),
+                Arrays.asList(4, 6, 8, 10, 12, 14, 16, 18, 20));
+    }
+
+    private void assertFastOverflowMatchesExact(
+            FileStoreTable fast, FileStoreTable capped, Predicate predicate, List<Integer> expected)
+            throws IOException {
+        ReadBuilder exact =
+                fast.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
+        List<Split> exactSplits = exact.newScan().plan().splits();
+        assertThat(exactSplits).isNotEmpty().hasOnlyElementsOfType(IndexedSplit.class);
+        assertThat(readIds(exact, exactSplits)).containsExactlyInAnyOrderElementsOf(expected);
+
+        ReadBuilder limited =
+                capped.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
+        List<Split> planned = limited.newScan().plan().splits();
+        assertThat(planned).isNotEmpty().hasOnlyElementsOfType(IndexQuerySplit.class);
+        List<Split> restored = new ArrayList<>();
+        for (Split split : planned) {
+            assertThat(((IndexQuerySplit) split).dataSplit().dataFiles())
+                    .allMatch(file -> file.nonNullFirstRowId() < 24);
+            restored.add(SplitSerializer.deserialize(SplitSerializer.serialize(split)));
+        }
+        assertThat(readIds(limited, restored)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private List<Integer> readIds(ReadBuilder read, List<Split> splits) throws IOException {
+        List<Integer> ids = new ArrayList<>();
+        for (Split split : splits) {
+            read.newRead()
+                    .executeFilter()
+                    .createReader(split)
+                    .forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     @ParameterizedTest

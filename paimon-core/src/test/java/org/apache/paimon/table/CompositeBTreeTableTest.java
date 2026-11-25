@@ -239,6 +239,33 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    void testFastRangeOverflowPreservesCompositeDisjunctionCoverage() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 40);
+        build(table, "f1", "f0");
+        append(table, 40, 80);
+        build(table, "f2");
+
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.or(
+                        query(builder, "category-a", 7),
+                        builder.equal(2, BinaryString.fromString("p41")));
+        FileStoreTable fast = configured(table, "fast", false);
+        FileStoreTable capped =
+                fast.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "1"));
+        assertThat(read(fast, predicate)).containsExactlyInAnyOrder("p7", "p27", "p41");
+        assertThat(capped.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexQuerySplit.class);
+        assertThat(read(capped, predicate)).containsExactlyInAnyOrder("p7", "p27", "p41");
+    }
+
+    @Test
     void testRangesAvoidSingleColumnPostingsAndKeepResidualConditions() throws Exception {
         createTableDefault();
         FileStoreTable table = table();
