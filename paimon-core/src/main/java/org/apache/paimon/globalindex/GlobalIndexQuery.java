@@ -25,7 +25,6 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFi
 import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.rtree.RTreeGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -440,10 +439,7 @@ class GlobalIndexQuery {
             throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluateWithExecutor(
-                        fileIO, options, ranges, executor, false, GlobalIndexScanBudget.UNLIMITED)
-                .get()
-                .result();
+        return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
     }
 
     /** Retain candidates wherever a child predicate cannot be evaluated by an index. */
@@ -499,15 +495,9 @@ class GlobalIndexQuery {
     /** Preserve unsupported-reader fallback and coverage of the paths that actually contributed. */
     Optional<Evaluation> evaluateWithCoverage(FileIO fileIO, Options options, List<Range> ranges)
             throws IOException {
-        return evaluateWithCoverage(fileIO, options, ranges, GlobalIndexScanBudget.UNLIMITED);
-    }
-
-    Optional<Evaluation> evaluateWithCoverage(
-            FileIO fileIO, Options options, List<Range> ranges, GlobalIndexScanBudget budget)
-            throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluateWithExecutor(fileIO, options, ranges, executor, true, budget);
+        return evaluateWithExecutor(fileIO, options, ranges, executor, true);
     }
 
     private Optional<Evaluation> evaluateWithExecutor(
@@ -515,8 +505,7 @@ class GlobalIndexQuery {
             Options options,
             List<Range> ranges,
             ExecutorService executor,
-            boolean allowUnsupported,
-            GlobalIndexScanBudget budget)
+            boolean allowUnsupported)
             throws IOException {
         if (predicate == null) {
             GlobalIndexResult result = null;
@@ -525,7 +514,7 @@ class GlobalIndexQuery {
             for (GlobalIndexQuery child : children) {
                 Optional<Evaluation> evaluation =
                         child.evaluateWithExecutor(
-                                fileIO, options, ranges, executor, allowUnsupported, budget);
+                                fileIO, options, ranges, executor, allowUnsupported);
                 if (!evaluation.isPresent()) {
                     if (union) {
                         return Optional.empty();
@@ -547,8 +536,6 @@ class GlobalIndexQuery {
         Set<Integer> fields = new HashSet<>();
         List<Range> coverage = new ArrayList<>();
         boolean supported = groups.isEmpty();
-        GlobalIndexFileReader fileReader = meta -> fileIO.newInputStream(meta.filePath());
-        fileReader = fileReader.withScanBudget(budget);
         for (IndexGroup group : groups) {
             if (group.files.isEmpty()) {
                 supported = true;
@@ -567,7 +554,7 @@ class GlobalIndexQuery {
                     GlobalIndexer.createForRead(group.type, group.indexFields(), options);
             try (GlobalIndexReader reader =
                     indexer.createReader(
-                            fileReader,
+                            meta -> fileIO.newInputStream(meta.filePath()),
                             group.readerFiles(),
                             group.range.count(),
                             splitRows.results().toRangeList(),
@@ -583,21 +570,12 @@ class GlobalIndexQuery {
                 fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
                 coverage.add(group.range);
                 // Clip in index-local coordinates before offset() iterates the retained rows.
-                result = result.or(budget.offset(splitRows.and(matches.get()), group.range.from));
+                result = result.or(splitRows.and(matches.get()).offset(group.range.from));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while evaluating index query split", e);
             } catch (ExecutionException e) {
-                if (GlobalIndexScanBudget.isExceeded(e)) {
-                    // A budget rejection invalidates the entire leaf, including earlier groups.
-                    return Optional.empty();
-                }
                 throw new IOException("Failed to evaluate index query split", e.getCause());
-            } catch (RuntimeException e) {
-                if (GlobalIndexScanBudget.isExceeded(e)) {
-                    return Optional.empty();
-                }
-                throw e;
             }
         }
         return supported

@@ -3213,27 +3213,8 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to bound automatic scalar global index evaluation during "
-                                    + "Data Evolution batch scan planning in full or detail mode "
-                                    + "and fall back to filtering the data when limits are exceeded.");
-
-    public static final ConfigOption<MemorySize> DATA_EVOLUTION_SCALAR_INDEX_MAX_INDEX_READ_SIZE =
-            key("data-evolution.scalar-index.max-index-read-size")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(16))
-                    .withDescription(
-                            "Maximum index bytes charged across BTree and Bitmap shards during "
-                                    + "one adaptive scalar scan plan. BTree charges cached block "
-                                    + "accesses too. Set to 0 for no byte limit.");
-
-    public static final ConfigOption<Long> DATA_EVOLUTION_SCALAR_INDEX_MAX_ROW_IDS =
-            key("data-evolution.scalar-index.max-row-ids")
-                    .longType()
-                    .defaultValue(1_000_000L)
-                    .withDescription(
-                            "Maximum individual row ID decodes and shifts charged across index "
-                                    + "shards during one adaptive scalar scan plan. Operations on "
-                                    + "compressed bitmaps can avoid these charges. Set to 0 for no row ID limit.");
+                            "Whether to limit candidate row-ID ranges during automatic scalar "
+                                    + "global index planning for Data Evolution batch scans in full or detail mode.");
 
     public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
             key("data-evolution.scalar-index.max-selection-ranges")

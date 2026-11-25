@@ -483,9 +483,7 @@ These table options affect global index build and read behavior:
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `full` | Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters. |
-| `data-evolution.scalar-index.adaptive.enabled` | `false` | Bound scalar global index work during Java Data Evolution batch planning in `full` and `detail` modes and fall back to filtering the data when limits are exceeded. |
-| `data-evolution.scalar-index.max-index-read-size` | `16 mb` | Maximum index bytes charged across BTree and Bitmap shards in one adaptive scan plan. |
-| `data-evolution.scalar-index.max-row-ids` | `1000000` | Maximum individual row ID decodes and shifts charged across index shards in one adaptive scan plan. |
+| `data-evolution.scalar-index.adaptive.enabled` | `false` | Limit candidate row-ID ranges during Java Data Evolution scalar batch planning in `full` and `detail` modes. |
 | `data-evolution.scalar-index.max-selection-ranges` | `100000` | Maximum number of disjoint row-ID ranges when materializing an adaptive index selection during planning. |
 | `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
@@ -506,26 +504,14 @@ These table options affect global index build and read behavior:
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
 evaluated by the core scan, including scans used by Flink and Spark.
 
-The three budgets apply to automatic planning-time index evaluation in `full` and `detail` modes
-with `data-evolution.scalar-index.adaptive.enabled=true`. Each budget accepts a nonnegative value.
-Set an individual budget to `0` to disable that limit.
+With adaptive planning enabled in `full` and `detail` modes, the planner probes the number of
+disjoint contiguous ranges in the combined candidate bitmap after index evaluation. The bitmap
+also includes rows outside index coverage. A contiguous run counts as one range regardless of
+its row count. The probe stops at the start of the first range over the limit. Set
+`data-evolution.scalar-index.max-selection-ranges` to `0` to disable the limit.
 
-- `max-index-read-size` counts encoded index bytes charged during lookup. BTree estimates leaf
-  block bytes before a range lookup and charges accesses to cached blocks as well. Bitmap charges
-  the requested bytes before each index read. The byte limit measures logical index work even when
-  physical I/O is lower.
-- `max-row-ids` counts individual row ID decodes, such as BTree delta-list postings, and shifts
-  from shard-local to table row IDs. A row ID can be charged once for decoding and again for
-  shifting. Operations on compressed bitmaps can avoid these charges. For example, Bitmap can
-  return a compressed result unchanged when the shard starts at row ID zero.
-- `max-selection-ranges` counts disjoint contiguous row-ID intervals during conversion of
-  candidate bitmaps. A contiguous run counts as one range regardless of how many rows it contains.
-  The combined candidate bitmap also includes rows that the index does not cover.
-
-A declined index lookup leaves its predicate for the data reader. Other conjuncts may still
-prune rows using indexes. The planner first probes the number of disjoint candidate ranges. When
-the ranges fit, it pushes them down to prune manifests and builds indexed splits by intersecting
-the candidates with each split's merged file ranges. When the probe exceeds the limit, the
+When the ranges fit, the planner pushes them down to prune manifests and builds indexed splits by
+intersecting the candidates with each split's merged file ranges. When the probe exceeds the limit, the
 planner prunes whole file groups from the ordinary scan plan and counts ranges again using only
 candidates within the retained groups' row-ID ranges. If the scoped ranges fit, it emits indexed
 splits. If the scoped ranges exceed the limit, it emits ordinary splits for the retained groups,

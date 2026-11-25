@@ -89,51 +89,6 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
-    void testOffsetBudgetRejectsLeafAcrossShards() {
-        RowType rowType = rowType();
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-        Predicate broad = builder.equal(0, 1);
-        Predicate point = builder.equal(1, 7);
-        GlobalIndexResult localRows = GlobalIndexResult.fromRange(new Range(0, 99));
-        for (boolean conjunction : new boolean[] {true, false}) {
-            GlobalIndexScanBudget budget = new GlobalIndexScanBudget(0, 150, 0);
-            GlobalIndexReader broadReader =
-                    new UnionGlobalIndexReader(
-                            Arrays.asList(
-                                    new OffsetGlobalIndexReader(
-                                            readerReturning(localRows), 100, 199, budget),
-                                    new OffsetGlobalIndexReader(
-                                            readerReturning(localRows), 200, 299, budget)));
-            try (GlobalIndexEvaluator evaluator =
-                    new GlobalIndexEvaluator(
-                            rowType,
-                            field ->
-                                    Collections.singletonList(
-                                            field == 0
-                                                    ? broadReader
-                                                    : readerReturning(resultOf(107))))) {
-                Predicate predicate =
-                        conjunction
-                                ? PredicateBuilder.and(broad, point)
-                                : PredicateBuilder.or(broad, point);
-                Optional<GlobalIndexEvaluator.Evaluation> evaluation =
-                        evaluator.evaluateWithContributingFields(predicate);
-                if (conjunction) {
-                    assertThat(evaluation)
-                            .hasValueSatisfying(
-                                    result -> {
-                                        assertBitmapContainsExactly(result.result().results(), 107);
-                                        assertThat(result.contributingFieldIds())
-                                                .containsExactly(1);
-                                    });
-                } else {
-                    assertThat(evaluation).isEmpty();
-                }
-            }
-        }
-    }
-
-    @Test
     void testRangeFallbackAndOrBoundary() {
         AtomicInteger rangeCalls = new AtomicInteger();
         GlobalIndexReader reader =

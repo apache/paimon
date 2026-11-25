@@ -23,7 +23,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
@@ -57,7 +56,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.function.LongConsumer;
-import java.util.function.ToIntFunction;
 import java.util.zip.CRC32;
 
 /**
@@ -70,13 +68,11 @@ public class BTreeIndexReader implements Closeable {
     private final SstFileReader reader;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
-    private final Comparator<MemorySlice> sliceComparator;
     private final int fileVersion;
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
     @Nullable private final RoaringNavigableMap64 rowIdFilter;
-    private final GlobalIndexScanBudget budget;
 
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
@@ -152,9 +148,7 @@ public class BTreeIndexReader implements Closeable {
             throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
-        this.sliceComparator = keySerializer.createSliceComparator();
         this.rowIdFilter = rowIdFilter;
-        this.budget = fileReader.scanBudget();
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         this.input = fileReader.getInputStream(globalIndexIOMeta);
@@ -180,11 +174,10 @@ public class BTreeIndexReader implements Closeable {
                             input, filePath, cacheManager, footer.getBloomFilterHandle());
             this.reader =
                     new SstFileReader(
-                            sliceComparator,
+                            keySerializer.createSliceComparator(),
                             blockCache,
                             footer.getIndexBlockHandle(),
-                            bloomFilter,
-                            budget.hasIndexByteLimit() ? budget::reserveIndexBytes : null);
+                            bloomFilter);
             openedReader = this.reader;
             if (indexMeta.hasAmbiguousNullBounds()) {
                 // Both legacy bounds have zero length. If the SST has a non-null key, it is the
@@ -212,7 +205,6 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private BTreeFileFooter readFooter(BlockCache blockCache, long fileSize) {
-        budget.reserveIndexBytes(BTreeFileFooter.ENCODED_LENGTH);
         MemorySegment footerEncodings =
                 blockCache.getBlock(
                         fileSize - BTreeFileFooter.ENCODED_LENGTH,
@@ -229,7 +221,6 @@ public class BTreeIndexReader implements Closeable {
             return nullBitmap;
         }
 
-        budget.reserveIndexBytes(blockHandle.size() + Integer.BYTES);
         CRC32 crc32c = new CRC32();
         // read bytes and crc value
         MemorySliceInput sliceInput =
@@ -367,25 +358,27 @@ public class BTreeIndexReader implements Closeable {
                             result.or(pointQuery(interval.pointKey()));
                             continue;
                         }
-                        ToIntFunction<MemorySlice> lowerBound =
+                        SstFileReader.SstFileIterator iterator = reader.createIterator();
+                        iterator.seekTo(
                                 key ->
                                         interval.lower()
                                                 .compareKey(
                                                         (InternalRow)
-                                                                keySerializer.deserialize(key));
-                        readRange(
-                                lowerBound,
-                                key ->
-                                        interval.upper()
-                                                                .compareKey(
-                                                                        (InternalRow)
-                                                                                keySerializer
-                                                                                        .deserialize(
-                                                                                                key))
-                                                        > 0
-                                                ? 1
-                                                : 0,
-                                result);
+                                                                keySerializer.deserialize(key)));
+                        BlockIterator batch;
+                        boolean finished = false;
+                        while (!finished && (batch = iterator.readBatch()) != null) {
+                            while (batch.hasNext()) {
+                                Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
+                                InternalRow key =
+                                        (InternalRow) keySerializer.deserialize(entry.getKey());
+                                if (interval.upper().compareKey(key) > 0) {
+                                    finished = true;
+                                    break;
+                                }
+                                addRowIdsTo(entry.getValue(), result);
+                            }
+                        }
                     }
                     return result;
                 });
@@ -571,72 +564,30 @@ public class BTreeIndexReader implements Closeable {
         if (minKey == null) {
             return new RoaringNavigableMap64();
         }
-        MemorySlice lower = MemorySlice.wrap(keySerializer.serialize(from));
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        readRange(
-                key -> sliceComparator.compare(key, lower),
-                key -> {
-                    Object value = keySerializer.deserialize(key);
-                    if (!fromInclusive && comparator.compare(value, from) == 0) {
-                        return -1;
-                    }
-                    int difference = comparator.compare(value, to);
-                    return difference > 0 || !toInclusive && difference == 0 ? 1 : 0;
-                },
-                result);
-        return result;
-    }
+        SstFileReader.SstFileIterator fileIter = reader.createIterator();
+        fileIter.seekTo(keySerializer.serialize(from));
 
-    private void readRange(
-            ToIntFunction<MemorySlice> lowerBound,
-            ToIntFunction<MemorySlice> compareToRange,
-            RoaringNavigableMap64 result)
-            throws IOException {
-        if (budget.hasIndexByteLimit()) {
-            long bytes =
-                    reader.estimateRangeReadSize(
-                            lowerBound,
-                            key -> compareToRange.applyAsInt(key) > 0,
-                            budget.remainingIndexBytes());
-            budget.checkIndexBytes(bytes);
-        }
-        SstFileReader.SstFileIterator iterator = reader.createIterator();
-        iterator.seekTo(lowerBound);
-        List<MemorySlice> postings = budget.hasRowIdLimit() ? new ArrayList<>() : null;
-        BlockIterator block;
-        boolean finished = false;
-        while (!finished && (block = iterator.readBatch()) != null) {
-            long decodedRows = 0;
-            while (block.hasNext()) {
-                Map.Entry<MemorySlice, MemorySlice> entry = block.next();
-                int comparison = compareToRange.applyAsInt(entry.getKey());
-                if (comparison > 0) {
-                    finished = true;
-                    break;
-                }
-                if (comparison < 0) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        BlockIterator dataIter;
+        Map.Entry<MemorySlice, MemorySlice> entry;
+        while ((dataIter = fileIter.readBatch()) != null) {
+            while (dataIter.hasNext()) {
+                entry = dataIter.next();
+                Object key = keySerializer.deserialize(entry.getKey());
+
+                if (!fromInclusive && comparator.compare(key, from) == 0) {
                     continue;
                 }
-                MemorySlice posting = entry.getValue();
-                if (postings == null) {
-                    addRowIdsTo(posting, result, GlobalIndexScanBudget.UNLIMITED);
-                } else {
-                    postings.add(posting);
-                    decodedRows +=
-                            fileVersion == BTreeFileFooter.VERSION_1
-                                    ? readVersion1Count(posting.toInput())
-                                    : BTreePostingList.decodedRowIdCount(posting);
+
+                int difference = comparator.compare(key, to);
+                if (difference > 0 || !toInclusive && difference == 0) {
+                    return result;
                 }
-            }
-            if (postings != null) {
-                // Reserve once per block so parallel scans do not contend on every posting.
-                budget.reserveRowIds(decodedRows);
-                for (MemorySlice posting : postings) {
-                    addRowIdsTo(posting, result, GlobalIndexScanBudget.UNLIMITED);
-                }
-                postings.clear();
+
+                addRowIdsTo(entry.getValue(), result);
             }
         }
+        return result;
     }
 
     private long[] deserializeRowIds(MemorySlice slice) throws IOException {
@@ -650,16 +601,9 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private void addRowIdsTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
-        addRowIdsTo(slice, target, budget);
-    }
-
-    private void addRowIdsTo(
-            MemorySlice slice, RoaringNavigableMap64 target, GlobalIndexScanBudget rowBudget)
-            throws IOException {
         if (fileVersion == BTreeFileFooter.VERSION_1) {
             MemorySliceInput input = slice.toInput();
             int count = readVersion1Count(input);
-            rowBudget.reserveRowIds(count);
             for (int i = 0; i < count; i++) {
                 long rowId = input.readVarLenLong();
                 if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
@@ -667,7 +611,7 @@ public class BTreeIndexReader implements Closeable {
                 }
             }
         } else {
-            BTreePostingList.addTo(slice, target, rowIdFilter, rowBudget);
+            BTreePostingList.addTo(slice, target, rowIdFilter);
         }
     }
 

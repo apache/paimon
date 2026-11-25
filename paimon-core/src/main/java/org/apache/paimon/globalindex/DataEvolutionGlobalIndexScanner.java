@@ -82,7 +82,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final FileStoreTable table;
     private final List<IndexFileMeta> indexFiles;
     private final FileIO fileIO;
-    private final GlobalIndexScanBudget budget;
 
     private DataEvolutionGlobalIndexScanner(
             FileStoreTable table,
@@ -91,10 +90,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexSearchMode searchMode,
             Collection<IndexFileMeta> coverageIndexFiles,
             Collection<IndexFileMeta> indexFiles,
-            DataEvolutionIndexSchema schema,
-            GlobalIndexScanBudget budget) {
+            DataEvolutionIndexSchema schema) {
         this.table = table;
-        this.budget = budget;
         this.indexFiles = new ArrayList<>(indexFiles);
         this.fileIO = table.fileIO();
         this.options = table.coreOptions().toConfiguration();
@@ -105,8 +102,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         this.coverage =
                 new DataEvolutionGlobalIndexCoverage(
                         table, snapshot, partitionFilter, coverageIndexFiles, searchMode, schema);
-        GlobalIndexFileReader fileReader = meta -> fileIO.newInputStream(meta.filePath());
-        GlobalIndexFileReader indexFileReader = fileReader.withScanBudget(budget);
+        GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, List<IndexMetaFileGroup>> groupsByField = groupIndexFiles(indexFiles);
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
@@ -269,8 +265,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         searchMode,
                         globalIndexFiles,
                         globalIndexFiles,
-                        schema,
-                        GlobalIndexScanBudget.UNLIMITED));
+                        schema));
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
@@ -285,16 +280,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Predicate filter) {
-        return createForPredicate(
-                table, snapshot, partitionFilter, filter, GlobalIndexScanBudget.UNLIMITED);
-    }
-
-    static Optional<DataEvolutionGlobalIndexScanner> createForPredicate(
-            FileStoreTable table,
-            @Nullable Snapshot snapshot,
-            @Nullable PartitionPredicate partitionFilter,
-            @Nullable Predicate filter,
-            GlobalIndexScanBudget budget) {
         if (snapshot == null) {
             return Optional.empty();
         }
@@ -316,8 +301,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
                         indexFiles,
-                        schema,
-                        budget));
+                        schema));
     }
 
     /**
@@ -365,8 +349,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.coreOptions().scalarScanSearchMode(),
                         indexFiles,
                         selectedIndexFiles,
-                        schema,
-                        GlobalIndexScanBudget.UNLIMITED));
+                        schema));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -452,8 +435,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         options,
                         indexFiles.stream()
                                 .map(file -> file.globalIndexMeta().rowRange())
-                                .collect(Collectors.toList()),
-                        budget);
+                                .collect(Collectors.toList()));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to evaluate composite global index query", e);
             }
@@ -562,8 +544,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         null,
                                                         executor),
                                                 range.from,
-                                                range.to,
-                                                budget),
+                                                range.to),
                                 executor));
             }
 

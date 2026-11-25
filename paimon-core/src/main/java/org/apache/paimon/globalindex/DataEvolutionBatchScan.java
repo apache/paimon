@@ -323,18 +323,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         if (rowRangeIndex == null) {
             Optional<GlobalIndexResult> indexResult;
-            GlobalIndexScanBudget budget = GlobalIndexScanBudget.UNLIMITED;
+            int maxRanges = 0;
             if (canPushDownGlobalIndexTopN()) {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
-                budget = scalarScanBudget();
-                indexResult = evalGlobalIndex(budget);
+                maxRanges = scalarSelectionRangeLimit();
+                indexResult = evalGlobalIndex();
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 RoaringNavigableMap64 candidates = result.results();
-                int maxRanges = budget.maxSelectionRanges();
                 rowRangeIndex =
                         maxRanges == 0
                                 ? RowRangeIndex.fromBitmap(candidates)
@@ -600,9 +599,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return options != null && options.queryAuthEnabled();
     }
 
-    private GlobalIndexScanBudget scalarScanBudget() {
+    private int scalarSelectionRangeLimit() {
         if (filter == null || globalIndexResult != null || queryAuthEnabled()) {
-            return GlobalIndexScanBudget.UNLIMITED;
+            return 0;
         }
         CoreOptions options = table.coreOptions();
         Options configuration = options.toConfiguration();
@@ -611,22 +610,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (!configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED)
                 || !options.globalIndexEnabled()
                 || options.scalarScanSearchMode() == GlobalIndexSearchMode.FAST) {
-            return GlobalIndexScanBudget.UNLIMITED;
+            return 0;
         }
-        long maxIndexBytes =
-                configuration
-                        .get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_INDEX_READ_SIZE)
-                        .getBytes();
-        long maxRowIds = configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_ROW_IDS);
         int maxSelectionRanges =
                 configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES);
-        if (maxIndexBytes == 0 && maxRowIds == 0 && maxSelectionRanges == 0) {
-            return GlobalIndexScanBudget.UNLIMITED;
-        }
-        return new GlobalIndexScanBudget(maxIndexBytes, maxRowIds, maxSelectionRanges);
+        Preconditions.checkArgument(
+                maxSelectionRanges >= 0, "Maximum selection range count must be non-negative.");
+        return maxSelectionRanges;
     }
 
-    private Optional<GlobalIndexResult> evalGlobalIndex(GlobalIndexScanBudget budget) {
+    private Optional<GlobalIndexResult> evalGlobalIndex() {
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
         // can hand in one that was computed off the raw values.
@@ -652,11 +645,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         long totalStart = System.nanoTime();
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
                 DataEvolutionGlobalIndexScanner.createForPredicate(
-                        table,
-                        batchScan.prepareSnapshot(),
-                        partitionFilter,
-                        globalIndexFilter,
-                        budget);
+                        table, batchScan.prepareSnapshot(), partitionFilter, globalIndexFilter);
         long metadataDuration = System.nanoTime() - totalStart;
         if (!optionalScanner.isPresent()) {
             return Optional.empty();

@@ -202,9 +202,9 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    public void testAdaptiveScalarIndexBudgetOptions(String indexType) throws Exception {
+    public void testAdaptiveScalarIndexRangeLimit(String indexType) throws Exception {
         createTableDefault();
-        // Leave row 0 uncovered so the indexed shard starts at a nonzero row ID.
+        // Leave a matching row outside index coverage.
         appendRows(0, 1);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         BinaryString match = BinaryString.fromString("a0");
@@ -219,36 +219,29 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         }
         createIndex("f1", Collections.singletonList(new Range(1, 6)), indexType);
 
-        List<String> budgetKeys =
-                Arrays.asList(
-                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_INDEX_READ_SIZE.key(),
-                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_ROW_IDS.key(),
-                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key());
+        String rangeLimit = CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key();
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(), "true");
-        budgetKeys.forEach(key -> options.put(key, "0"));
-        FileStoreTable unlimited = table.copy(options);
+        options.put(rangeLimit, "4");
+        FileStoreTable adaptive = table.copy(options);
         Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, match);
-        assertThat(unlimited.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+        assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
                 .isNotEmpty()
                 .hasOnlyElementsOfType(IndexedSplit.class);
 
-        for (String key : budgetKeys) {
-            ReadBuilder read =
-                    unlimited
-                            .copy(Collections.singletonMap(key, "1"))
-                            .newReadBuilder()
-                            .withFilter(predicate)
-                            .withProjection(new int[] {0});
-            TableScan.Plan plan = read.newScan().plan();
-            assertThat(plan.splits()).as(key).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
-            List<Integer> ids = new ArrayList<>();
-            read.newRead()
-                    .executeFilter()
-                    .createReader(plan)
-                    .forEachRemaining(row -> ids.add(row.getInt(0)));
-            assertThat(ids).as(key).containsExactlyInAnyOrder(0, 2, 4, 6);
-        }
+        ReadBuilder read =
+                adaptive.copy(Collections.singletonMap(rangeLimit, "3"))
+                        .newReadBuilder()
+                        .withFilter(predicate)
+                        .withProjection(new int[] {0});
+        TableScan.Plan plan = read.newScan().plan();
+        assertThat(plan.splits()).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
+        List<Integer> ids = new ArrayList<>();
+        read.newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        assertThat(ids).containsExactlyInAnyOrder(0, 2, 4, 6);
     }
 
     @ParameterizedTest

@@ -870,52 +870,6 @@ class GlobalIndexQueryTest {
         assertThat(complete.coveredRanges()).containsExactly(new Range(0, 99));
     }
 
-    @Test
-    void testCompositeBudgetRejectsEarlierShardMatches() throws Exception {
-        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-        Predicate predicate = PredicateBuilder.and(builder.equal(0, 1), builder.greaterThan(1, 7));
-        List<IndexFileMeta> files =
-                Arrays.asList(
-                        indexFile("btree", "first", 0, 99, 0, new int[] {1}),
-                        indexFile("btree", "second", 100, 199, 0, new int[] {1}));
-        IndexPathFactory paths = mock(IndexPathFactory.class);
-        when(paths.toPath(any(IndexFileMeta.class)))
-                .thenAnswer(
-                        invocation ->
-                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
-        Options options = new Options();
-        GlobalIndexQuery query = GlobalIndexQuery.create(rowType, predicate, files, paths, options);
-        assertThat(query.hasCompositeQuery()).isTrue();
-
-        GlobalIndexReader reader = mock(GlobalIndexReader.class);
-        when(reader.visitComposite(any()))
-                .thenReturn(
-                        CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.fromRange(new Range(0, 99)))));
-        GlobalIndexer indexer = mock(GlobalIndexer.class);
-        when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
-                .thenReturn(reader);
-        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.createForRead(anyList(), any(Options.class))).thenReturn(indexer);
-        FileIO fileIO = mock(FileIO.class);
-        List<Range> covered = Collections.singletonList(new Range(0, 199));
-
-        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
-                mockStatic(GlobalIndexerFactoryUtils.class)) {
-            factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
-            assertThat(
-                            query.evaluateWithCoverage(
-                                    fileIO, options, covered, new GlobalIndexScanBudget(0, 100, 0)))
-                    .hasValueSatisfying(
-                            result -> assertThat(result.coveredRanges()).isEqualTo(covered));
-            assertThat(
-                            query.evaluateWithCoverage(
-                                    fileIO, options, covered, new GlobalIndexScanBudget(0, 99, 0)))
-                    .isEmpty();
-        }
-    }
-
     @ParameterizedTest
     @CsvSource({
         "index-options,1 gb,true",

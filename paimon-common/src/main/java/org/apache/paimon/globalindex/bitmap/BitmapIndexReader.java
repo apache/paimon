@@ -21,7 +21,6 @@ package org.apache.paimon.globalindex.bitmap;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.memory.MemorySlice;
@@ -48,7 +47,6 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
     private final SeekableInputStream input;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
-    private final GlobalIndexScanBudget budget;
     private final LazyField<RoaringNavigableMap64> nullRows;
     private final LazyField<RoaringNavigableMap64> nonNullRows;
     private final LazyField<List<BitmapGlobalIndexFormat.DictionaryBlockMeta>> dictionaryBlocks;
@@ -63,7 +61,6 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         this.dictionaryBlockCache = new ConcurrentHashMap<>();
-        this.budget = fileReader.scanBudget();
         this.input = fileReader.getInputStream(meta);
         try {
             BitmapGlobalIndexFormat.Footer footer =
@@ -165,7 +162,6 @@ class BitmapIndexReader implements BitmapGlobalIndexFormat.SeekableReader, Close
 
     @Override
     public synchronized byte[] read(long offset, int length) throws IOException {
-        budget.reserveIndexBytes(length);
         input.seek(offset);
         byte[] bytes = new byte[length];
         IOUtils.readFully(input, bytes);

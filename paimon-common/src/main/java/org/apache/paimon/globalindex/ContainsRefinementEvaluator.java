@@ -249,11 +249,8 @@ final class ContainsRefinementEvaluator {
                 new ArrayList<>(group.readers.size());
         for (GlobalIndexReader reader : group.readers) {
             futures.add(
-                    GlobalIndexEvaluator.declineAsUnsupported(
-                            () ->
-                                    ((ContainsRefiningGlobalIndexReader) reader)
-                                            .visitContainsCandidates(
-                                                    group.fieldRef, group.literals, candidates)));
+                    ((ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsCandidates(group.fieldRef, group.literals, candidates));
         }
         return intersectReaderResults(futures);
     }
@@ -264,11 +261,8 @@ final class ContainsRefinementEvaluator {
                 new ArrayList<>(group.readers.size());
         for (GlobalIndexReader reader : group.readers) {
             futures.add(
-                    GlobalIndexEvaluator.declineAsUnsupported(
-                            () ->
-                                    ((ContainsRefiningGlobalIndexReader) reader)
-                                            .visitContainsConjunction(
-                                                    group.fieldRef, group.literals, candidates)));
+                    ((ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsConjunction(group.fieldRef, group.literals, candidates));
         }
         return intersectReaderResults(futures)
                 .thenApply(

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex.btree;
 
-import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.utils.LongArrayList;
@@ -53,28 +52,6 @@ public class BTreePostingListTest {
         }
 
         assertEncodingAndRoundTrip(rowIds, BTreePostingList.DELTA_LIST);
-    }
-
-    @Test
-    public void testDeltaBudgetDeclinesBeforeAddingRows() throws Exception {
-        LongArrayList sparse = new LongArrayList(256);
-        for (int i = 0; i < 256; i++) {
-            sparse.add(i * 100L);
-        }
-        MemorySlice posting = MemorySlice.wrap(BTreePostingList.serialize(sparse));
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        assertThatThrownBy(
-                        () ->
-                                BTreePostingList.addTo(
-                                        posting,
-                                        result,
-                                        null,
-                                        new GlobalIndexScanBudget(0, 255, 0)))
-                .matches(GlobalIndexScanBudget::isExceeded);
-        assertThat(result).isEmpty();
-
-        BTreePostingList.addTo(posting, result, null, new GlobalIndexScanBudget(0, 256, 0));
-        assertThat(result.getLongCardinality()).isEqualTo(256);
     }
 
     @Test

@@ -20,7 +20,6 @@ package org.apache.paimon.globalindex.io;
 
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexScanBudget;
 
 import java.io.IOException;
 
@@ -28,25 +27,4 @@ import java.io.IOException;
 public interface GlobalIndexFileReader {
 
     SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException;
-
-    default GlobalIndexScanBudget scanBudget() {
-        return GlobalIndexScanBudget.UNLIMITED;
-    }
-
-    default GlobalIndexFileReader withScanBudget(GlobalIndexScanBudget budget) {
-        if (budget == GlobalIndexScanBudget.UNLIMITED) {
-            return this;
-        }
-        return new GlobalIndexFileReader() {
-            @Override
-            public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
-                return GlobalIndexFileReader.this.getInputStream(meta);
-            }
-
-            @Override
-            public GlobalIndexScanBudget scanBudget() {
-                return budget;
-            }
-        };
-    }
 }

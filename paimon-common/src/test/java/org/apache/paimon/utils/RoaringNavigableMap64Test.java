@@ -252,6 +252,75 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testRangeLimitStopsAtStartOfOverflowingRun() throws Exception {
+        int maxRanges = 128;
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    private int rowsVisited;
+
+                    @Override
+                    public LongIterator getLongIterator() {
+                        LongIterator iterator = super.getLongIterator();
+                        return new LongIterator() {
+                            @Override
+                            public LongIterator clone() {
+                                return iterator.clone();
+                            }
+
+                            @Override
+                            public boolean hasNext() {
+                                return iterator.hasNext();
+                            }
+
+                            @Override
+                            public long next() {
+                                if (++rowsVisited > 4 * maxRanges) {
+                                    throw new AssertionError("Probe entered the overflowing run");
+                                }
+                                return iterator.next();
+                            }
+                        };
+                    }
+                };
+        for (int i = 0; i < maxRanges; i++) {
+            source.add(2L * i);
+        }
+        long denseEnd = 1_000_000_000L;
+        source.addRange(2L * maxRanges, denseEnd + 1);
+        // A fragmented suffix keeps the iterator path even after it reaches the long run.
+        for (int i = 1; i <= 256; i++) {
+            source.add(denseEnd + 2L * i);
+        }
+
+        assertThat(wrap(source).tryToRangeList(maxRanges)).isEmpty();
+    }
+
+    @Test
+    public void testRangeLimitStopsBeforeVisitingNextNonemptyScope() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public long select(long index) {
+                        if (index >= 2) {
+                            throw new AssertionError(
+                                    "Probe entered the next scope after the limit");
+                        }
+                        return super.select(index);
+                    }
+                };
+        source.add(0);
+        source.add(2);
+        source.addRange(10, 100);
+        RoaringNavigableMap64 bitmap = wrap(source);
+        Range first = new Range(0, 2);
+        Range empty = new Range(4, 5);
+        assertThat(bitmap.tryToRangeList(2, Arrays.asList(first, empty)))
+                .contains(Arrays.asList(new Range(0, 0), new Range(2, 2)));
+        assertThat(bitmap.tryToRangeList(2, Arrays.asList(first, empty, new Range(10, 99))))
+                .isEmpty();
+    }
+
+    @Test
     public void testScopedRangeConversionSkipsExcludedRows() throws Exception {
         Roaring64NavigableMap source =
                 new Roaring64NavigableMap() {
@@ -268,16 +337,20 @@ public class RoaringNavigableMap64Test {
         for (int i = 0; i < 256; i++) {
             source.add(tail + 1 + 2L * i);
         }
-        Constructor<RoaringNavigableMap64> constructor =
-                RoaringNavigableMap64.class.getDeclaredConstructor(Roaring64NavigableMap.class);
-        constructor.setAccessible(true);
-        RoaringNavigableMap64 bitmap = constructor.newInstance(source);
+        RoaringNavigableMap64 bitmap = wrap(source);
         List<Range> scope = Collections.singletonList(new Range(tail + 508, tail + 511));
         List<Range> expected =
                 Arrays.asList(new Range(tail + 509, tail + 509), new Range(tail + 511, tail + 511));
 
         assertThat(bitmap.tryToRangeList(2, scope)).contains(expected);
         assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
+    }
+
+    private static RoaringNavigableMap64 wrap(Roaring64NavigableMap source) throws Exception {
+        Constructor<RoaringNavigableMap64> constructor =
+                RoaringNavigableMap64.class.getDeclaredConstructor(Roaring64NavigableMap.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(source);
     }
 
     @Test

@@ -117,10 +117,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             selected.visitRangesBySelect(
                     0,
                     count,
-                    (start, end) -> {
-                        result.addRange(new Range(start - range.from, end - range.from));
-                        return true;
-                    });
+                    (start, end) ->
+                            result.addRange(new Range(start - range.from, end - range.from)));
         } else {
             selected.roaring64NavigableMap.forEach(row -> result.add(row - range.from));
         }
@@ -268,23 +266,12 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
 
         // Materialize Range objects only after seeing that the result fits.
-        int[] rangeCount = {0};
-        boolean fits =
-                forEachRange(
-                        scope,
-                        true,
-                        (start, end) -> {
-                            if (rangeCount[0] == maxRanges) {
-                                return false;
-                            }
-                            rangeCount[0]++;
-                            return true;
-                        });
-        if (!fits) {
+        RangeCounter counter = new RangeCounter(maxRanges);
+        if (!forEachRange(scope, true, counter)) {
             return Optional.empty();
         }
 
-        List<Range> ranges = new ArrayList<>(rangeCount[0]);
+        List<Range> ranges = new ArrayList<>(counter.count);
         forEachRange(scope, true, (start, end) -> ranges.add(new Range(start, end)));
         return Optional.of(ranges);
     }
@@ -304,6 +291,9 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         if (cardinality == 0) {
             return true;
         }
+        if (!visitor.canStartRange()) {
+            return false;
+        }
         if (shouldUseSelectRanges(cardinality)) {
             return visitRangesBySelect(0, cardinality, visitor);
         }
@@ -317,6 +307,9 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         if (startIndex == endIndex) {
             return true;
         }
+        if (!visitor.canStartRange()) {
+            return false;
+        }
         if (startIndex == 0 && endIndex == getLongCardinality()) {
             return forEachRange(null, true, visitor);
         }
@@ -326,7 +319,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         long count = endIndex - startIndex;
         long missing = (last - first) - (count - 1);
         if (missing == 0) {
-            return visitor.visit(first, last);
+            visitor.visit(first, last);
+            return true;
         }
 
         // Use ordinal searches when the scope can only have a few runs relative to the
@@ -395,24 +389,28 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
                     }
                 }
             } else {
-                if (!visitor.visit(rangeStart, rangeEnd)) {
+                visitor.visit(rangeStart, rangeEnd);
+                // The gap proves that another range exists before we need to find its end.
+                if (!visitor.canStartRange()) {
                     return false;
                 }
                 rangeStart = current;
                 rangeEnd = current;
             }
         }
-        return visitor.visit(rangeStart, rangeEnd);
+        visitor.visit(rangeStart, rangeEnd);
+        return true;
     }
 
     private boolean visitRangesBySelect(long rangeStartIndex, long endIndex, RangeVisitor visitor) {
         while (rangeStartIndex < endIndex) {
+            if (!visitor.canStartRange()) {
+                return false;
+            }
             long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
             long rangeEndIndex = findRangeEndIndex(rangeStartIndex, endIndex, rangeStart);
             long rangeOffset = rangeEndIndex - rangeStartIndex;
-            if (!visitor.visit(rangeStart, rangeStart + rangeOffset)) {
-                return false;
-            }
+            visitor.visit(rangeStart, rangeStart + rangeOffset);
             rangeStartIndex = rangeEndIndex + 1;
         }
 
@@ -421,7 +419,31 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     @FunctionalInterface
     private interface RangeVisitor {
-        boolean visit(long start, long end);
+        default boolean canStartRange() {
+            return true;
+        }
+
+        void visit(long start, long end);
+    }
+
+    private static final class RangeCounter implements RangeVisitor {
+
+        private final int limit;
+        private int count;
+
+        private RangeCounter(int limit) {
+            this.limit = limit;
+        }
+
+        @Override
+        public boolean canStartRange() {
+            return count < limit;
+        }
+
+        @Override
+        public void visit(long start, long end) {
+            count++;
+        }
     }
 
     private long findRangeEndIndex(long rangeStartIndex, long cardinality, long rangeStart) {

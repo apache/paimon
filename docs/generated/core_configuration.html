@@ -636,19 +636,7 @@ under the License.
             <td><h5>data-evolution.scalar-index.adaptive.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to bound automatic scalar global index evaluation during Data Evolution batch scan planning in full or detail mode and fall back to filtering the data when limits are exceeded.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.scalar-index.max-index-read-size</h5></td>
-            <td style="word-wrap: break-word;">16 mb</td>
-            <td>MemorySize</td>
-            <td>Maximum index bytes charged across BTree and Bitmap shards during one adaptive scalar scan plan. BTree charges cached block accesses too. Set to 0 for no byte limit.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.scalar-index.max-row-ids</h5></td>
-            <td style="word-wrap: break-word;">1000000</td>
-            <td>Long</td>
-            <td>Maximum individual row ID decodes and shifts charged across index shards during one adaptive scalar scan plan. Operations on compressed bitmaps can avoid these charges. Set to 0 for no row ID limit.</td>
+            <td>Whether to limit candidate row-ID ranges during automatic scalar global index planning for Data Evolution batch scans in full or detail mode.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.scalar-index.max-selection-ranges</h5></td>
