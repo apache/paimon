@@ -54,6 +54,17 @@ The action uses `_id` to identify records. Updates carry the resulting document,
 events may contain only the document identity, so other document fields cannot replace `_id`
 as the record key.
 
+Partition keys have the same limitation. A delete, and the retraction written for an update or a
+replace, carries only the document key (`_id`, plus the shard key of a sharded collection), so its
+other fields are NULL. If a partition key is another document field, or a computed column of one,
+the retraction goes to the default partition and misses the stored row: a deleted document stays
+in the table, and a document whose partition value changes keeps its old row next to the new one.
+By default the primary key is `_id` alone, so such a table cannot use the default `bucket = -1`;
+set a fixed `bucket`. A computed column of `_id` does not have this problem, because it is
+computed from `_id` again. All of this applies to `mongodb_sync_database` too. There, adding the
+partition key to `--primary_keys` does not help: the NULL partition value then fails the job at the
+first delete, update or replace.
+
 | `--mongodb_conf` option | Behavior |
 | --- | --- |
 | `schema.start.mode=dynamic` (default) | Infer the initial fields from the first document in the collection. The collection must contain a document when starting the table action. Add new top-level fields as they appear; nested values remain within their source fields. |

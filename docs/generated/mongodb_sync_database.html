@@ -33,7 +33,7 @@
     <tr>
         <td><h5>--partition_keys</h5></td>
         <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".
-            If the keys are not in source table, the sink table won't set partition keys.</td>
+            If the keys are not in source table, the sink table won't set partition keys. Deletes carry only the document key (<code>_id</code>, plus the shard key of a sharded collection), so with the default primary key and a partition key on another document field, a deleted document or a document whose partition value changes keeps a stale row in its old partition. See <a href="#schema-and-document-identity">Schema and Document Identity</a>.</td>
     </tr>
     <tr>
         <td><h5>--primary_keys</h5></td>
