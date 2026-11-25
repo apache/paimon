@@ -563,22 +563,17 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
 
-        // the with-base path derives the operation from the commit kind; a rebuild exporting
-        // the full table must do the same, or incremental consumers replay it as new data
-        String operation = IcebergSnapshotSummary.APPEND.operation();
-        if (paimonSnapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-            operation = IcebergSnapshotSummary.REPLACE.operation();
-        } else if (paimonSnapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-            operation = IcebergSnapshotSummary.OVERWRITE.operation();
-        }
         IcebergSnapshotSummary snapshotSummary =
-                computeSnapshotSummary(operation, paimonSnapshot, metrics);
+                computeSnapshotSummary(
+                        IcebergSnapshotSummary.APPEND.operation(), paimonSnapshot, metrics);
 
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
-                        snapshotId == Snapshot.FIRST_SNAPSHOT_ID ? null : (Long) (snapshotId - 1),
+                        // A full export starts a new lineage. Readers with old checkpoints must
+                        // resync.
+                        null,
                         // the Paimon snapshot's own commit time, the as-of time readers see
                         paimonSnapshot.timeMillis(),
                         snapshotSummary,
