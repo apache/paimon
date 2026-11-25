@@ -32,9 +32,11 @@ import pyarrow as pa
 import pyarrow.fs as pafs
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.blob import BlobDescriptor, VideoFrameDescriptor
@@ -131,8 +133,6 @@ class VideoDecodeParallelismTest(unittest.TestCase):
 
     @unittest.skipUnless(S3FileSystem is not None, "requires Arrow S3")
     def test_video_file_pool(self):
-        first = object.__new__(PyArrowFileIO)
-        second = object.__new__(PyArrowFileIO)
         opens = []
 
         def open_stream(path):
@@ -140,9 +140,14 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             opens.append((path, stream))
             return stream
 
-        for file_io in (first, second):
-            file_io.filesystem = Mock(spec=S3FileSystem)
-            file_io.new_input_stream = open_stream
+        def create_file_io():
+            filesystem = Mock(spec=S3FileSystem)
+            filesystem.open_input_file.side_effect = open_stream
+            with patch.object(PyArrowFileIO, "_initialize_oss_fs", return_value=filesystem):
+                return FileIO.get("oss://bucket/table", Options({"fs.oss.impl": "legacy"}))
+
+        first, second = create_file_io(), create_file_io()
+        self.assertIsInstance(first, OssFileIO)
         token_io = object.__new__(RESTTokenFileIO)
         token_io.file_io = Mock(return_value=first)
         table = SimpleNamespace(file_io=token_io, options=CoreOptions(Options({

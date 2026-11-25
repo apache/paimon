@@ -854,7 +854,7 @@ class VideoFrameCollator:
             if type(file_io) is RESTTokenFileIO:
                 file_io = file_io.file_io()
             # Arrow may raise ImportError for missing optional backends.
-            if type(file_io) is PyArrowFileIO and isinstance(
+            if isinstance(file_io, PyArrowFileIO) and isinstance(
                     file_io.filesystem, vars(pafs).get("S3FileSystem", ())):
                 if self._video_file_pool is None:
                     self._video_file_pool = _VideoFilePool(self._max_cached_video_files)
