@@ -170,10 +170,10 @@ def to_arrow(
             split reader. ``None`` uses the native reader default (8), or 1
             for Python reads and native preparation fallback. Explicit ``1``
             keeps BLOB reads serial within each split; values must be >= 1.
-            Native execution caps active BLOB split groups and their combined
-            range reads at 64, reducing per-group concurrency using the actual
-            number of active groups. Python parallel reads also cap combined
-            BLOB workers at 64.
+            Native execution that materializes BLOB payloads caps combined
+            range reads at 64 per read. Python reduces per-split concurrency
+            toward a total budget of 64, but retains at least one read per
+            split worker; more than 64 split workers can exceed that budget.
     """
     effective_bp = self._resolve_blob_parallelism(blob_parallelism)
     effective = self._resolve_parallelism(parallelism, len(splits))

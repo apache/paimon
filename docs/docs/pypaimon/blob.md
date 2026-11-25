@@ -98,11 +98,13 @@ Use `to_arrow_batch_reader` to read blob data in batches. When
 including native preparation fallback, retain a default of 1. Set
 `blob_parallelism=1` explicitly to keep BLOB reads serial within each split.
 
-Native execution caps the combined BLOB range-read concurrency at 64 and reduces
-per-group concurrency when needed. BLOB reads with a LIMIT retain a single split
-group and check the row quota before materializing output payloads. Python
-parallel reads also retain their existing worker cap. These rules apply to both
-`to_arrow_batch_reader` and `to_arrow`; row-by-row reading is unchanged.
+Native execution that materializes BLOB payloads caps the combined range-read
+concurrency at 64 per read and reduces per-group concurrency when needed. BLOB
+reads with a LIMIT retain a single split group and check the row quota before
+materializing output payloads. Python parallel reads reduce per-split BLOB concurrency toward a total budget of 64,
+but keep at least one read per split worker: 65 split workers can therefore
+issue 65 concurrent reads. This is not a hard Python request limit. These rules
+apply to both `to_arrow_batch_reader` and `to_arrow`; row-by-row reading is unchanged.
 
 Set a positive `blob_parallelism` to override the per-group default within the
 backend's concurrency budget:
@@ -122,6 +124,16 @@ Or read all data into a single Arrow Table:
 ```python
 arrow_table = read.to_arrow(splits, blob_parallelism=16)
 ```
+
+For a concurrency-limited HTTP origin, explicitly reduce BLOB concurrency.
+The multimodal scan API also accepts this override:
+
+```python
+arrow_table = multimodal_table.scan().to_arrow(blob_parallelism=1)
+```
+
+This limits reads within each split; multiple active splits or independent
+queries can still send requests concurrently.
 
 ### Row-by-row reading
 

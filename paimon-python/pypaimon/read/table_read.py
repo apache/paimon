@@ -210,10 +210,10 @@ class TableRead:
                 split reader. ``None`` uses the native reader default (8), or 1
                 for Python reads and native preparation fallback. Explicit ``1``
                 keeps BLOB reads serial within each split; values must be >= 1.
-                Native execution caps active BLOB split groups and their combined
-                range reads at 64, reducing per-group concurrency using the actual
-                number of active groups. Python parallel reads also cap combined
-                BLOB workers at 64.
+                Native execution that materializes BLOB payloads caps combined
+                range reads at 64 per read. Python reduces per-split concurrency
+                toward a total budget of 64, but retains at least one read per
+                split worker; more than 64 split workers can exceed that budget.
         """
         from pypaimon.read.read_dispatch import to_arrow
         return to_arrow(self, splits, parallelism, blob_parallelism)
@@ -336,7 +336,7 @@ class TableRead:
 
     @classmethod
     def _cap_blob_parallelism(cls, workers: int, blob_parallelism: int) -> int:
-        """Shrink per-split blob_parallelism so workers*B <= cap (peak reads)."""
+        """Reduce per-split concurrency toward the budget, keeping at least one."""
         from pypaimon.read.read_support import _cap_blob_parallelism
         return _cap_blob_parallelism(cls, workers, blob_parallelism)
 

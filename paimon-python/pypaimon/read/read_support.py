@@ -248,7 +248,7 @@ def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
 
 
 def _cap_blob_parallelism(cls, workers: int, blob_parallelism: int) -> int:
-    """Shrink per-split blob_parallelism so workers*B <= cap (peak reads)."""
+    """Reduce per-split concurrency toward the budget, keeping at least one."""
     if blob_parallelism <= 1 or workers * blob_parallelism <= cls._MAX_TOTAL_BLOB_WORKERS:
         return blob_parallelism
     return max(1, cls._MAX_TOTAL_BLOB_WORKERS // workers)

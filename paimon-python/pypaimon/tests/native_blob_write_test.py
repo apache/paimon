@@ -477,6 +477,113 @@ def test_native_blob_default_limit_reads_only_selected_http_payload(
     assert requests == ['/payload']
 
 
+@pytest.fixture
+def throttled_http_blob_uri():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Event, Lock, Thread
+    from time import monotonic, sleep
+
+    lock = Lock()
+    rejected = Event()
+    state = {'active': 0, 'peak': 0, 'throttled': 0, 'requests': {}, 'hold': True}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            with lock:
+                state['requests'].setdefault(self.path, []).append(monotonic())
+                if state['active'] >= 4:
+                    state['throttled'] += 1
+                    limited = True
+                else:
+                    state['active'] += 1
+                    state['peak'] = max(state['peak'], state['active'])
+                    limited = False
+            if limited:
+                self.send_response(429)
+                self.send_header('Retry-After', '1')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                rejected.set()
+                return
+            try:
+                # Hold the first successful requests until another request is
+                # throttled, making the concurrency regression deterministic.
+                if state['hold'] and not rejected.wait(5):
+                    self.send_error(503)
+                    return
+                if not state['hold']:
+                    sleep(0.05)
+                body = b'prefix-' + ('img%02d' % int(self.path[1:])).encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                with lock:
+                    state['active'] -= 1
+
+        def log_message(self, *args):
+            pass
+
+    class Server(ThreadingHTTPServer):
+        request_queue_size = 32
+
+    server = Server(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield 'http://127.0.0.1:{}'.format(server.server_port), state
+    finally:
+        rejected.set()
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader', 'scan_serial'])
+def test_native_blob_default_retries_throttled_http_origin(
+        tmp_path, throttled_http_blob_uri, method_name):
+    uri, state = throttled_http_blob_uri
+    state['hold'] = method_name != 'scan_serial'
+    table = _table(tmp_path, {'blob-descriptor-field': 'large',
+                              'target-file-row-num': '100',
+                              'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
+    data = pa.table({'id': list(range(8)),
+                     'large': [BlobDescriptor(uri + '/%d' % i, 7, 5).serialize() for i in range(8)],
+                     'small': [None] * 8}, schema=_SCHEMA)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    builder = table.new_read_builder()
+    splits = builder.new_scan().plan().splits()
+    assert len(splits) == 1
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+               side_effect=AssertionError('Python fallback')):
+        if method_name == 'scan_serial':
+            from pypaimon.multimodal.query import ScanQuery
+            result = ScanQuery(table).to_arrow(blob_parallelism=1)
+        else:
+            result = getattr(builder.new_read(), method_name)(splits)
+            if method_name != 'to_arrow':
+                result = result.read_all()
+    assert result.to_pylist() == [
+        {'id': i, 'large': ('img%02d' % i).encode(), 'small': None} for i in range(8)]
+    if method_name == 'scan_serial':
+        assert state['throttled'] == 0
+        assert all(len(times) == 1 for times in state['requests'].values())
+        return
+    assert state['peak'] == 4
+    assert state['throttled'] > 0
+    retries = [times for times in state['requests'].values() if len(times) > 1]
+    assert retries
+    assert all(times[1] - times[0] >= 1 for times in retries)
+
+
 @pytest.mark.parametrize('encoding', ['payload', 'gzip', 'deflate'])
 @pytest.mark.parametrize('inline', [False, True])
 @pytest.mark.parametrize('length', [3, -1])
