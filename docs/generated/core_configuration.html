@@ -633,6 +633,12 @@ under the License.
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.scalar-index.adaptive.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to bound automatic scalar global index evaluation during Data Evolution batch scan planning in full or detail mode and fall back to filtering the data when limits are exceeded.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
