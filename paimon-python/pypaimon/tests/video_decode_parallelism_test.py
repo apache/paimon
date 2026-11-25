@@ -39,6 +39,11 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.blob import BlobDescriptor, VideoFrameDescriptor
 
+try:
+    from pyarrow.fs import S3FileSystem
+except ImportError:
+    S3FileSystem = None
+
 
 def identity(value):
     return value
@@ -63,28 +68,41 @@ def decode_worker(collator, pool, connection):
 
 class VideoDecodeParallelismTest(unittest.TestCase):
     def test_video_file_pool_falls_back_without_arrow_s3(self):
-        table = SimpleNamespace(file_io=LocalFileIO(), options=CoreOptions(Options({
-            "read.video.max-cached-files": "1"})))
-        collator = VideoFrameCollator(
-            table, video_column="camera", decoder_factory=identity,
-            decode_fn=lambda source, _, row: source.read())
+        local = LocalFileIO()
+        arrow = object.__new__(PyArrowFileIO)
+        arrow.filesystem = pafs.LocalFileSystem()
+        arrow.new_input_stream = local.new_input_stream
+        options = CoreOptions(Options({"read.video.max-cached-files": "1"}))
+        original_getattr = pafs.__getattr__
 
-        with tempfile.TemporaryDirectory() as directory, patch.dict(vars(pafs)):
+        def without_s3(name):
+            if name == "S3FileSystem":
+                raise ImportError("PyArrow has no S3 support")
+            return original_getattr(name)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                vars(pafs), {"__getattr__": without_s3}):
             vars(pafs).pop("S3FileSystem", None)
             path = Path(directory) / "local.video"
             path.write_bytes(b"headerpayload")
             descriptor = VideoFrameDescriptor(str(path), 6, 7, 0)
-            try:
-                self.assertEqual(
-                    collator({"camera": descriptor.serialize()})["frame"], b"payload")
-                self.assertIsNone(collator._video_file_pool)
-            finally:
-                collator.close()
+            for file_io in (local, arrow):
+                with self.subTest(file_io=type(file_io).__name__):
+                    collator = VideoFrameCollator(
+                        SimpleNamespace(file_io=file_io, options=options),
+                        video_column="camera", decoder_factory=identity,
+                        decode_fn=lambda source, _, row: source.read())
+                    try:
+                        self.assertEqual(
+                            collator({"camera": descriptor.serialize()})["frame"], b"payload")
+                        self.assertIsNone(collator._video_file_pool)
+                    finally:
+                        collator.close()
 
-    @unittest.skipUnless(hasattr(pafs, "S3FileSystem"), "requires Arrow S3")
+    @unittest.skipUnless(S3FileSystem is not None, "requires Arrow S3")
     def test_video_file_pool_readinto_uses_bytes_and_respects_payload_bounds(self):
         file_io = object.__new__(PyArrowFileIO)
-        file_io.filesystem = Mock(spec=pafs.S3FileSystem)
+        file_io.filesystem = Mock(spec=S3FileSystem)
         file_io.new_input_stream = lambda _: pa.BufferReader(b"__abcdefghijNEXT")
         table = SimpleNamespace(file_io=file_io, options=CoreOptions(Options({
             "read.video.max-cached-files": "1"})))
@@ -111,7 +129,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         finally:
             collator.close()
 
-    @unittest.skipUnless(hasattr(pafs, "S3FileSystem"), "requires Arrow S3")
+    @unittest.skipUnless(S3FileSystem is not None, "requires Arrow S3")
     def test_video_file_pool(self):
         first = object.__new__(PyArrowFileIO)
         second = object.__new__(PyArrowFileIO)
@@ -123,7 +141,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             return stream
 
         for file_io in (first, second):
-            file_io.filesystem = Mock(spec=pafs.S3FileSystem)
+            file_io.filesystem = Mock(spec=S3FileSystem)
             file_io.new_input_stream = open_stream
         token_io = object.__new__(RESTTokenFileIO)
         token_io.file_io = Mock(return_value=first)
