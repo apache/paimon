@@ -33,7 +33,7 @@ for version in 1.0.1 1.4.2 2.0.0 "$current_version"; do
     javac -source 8 -target 8 \
         -cp "$(cat "$test_dir/classpath-$version")" \
         -d "$test_dir/classes-$version" \
-        "$script_dir/src/main/java/org/apache/paimon/compatibility/ReleaseTableCompatibility.java"
+        "$script_dir/src/test/java/org/apache/paimon/compatibility/ReleaseTableCompatibility.java"
 done
 
 run() {
