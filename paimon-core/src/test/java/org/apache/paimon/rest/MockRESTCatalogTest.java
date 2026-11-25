@@ -27,8 +27,13 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.Model;
 import org.apache.paimon.catalog.ModelField;
+import org.apache.paimon.catalog.Prediction;
+import org.apache.paimon.catalog.PredictionSpec;
+import org.apache.paimon.catalog.PredictionStatus;
 import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.management.ListPermissionsRequest;
@@ -72,6 +77,7 @@ import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -91,6 +97,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -120,6 +127,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class MockRESTCatalogTest extends RESTCatalogTest {
 
     private RESTCatalogServer restCatalogServer;
+    private RESTCatalogPredictionTestControl predictionTestControl;
     private final String serverDefineHeaderName = "test-header";
     private final String serverDefineHeaderValue = "test-value";
     private String dataPath;
@@ -188,6 +196,427 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         catalog.dropDatabase(database, false, false);
         assertThatThrownBy(() -> catalog.getModel(identifier))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
+    }
+
+    @Test
+    void testPredictionReferenceIntegration() throws Exception {
+        String database = "prediction_reference";
+        Identifier sourceIdentifier = Identifier.create(database, "clips");
+        Identifier modelIdentifier = Identifier.create(database, "sample_model");
+        catalog.createDatabase(database, false);
+        catalog.createTable(
+                sourceIdentifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("content", DataTypes.STRING())
+                        .build(),
+                false);
+        FileStoreTable source = (FileStoreTable) catalog.getTable(sourceIdentifier);
+        commitRows(source, GenericRow.of(1, BinaryString.fromString("first")));
+
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "reference",
+                        "sample",
+                        Collections.singletonList(new ModelField("text", "STRING", null)),
+                        Collections.singletonList(new ModelField("response", "STRING", null)),
+                        Collections.emptyMap());
+        catalog.createModel(
+                modelIdentifier,
+                new Model(modelIdentifier, "Deterministic reference model", definition),
+                false);
+
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        sourceIdentifier,
+                        new PredictionSpec(
+                                "snapshot-readback",
+                                modelIdentifier,
+                                Collections.singletonMap("text", "content"),
+                                Collections.singletonList("id"),
+                                "Return the input as JSON",
+                                null,
+                                Collections.emptyMap(),
+                                "reference-success"));
+        long pinnedSnapshot = submitted.snapshotId();
+
+        commitRows(source, GenericRow.of(2, BinaryString.fromString("second")));
+        assertThat(
+                        ((FileStoreTable) catalog.getTable(sourceIdentifier))
+                                .snapshotManager()
+                                .latestSnapshotId())
+                .isGreaterThan(pinnedSnapshot);
+
+        resumePredictionExecution.run();
+        Prediction completed = waitForPrediction(submitted.predictionId());
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        assertThat(completed.snapshotId()).isEqualTo(pinnedSnapshot);
+        assertThat(completed.output()).isNotNull();
+        assertThat(batchRead(catalog.getTable(completed.output().table().toIdentifier())))
+                .containsExactly("+I[1, {\"text\":\"first\"}, null]");
+
+        resumePredictionExecution = predictionTestControl.pauseExecution();
+        Prediction toCancel =
+                catalog.submitPrediction(
+                        sourceIdentifier,
+                        new PredictionSpec(
+                                "cancel-reference",
+                                modelIdentifier,
+                                Collections.singletonMap("text", "content"),
+                                Collections.singletonList("id"),
+                                "Return the input as JSON",
+                                null,
+                                Collections.emptyMap(),
+                                "reference-cancel"));
+        waitForPredictionState(toCancel.predictionId(), PredictionStatus.State.RUNNING);
+        Prediction canceling = catalog.cancelPrediction(toCancel.predictionId());
+        assertThat(canceling.status().state()).isEqualTo(PredictionStatus.State.TERMINATING);
+        resumePredictionExecution.run();
+        Prediction canceled = waitForPrediction(toCancel.predictionId());
+        assertThat(canceled.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
+        assertThat(canceled.output()).isNull();
+    }
+
+    @Test
+    void testPredictionValidatesRegisteredProviderModel() throws Exception {
+        String database = "prediction_provider_validation";
+        Identifier sourceIdentifier = Identifier.create(database, "clips");
+        Identifier modelIdentifier = Identifier.create(database, "sample_model");
+        catalog.createDatabase(database, false);
+        catalog.createTable(
+                sourceIdentifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("content", DataTypes.STRING())
+                        .build(),
+                false);
+        commitRows(
+                (FileStoreTable) catalog.getTable(sourceIdentifier),
+                GenericRow.of(1, BinaryString.fromString("first")));
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "reference",
+                        "unknown",
+                        Collections.singletonList(new ModelField("text", "STRING", null)),
+                        Collections.singletonList(new ModelField("response", "STRING", null)),
+                        Collections.emptyMap());
+        catalog.createModel(
+                modelIdentifier,
+                new Model(modelIdentifier, "Unsupported reference model", definition),
+                false);
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.submitPrediction(
+                                        sourceIdentifier,
+                                        new PredictionSpec(
+                                                "unsupported-model",
+                                                modelIdentifier,
+                                                Collections.singletonMap("text", "content"),
+                                                Collections.singletonList("id"),
+                                                "Return the input as JSON",
+                                                null,
+                                                Collections.emptyMap(),
+                                                "unsupported-model-token")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("supports only model 'sample'");
+    }
+
+    @Test
+    void testConcurrentIdempotentPredictionSubmissionsReturnSameJob() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_concurrent_same");
+        PredictionSpec spec = fixture.spec("same-request", "same-token");
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
+        predictionTestControl.synchronizeNextSubmissions(2);
+        ExecutorService submissions = Executors.newFixedThreadPool(2);
+        try {
+            Future<Prediction> first =
+                    submissions.submit(() -> catalog.submitPrediction(fixture.source, spec));
+            Future<Prediction> second =
+                    submissions.submit(() -> catalog.submitPrediction(fixture.source, spec));
+
+            assertThat(first.get(10, TimeUnit.SECONDS).predictionId())
+                    .isEqualTo(second.get(10, TimeUnit.SECONDS).predictionId());
+        } finally {
+            resumePredictionExecution.run();
+            submissions.shutdownNow();
+        }
+    }
+
+    @Test
+    void testConcurrentConflictingPredictionSubmissionsReturnConflict() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_concurrent_conflict");
+        PredictionSpec firstSpec = fixture.spec("first-request", "conflict-token");
+        PredictionSpec secondSpec = fixture.spec("second-request", "conflict-token");
+        Runnable resumePredictionExecution = predictionTestControl.pauseExecution();
+        predictionTestControl.synchronizeNextSubmissions(2);
+        ExecutorService submissions = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Prediction>> results =
+                    Arrays.asList(
+                            submissions.submit(
+                                    () -> catalog.submitPrediction(fixture.source, firstSpec)),
+                            submissions.submit(
+                                    () -> catalog.submitPrediction(fixture.source, secondSpec)));
+            int accepted = 0;
+            int conflicts = 0;
+            for (Future<Prediction> result : results) {
+                try {
+                    result.get(10, TimeUnit.SECONDS);
+                    accepted++;
+                } catch (ExecutionException e) {
+                    assertThat(e.getCause()).isInstanceOf(AlreadyExistsException.class);
+                    conflicts++;
+                }
+            }
+            assertThat(accepted).isEqualTo(1);
+            assertThat(conflicts).isEqualTo(1);
+        } finally {
+            resumePredictionExecution.run();
+            submissions.shutdownNow();
+        }
+    }
+
+    @Test
+    void testCancelAfterOutputTableCreationDoesNotPublishTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_create");
+        Runnable resume = predictionTestControl.pauseAfterOutputCreated();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("cancel-after-create", "cancel-create-token"));
+
+        predictionTestControl.awaitOutputCreated();
+        assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
+                .isEqualTo(PredictionStatus.State.TERMINATING);
+        resume.run();
+
+        assertCanceledWithoutOutputTable(fixture, submitted.predictionId());
+    }
+
+    @Test
+    void testCancelAfterOutputCommitDoesNotPublishTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_cancel_after_commit");
+        Runnable resume = predictionTestControl.pauseAfterOutputCommitted();
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("cancel-after-commit", "cancel-commit-token"));
+
+        predictionTestControl.awaitOutputCommitted();
+        assertThat(catalog.cancelPrediction(submitted.predictionId()).status().state())
+                .isEqualTo(PredictionStatus.State.TERMINATING);
+        resume.run();
+
+        assertCanceledWithoutOutputTable(fixture, submitted.predictionId());
+    }
+
+    @Test
+    void testPredictionDerivesMergeKeyFromPrimaryKey() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_derived_merge_key");
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source,
+                        fixture.specWithoutMergeKey("derived-merge-key", "derived-key-token"));
+
+        Prediction completed = waitForPrediction(submitted.predictionId());
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        assertThat(batchRead(catalog.getTable(completed.output().table().toIdentifier())))
+                .containsExactlyInAnyOrder(
+                        "+I[1, {\"text\":\"first\"}, null]", "+I[2, {\"text\":\"second\"}, null]");
+    }
+
+    @Test
+    void testPredictionRejectsDerivedMergeKeyUsingReservedOutputName() throws Exception {
+        PredictionFixture fixture =
+                createPredictionFixture("prediction_reserved_derived_key", "response");
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.submitPrediction(
+                                        fixture.source,
+                                        fixture.specWithoutMergeKey(
+                                                "reserved-derived-key", "reserved-key-token")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("reserved output name");
+    }
+
+    @Test
+    void testPredictionRejectsUnsupportedScanOptions() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_scan_options", "id", 2);
+        for (Map.Entry<String, String> option :
+                Arrays.asList(
+                        new AbstractMap.SimpleEntry<>(CoreOptions.SCAN_BUCKET.key(), "0"),
+                        new AbstractMap.SimpleEntry<>(
+                                CoreOptions.STREAM_SCAN_MODE.key(), "file-monitor"))) {
+            PredictionSpec spec =
+                    new PredictionSpec(
+                            "restricted-" + option.getKey(),
+                            fixture.model,
+                            Collections.singletonMap("text", "content"),
+                            Collections.singletonList("id"),
+                            "Return the input as JSON",
+                            null,
+                            Collections.singletonMap(option.getKey(), option.getValue()),
+                            "restricted-" + option.getKey() + "-token");
+
+            assertThatThrownBy(() -> catalog.submitPrediction(fixture.source, spec))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining(option.getKey());
+        }
+
+        PredictionFixture configured =
+                createPredictionFixture(
+                        "prediction_stream_scan_mode",
+                        "id",
+                        1,
+                        Collections.singletonMap(
+                                CoreOptions.STREAM_SCAN_MODE.key(), "file-monitor"));
+        assertThatThrownBy(
+                        () ->
+                                catalog.submitPrediction(
+                                        configured.source,
+                                        configured.spec(
+                                                "configured-stream-scan-mode",
+                                                "configured-stream-scan-mode-token")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining(CoreOptions.STREAM_SCAN_MODE.key());
+    }
+
+    @Test
+    void testPredictionPublishesEmptyResultTable() throws Exception {
+        PredictionFixture fixture = createPredictionFixture("prediction_empty_result");
+        FileStoreTable source = (FileStoreTable) catalog.getTable(fixture.source);
+        commitRows(
+                source,
+                GenericRow.ofKind(RowKind.DELETE, 1, BinaryString.fromString("first")),
+                GenericRow.ofKind(RowKind.DELETE, 2, BinaryString.fromString("second")));
+        assertThat(batchRead(source)).isEmpty();
+
+        Prediction submitted =
+                catalog.submitPrediction(
+                        fixture.source, fixture.spec("empty-result", "empty-result-token"));
+        Prediction completed = waitForPrediction(submitted.predictionId());
+
+        assertThat(completed.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.SUCCESS);
+        FileStoreTable output =
+                (FileStoreTable) catalog.getTable(completed.output().table().toIdentifier());
+        assertThat(output.snapshotManager().latestSnapshot()).isNotNull();
+        assertThat(output.snapshotManager().latestSnapshot().totalRecordCount()).isZero();
+        assertThat(batchRead(output)).isEmpty();
+    }
+
+    private PredictionFixture createPredictionFixture(String database) throws Exception {
+        return createPredictionFixture(database, "id");
+    }
+
+    private PredictionFixture createPredictionFixture(String database, String primaryKey)
+            throws Exception {
+        return createPredictionFixture(database, primaryKey, 1);
+    }
+
+    private PredictionFixture createPredictionFixture(
+            String database, String primaryKey, int buckets) throws Exception {
+        return createPredictionFixture(database, primaryKey, buckets, Collections.emptyMap());
+    }
+
+    private PredictionFixture createPredictionFixture(
+            String database, String primaryKey, int buckets, Map<String, String> tableOptions)
+            throws Exception {
+        Identifier source = Identifier.create(database, "clips");
+        Identifier model = Identifier.create(database, "sample_model");
+        catalog.createDatabase(database, false);
+        Schema.Builder schema =
+                Schema.newBuilder()
+                        .column(primaryKey, DataTypes.INT())
+                        .column("content", DataTypes.STRING())
+                        .primaryKey(primaryKey)
+                        .option(CoreOptions.BUCKET.key(), Integer.toString(buckets));
+        tableOptions.forEach(schema::option);
+        catalog.createTable(source, schema.build(), false);
+        commitRows(
+                (FileStoreTable) catalog.getTable(source),
+                GenericRow.of(1, BinaryString.fromString("first")),
+                GenericRow.of(2, BinaryString.fromString("second")));
+        ProviderModelDefinition definition =
+                new ProviderModelDefinition(
+                        "reference",
+                        "sample",
+                        Collections.singletonList(new ModelField("text", "STRING", null)),
+                        Collections.singletonList(new ModelField("response", "STRING", null)),
+                        Collections.emptyMap());
+        catalog.createModel(
+                model, new Model(model, "Deterministic reference model", definition), false);
+        return new PredictionFixture(source, model);
+    }
+
+    private void assertCanceledWithoutOutputTable(PredictionFixture fixture, String predictionId)
+            throws Exception {
+        Prediction canceled = waitForPrediction(predictionId);
+        assertThat(canceled.status().terminationDetails().code())
+                .isEqualTo(PredictionStatus.TerminationCode.CANCELED);
+        assertThat(canceled.output()).isNull();
+        String outputName = fixture.source.getObjectName() + "__" + predictionId.replace('-', '_');
+        assertThat(catalog.listTables(fixture.source.getDatabaseName())).doesNotContain(outputName);
+    }
+
+    private static final class PredictionFixture {
+
+        private final Identifier source;
+        private final Identifier model;
+
+        private PredictionFixture(Identifier source, Identifier model) {
+            this.source = source;
+            this.model = model;
+        }
+
+        private PredictionSpec spec(String name, String idempotencyToken) {
+            return spec(name, Collections.singletonList("id"), idempotencyToken);
+        }
+
+        private PredictionSpec specWithoutMergeKey(String name, String idempotencyToken) {
+            return spec(name, null, idempotencyToken);
+        }
+
+        private PredictionSpec spec(
+                String name, List<String> mergeKeyColumns, String idempotencyToken) {
+            return new PredictionSpec(
+                    name,
+                    model,
+                    Collections.singletonMap("text", "content"),
+                    mergeKeyColumns,
+                    "Return the input as JSON",
+                    null,
+                    Collections.emptyMap(),
+                    idempotencyToken);
+        }
+    }
+
+    private Prediction waitForPrediction(String predictionId) throws Exception {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            Prediction prediction = catalog.getPrediction(predictionId);
+            if (prediction.status().isTerminal()) {
+                return prediction;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Prediction did not terminate: " + predictionId);
+    }
+
+    private void waitForPredictionState(String predictionId, PredictionStatus.State expectedState)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            if (catalog.getPrediction(predictionId).status().state() == expectedState) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Prediction did not reach " + expectedState + ": " + predictionId);
     }
 
     @Test
@@ -2002,6 +2431,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         this.config = new ConfigResponse(defaultConf, ImmutableMap.of());
         restCatalogServer =
                 new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
+        predictionTestControl = restCatalogServer.predictionTestControl();
         restCatalogServer.start();
         for (Map.Entry<String, String> entry : this.authMap.entrySet()) {
             options.set(entry.getKey(), entry.getValue());

@@ -47,6 +47,7 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String MODELS = "models";
+    protected static final String PREDICTIONS = "predictions";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
@@ -151,16 +152,29 @@ public class ResourcePaths {
     }
 
     public String models(String databaseName) {
-        checkModelPathSegment(databaseName, "databaseName");
+        checkPathSegment(databaseName, "databaseName");
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), MODELS);
     }
 
     public String model(String databaseName, String modelName) {
-        checkModelPathSegment(modelName, "modelName");
+        checkPathSegment(modelName, "modelName");
         return SLASH.join(models(databaseName), encodeString(modelName));
     }
 
-    private static void checkModelPathSegment(String value, String name) {
+    public String predictions() {
+        return SLASH.join(V1, prefix, PREDICTIONS);
+    }
+
+    public String prediction(String predictionId) {
+        checkPathSegment(predictionId, "predictionId");
+        return SLASH.join(predictions(), encodeString(predictionId));
+    }
+
+    public String cancelPrediction(String predictionId) {
+        return SLASH.join(prediction(predictionId), "cancel");
+    }
+
+    private static void checkPathSegment(String value, String name) {
         checkArgument(value != null && !value.trim().isEmpty(), "%s must not be blank", name);
         checkArgument(
                 !".".equals(value) && !"..".equals(value), "%s must not be a dot segment", name);

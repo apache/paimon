@@ -225,7 +225,8 @@ public class RequestJacksonCompatibilityTest {
                             RenameTableRequest.class,
                             ReplaceTableRequest.class,
                             RevokePermissionRequest.class,
-                            RollbackTableRequest.class)
+                            RollbackTableRequest.class,
+                            SubmitPredictionRequest.class)
                     .collect(Collectors.toSet());
 
     @ParameterizedTest(name = "{0}")

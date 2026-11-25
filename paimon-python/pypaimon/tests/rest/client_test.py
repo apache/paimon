@@ -133,7 +133,7 @@ class HttpClientTimeoutTest(unittest.TestCase):
             client._execute_request('GET', 'http://localhost:8080/x')
 
         self.assertTrue(req.called, "session.request must be invoked")
-        kwargs = req.call_args.kwargs
+        kwargs = req.call_args[1]
         self.assertEqual(
             kwargs.get('timeout'), client._timeout,
             "request must carry the timeout; Session.timeout is dead code")

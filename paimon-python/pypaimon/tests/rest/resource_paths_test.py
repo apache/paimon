@@ -51,6 +51,15 @@ class ResourcePathsTest(unittest.TestCase):
             "/v1/catalog%2Fid/databases/sales+db/table-details", paths.table_details("sales db"))
         self.assertEqual("/v1/catalog%2Fid/tables/id/a%2Fb+c", paths.table_by_id("a/b c"))
 
+    def test_prediction_rejects_dot_segments(self):
+        paths = ResourcePaths("paimon")
+        for prediction_id in (".", ".."):
+            with self.subTest(prediction_id=prediction_id):
+                with self.assertRaises(ValueError):
+                    paths.prediction(prediction_id)
+                with self.assertRaises(ValueError):
+                    paths.cancel_prediction(prediction_id)
+
     def test_signature_matches_the_path_sent(self):
         received = []
 

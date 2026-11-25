@@ -1197,6 +1197,34 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException("Current Catalog does not support models");
     }
 
+    // ======================= Prediction methods ===============================
+
+    /** Submit an asynchronous prediction over a table and its fixed snapshot. */
+    default Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
+            throws DatabaseNotExistException, TableNotExistException, ModelNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support predictions");
+    }
+
+    /** Get one asynchronous prediction by its unique id. */
+    default Prediction getPrediction(String predictionId) throws PredictionNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support predictions");
+    }
+
+    /** List asynchronous predictions, optionally filtered by source table. */
+    default PagedList<Prediction> listPredictions(
+            @Nullable Identifier source,
+            @Nullable String name,
+            @Nullable PredictionStatus.State state,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException("Current Catalog does not support predictions");
+    }
+
+    /** Request cancellation and return the updated prediction metadata. */
+    default Prediction cancelPrediction(String predictionId) throws PredictionNotExistException {
+        throw new UnsupportedOperationException("Current Catalog does not support predictions");
+    }
+
     // ======================= Function methods ===============================
 
     /**
@@ -1934,6 +1962,27 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
+        }
+    }
+
+    /** Exception for trying to access a prediction that doesn't exist. */
+    class PredictionNotExistException extends Exception {
+
+        private static final String MSG = "Prediction %s doesn't exist.";
+
+        private final String predictionId;
+
+        public PredictionNotExistException(String predictionId) {
+            this(predictionId, null);
+        }
+
+        public PredictionNotExistException(String predictionId, @Nullable Throwable cause) {
+            super(String.format(MSG, predictionId), cause);
+            this.predictionId = predictionId;
+        }
+
+        public String predictionId() {
+            return predictionId;
         }
     }
 

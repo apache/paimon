@@ -55,6 +55,10 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.model import CreateModelRequest, GetModelResponse, ListModelsResponse
+from pypaimon.api.prediction import (
+    CancelPredictionRequest, GetPredictionResponse, ListPredictionsResponse,
+    SubmitPredictionRequest,
+)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_exception import NoSuchResourceException, RESTException
 from pypaimon.api.rest_util import RESTUtil
@@ -63,6 +67,7 @@ from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.catalog.prediction import PredictionState
 from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.list_permissions_request import \
     ListPermissionsRequest
@@ -818,6 +823,59 @@ class RESTApi:
         database_name, model_name = self._validate_resource_path(identifier)
         self.client.delete(
             self.resource_paths.model(database_name, model_name),
+            self.rest_auth_function,
+        )
+
+    def submit_prediction(
+            self,
+            request: SubmitPredictionRequest,
+    ) -> GetPredictionResponse:
+        return self.client.post_with_response_type(
+            self.resource_paths.predictions(),
+            request,
+            GetPredictionResponse,
+            self.rest_auth_function,
+        )
+
+    def get_prediction(self, prediction_id: str) -> GetPredictionResponse:
+        return self.client.get(
+            self.resource_paths.prediction(prediction_id),
+            GetPredictionResponse,
+            self.rest_auth_function,
+        )
+
+    def list_predictions(
+            self,
+            source: Optional[Identifier] = None,
+            name: Optional[str] = None,
+            state: Optional[PredictionState] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[GetPredictionResponse]:
+        query_params = {}
+        if source is not None:
+            database_name, table_name = self._validate_resource_path(source)
+            self._put_query_parameter(query_params, "database", database_name)
+            self._put_query_parameter(query_params, "table", table_name)
+        self._put_query_parameter(query_params, "name", name)
+        self._put_query_parameter(
+            query_params, "state", state.value if state is not None else None)
+        if max_results is not None and max_results > 0:
+            query_params[self.MAX_RESULTS] = str(max_results)
+        self._put_query_parameter(query_params, self.PAGE_TOKEN, page_token)
+        response = self.client.get_with_params(
+            self.resource_paths.predictions(),
+            query_params,
+            ListPredictionsResponse,
+            self.rest_auth_function,
+        )
+        return PagedList(response.predictions, response.next_page_token)
+
+    def cancel_prediction(self, prediction_id: str) -> GetPredictionResponse:
+        return self.client.post_with_response_type(
+            self.resource_paths.cancel_prediction(prediction_id),
+            CancelPredictionRequest(),
+            GetPredictionResponse,
             self.rest_auth_function,
         )
 

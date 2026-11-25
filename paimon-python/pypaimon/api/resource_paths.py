@@ -35,6 +35,7 @@ class ResourcePaths:
     FUNCTION_DETAILS = "function-details"
     MODELS = "models"
     SEMANTIC_VIEWS = "semantic-views"
+    PREDICTIONS = "predictions"
     TAGS = "tags"
     BRANCHES = "branches"
     FORWARD = "forward"
@@ -153,6 +154,20 @@ class ResourcePaths:
     def semantic_view(self, database_name: str, view_name: str) -> str:
         view = self._semantic_view_segment(view_name, "Semantic view name")
         return "{}/{}".format(self.semantic_views(database_name), view)
+
+    def predictions(self) -> str:
+        return "{}/{}".format(self.base_path, self.PREDICTIONS)
+
+    def prediction(self, prediction_id: str) -> str:
+        if not isinstance(prediction_id, str) or not prediction_id.strip():
+            raise ValueError("prediction_id must be a non-empty string")
+        if prediction_id in (".", ".."):
+            raise ValueError("prediction_id must not be a dot segment")
+        return "{}/{}".format(
+            self.predictions(), RESTUtil.encode_string(prediction_id))
+
+    def cancel_prediction(self, prediction_id: str) -> str:
+        return "{}/cancel".format(self.prediction(prediction_id))
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

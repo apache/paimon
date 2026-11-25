@@ -79,7 +79,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RESTApiCoverageTest {
 
     /** RESTApi methods with no entry in DLFOpenApiActions; they are signed without an action. */
-    private static final Set<String> WITHOUT_ACTION = Collections.emptySet();
+    private static final Set<String> WITHOUT_ACTION =
+            Collections.unmodifiableSet(
+                    new TreeSet<>(
+                            Arrays.asList(
+                                    "cancelPrediction",
+                                    "getPrediction",
+                                    "listPredictions",
+                                    "submitPrediction")));
 
     /** A value per parameter type; "SELECT" is valid both as a name and as an access. */
     private static final Map<Class<?>, Object> ARGUMENTS = arguments();
