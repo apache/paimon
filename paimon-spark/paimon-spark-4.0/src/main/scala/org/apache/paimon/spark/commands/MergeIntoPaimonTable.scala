@@ -113,7 +113,7 @@ case class MergeIntoPaimonTable(
 
     // Step1: get the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits =
-      findCandidateDataSplits(targetOnlyCondition.getOrElse(TrueLiteral), relation.output)
+      findCandidateDataSplits(targetOnlyCondition.getOrElse(TrueLiteral), relation)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (deletionVectorsEnabled) {
