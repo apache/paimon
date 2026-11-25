@@ -24,11 +24,14 @@ import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonRowLevelCommand, PaimonSparkWriter}
 import org.apache.paimon.spark.read.PaimonSplitScan
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.QueryExecution
@@ -36,6 +39,7 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.Utils
+import org.apache.spark.sql.types.LongType
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -679,6 +683,45 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       // A row-id condition under OR cannot restrict the scan to that row-id range.
       sql("DELETE FROM t WHERE _ROW_ID = 0 OR id = 4")
       checkAnswer(sql("SELECT id, data, _ROW_ID FROM t"), Seq(Row(2, 20, 1)))
+    }
+  }
+
+  test("Data Evolution: row id delete prunes a multi-file table") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '100')
+            |""".stripMargin)
+      for (batch <- 0 until 12) {
+        sql(
+          s"INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range(${batch * 100}, ${(batch + 1) * 100})")
+      }
+
+      val rowId = AttributeReference("_ROW_ID", LongType)()
+      case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
+
+        def candidates(condition: Expression, output: Seq[Attribute]): Seq[DataSplit] =
+          findCandidateDataSplits(condition, output)
+      }
+      val probe = RowLevelProbe(loadTable("t"))
+      def fileCount(splits: Seq[DataSplit]): Int =
+        splits.flatMap(_.dataFiles().asScala.map(_.fileName())).distinct.size
+
+      val unprunedFiles = fileCount(probe.candidates(Literal.TrueLiteral, Seq(rowId)))
+      val prunedFiles =
+        fileCount(probe.candidates(EqualTo(rowId, Literal(550L)), Seq(rowId)))
+      assert(unprunedFiles == 12)
+      assert(prunedFiles == 1)
+
+      sql("DELETE FROM t WHERE _ROW_ID BETWEEN 550 AND 550")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1199L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 549 AND 551 ORDER BY id"),
+        Seq(Row(549, 549L), Row(551, 551L)))
     }
   }
 
