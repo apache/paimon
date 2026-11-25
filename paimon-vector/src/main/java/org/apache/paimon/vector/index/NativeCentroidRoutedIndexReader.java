@@ -55,7 +55,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Routes queries to shard files using row IDs relative to their shared range. */
 final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexReader
@@ -102,8 +101,7 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
                 checkArgument(modelMeta == null, "Multiple routing models.");
                 modelMeta = meta;
             } else {
-                checkArgument(
-                        file.rowCount() >= 0, "Centroid shards must record their vector count.");
+                checkArgument(file.rowCount() > 0, "Centroid shards must contain vectors.");
                 checkArgument(
                         shards.put(meta.centroid(), file) == null,
                         "Duplicate centroid shard %s.",
@@ -116,15 +114,14 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
         this.metric = NativeCentroidVectorGlobalIndexer.routingMetric(modelMeta);
         this.vectorCount = count;
         int nlist = routing.nlist();
-        checkArgument(
-                shards.size() == nlist, "Centroid shards do not cover all routing centroids.");
+        checkArgument(nlist == 0 || count > 0, "Centroid routing model has no vector shards.");
         boolean storesLocalNlist = storesLocalNlist(indexType, metric);
         for (Map.Entry<Integer, GlobalIndexIOMeta> shard : shards.entrySet()) {
             int centroid = shard.getKey();
             checkArgument(
                     centroid >= 0 && centroid < nlist, "Invalid shard centroid %s.", centroid);
             byte[] local = shard.getValue().metadata();
-            if (storesLocalNlist && shard.getValue().rowCount() > 0) {
+            if (storesLocalNlist) {
                 checkArgument(
                         local != null && local.length == Integer.BYTES,
                         "Invalid centroid shard metadata.");
@@ -164,10 +161,6 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             }
         }
         return model;
-    }
-
-    private GlobalIndexIOMeta shard(int centroid) {
-        return checkNotNull(shards.get(centroid), "Missing routed centroid shard %s.", centroid);
     }
 
     private NativeVectorGlobalIndexReader openShard(GlobalIndexIOMeta shard) {
@@ -289,8 +282,10 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             boolean joint = considerJoint;
             for (int i = 0; joint && i < JOINT_OUTER_PROBES; i++) {
                 int centroid = nearest[i];
+                GlobalIndexIOMeta shard = shards.get(centroid);
                 joint =
-                        shard(centroid).rowCount()
+                        shard != null
+                                && shard.rowCount()
                                         >= (long) NativeVectorGlobalIndexReader.JOINT_INNER_PROBES
                                                 * query.limit()
                                 && jointLayout.contains(centroid);
@@ -473,8 +468,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             }
             Map<Boolean, List<Integer>> policy = Collections.singletonMap(false, indices);
             for (int centroid : plans.get(0).centers) {
-                GlobalIndexIOMeta file = shard(centroid);
-                if (file.rowCount() > 0) {
+                GlobalIndexIOMeta file = shards.get(centroid);
+                if (file != null) {
                     groups.put(file, policy);
                 }
             }
@@ -487,8 +482,8 @@ final class NativeCentroidRoutedIndexReader extends AbstractVectorGlobalIndexRea
             Route route = plans.get(i);
             for (int centroid : route.centers) {
                 if (route.visited.add(centroid)) {
-                    GlobalIndexIOMeta file = shard(centroid);
-                    if (file.rowCount() > 0) {
+                    GlobalIndexIOMeta file = shards.get(centroid);
+                    if (file != null) {
                         groups.computeIfAbsent(file, ignored -> new LinkedHashMap<>())
                                 .computeIfAbsent(route.joint, ignored -> new ArrayList<>())
                                 .add(i);

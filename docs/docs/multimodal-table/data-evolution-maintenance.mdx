@@ -104,9 +104,8 @@ to reclaim these files. The default retention window is one day. If setting
 maintenance jobs. Snapshot expiration alone does not reclaim files that were
 never committed.
 
-The orphan cleaner does **not** scan `global-index.external-path`, including
-DV index files stored there. This also applies to previously configured
-external index roots. For manual recovery:
+Use manual recovery for orphaned DV index files in external index directories,
+including previously configured roots:
 
 1. Stop the failed attempt and its retries, and identify its output files from
    a recorded inventory or storage audit log. For a root used exclusively by

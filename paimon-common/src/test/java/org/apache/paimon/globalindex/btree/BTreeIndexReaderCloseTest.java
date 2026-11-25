@@ -71,14 +71,14 @@ public class BTreeIndexReaderCloseTest {
         GlobalIndexFileWriter fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return "test-btree-" + UUID.randomUUID() + prefix;
+                    public String newFilePath(String prefix) {
+                        return path("test-btree-" + UUID.randomUUID() + prefix).toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(path(fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
 
@@ -94,7 +94,7 @@ public class BTreeIndexReaderCloseTest {
         assertThat(results).hasSize(1);
 
         ResultEntry entry = results.get(0);
-        Path filePath = path(entry.fileName());
+        Path filePath = new Path(entry.filePath());
         meta = new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), results.get(0).meta());
     }
 

@@ -93,7 +93,7 @@ class IndexManifestDeletionTest {
             store.options()
                     .toConfiguration()
                     .set(
-                            CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH,
+                            "global-index.external-path",
                             new Path(new Path(tempDir.toUri()), "new-index-root").toString());
         }
         IndexManifestFile manifest = store.indexManifestFileFactory().create();

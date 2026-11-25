@@ -41,6 +41,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private static final int RANGE_LIST_SELECT_SAMPLE_SIZE = 64;
 
+    private static final long ROARING_CONTAINER_SPAN = 1L << 16;
+
     private final Roaring64NavigableMap roaring64NavigableMap;
 
     public RoaringNavigableMap64() {
@@ -71,6 +73,55 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
         long before = fromInclusive == 0 ? 0 : roaring64NavigableMap.rankLong(fromInclusive - 1);
         return roaring64NavigableMap.rankLong(toExclusive - 1) > before;
+    }
+
+    /** Copies the values within {@code range}, subtracting the range start from each value. */
+    public RoaringNavigableMap64 relativeRange(Range range) {
+        Preconditions.checkArgument(range.from >= 0, "Expected a non-negative range.");
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        if (isEmpty()) {
+            return result;
+        }
+        long firstIndex = range.from == 0 ? 0 : roaring64NavigableMap.rankLong(range.from - 1);
+        long endIndex = roaring64NavigableMap.rankLong(range.to);
+        if (firstIndex == endIndex) {
+            return result;
+        }
+
+        long first = roaring64NavigableMap.select(firstIndex);
+        long last = roaring64NavigableMap.select(endIndex - 1);
+        long count = endIndex - firstIndex;
+        if (last - first == count - 1) {
+            result.addRange(new Range(first - range.from, last - range.from));
+            return result;
+        }
+        if ((last - first) / ROARING_CONTAINER_SPAN >= count) {
+            // Selecting sparse values avoids allocating containers across a wide gap.
+            for (long index = firstIndex; index < endIndex; index++) {
+                result.add(roaring64NavigableMap.select(index) - range.from);
+            }
+            return result;
+        }
+
+        RoaringNavigableMap64 selected = range.from == 0 ? result : new RoaringNavigableMap64();
+        selected.addRange(new Range(first, last));
+        selected.and(this);
+        if (range.from == 0) {
+            return selected;
+        }
+        if (selected.shouldUseSelectRanges(count)) {
+            for (Range run : selected.toRangeListBySelect(count)) {
+                result.addRange(run.addOffset(-range.from));
+            }
+        } else {
+            selected.roaring64NavigableMap.forEach(row -> result.add(row - range.from));
+        }
+        return result;
+    }
+
+    /** Last value in bitmap order, which is unsigned. The bitmap must be nonempty. */
+    public long last() {
+        return roaring64NavigableMap.last();
     }
 
     public void add(long x) {

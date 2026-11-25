@@ -70,6 +70,7 @@ class PythonTableDeleteByRowId:
         self.table: FileStoreTable = table
         self.file_io = table.file_io
         self._precomputed_anchor_ranges = _precomputed_anchor_ranges
+        self._path_factory = None
         return self
 
     def _snapshot_anchor_ranges(self) -> _AnchorRangesInfo:
@@ -291,7 +292,9 @@ class PythonTableDeleteByRowId:
             deletion_vectors: Dict[str, DeletionVector],
     ) -> IndexManifestEntry:
         file_name = f"{FileStorePathFactory.INDEX_PREFIX}{uuid.uuid4()}-1"
-        path, external = self.table.path_factory().new_bucket_index_path(
+        if self._path_factory is None:
+            self._path_factory = self.table.path_factory()
+        path, external = self._path_factory.new_bucket_index_path(
             tuple(partition.values), bucket, file_name)
 
         position = 1

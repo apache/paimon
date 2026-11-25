@@ -18,6 +18,7 @@
 """Translate ordinary snapshot-and-split plans to and from Rust Core."""
 
 from copy import copy, deepcopy
+import json
 
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
@@ -31,6 +32,7 @@ from pypaimon.table.source.search_types import (
     PrimaryKeyVectorScanPlan, PrimaryKeyVectorSearchSplit,
 )
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult, PrimaryKeySearchPosition
+from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message_serializer import _index_from_row, _index_row
 
@@ -56,7 +58,6 @@ def _files(values):
 def _split_from_native(table, split, full_text):
     from pypaimon_rust import datafusion as sdk
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
-    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 
     native_pk = sdk.PrimaryKeyFullTextSearchSplit if full_text else sdk.PrimaryKeyVectorSearchSplit
     native_index = sdk.IndexFullTextSearchSplit if full_text else sdk.IndexVectorSearchSplit
@@ -88,13 +89,29 @@ def _plan_from_native(table, native, full_text, primary_key):
     if primary_key:
         cls = PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan
         return cls(0 if snapshot is None else snapshot.id, splits, snapshot)
-    return (FullTextScanPlan if full_text else VectorSearchScanPlan)(splits, snapshot)
+    if full_text:
+        return FullTextScanPlan(splits, snapshot)
+    # Preserve the candidate filtering chosen by the native planner when a
+    # local reader consumes the captured plan or receives only its splits.
+    for split in splits:
+        split._native_vector_layout = True
+    raw_splits = [split for split in splits if isinstance(split, RawVectorSearchSplit)]
+    if (raw_splits and hasattr(native, '_from_json')
+            and any(file.global_index_meta is not None and file.global_index_meta.has_centroid_bitmap_fields()
+                    for split in splits if isinstance(split, IndexVectorSearchSplit)
+                    for file in split.vector_index_files)):
+        # The SDK pickle codec also carries the ranges planned solely for scalar prefiltering.
+        # Keep those ranges with each split so both reader entry points preserve their purpose.
+        _, (state,) = native.__reduce__()
+        ranges = [Range(value['from'], value['to']) for value in json.loads(state).get('scalar_prefilter_ranges', ())]
+        for split in raw_splits:
+            split._scalar_prefilter_ranges = Range.and_(split.row_ranges, ranges)
+    return VectorSearchScanPlan(splits, snapshot)
 
 
 def _split_to_native(split, full_text, snapshot=None):
     from pypaimon_rust import datafusion as sdk
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
-    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 
     expected = ((PrimaryKeyFullTextSearchSplit, IndexFullTextSearchSplit, RawFullTextSearchSplit) if full_text else
                 (PrimaryKeyVectorSearchSplit, IndexVectorSearchSplit, RawVectorSearchSplit))
@@ -134,7 +151,30 @@ def _plan_to_native(plan, full_text):
     captured = plan.snapshot()
     snapshot = None if captured is None else sdk.Snapshot._from_json(JSON.to_json(captured))
     cls = sdk.FullTextScanPlan if full_text else sdk.VectorScanPlan
-    return cls([_split_to_native(split, full_text, captured) for split in plan.splits()], snapshot)
+    native = cls([_split_to_native(split, full_text, captured) for split in plan.splits()], snapshot)
+    ranges = _scalar_prefilter_ranges(plan.splits()) if not full_text else []
+    if ranges:
+        restore, (state,) = native.__reduce__()
+        state = json.loads(state)
+        state['scalar_prefilter_ranges'] = [{'from': r.from_, 'to': r.to} for r in ranges]
+        return restore(json.dumps(state))
+    return native
+
+
+def _scalar_prefilter_ranges(splits):
+    raw_splits = [split for split in splits if isinstance(split, RawVectorSearchSplit)]
+    if not any(getattr(split, '_scalar_prefilter_ranges', ()) for split in raw_splits):
+        return []
+    prefilter, scoring = [], []
+    for split in raw_splits:
+        ranges = Range.and_(split.row_ranges, getattr(split, '_scalar_prefilter_ranges', ()))
+        prefilter.extend(ranges)
+        for row_range in split.row_ranges:
+            scoring.extend(row_range.exclude(ranges))
+    # An explicitly supplied raw split can request scoring over a range that
+    # another split supplied only for scalar prefiltering.
+    scoring = Range.sort_and_merge_overlap(scoring, True, True)
+    return [uncovered for row_range in prefilter for uncovered in row_range.exclude(scoring)]
 
 
 def _capture_builder(builder):
@@ -276,13 +316,11 @@ def _builder_to_native(builder, full_text, batch=False, scan=False):
         from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
         native = _native_full_text_builder(builder, require_limit=not scan)
     else:
-        from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
+        from pypaimon.execution.native.read.native_vector_search import _native_vector_builder, _set_native_query
         native = _native_vector_builder(builder, batch)
         if native is not None and not scan:
-            if batch:
-                native.with_query_vectors(builder._query_vectors)
-            else:
-                native.with_query_vector(builder._query_vector)
+            queries = builder._query_vectors if batch else builder._query_vector
+            _set_native_query(native, builder, queries, batch)
     if native is None:
         raise RuntimeError('Native search runtime is unavailable for the captured reader configuration')
     return native
@@ -297,16 +335,13 @@ def native_vector_scan(builder, batch=False):
 
 
 def native_vector_read(builder, batch=False):
-    from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
+    from pypaimon.execution.native.read.native_vector_search import _native_vector_builder, _set_native_query
     native = _native_vector_builder(builder, batch)
     if native is None:
         return None
-    if batch:
-        native.with_query_vectors(builder._query_vectors)
-        reader = native.new_batch_vector_search_read()
-    else:
-        native.with_query_vector(builder._query_vector)
-        reader = native.new_vector_search_read()
+    queries = builder._query_vectors if batch else builder._query_vector
+    _set_native_query(native, builder, queries, batch)
+    reader = native.new_batch_vector_search_read() if batch else native.new_vector_search_read()
     return NativeSearchRead(
         builder._table, reader, builder._is_primary_key_vector_search(), False,
         _capture_builder(builder), batch)

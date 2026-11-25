@@ -25,6 +25,7 @@ import pyarrow as pa
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder, _write_vector_batch
 from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import VindexVectorIndexWriter
 from pypaimon.schema.data_types import ArrayType, AtomicType
+from pypaimon.utils.file_store_path_factory import IndexPathFactory
 from pypaimon.utils.range import Range
 
 
@@ -190,7 +191,7 @@ class VindexBatchWriteTest(unittest.TestCase):
             (Mock(), Range(0, 9)),
         ]), patch(module + '.ADD_BATCH_SIZE', 1):
             with self.assertRaisesRegex(ValueError, '_ROW_ID is null'):
-                builder._build_generic_index([], [], Mock(), read, '/unused')
+                builder._build_generic_index([], [], Mock(), read, IndexPathFactory('/unused'))
         writer.write_batch.assert_not_called()
         writer.finish.assert_not_called()
         writer.close.assert_called_once()

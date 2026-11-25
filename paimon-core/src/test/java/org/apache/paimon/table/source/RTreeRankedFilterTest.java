@@ -178,7 +178,6 @@ class RTreeRankedFilterTest extends TableTestBase {
             List<IndexFileMeta> files =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                             table.fileIO(),
-                            table.store().pathFactory().globalIndexFileFactory(),
                             table.coreOptions(),
                             new Range(0, values.length - 1),
                             field.id(),

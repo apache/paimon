@@ -20,6 +20,7 @@ package org.apache.paimon.metastore;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.CentroidIndexMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -90,11 +91,18 @@ class GlobalIndexVisibilityChecker {
             }
 
             GlobalIndexIdentifier identifier = identifierOf(entry);
-            if (identifiers.contains(identifier)) {
-                indexedRangesByPartition
-                        .computeIfAbsent(entry.partition().copy(), k -> new HashMap<>())
-                        .computeIfAbsent(identifier, k -> new ArrayList<>())
-                        .add(entry.indexFile().globalIndexMeta().rowRange());
+            Map<GlobalIndexIdentifier, List<Range>> indexed =
+                    indexedRangesByPartition.computeIfAbsent(
+                            entry.partition().copy(), k -> new HashMap<>());
+            Range range = globalIndex.rowRange();
+            if (identifier.centroidBitmap) {
+                for (GlobalIndexIdentifier required : identifiers) {
+                    if (identifier.coversCentroidBitmap(required)) {
+                        indexed.computeIfAbsent(required, k -> new ArrayList<>()).add(range);
+                    }
+                }
+            } else if (identifiers.contains(identifier)) {
+                indexed.computeIfAbsent(identifier, k -> new ArrayList<>()).add(range);
             }
         }
 
@@ -171,7 +179,14 @@ class GlobalIndexVisibilityChecker {
             FileStoreTable table, Snapshot snapshot) {
         return table.store()
                 .newIndexFileHandler()
-                .scan(snapshot, entry -> entry.indexFile().globalIndexMeta() != null);
+                .scan(
+                        snapshot,
+                        entry -> {
+                            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                            return meta != null
+                                    && (!CentroidIndexMeta.hasBitmapFields(meta)
+                                            || CentroidIndexMeta.isRoutingModel(meta.indexMeta()));
+                        });
     }
 
     private static GlobalIndexIdentifier identifierOf(IndexManifestEntry entry) {
@@ -179,7 +194,8 @@ class GlobalIndexVisibilityChecker {
         return new GlobalIndexIdentifier(
                 entry.indexFile().indexType(),
                 globalIndex.indexFieldId(),
-                globalIndex.extraFieldIds());
+                globalIndex.extraFieldIds(),
+                CentroidIndexMeta.hasBitmapFields(globalIndex));
     }
 
     private static class GlobalIndexIdentifier {
@@ -187,14 +203,28 @@ class GlobalIndexVisibilityChecker {
         private final String indexType;
         private final int indexFieldId;
         private final int[] extraFieldIds;
+        private final boolean centroidBitmap;
 
-        private GlobalIndexIdentifier(String indexType, int indexFieldId, int[] extraFieldIds) {
+        private GlobalIndexIdentifier(
+                String indexType, int indexFieldId, int[] extraFieldIds, boolean centroidBitmap) {
             this.indexType = indexType;
             this.indexFieldId = indexFieldId;
             this.extraFieldIds =
                     extraFieldIds == null
                             ? null
                             : Arrays.copyOf(extraFieldIds, extraFieldIds.length);
+            this.centroidBitmap = centroidBitmap;
+        }
+
+        private boolean coversCentroidBitmap(GlobalIndexIdentifier required) {
+            return required.centroidBitmap
+                    && indexFieldId == required.indexFieldId
+                    && indexType.equals(required.indexType)
+                    && Arrays.stream(required.extraFieldIds)
+                            .allMatch(
+                                    field ->
+                                            Arrays.stream(extraFieldIds)
+                                                    .anyMatch(id -> id == field));
         }
 
         @Override
@@ -208,13 +238,14 @@ class GlobalIndexVisibilityChecker {
 
             GlobalIndexIdentifier that = (GlobalIndexIdentifier) o;
             return indexFieldId == that.indexFieldId
+                    && centroidBitmap == that.centroidBitmap
                     && Objects.equals(indexType, that.indexType)
                     && Arrays.equals(extraFieldIds, that.extraFieldIds);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(indexType, indexFieldId);
+            int result = Objects.hash(indexType, indexFieldId, centroidBitmap);
             result = 31 * result + Arrays.hashCode(extraFieldIds);
             return result;
         }

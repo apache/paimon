@@ -58,41 +58,45 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
             lookup._projection.append(row_id)
         builder = lookup._configured_read_builder()
         reader = builder.new_read()
-        if query._metadata_only_result():
-            dataset = ray.data.from_arrow(pa.table({row_id: pa.array(list(result.results()), type=pa.int64())}))
+        row_ids = result.results()
+        empty_result = row_ids.is_empty()
+        if empty_result or query._metadata_only_result():
+            table = reader._output_arrow_schema().empty_table()
+            if not empty_result:
+                table = pa.Table.from_arrays([pa.array(list(row_ids), type=pa.int64())], schema=table.schema)
+            dataset = ray.data.from_arrow(query._finish_search_result(table, result, added_row_id))
         else:
             splits = builder.new_scan().with_global_index_result(result).plan().splits()
             dataset = _read_lookup_splits(
                 reader, splits, concurrency, remote_args, override_num_blocks)
 
-        # Only compact candidate metadata crosses the driver. Payloads remain in
-        # worker blocks, including during score attachment and global ordering.
-        rank_column = "_paimon_search_rank_" + uuid.uuid4().hex
-        finish = copy(query)
-        finish._sort_by_score = False
-        sort_by_score = query._sort_by_score
-        score_getter = (result.score_getter()
-                        if sort_by_score and not result.results().is_empty() else None)
+            # Only compact candidate metadata crosses the driver. Payloads remain in
+            # worker blocks, including during score attachment and global ordering.
+            rank_column = "_paimon_search_rank_" + uuid.uuid4().hex
+            finish = copy(query)
+            finish._sort_by_score = False
+            sort_by_score = query._sort_by_score
+            score_getter = result.score_getter() if sort_by_score else None
 
-        def finish_batch(batch):
-            output = finish._finish_search_result(batch, result, False)
+            def finish_batch(batch):
+                output = finish._finish_search_result(batch, result, False)
+                if score_getter is not None:
+                    output = output.append_column(rank_column, pa.array(
+                        [-score_getter(value) for value in batch[row_id].to_pylist()], type=pa.float64()))
+                return output
+
+            empty = reader._output_arrow_schema().empty_table()
+            dataset = dataset.map_batches(finish_batch, batch_format="pyarrow")
+            empty = finish_batch(empty)
             if sort_by_score:
-                output = output.append_column(rank_column, pa.array(
-                    [-score_getter(value) for value in batch[row_id].to_pylist()], type=pa.float64()))
-            return output
-
-        empty = reader._output_arrow_schema().empty_table()
-        dataset = dataset.map_batches(finish_batch, batch_format="pyarrow")
-        empty = finish_batch(empty)
-        if sort_by_score:
-            dataset = dataset.sort([rank_column, row_id]).drop_columns([rank_column])
-            empty = empty.drop_columns([rank_column])
-        if added_row_id:
-            dataset = dataset.drop_columns([row_id])
-            empty = empty.drop_columns([row_id])
-        # Sort/map may discard every empty block. Restore the final typed schema.
-        dataset = dataset.union(ray.data.from_arrow(empty))
-        if sort_by_score:
+                dataset = dataset.sort([rank_column, row_id]).drop_columns([rank_column])
+                empty = empty.drop_columns([rank_column])
+            if added_row_id:
+                dataset = dataset.drop_columns([row_id])
+                empty = empty.drop_columns([row_id])
+            # Sort/map may discard every empty block. Restore the final typed schema.
+            dataset = dataset.union(ray.data.from_arrow(empty))
+        if query._sort_by_score:
             # Projection tasks after Sort can finish out of order. Preserve the
             # sorted block order through the whole returned Dataset, without
             # changing the process-wide DataContext or unrelated Datasets.

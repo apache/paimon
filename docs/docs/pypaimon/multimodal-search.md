@@ -46,9 +46,38 @@ Use `create_index` to create the global indexes used by search APIs. The
 index implementation. Use `full-text` for full-text indexes.
 
 ```python
-docs.create_index("embedding", index_type="ivf-pq")
+docs.create_index("embedding", index_type="ivf-flat")
 docs.create_index("content", index_type="full-text")
 ```
+
+### Centroid shards and Bitmap filters
+
+On a Parquet Data Evolution append table, use `ivf-flat.sharding=centroid`
+to train a router and build a vector shard for each populated centroid.
+Use `extra_fields` to map scalar column names to `bitmap`. For each row-ID range
+with indexed vectors, Paimon writes one Bitmap per configured scalar column.
+Searches can use these Bitmaps for equality, `IN`, null checks, and their `AND`
+and `OR` combinations before ranking.
+Building with `extra_fields` requires `global-index.column-update-action` to
+be `THROW_ERROR` (the default) or `DROP_PARTITION_INDEX`.
+
+```python
+docs.create_index(
+    "embedding", index_type="ivf-flat",
+    options={"ivf-flat.sharding": "centroid", "ivf-flat.centroid.nlist": "16"},
+    extra_fields={"category": "bitmap"},
+)
+neighbors = docs.search([0.1, 0.2, 0.3], column="embedding",
+                        pre_filter="category = 'lake'").limit(10).to_arrow()
+```
+
+Builds and searches use native execution on local filesystem and supported REST
+tables. Install a `pypaimon-rust` build with centroid and MultiVector support.
+The source is available on the [paimon-rust main branch](https://github.com/apache/paimon-rust/tree/main/bindings/python).
+When a search selects both range and centroid indexes of the same type, it uses
+native planning for all selected ranges. With a scalar predicate and no
+applicable scalar index, the search filters the ANN candidates returned by the probes.
+Probe options and rebuild behavior are described in the [Centroid Vector Index guide](../multimodal-table/global-index/centroid-vector).
 
 ### Build vector indexes with Ray
 
@@ -63,17 +92,17 @@ docs.create_index(
 )
 ```
 
-The driver plans uncovered row ranges from one snapshot. Workers build files;
-the driver publishes their index entries in one commit after all shards succeed.
-`concurrency` bounds running shards; `global-index.build.parallelism` controls
-only local thread-based builds. Install the same `pypaimon[ray,vindex]`
-dependencies on every worker and use storage accessible to the entire cluster.
+The driver plans row ranges from one snapshot. Range builds skip existing index
+coverage. Centroid builds replace the prior indexes for the selected partitions.
+Workers build files and the driver commits the additions and replacements after
+all shards succeed. `concurrency` bounds running shards.
+`global-index.build.parallelism` controls local thread-based builds.
+Install the same Python dependencies and native runtime on every worker and use
+storage accessible to the entire cluster.
 
-Write tasks require `max_retries=0` and `retry_exceptions=False` (set by default).
-On a task failure, the driver stops submissions, waits for dispatched tasks,
-and removes their uncommitted output files. Rerun the build after the failure;
-already committed index coverage is skipped. Driver/cluster termination can
-still leave orphan files for normal orphan-file maintenance. Retain the source
+Write tasks require `max_retries=0` and `retry_exceptions=False` by default.
+On a task failure, the driver stops submissions and waits for dispatched tasks.
+Uncommitted outputs can remain for orphan-file maintenance. Retain the source
 snapshot's files until the build and its commit finish.
 
 ## Search
@@ -493,6 +522,31 @@ hybrid = docs.search_hybrid(
 ```
 
 Dictionary vector routes also accept `anns_field`, `data`, and `param` aliases.
+
+## Search a list of embeddings with MultiVector
+
+On a Data Evolution append table, a row can store multiple embeddings in an
+`ARRAY<VECTOR<FLOAT, d>>` or `ARRAY<ARRAY<FLOAT>>` column. Build a range-sharded
+vector index with the cosine metric. For variable-length inner arrays, set the
+embedding dimension when building the index.
+
+`with_multi_vector()` ranks each row by the sum of the best cosine match for
+each query vector. The matrix produces one top-K result.
+
+```python
+table = docs.raw_table
+table.create_global_index("chunks", "ivf-flat", options={"ivf-flat.dimension": "3"})
+result = (
+    table.new_vector_search_builder()
+    .with_vector_column("chunks")
+    .with_multi_vector([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    .with_limit(10)
+    .execute_local()
+)
+read = table.new_read_builder().with_projection(["id"])
+plan = read.new_scan().with_global_index_result(result).plan()
+rows = read.new_read().to_arrow(plan.splits())
+```
 
 ## Search Vectors
 

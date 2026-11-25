@@ -2907,12 +2907,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
-    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATH =
-            key("global-index.external-path")
+    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATHS =
+            key("global-index.external-paths")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+                            "Comma-separated global index root directories. "
+                                    + "New index files are distributed in round-robin order. "
+                                    + "An empty value uses <table-root-directory>/index.");
 
     public static final ConfigOption<GlobalIndexColumnUpdateAction>
             GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
@@ -4211,17 +4213,24 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    public Path globalIndexExternalPath() {
-        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
+    public List<Path> globalIndexExternalPaths() {
+        boolean multiple = options.contains(GLOBAL_INDEX_EXTERNAL_PATHS);
+        String pathString =
+                multiple
+                        ? options.get(GLOBAL_INDEX_EXTERNAL_PATHS)
+                        : options.get("global-index.external-path");
         if (pathString == null || pathString.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
-        Path path = new Path(pathString);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
+        String[] values = multiple ? pathString.split(",") : new String[] {pathString};
+        List<Path> paths = new ArrayList<>();
+        for (String value : values) {
+            Path path = new Path(multiple ? value.trim() : value);
+            checkArgument(path.toUri().getScheme() != null, "scheme should not be null: %s", path);
+            paths.add(path);
         }
-        return path;
+        checkArgument(!paths.isEmpty(), "global index external paths is empty");
+        return paths;
     }
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
@@ -4494,6 +4503,49 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
+    }
+
+    /** Returns all configured external data paths without applying the write strategy. */
+    public List<Path> dataFileExternalPathList() {
+        String externalPaths = dataFileExternalPaths();
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            paths.add(new Path(pathString.trim()));
+        }
+        return paths;
+    }
+
+    /** Returns external data paths eligible for writing under the configured strategy. */
+    public List<Path> createExternalPaths() {
+        String externalPaths = dataFileExternalPaths();
+        ExternalPathStrategy strategy = externalPathStrategy();
+        if (externalPaths == null
+                || externalPaths.isEmpty()
+                || strategy == ExternalPathStrategy.NONE) {
+            return Collections.emptyList();
+        }
+
+        String specificFS = externalSpecificFS();
+        List<Path> paths = new ArrayList<>();
+        for (Path path : dataFileExternalPathList()) {
+            String scheme = path.toUri().getScheme();
+            checkArgument(scheme != null, "scheme should not be null: %s", path);
+            if (strategy == ExternalPathStrategy.SPECIFIC_FS) {
+                checkArgument(
+                        specificFS != null,
+                        "External path specificFS should not be null when strategy is specificFS.");
+                if (scheme.equalsIgnoreCase(specificFS)) {
+                    paths.add(path);
+                }
+            } else {
+                paths.add(path);
+            }
+        }
+        checkArgument(!paths.isEmpty(), "External paths should not be empty");
+        return paths;
     }
 
     public ExternalPathStrategy externalPathStrategy() {
@@ -6060,6 +6112,13 @@ public class CoreOptions implements Serializable {
         ENTROPY_INJECT(
                 "entropy-inject",
                 "When writing a new file, a path is chosen based on the hash value of the file's content."),
+
+        ENTROPY_INJECT_TEMPLATE(
+                "entropy-inject-template",
+                "Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. "
+                        + "The placeholder is replaced in place by hash directories computed from the file name. "
+                        + "Place '{hash}' before the database and table directories to share object storage prefixes across tables. "
+                        + "This strategy cannot be enabled or disabled on an existing table."),
 
         WEIGHTED(
                 "weight-robin",

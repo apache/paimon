@@ -411,7 +411,6 @@ class RTreeGlobalIndexTableTest extends DataEvolutionTestBase {
             List<IndexFileMeta> metas =
                     GlobalIndexBuilderUtils.toIndexFileMetas(
                             table.fileIO(),
-                            table.store().pathFactory().globalIndexFileFactory(),
                             table.coreOptions(),
                             range,
                             Collections.singletonList(field),
