@@ -3215,7 +3215,9 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Maximum number of disjoint candidate row-ID ranges during automatic scalar "
                                     + "global index planning for Data Evolution batch scans in full or detail mode. "
-                                    + "When exceeded, file group pruning can still apply. An unset value or 0 disables the limit.");
+                                    + "When exceeded, file group pruning can still apply. "
+                                    + "Start with 100000 when fragmented candidate ranges slow planning. "
+                                    + "An unset value or 0 disables the limit.");
 
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
             key("scalar-index.prefilter.search-mode")
