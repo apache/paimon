@@ -718,6 +718,36 @@ class ZooKeeperCatalogLockTest {
     }
 
     @Test
+    void failedLockConstructionDoesNotRetainClient() throws Exception {
+        Options validOptions = options();
+        validOptions.set(ZooKeeperCatalogLockOptions.ROOT_PATH, "paimon/locks-failed-construction");
+        Options invalidOptions = Options.fromMap(validOptions.toMap());
+        invalidOptions.set(CatalogOptions.WAREHOUSE, ":bad");
+        ZooKeeperCatalogLockFactory factory = new ZooKeeperCatalogLockFactory();
+        CuratorFramework shared;
+
+        try (ZooKeeperCatalogLock first =
+                factory.createLock(CatalogLockContext.fromOptions(validOptions))) {
+            shared = clientOf(first);
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                            factory.createLock(
+                                    CatalogLockContext.fromOptions(invalidOptions),
+                                    Identifier.create("db", "table"),
+                                    null,
+                                    null,
+                                    new Options()));
+            assertEquals("still-usable", first.runWithLock("db", "tbl", () -> "still-usable"));
+        }
+
+        try (ZooKeeperCatalogLock next =
+                factory.createLock(CatalogLockContext.fromOptions(validOptions))) {
+            assertNotEquals(shared, clientOf(next));
+        }
+    }
+
+    @Test
     void doesNotShareClientWithDifferentTimeouts() throws Exception {
         Options firstOptions = options();
         Options secondOptions = options();

@@ -149,13 +149,25 @@ final class ZooKeeperCatalogLockManager {
                             return result;
                         });
 
-        return new ZooKeeperCatalogLock(
-                tracker.client,
-                tracker.epoch,
-                () -> releaseClient(config, tracker),
-                warehouse,
-                acquireTimeoutMillis,
-                identifier);
+        try {
+            return new ZooKeeperCatalogLock(
+                    tracker.client,
+                    tracker.epoch,
+                    () -> releaseClient(config, tracker),
+                    warehouse,
+                    acquireTimeoutMillis,
+                    identifier);
+        } catch (RuntimeException | Error failure) {
+            // No lock was returned to release the retained client reference.
+            try {
+                releaseClient(config, tracker);
+            } catch (RuntimeException | Error releaseFailure) {
+                if (releaseFailure != failure) {
+                    failure.addSuppressed(releaseFailure);
+                }
+            }
+            throw failure;
+        }
     }
 
     private static ClientConfig clientConfig(String quorum, String root, Options options) {
