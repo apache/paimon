@@ -70,6 +70,105 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon View: resolve unqualified names in the namespace of the view") {
+    // spark_catalog does not support Paimon views, its views are Spark's own.
+    Seq(paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("view_db1", "view_db2") {
+          sql("CREATE DATABASE view_db1")
+          sql("CREATE DATABASE view_db2")
+          withTable("view_db1.orders", "view_db2.orders") {
+            withView("view_db1.v", "view_db1.v_on_v", "view_db1.v_in", "view_db1.v_other") {
+              sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+              sql("INSERT INTO view_db1.orders VALUES (1)")
+              // A different schema, so a view bound to this table would store another schema.
+              sql("CREATE TABLE view_db2.orders (id INT, name STRING) USING paimon")
+              sql("INSERT INTO view_db2.orders VALUES (2, 'b')")
+
+              sql("USE view_db1")
+              sql("CREATE VIEW v AS SELECT * FROM orders")
+              sql("CREATE VIEW v_on_v AS SELECT * FROM v")
+              sql("CREATE VIEW v_in AS SELECT * FROM orders WHERE id IN (SELECT id FROM orders)")
+              sql("USE view_db2")
+              // The body binds to the namespace of the view, also when it is created elsewhere.
+              sql("CREATE VIEW view_db1.v_other AS SELECT * FROM orders")
+
+              checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(1)))
+              checkAnswer(sql("SELECT * FROM view_db1.v_on_v"), Seq(Row(1)))
+              checkAnswer(sql("SELECT * FROM view_db1.v_in"), Seq(Row(1)))
+              checkAnswer(sql("SELECT * FROM view_db1.v_other"), Seq(Row(1)))
+              checkAnswer(
+                sql("SELECT id FROM orders WHERE id NOT IN (SELECT id FROM view_db1.v)"),
+                Seq(Row(2)))
+              // The depth check follows the names the body resolves to.
+              withSQLConf("spark.sql.view.maxNestedViewDepth" -> "1") {
+                val error = intercept[IllegalArgumentException] {
+                  sql("SELECT * FROM view_db1.v_on_v")
+                }
+                assert(error.getMessage.contains("spark.sql.view.maxNestedViewDepth (1)"))
+              }
+            }
+          }
+        }
+    }
+  }
+
+  test("Paimon View: CTE in a subquery under the LEGACY CTE policy") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("view_db1", "view_db2") {
+      sql("CREATE DATABASE view_db1")
+      sql("CREATE DATABASE view_db2")
+      withTable("view_db1.orders", "view_db2.orders") {
+        withView("view_db1.v") {
+          sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+          sql("INSERT INTO view_db1.orders VALUES (1), (2)")
+          sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
+          sql("INSERT INTO view_db2.orders VALUES (2), (3)")
+          withSQLConf("spark.sql.legacy.ctePrecedencePolicy" -> "LEGACY") {
+            sql("USE view_db1")
+            sql("""
+                  |CREATE VIEW v AS SELECT * FROM orders
+                  |WHERE id IN (WITH c AS (SELECT id FROM orders) SELECT id FROM c)
+                  |""".stripMargin)
+            // Such a body cannot be qualified, so all its names bind in the current namespace,
+            // never some here and some there.
+            sql("USE view_db2")
+            checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(2), Row(3)))
+          }
+        }
+      }
+    }
+  }
+
+  test("Paimon View: names resolved later in analysis bind in the current namespace") {
+    // Paimon table-valued functions name their table with a string, and IDENTIFIER(...) with a
+    // non-literal argument is resolved during analysis. A body with either binds as before.
+    val bodies =
+      Seq("SELECT id FROM paimon_incremental_query('orders', 0, 1)") ++
+        (if (gteqSpark3_5) Seq("SELECT id FROM IDENTIFIER('ord' || 'ers')") else Nil)
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("view_db1", "view_db2") {
+      sql("CREATE DATABASE view_db1")
+      sql("CREATE DATABASE view_db2")
+      withTable("view_db1.orders", "view_db2.orders") {
+        sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+        sql("INSERT INTO view_db1.orders VALUES (1), (2)")
+        sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
+        sql("INSERT INTO view_db2.orders VALUES (2), (3)")
+        bodies.foreach {
+          body =>
+            withView("view_db1.v") {
+              sql("USE view_db1")
+              sql(s"CREATE VIEW v AS SELECT * FROM orders WHERE id IN ($body)")
+              sql("USE view_db2")
+              checkAnswer(sql("SELECT * FROM view_db1.v ORDER BY id"), Seq(Row(2), Row(3)))
+            }
+        }
+      }
+    }
+  }
+
   test("Paimon View: reject recursive replacement") {
     sql(s"USE $paimonHiveCatalogName")
     withDatabase("test_db") {

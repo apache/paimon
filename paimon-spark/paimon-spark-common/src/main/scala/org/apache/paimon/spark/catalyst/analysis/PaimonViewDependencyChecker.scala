@@ -77,7 +77,7 @@ private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends Pa
           checkDepth(1)
           active += reference
           try {
-            val childDepth = viewDependencies(query).foldLeft(0) {
+            val childDepth = viewDependencies(currentCatalog, currentIdent, query).foldLeft(0) {
               case (depth, (dependencyCatalog, dependencyIdent)) =>
                 val dependencyDepth =
                   try {
@@ -102,10 +102,18 @@ private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends Pa
     visit(catalog, ident, queryText)
   }
 
-  private def viewDependencies(queryText: String): Seq[(SupportView, Identifier)] = {
+  private def viewDependencies(
+      viewCatalog: SupportView,
+      viewIdent: Identifier,
+      queryText: String): Seq[(SupportView, Identifier)] = {
     val parsedPlan = PaimonUtils.parseQueryCompat(spark.sessionState.sqlParser, queryText)
     val earlyRules = SparkShimLoader.shim.earlyBatchRules()
-    val rewritten = earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan))
+    // Resolve the dependencies the way the view body is resolved when it is read.
+    val rewritten = PaimonViewRelations.qualify(
+      spark,
+      earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan)),
+      viewCatalog,
+      viewIdent)
     val dependencies = mutable.ArrayBuffer[(SupportView, Identifier)]()
 
     def collectDependencies(plan: LogicalPlan): Unit = {
