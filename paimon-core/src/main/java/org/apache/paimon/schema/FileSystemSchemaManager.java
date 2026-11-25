@@ -222,6 +222,12 @@ public class FileSystemSchemaManager implements SchemaManager {
             TableSchema newTableSchema =
                     SchemaManager.generateTableSchema(
                             oldTableSchema, changes, hasSnapshots, lazyIdentifier);
+            // Ignore the revision ID and timestamp when checking for schema changes.
+            if (oldTableSchema.version() == newTableSchema.version()
+                    && oldTableSchema.highestFieldId() == newTableSchema.highestFieldId()
+                    && oldTableSchema.toSchema().equals(newTableSchema.toSchema())) {
+                return oldTableSchema;
+            }
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {

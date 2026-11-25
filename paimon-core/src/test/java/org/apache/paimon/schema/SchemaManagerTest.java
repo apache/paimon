@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -175,6 +176,184 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("unchangedSchemaChanges")
+    public void testCommitUnchangedSchema(String name, List<SchemaChange> changes)
+            throws Exception {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema original = manager.createTable(schema);
+
+        TableSchema result = manager.commitChanges(changes);
+
+        assertThat(result.id()).isEqualTo(original.id());
+        assertThat(result.timeMillis()).isEqualTo(original.timeMillis());
+        assertThat(result.toString()).isEqualTo(original.toString());
+        assertThat(manager.latest().get().toString()).isEqualTo(original.toString());
+        assertThat(manager.listAllIds()).containsExactly(original.id());
+    }
+
+    private static Stream<Arguments> unchangedSchemaChanges() {
+        return Stream.of(
+                Arguments.of("empty changes", Collections.emptyList()),
+                Arguments.of(
+                        "unchanged option",
+                        Collections.singletonList(SchemaChange.setOption("key", "value"))),
+                Arguments.of(
+                        "absent option",
+                        Collections.singletonList(SchemaChange.removeOption("missing"))),
+                Arguments.of(
+                        "unchanged table comment",
+                        Collections.singletonList(SchemaChange.updateComment(""))),
+                Arguments.of(
+                        "unchanged column comment",
+                        Collections.singletonList(SchemaChange.updateColumnComment("f2", null))),
+                Arguments.of(
+                        "unchanged column type",
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType("f2", new VarCharType()))),
+                Arguments.of(
+                        "unchanged column nullability",
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability("f2", true))),
+                Arguments.of(
+                        "unchanged column position",
+                        Collections.singletonList(
+                                SchemaChange.updateColumnPosition(
+                                        SchemaChange.Move.after("f2", "f1")))),
+                Arguments.of(
+                        "added and removed option",
+                        Arrays.asList(
+                                SchemaChange.setOption("temporary", "value"),
+                                SchemaChange.removeOption("temporary"))),
+                Arguments.of(
+                        "reverted column rename",
+                        Arrays.asList(
+                                SchemaChange.renameColumn("f2", "renamed"),
+                                SchemaChange.renameColumn("renamed", "f2"))));
+    }
+
+    @Test
+    public void testCommitUnchangedOptionOnNonEmptyTable() throws Exception {
+        Path tableRoot = new Path(tempDir.toString());
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
+        TableSchema original = manager.createTable(schema);
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 2L, BinaryString.fromString("v")), 0);
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        assertThat(manager.commitChanges(SchemaChange.setOption("key", "value")).toString())
+                .isEqualTo(original.toString());
+        assertThat(manager.listAllIds()).containsExactly(original.id());
+    }
+
+    @Test
+    public void testCommitChangedSchemaWithUnchangedChanges() throws Exception {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema original = manager.createTable(schema);
+        List<SchemaChange> changes =
+                Arrays.asList(
+                        SchemaChange.setOption("key", "value"),
+                        SchemaChange.setOption("new_k", "new_v"),
+                        SchemaChange.updateComment("updated comment"));
+
+        TableSchema updated = manager.commitChanges(changes);
+
+        assertThat(updated.id()).isEqualTo(original.id() + 1);
+        assertThat(updated.options()).containsEntry("new_k", "new_v");
+        assertThat(updated.comment()).isEqualTo("updated comment");
+        assertThat(manager.commitChanges(changes).toString()).isEqualTo(updated.toString());
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
+    }
+
+    @Test
+    public void testCommitTypeAndOptionChangesWithoutAllocatingFieldIds() throws Exception {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema original =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("payload", DataTypes.INT())
+                                .primaryKey("id")
+                                .option("key", "value")
+                                .build());
+
+        TableSchema typeChanged =
+                manager.commitChanges(SchemaChange.updateColumnType("payload", DataTypes.BIGINT()));
+
+        assertThat(typeChanged.id()).isEqualTo(original.id() + 1);
+        assertThat(typeChanged.highestFieldId()).isEqualTo(original.highestFieldId());
+        assertThat(typeChanged.fields().get(1).type()).isEqualTo(DataTypes.BIGINT());
+
+        TableSchema optionChanged = manager.commitChanges(SchemaChange.setOption("key", "changed"));
+
+        assertThat(optionChanged.id()).isEqualTo(typeChanged.id() + 1);
+        assertThat(optionChanged.highestFieldId()).isEqualTo(original.highestFieldId());
+        assertThat(optionChanged.options()).containsEntry("key", "changed");
+        assertThat(manager.listAllIds())
+                .containsExactlyInAnyOrder(original.id(), typeChanged.id(), optionChanged.id());
+    }
+
+    @Test
+    public void testCommitFieldIdAllocation() throws Exception {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema original = manager.createTable(schema);
+
+        TableSchema updated =
+                manager.commitChanges(
+                        SchemaChange.addColumn("temporary", DataTypes.INT()),
+                        SchemaChange.dropColumn("temporary"));
+
+        assertThat(updated.toSchema()).isEqualTo(original.toSchema());
+        assertThat(updated.highestFieldId()).isEqualTo(original.highestFieldId() + 1);
+        assertThat(updated.id()).isEqualTo(original.id() + 1);
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
+    }
+
+    @Test
+    public void testCommitSchemaFormatUpgrade() throws Exception {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema original = TableSchema.create(0, schema);
+        Map<String, String> options = new HashMap<>(original.options());
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        TableSchema legacy =
+                new TableSchema(
+                        TableSchema.CURRENT_VERSION - 1,
+                        original.id(),
+                        original.fields(),
+                        original.highestFieldId(),
+                        original.partitionKeys(),
+                        original.primaryKeys(),
+                        options,
+                        original.comment(),
+                        1L);
+        assertThat(manager.commit(legacy)).isTrue();
+
+        TableSchema updated = manager.commitChanges(Collections.emptyList());
+
+        assertThat(updated.toSchema()).isEqualTo(legacy.toSchema());
+        assertThat(updated.version()).isEqualTo(TableSchema.CURRENT_VERSION);
+        assertThat(updated.id()).isEqualTo(legacy.id() + 1);
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(legacy.id(), updated.id());
+    }
+
+    @Test
+    public void testEmptyChangesRequireExistingTable() {
+        SchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+
+        assertThatThrownBy(() -> manager.commitChanges(Collections.emptyList()))
+                .isInstanceOf(Catalog.TableNotExistException.class);
     }
 
     @ParameterizedTest
