@@ -230,8 +230,8 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
         FileStoreTable adaptive =
                 table.copy(
                         Collections.singletonMap(
-                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(),
-                                "true"));
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "100000"));
         assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
                 .isNotEmpty()
                 .hasOnlyElementsOfType(IndexedSplit.class);

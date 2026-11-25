@@ -220,20 +220,15 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         createIndex("f1", Collections.singletonList(new Range(1, 6)), indexType);
 
         String rangeLimit = CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key();
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(), "true");
-        options.put(rangeLimit, "4");
-        FileStoreTable adaptive = table.copy(options);
+        FileStoreTable adaptive = table.copy(Collections.singletonMap(rangeLimit, "4"));
         Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, match);
         assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
                 .isNotEmpty()
                 .hasOnlyElementsOfType(IndexedSplit.class);
 
+        FileStoreTable limited = adaptive.copy(Collections.singletonMap(rangeLimit, "3"));
         ReadBuilder read =
-                adaptive.copy(Collections.singletonMap(rangeLimit, "3"))
-                        .newReadBuilder()
-                        .withFilter(predicate)
-                        .withProjection(new int[] {0});
+                limited.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
         TableScan.Plan plan = read.newScan().plan();
         assertThat(plan.splits()).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
         List<Integer> ids = new ArrayList<>();
@@ -242,6 +237,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .createReader(plan)
                 .forEachRemaining(row -> ids.add(row.getInt(0)));
         assertThat(ids).containsExactlyInAnyOrder(0, 2, 4, 6);
+
+        FileStoreTable unlimited = limited.copy(Collections.singletonMap(rangeLimit, "0"));
+        assertThat(unlimited.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
     }
 
     @ParameterizedTest
@@ -274,7 +274,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         Map<String, String> adaptiveOptions =
                 Collections.singletonMap(
-                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(), "true");
+                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                        "100000");
         FileStoreTable pinned =
                 table.copy(
                         Collections.singletonMap(
@@ -404,8 +405,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         FileStoreTable adaptive =
                 table.copy(
                         Collections.singletonMap(
-                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED.key(),
-                                "true"));
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "100000"));
         ReadBuilder read =
                 adaptive.newReadBuilder().withFilter(predicate).withProjection(new int[] {0, 2});
         TableScan.Plan plan = read.newScan().plan();

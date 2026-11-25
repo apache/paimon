@@ -3208,22 +3208,14 @@ public class CoreOptions implements Serializable {
                             "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
                                     + "setting also serves as a fallback for scalar prefilters.");
 
-    public static final ConfigOption<Boolean> DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED =
-            key("data-evolution.scalar-index.adaptive.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to limit candidate row-ID ranges during automatic scalar "
-                                    + "global index planning for Data Evolution batch scans in full or detail mode.");
-
     public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
             key("data-evolution.scalar-index.max-selection-ranges")
                     .intType()
-                    .defaultValue(100_000)
+                    .noDefaultValue()
                     .withDescription(
-                            "Maximum number of disjoint row-ID ranges when materializing adaptive "
-                                    + "index selections during planning. When exceeded, file group "
-                                    + "pruning can still apply. Set to 0 for no range limit.");
+                            "Maximum number of disjoint candidate row-ID ranges during automatic scalar "
+                                    + "global index planning for Data Evolution batch scans in full or detail mode. "
+                                    + "When exceeded, file group pruning can still apply. An unset value or 0 disables the limit.");
 
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
             key("scalar-index.prefilter.search-mode")

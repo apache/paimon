@@ -633,16 +633,10 @@ under the License.
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
-            <td><h5>data-evolution.scalar-index.adaptive.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to limit candidate row-ID ranges during automatic scalar global index planning for Data Evolution batch scans in full or detail mode.</td>
-        </tr>
-        <tr>
             <td><h5>data-evolution.scalar-index.max-selection-ranges</h5></td>
-            <td style="word-wrap: break-word;">100000</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>Maximum number of disjoint row-ID ranges when materializing adaptive index selections during planning. When exceeded, file group pruning can still apply. Set to 0 for no range limit.</td>
+            <td>Maximum number of disjoint candidate row-ID ranges during automatic scalar global index planning for Data Evolution batch scans in full or detail mode. When exceeded, file group pruning can still apply. An unset value or 0 disables the limit.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>

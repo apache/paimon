@@ -607,13 +607,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
         Options configuration = options.toConfiguration();
         // FAST intentionally restricts reads to index coverage. A data-scan fallback would
         // widen that search scope.
-        if (!configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_ADAPTIVE_ENABLED)
+        if (!configuration.contains(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
                 || !options.globalIndexEnabled()
                 || options.scalarScanSearchMode() == GlobalIndexSearchMode.FAST) {
             return 0;
         }
         int maxSelectionRanges =
-                configuration.get(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES);
+                configuration
+                        .getOptional(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
+                        .orElse(0);
         Preconditions.checkArgument(
                 maxSelectionRanges >= 0, "Maximum selection range count must be non-negative.");
         return maxSelectionRanges;
