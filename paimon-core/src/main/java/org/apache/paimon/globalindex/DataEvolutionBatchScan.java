@@ -64,7 +64,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -403,44 +405,66 @@ public class DataEvolutionBatchScan implements DataTableScan {
     @VisibleForTesting
     static SnapshotReader.Plan pruneFileGroups(
             SnapshotReader.Plan dataPlan, RoaringNavigableMap64 candidates) {
-        RangeHelper<DataFileMeta> fileGroups = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<Split> keptSplits = new ArrayList<>(dataPlan.splits().size());
-        boolean pruned = false;
-        for (Split split : dataPlan.splits()) {
-            DataSplit dataSplit = (DataSplit) split;
-            Set<String> removedFiles = new HashSet<>();
-            for (List<DataFileMeta> group :
-                    fileGroups.mergeOverlappingRanges(dataSplit.dataFiles())) {
-                // Keep all versions and dedicated files together when a row in the group is a
-                // candidate. The reader assembles full rows before applying the residual filter.
-                boolean intersects =
-                        group.stream()
-                                .anyMatch(
-                                        file ->
-                                                candidates.intersects(
-                                                        file.nonNullFirstRowId(),
-                                                        file.nonNullFirstRowId()
-                                                                + file.rowCount()));
-                if (!intersects) {
-                    group.forEach(file -> removedFiles.add(file.fileName()));
-                }
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<Split> splits = dataPlan.splits();
+        List<FileGroup> groups = new ArrayList<>();
+        for (int i = 0; i < splits.size(); i++) {
+            DataSplit split = (DataSplit) splits.get(i);
+            for (List<DataFileMeta> files : rangeHelper.mergeOverlappingRanges(split.dataFiles())) {
+                groups.add(new FileGroup(i, files));
             }
-            if (removedFiles.isEmpty()) {
+        }
+        groups.sort(Comparator.comparingLong(group -> group.range.from));
+        BitSet matches =
+                candidates.intersectingRanges(
+                        groups.stream().map(group -> group.range).collect(Collectors.toList()));
+        if (matches.cardinality() == groups.size()) {
+            return dataPlan;
+        }
+
+        Map<Integer, Set<String>> removedBySplit = new HashMap<>();
+        for (int i = matches.nextClearBit(0); i < groups.size(); i = matches.nextClearBit(i + 1)) {
+            FileGroup group = groups.get(i);
+            Set<String> removed =
+                    removedBySplit.computeIfAbsent(group.splitIndex, ignored -> new HashSet<>());
+            group.files.forEach(file -> removed.add(file.fileName()));
+        }
+
+        List<Split> keptSplits = new ArrayList<>(splits.size());
+        for (int i = 0; i < splits.size(); i++) {
+            DataSplit split = (DataSplit) splits.get(i);
+            Set<String> removed = removedBySplit.get(i);
+            if (removed == null) {
                 keptSplits.add(split);
             } else {
-                pruned = true;
-                dataSplit
-                        .filterDataFile(file -> !removedFiles.contains(file.fileName()))
+                split.filterDataFile(file -> !removed.contains(file.fileName()))
                         .ifPresent(keptSplits::add);
             }
         }
-        return pruned
-                ? new PlanImpl(
-                        dataPlan.watermark(),
-                        dataPlan.snapshotId(),
-                        dataPlan.snapshot(),
-                        keptSplits)
-                : dataPlan;
+        return new PlanImpl(
+                dataPlan.watermark(), dataPlan.snapshotId(), dataPlan.snapshot(), keptSplits);
+    }
+
+    private static final class FileGroup {
+
+        private final int splitIndex;
+        private final List<DataFileMeta> files;
+        private final Range range;
+
+        private FileGroup(int splitIndex, List<DataFileMeta> files) {
+            this.splitIndex = splitIndex;
+            this.files = files;
+            long first = Long.MAX_VALUE;
+            long last = Long.MIN_VALUE;
+            for (DataFileMeta file : files) {
+                Range rowIds = file.nonNullRowIdRange();
+                first = Math.min(first, rowIds.from);
+                last = Math.max(last, rowIds.to);
+            }
+            // Overlapping files form a contiguous group. Keep all versions and dedicated files
+            // together when any row in that group is a candidate.
+            this.range = new Range(first, last);
+        }
     }
 
     // An OR across a spatial and another column can require fallback for the entire predicate.

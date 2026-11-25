@@ -483,7 +483,7 @@ These table options affect global index build and read behavior:
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `full` | Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters. |
-| `data-evolution.scalar-index.max-selection-ranges` | Not set | Maximum number of disjoint candidate row-ID ranges during Java Data Evolution scalar batch planning in `full` and `detail` modes. |
+| `data-evolution.scalar-index.max-selection-ranges` | Not set | Maximum number of disjoint candidate row-ID ranges when scalar global index results are evaluated during Java Data Evolution batch planning in `full` and `detail` modes. |
 | `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
@@ -503,12 +503,12 @@ These table options affect global index build and read behavior:
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
 evaluated by the core scan, including scans used by Flink and Spark.
 
-A positive `data-evolution.scalar-index.max-selection-ranges` enables bounded range probing for
-Java Data Evolution scalar batch scans in `full` and `detail` modes. An unset value or `0` leaves
-range conversion unbounded. The planner probes disjoint contiguous ranges in the combined
-candidate bitmap after index evaluation, including rows outside index coverage. A contiguous run
-counts as one range regardless of its row count. The probe stops at the start of the first range
-over the limit.
+When scalar global index results are evaluated during planning, a positive
+`data-evolution.scalar-index.max-selection-ranges` enables bounded range probing for Java Data
+Evolution batch scans in `full` and `detail` modes. An unset value or `0` leaves range conversion
+unbounded. The planner probes disjoint contiguous ranges in the combined candidate bitmap after
+index evaluation, including rows outside index coverage. A contiguous run counts as one range
+regardless of its row count. The probe stops at the start of the first range over the limit.
 
 If fragmented candidate ranges slow planning, start with
 `data-evolution.scalar-index.max-selection-ranges=100000`.

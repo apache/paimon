@@ -238,18 +238,28 @@ public class DataEvolutionBatchScanTest {
                         .withDataDeletionFiles(
                                 Arrays.asList(anchorDeletion, removedDeletion, null, tailDeletion))
                         .build();
-        SnapshotReader.Plan plan = new PlanImpl(100L, 42L, null, Collections.singletonList(split));
+        DataSplit laterSplit =
+                DataSplit.builder()
+                        .withSnapshot(42L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(
+                                Collections.singletonList(newAppendFile(100, 20, "later.parquet")))
+                        .build();
+        SnapshotReader.Plan plan = new PlanImpl(100L, 42L, null, Arrays.asList(laterSplit, split));
         RoaringNavigableMap64 candidates = new RoaringNavigableMap64();
         candidates.add(0);
         candidates.add(40);
+        candidates.add(101);
 
         SnapshotReader.Plan pruned = DataEvolutionBatchScan.pruneFileGroups(plan, candidates);
 
         assertThat(pruned.snapshotId()).isEqualTo(42L);
         assertThat(pruned.watermark()).isEqualTo(100L);
         assertThat(pruned.dataSplits())
-                .singleElement()
-                .satisfies(
+                .satisfiesExactly(
+                        kept -> assertThat(kept).isSameAs(laterSplit),
                         kept -> {
                             assertThat(kept.dataFiles()).containsExactly(anchor, companion, tail);
                             assertThat(kept.deletionFiles())

@@ -3213,8 +3213,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "Maximum number of disjoint candidate row-ID ranges during automatic scalar "
-                                    + "global index planning for Data Evolution batch scans in full or detail mode. "
+                            "Maximum number of disjoint candidate row-ID ranges when scalar global index "
+                                    + "results are evaluated during planning for Data Evolution batch scans in full or detail mode. "
                                     + "When exceeded, file group pruning can still apply. "
                                     + "Start with 100000 when fragmented candidate ranges slow planning. "
                                     + "An unset value or 0 disables the limit.");
