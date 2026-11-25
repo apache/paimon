@@ -18,7 +18,7 @@
 
 # Table compatibility test
 
-After installing the current `paimon-bundle` locally, run
+After building the current checkout's `paimon-bundle`, run
 `bash tools/compatibility/run-table-compatibility.sh`.
 
 Separate JVMs test append and primary-key table reads/writes between 1.0.1 and

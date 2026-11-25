@@ -29,11 +29,6 @@
     </properties>
     <dependencies>
         <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-bundle</artifactId>
-            <version>${paimon.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-common</artifactId>
             <version>3.3.4</version>
@@ -55,4 +50,16 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <profiles>
+        <profile>
+            <id>released-bundle</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-bundle</artifactId>
+                    <version>${paimon.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>
