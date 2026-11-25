@@ -1079,7 +1079,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     self.assertEqual([0 if configured is None else 2] * 2, [
                         c.prefetch_max_bytes for c in dataset.reader._video_collators])
                     self.assertEqual([0 if configured is None else 2] * 2, [
-                        c.max_cached_video_files for c in dataset.reader._video_collators])
+                        c._max_cached_video_files for c in dataset.reader._video_collators])
                     self.assertEqual([1 if configured is None else 2] * 2, [
                         c.decoder_factory.keywords["codec_threads"]
                         for c in dataset.reader._video_collators])

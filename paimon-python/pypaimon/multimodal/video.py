@@ -536,7 +536,7 @@ class VideoFrameCollator:
     and worker; decoder buffers, RGB outputs and temporary copies are additional.
 
     The cache is process-local and keyed by physical video payload identity.
-    ``max_cached_video_files`` overrides the table's ``read.video.max-cached-files``.
+    The table option ``read.video.max-cached-files`` bounds pooled file handles.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
     """
@@ -554,8 +554,7 @@ class VideoFrameCollator:
             decode_batch_fn=None,
             range_parallelism=4,
             prefetch_max_bytes=0,
-            decode_parallelism=1,
-            max_cached_video_files=None):
+            decode_parallelism=1):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -593,15 +592,7 @@ class VideoFrameCollator:
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
             raise ValueError("table must provide raw_table.file_io or file_io.")
-        if max_cached_video_files is None:
-            options = getattr(raw_table, "options", None)
-            max_cached_video_files = (options.read_video_max_cached_files()
-                                      if isinstance(options, CoreOptions) else 0)
-        elif (isinstance(max_cached_video_files, bool)
-              or not isinstance(max_cached_video_files, int)
-              or max_cached_video_files < 0):
-            raise ValueError("max_cached_video_files must be a non-negative int.")
-
+        options = getattr(raw_table, "options", None)
         self.file_io = file_io
         self.video_column = video_column
         self.decoder_factory = decoder_factory
@@ -616,7 +607,8 @@ class VideoFrameCollator:
         self._decode_pool = _VideoDecodePool()
         self._decoders = OrderedDict()
         self._video_metadata_cache = _VideoMetadataCache()
-        self.max_cached_video_files = max_cached_video_files
+        self._max_cached_video_files = (options.read_video_max_cached_files()
+                                        if isinstance(options, CoreOptions) else 0)
         self._video_file_pool = None
         self._owner_pid = os.getpid()
 
@@ -846,7 +838,7 @@ class VideoFrameCollator:
 
     def _open_video_stream(self, descriptor):
         file_io = self.file_io
-        if self.max_cached_video_files and descriptor.uri.endswith(".video"):
+        if self._max_cached_video_files and descriptor.uri.endswith(".video"):
             from pyarrow.fs import S3FileSystem
             from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
             from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
@@ -855,7 +847,7 @@ class VideoFrameCollator:
                 file_io = file_io.file_io()
             if type(file_io) is PyArrowFileIO and isinstance(file_io.filesystem, S3FileSystem):
                 if self._video_file_pool is None:
-                    self._video_file_pool = _VideoFilePool(self.max_cached_video_files)
+                    self._video_file_pool = _VideoFilePool(self._max_cached_video_files)
                 cursor = self._video_file_pool.open(file_io, descriptor.uri)
                 if cursor is not None:
                     try:
