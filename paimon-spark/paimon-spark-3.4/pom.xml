@@ -74,6 +74,13 @@ under the License.
         <!-- test -->
 
         <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-zookeeper</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.curator</groupId>
             <artifactId>curator-test</artifactId>
             <version>2.13.0</version>

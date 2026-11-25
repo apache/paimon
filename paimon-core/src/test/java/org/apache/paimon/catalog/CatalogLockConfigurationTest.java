@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -32,6 +33,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
@@ -76,6 +78,22 @@ class CatalogLockConfigurationTest {
             assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
         }
         assertThat(catalog.runWithLock(identifier, () -> "created")).isEqualTo("created");
+    }
+
+    @Test
+    void filesystemRejectsZooKeeperLockWithoutOptionalModule() throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        options.set(CatalogOptions.LOCK_TYPE, "zookeeper");
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(
+                        mock(FileIO.class),
+                        new Path("file:/warehouse"),
+                        CatalogContext.create(options))) {
+            assertThatThrownBy(catalog::lockFactory)
+                    .isInstanceOf(FactoryException.class)
+                    .hasMessageContaining("Could not find any factory for identifier 'zookeeper'");
+        }
     }
 
     @Test
