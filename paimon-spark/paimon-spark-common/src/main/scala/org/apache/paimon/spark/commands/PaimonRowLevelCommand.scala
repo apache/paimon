@@ -51,6 +51,7 @@ import java.util.Collections
 import java.util.function.Function
 
 import scala.collection.JavaConverters._
+import scala.util.control.NonFatal
 
 /** Helper trait for paimon row level command, like delete, update, merge into. */
 trait PaimonRowLevelCommand
@@ -359,18 +360,25 @@ object PaimonRowLevelCommand {
   private[commands] def conjunctiveRowIdRange(
       condition: Expression,
       targetAttributes: Seq[Attribute]): Option[Range] = {
-    // A user column named _row_id is legal; only the target's exact metadata attribute is safe.
+    // A user column named _row_id is legal. Match the resolved metadata attribute by exprId.
     val rowIdExprIds = targetAttributes.filter(_.name == ROW_ID_COLUMN).map(_.exprId).toSet
     def isRowId(expression: Expression): Boolean = expression match {
       case attribute: Attribute =>
-        attribute.name == ROW_ID_COLUMN && rowIdExprIds.contains(attribute.exprId)
+        rowIdExprIds.contains(attribute.exprId)
       case _ => false
     }
 
-    def literalLong(expression: Expression): Option[Long] = expression match {
-      case literal: Literal if literal.dataType == LongType && literal.value != null =>
-        Some(literal.value.asInstanceOf[Long])
-      case _ => None
+    def literalLong(expression: Expression): Option[Long] = {
+      if (!expression.foldable || !expression.deterministic || expression.dataType != LongType) {
+        None
+      } else {
+        // Spark may leave an analyzed integer literal as cast(550 as bigint).
+        try {
+          Option(expression.eval()).collect { case value: Long => value }
+        } catch {
+          case NonFatal(_) => None
+        }
+      }
     }
 
     def bounds(expression: Expression): Seq[(Option[Long], Option[Long])] = expression match {

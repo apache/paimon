@@ -51,6 +51,7 @@ class PaimonRowLevelCommandTest extends SparkFunSuite {
   test("do not prune on user columns or unrelated row id attributes") {
     val metadataRowId = AttributeReference("_ROW_ID", LongType)()
     val userRowId = AttributeReference("_row_id", LongType)()
+    val lowerCaseMetadataRowId = AttributeReference("_row_id", LongType)(metadataRowId.exprId)
     val unrelatedRowId = AttributeReference("_ROW_ID", LongType)()
     val targetAttributes = Seq(metadataRowId, userRowId)
 
@@ -65,6 +66,10 @@ class PaimonRowLevelCommandTest extends SparkFunSuite {
     assert(
       PaimonRowLevelCommand
         .conjunctiveRowIdRange(EqualTo(metadataRowId, Literal(100L)), targetAttributes)
+        .nonEmpty)
+    assert(
+      PaimonRowLevelCommand
+        .conjunctiveRowIdRange(EqualTo(lowerCaseMetadataRowId, Literal(100L)), targetAttributes)
         .nonEmpty)
   }
 }

@@ -24,19 +24,21 @@ import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonRowLevelCommand, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, DeleteFromPaimonTableCommand, PaimonRowLevelCommand, PaimonSparkWriter}
 import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.expressions.{EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
@@ -735,8 +737,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
         override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
 
-        def candidates(condition: Expression): Seq[DataSplit] =
-          findCandidateDataSplits(condition, relation)
+        def candidates(
+            condition: Expression,
+            targetRelation: DataSourceV2Relation = relation): Seq[DataSplit] =
+          findCandidateDataSplits(condition, targetRelation)
       }
       val probe = RowLevelProbe(loadTable("t"))
       def fileCount(splits: Seq[DataSplit]): Int =
@@ -748,7 +752,18 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       assert(unprunedFiles == 12)
       assert(prunedFiles == 1)
 
-      sql("DELETE FROM t WHERE _ROW_ID BETWEEN 550 AND 550")
+      val parsed = spark.sessionState.sqlParser.parsePlan("DELETE FROM t WHERE _row_id = 550")
+      val lowerCaseDelete = spark.sessionState.analyzer
+        .executeAndCheck(parsed, new QueryPlanningTracker)
+        .asInstanceOf[DeleteFromPaimonTableCommand]
+      val lowerCaseFiles =
+        fileCount(probe.candidates(lowerCaseDelete.condition, lowerCaseDelete.relation))
+      assert(
+        lowerCaseFiles == 1,
+        s"condition=${lowerCaseDelete.condition}, references=${lowerCaseDelete.condition.references}, metadata=${lowerCaseDelete.relation.metadataOutput}"
+      )
+
+      sql("DELETE FROM t WHERE _row_id = 550")
       checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1199L)))
       checkAnswer(
         sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 549 AND 551 ORDER BY id"),
