@@ -25,7 +25,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -659,17 +658,18 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
 
         DataSplit dataSplit = (DataSplit) split;
-        List<DataFileMeta> files = dataSplit.dataFiles();
+        List<Range> fileRanges =
+                GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
 
         List<Range> expected = new ArrayList<>();
-        for (DataFileMeta file : files) {
-            Range fileRange = file.nonNullRowIdRange();
+        for (Range fileRange : fileRanges) {
             expected.addAll(rowRangeIndex.intersectedRanges(fileRange.from, fileRange.to));
         }
-        expected = Range.sortAndMergeOverlap(expected, true);
+        // The file ranges and the range index both visit their intervals in row-ID order.
+        expected = Range.mergeSortedAsPossible(expected);
         if (expected.isEmpty()) {
-            long min = files.stream().mapToLong(f -> f.nonNullRowIdRange().from).min().orElse(-1L);
-            long max = files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(-1L);
+            long min = fileRanges.isEmpty() ? -1L : fileRanges.get(0).from;
+            long max = fileRanges.isEmpty() ? -1L : fileRanges.get(fileRanges.size() - 1).to;
             throw new IllegalStateException(
                     String.format(
                             "This is a bug, there should be intersected ranges for split with min row id %d and max row id %d.",

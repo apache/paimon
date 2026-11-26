@@ -975,6 +975,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         selection,
                         readBatchSizer,
                         metadataCache);
+        if (file.firstRowId() != null) {
+            formatReaderContext.withFallbackFields(SpecialFields.ROW_TRACKING_FIELD_NAMES);
+        }
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,

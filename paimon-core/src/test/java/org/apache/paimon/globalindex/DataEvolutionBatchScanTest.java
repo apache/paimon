@@ -203,7 +203,9 @@ public class DataEvolutionBatchScanTest {
         List<Split> indexedSplits =
                 DataEvolutionBatchScan.wrapToIndexSplits(
                                 Collections.singletonList(split),
-                                RowRangeIndex.create(Collections.singletonList(new Range(0, 5000))),
+                                RowRangeIndex.create(
+                                        Arrays.asList(new Range(0, 4300), new Range(4301, 5000)),
+                                        false),
                                 null)
                         .splits();
 
