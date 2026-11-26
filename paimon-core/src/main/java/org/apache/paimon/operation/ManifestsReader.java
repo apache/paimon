@@ -21,6 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.BucketFilter;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -30,6 +32,8 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TriFilter;
@@ -37,7 +41,9 @@ import org.apache.paimon.utils.TriFilter;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +71,7 @@ public class ManifestsReader {
     @Nullable private PartitionPredicate authPartitionFilter = null;
     @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
     @Nullable protected RowRangeIndex rowRangeIndex = null;
+    @Nullable private RoaringNavigableMap64 manifestGroupCandidates;
 
     public ManifestsReader(
             RowType partitionType,
@@ -139,6 +146,19 @@ public class ManifestsReader {
         return this;
     }
 
+    /**
+     * Selects whole groups of overlapping manifests for a row-ID candidate bitmap in an ALL scan.
+     */
+    public ManifestsReader withManifestGroupCandidates(@Nullable RoaringNavigableMap64 candidates) {
+        this.manifestGroupCandidates = candidates;
+        return this;
+    }
+
+    @Nullable
+    RoaringNavigableMap64 manifestGroupCandidates() {
+        return manifestGroupCandidates;
+    }
+
     @Nullable
     public PartitionPredicate partitionFilter() {
         if (partitionFilter == null) {
@@ -173,7 +193,93 @@ public class ManifestsReader {
                                         filterManifestFileMeta(
                                                 m, effectivePartitionFilter, effectiveBucketFilter))
                         .collect(Collectors.toList());
+        RoaringNavigableMap64 candidates = manifestGroupCandidates;
+        if (scanMode == ScanMode.ALL && candidates != null) {
+            filtered = pruneManifestGroups(filtered, candidates);
+        }
         return new Result(snapshot, manifests, filtered);
+    }
+
+    static List<ManifestFileMeta> pruneManifestGroups(
+            List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
+        return pruneManifestGroups(
+                manifests, selectManifestGroups(manifests, candidates, Collections.emptyMap()));
+    }
+
+    /** Returns the selected ADD row domains, or null if group pruning cannot narrow the scan. */
+    @Nullable
+    static RowRangeIndex selectManifestGroups(
+            List<ManifestFileMeta> manifests,
+            RoaringNavigableMap64 candidates,
+            Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries) {
+        List<Range> addRanges = new ArrayList<>(manifests.size());
+        for (ManifestFileMeta manifest : manifests) {
+            if (manifest.numAddedFiles() == 0) {
+                continue;
+            }
+            List<ManifestEntry> entries = mixedEntries.get(manifest);
+            if (entries == null) {
+                if (!hasValidRowIdBounds(manifest)) {
+                    return null;
+                }
+                addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
+            } else {
+                for (ManifestEntry entry : entries) {
+                    if (entry.kind() == FileKind.ADD) {
+                        Long first = entry.file().firstRowId();
+                        long count = entry.file().rowCount();
+                        if (first == null
+                                || first < 0
+                                || count <= 0
+                                || count - 1 > Long.MAX_VALUE - first) {
+                            return null;
+                        }
+                        addRanges.add(new Range(first, first + (count - 1)));
+                    }
+                }
+            }
+        }
+
+        // Only ADDs can supply companion files. Exclude DELETE ranges from the connectivity
+        // of groups whenever the ADD ranges are known.
+        List<Range> groups = Range.sortAndMergeOverlap(addRanges);
+        BitSet matches = candidates.intersectingRanges(groups);
+        int matchedCount = matches.cardinality();
+        if (mixedEntries.isEmpty()
+                && matchedCount == groups.size()
+                && addRanges.size() == manifests.size()) {
+            return null;
+        }
+
+        List<Range> retained = new ArrayList<>(matchedCount);
+        for (int i = matches.nextSetBit(0); i >= 0; i = matches.nextSetBit(i + 1)) {
+            retained.add(groups.get(i));
+        }
+        return RowRangeIndex.create(retained);
+    }
+
+    static List<ManifestFileMeta> pruneManifestGroups(
+            List<ManifestFileMeta> manifests, @Nullable RowRangeIndex retainedGroups) {
+        if (retainedGroups == null) {
+            return manifests;
+        }
+        if (retainedGroups.ranges().isEmpty()) {
+            return Collections.emptyList();
+        }
+        // Replay deletes for the retained ADDs. Unknown DELETE bounds may cover any group.
+        return manifests.stream()
+                .filter(
+                        manifest ->
+                                !hasValidRowIdBounds(manifest)
+                                        || retainedGroups.intersects(
+                                                manifest.minRowId(), manifest.maxRowId()))
+                .collect(Collectors.toList());
+    }
+
+    private static boolean hasValidRowIdBounds(ManifestFileMeta manifest) {
+        Long min = manifest.minRowId();
+        Long max = manifest.maxRowId();
+        return min != null && max != null && min >= 0 && max >= min;
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot, ScanMode scanMode) {
