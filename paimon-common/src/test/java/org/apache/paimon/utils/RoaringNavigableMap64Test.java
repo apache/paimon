@@ -33,6 +33,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.RandomAccess;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -296,6 +297,42 @@ public class RoaringNavigableMap64Test {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testIntersectingRangesStopsAtLastNonNegativeCandidate(boolean unsignedTail) {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(50);
+        if (unsignedTail) {
+            bitmap.add(Long.MIN_VALUE);
+        }
+        assertThat(bitmap.intersectingRanges(rangesWithReadLimit(262_144)).stream().toArray())
+                .containsExactly(0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    public void testScopedProbeStopsAtLastNonNegativeCandidate(
+            boolean unsignedTail, boolean sequential) {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(50);
+        if (unsignedTail) {
+            bitmap.add(Long.MIN_VALUE);
+        }
+        List<Range> scopes = rangesWithReadLimit(100_000);
+        List<Range> input =
+                sequential
+                        ? new AbstractList<Range>() {
+                            @Override
+                            public Range get(int index) {
+                                return scopes.get(index);
+                            }
+
+                            @Override
+                            public int size() {
+                                return scopes.size();
+                            }
+                        }
+                        : scopes;
+        assertThat(bitmap.tryToRangeList(1, input))
+                .contains(Collections.singletonList(new Range(50, 50)));
+    }
+
+    private static List<Range> rangesWithReadLimit(int size) {
         class OrderedRanges extends AbstractList<Range> implements RandomAccess {
             private int reads;
 
@@ -305,22 +342,48 @@ public class RoaringNavigableMap64Test {
                     throw new AssertionError(
                             "Probe continued past the last non-negative candidate");
                 }
-                long start = 100L * index;
+                long start = 200L * index;
                 return new Range(start, start + 99);
             }
 
             @Override
             public int size() {
-                return 262_144;
+                return size;
             }
         }
 
-        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(50);
-        if (unsignedTail) {
-            bitmap.add(Long.MIN_VALUE);
+        return new OrderedRanges();
+    }
+
+    @Test
+    public void testIntersectingRangesSkipsEmptyBatchWindows() {
+        long width = 1L << 24;
+        int groups = 8;
+        class GapRanges extends AbstractList<Range> implements RandomAccess {
+            private int emptyGroupReads;
+
+            @Override
+            public Range get(int index) {
+                if (index > 0 && index < groups - 1) {
+                    emptyGroupReads++;
+                }
+                return new Range(index * width, (index + 1) * width - 1);
+            }
+
+            @Override
+            public int size() {
+                return groups;
+            }
         }
-        assertThat(bitmap.intersectingRanges(new OrderedRanges()).stream().toArray())
-                .containsExactly(0);
+
+        GapRanges scopes = new GapRanges();
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.bitmapOf(50, (groups - 1) * width + 50);
+
+        assertThat(bitmap.intersectingRanges(scopes).stream().toArray())
+                .containsExactly(0, groups - 1);
+        // Reading an empty group to check its bounds must not produce a bitmap for the group.
+        assertThat(scopes.emptyGroupReads).isLessThanOrEqualTo(2 * (groups - 2));
     }
 
     @Test
@@ -548,11 +611,13 @@ public class RoaringNavigableMap64Test {
 
     @Test
     public void testBoundedProbeBatchesNearbyScopes() throws Exception {
+        AtomicInteger rankLookups = new AtomicInteger();
         Roaring64NavigableMap source =
                 new Roaring64NavigableMap() {
                     @Override
                     public long rankLong(long value) {
-                        throw new AssertionError("Probe ranked each scope in the full bitmap");
+                        rankLookups.incrementAndGet();
+                        return super.rankLong(value);
                     }
                 };
         long start = 1L << 32;
@@ -569,7 +634,9 @@ public class RoaringNavigableMap64Test {
                 Arrays.asList(new Range(start + 2, start + 4), new Range(start + 21, start + 21));
         assertThat(bitmap.tryToRangeList(2, scope)).contains(expected);
         assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
+        assertThat(rankLookups).hasValue(0);
         assertThat(bitmap.intersectingRanges(scope).stream().toArray()).containsExactly(0, 2);
+        assertThat(rankLookups).hasValue(1);
 
         List<Range> singleScope = Collections.singletonList(new Range(start, start + (1L << 22)));
         assertThat(bitmap.tryToRangeList(2, singleScope)).contains(expected);
