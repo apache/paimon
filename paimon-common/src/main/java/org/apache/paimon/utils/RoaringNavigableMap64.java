@@ -29,6 +29,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collections;
@@ -52,6 +53,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     private static final long SCOPE_BATCH_SPAN = 256 * ROARING_CONTAINER_SPAN;
 
     private static final int SCOPE_BATCH_SAMPLE_SIZE = 8;
+
+    private static final Method RESET_BITMAP_CACHES = bitmapCacheResetMethod();
 
     private final Roaring64NavigableMap roaring64NavigableMap;
 
@@ -87,11 +90,30 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     public BitSet intersectingRanges(List<Range> ranges) {
         List<Range> scopes = ranges instanceof RandomAccess ? ranges : new ArrayList<>(ranges);
         BitSet result = new BitSet(scopes.size());
-        if (isEmpty()) {
+        if (scopes.isEmpty() || isEmpty()) {
             return result;
+        }
+        long first = roaring64NavigableMap.first();
+        if (first < 0) {
+            return result;
+        }
+        long last = last();
+        if (last < 0) {
+            last = roaring64NavigableMap.select(roaring64NavigableMap.rankLong(Long.MAX_VALUE) - 1);
         }
         for (int start = 0; start < scopes.size(); ) {
             Range scope = scopes.get(start);
+            if (scope.from > last) {
+                break;
+            }
+            if (scope.to < first) {
+                start++;
+                continue;
+            }
+            if (scope.from <= first || scope.to >= last) {
+                result.set(start++);
+                continue;
+            }
             if (!canClipScope(scope)) {
                 if (intersectsWideScope(scope)) {
                     result.set(start);
@@ -99,7 +121,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
                 start++;
                 continue;
             }
-            int end = scopeBatchEnd(scopes, start);
+            int end = scopeBatchEnd(scopes, start, last - 1);
             RoaringNavigableMap64 candidates = intersectScopes(scopes, start, end);
             for (int i = start; i < end; i++) {
                 Range range = scopes.get(i);
@@ -195,14 +217,37 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     public void or(RoaringNavigableMap64 other) {
         roaring64NavigableMap.or(other.roaring64NavigableMap);
+        resetBitmapCaches(roaring64NavigableMap);
     }
 
     public void and(RoaringNavigableMap64 other) {
         roaring64NavigableMap.and(other.roaring64NavigableMap);
+        resetBitmapCaches(roaring64NavigableMap);
     }
 
     public void andNot(RoaringNavigableMap64 other) {
         roaring64NavigableMap.andNot(other.roaring64NavigableMap);
+        resetBitmapCaches(roaring64NavigableMap);
+    }
+
+    // RoaringBitmap 1.2.1 can reuse stale cumulative counts and cached buckets after
+    // set operations. Reset the delegate's caches while keeping its contents in place.
+    private static Method bitmapCacheResetMethod() {
+        try {
+            Method method = Roaring64NavigableMap.class.getDeclaredMethod("resetPerfHelpers");
+            method.setAccessible(true);
+            return method;
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("Cannot find the Roaring64NavigableMap cache reset", e);
+        }
+    }
+
+    private static void resetBitmapCaches(Roaring64NavigableMap bitmap) {
+        try {
+            RESET_BITMAP_CACHES.invoke(bitmap);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Cannot reset Roaring64NavigableMap caches", e);
+        }
     }
 
     public boolean isEmpty() {
@@ -241,6 +286,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         Roaring64NavigableMap result = new Roaring64NavigableMap();
         result.or(x1.roaring64NavigableMap);
         result.and(x2.roaring64NavigableMap);
+        resetBitmapCaches(result);
         return new RoaringNavigableMap64(result);
     }
 
@@ -248,6 +294,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         Roaring64NavigableMap result = new Roaring64NavigableMap();
         result.or(x1.roaring64NavigableMap);
         result.or(x2.roaring64NavigableMap);
+        resetBitmapCaches(result);
         return new RoaringNavigableMap64(result);
     }
 
@@ -337,7 +384,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             @Nullable List<Range> scope, boolean skipLongRuns, RangeVisitor visitor) {
         if (scope != null) {
             for (int start = 0; start < scope.size(); ) {
-                int end = scopeBatchEnd(scope, start);
+                int end = scopeBatchEnd(scope, start, Long.MAX_VALUE);
                 boolean fits =
                         canClipScope(scope.get(start))
                                 ? intersectScopes(scope, start, end)
@@ -365,11 +412,15 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return visitRangesByIterator(cardinality, skipLongRuns, visitor);
     }
 
-    private static int scopeBatchEnd(List<Range> scopes, int start) {
+    private static int scopeBatchEnd(List<Range> scopes, int start, long maxEnd) {
         Range first = scopes.get(start);
         int end = start + 1;
         if (canClipScope(first)) {
-            while (end < scopes.size() && scopes.get(end).to - first.from < SCOPE_BATCH_SPAN) {
+            while (end < scopes.size()) {
+                long nextEnd = scopes.get(end).to;
+                if (nextEnd > maxEnd || nextEnd - first.from >= SCOPE_BATCH_SPAN) {
+                    break;
+                }
                 end++;
             }
         }
@@ -508,9 +559,12 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     private boolean visitRangesByIterator(
             long endIndex, boolean skipLongRuns, RangeVisitor visitor) {
         LongIterator iterator = roaring64NavigableMap.getLongIterator();
+        if (!iterator.hasNext()) {
+            return true;
+        }
         long rangeStart = iterator.next();
         long rangeEnd = rangeStart;
-        for (long index = 1; index < endIndex; index++) {
+        for (long index = 1; iterator.hasNext(); index++) {
             long current = iterator.next();
             if (isNext(rangeEnd, current)) {
                 rangeEnd = current;
