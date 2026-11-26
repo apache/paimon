@@ -66,6 +66,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,7 @@ import java.util.function.Function;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateReferencingFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.table.SpecialFields.ROW_TRACKING_FIELD_NAMES;
+import static org.apache.paimon.table.SpecialFields.SEQUENCE_NUMBER;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -379,6 +381,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         file.fileSize(),
                         selection,
                         readBatchSizer);
+        if (rowTrackingEnabled) {
+            formatReaderContext.withFallbackFields(
+                    file.firstRowId() == null
+                            ? Collections.singleton(SEQUENCE_NUMBER.name())
+                            : ROW_TRACKING_FIELD_NAMES);
+        }
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         outputRowType,

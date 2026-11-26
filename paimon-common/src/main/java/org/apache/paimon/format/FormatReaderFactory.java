@@ -30,7 +30,9 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /** A factory to create {@link RecordReader} for file. */
 public interface FormatReaderFactory {
@@ -58,6 +60,14 @@ public interface FormatReaderFactory {
 
     /** Context for creating reader. */
     interface Context {
+
+        /**
+         * Fields whose missing physical values will be supplied by the caller. This only controls
+         * missing-field diagnostics; the format reader must still return null for missing values.
+         */
+        default Set<String> fallbackFields() {
+            return Collections.emptySet();
+        }
 
         FileIO fileIO();
 
