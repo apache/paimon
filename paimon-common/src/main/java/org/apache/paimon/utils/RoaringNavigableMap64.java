@@ -88,50 +88,67 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
      * Returns the indices of the intersecting ranges, given non-negative ranges sorted by start.
      */
     public BitSet intersectingRanges(List<Range> ranges) {
-        List<Range> scopes = ranges instanceof RandomAccess ? ranges : new ArrayList<>(ranges);
+        Range bounds = ranges.isEmpty() ? null : nonNegativeBounds();
+        if (bounds == null) {
+            return new BitSet();
+        }
+        List<Range> scopes = scopePrefix(ranges, bounds.to);
         BitSet result = new BitSet(scopes.size());
-        if (scopes.isEmpty() || isEmpty()) {
-            return result;
-        }
-        long first = roaring64NavigableMap.first();
-        if (first < 0) {
-            return result;
-        }
-        long last = last();
-        if (last < 0) {
-            last = roaring64NavigableMap.select(roaring64NavigableMap.rankLong(Long.MAX_VALUE) - 1);
-        }
+        long nextCandidate = bounds.from;
         for (int start = 0; start < scopes.size(); ) {
             Range scope = scopes.get(start);
-            if (scope.from > last) {
+            if (scope.from > bounds.to) {
                 break;
             }
-            if (scope.to < first) {
-                start++;
-                continue;
-            }
-            if (scope.from <= first || scope.to >= last) {
+            if (scope.to >= bounds.to) {
                 result.set(start++);
                 continue;
             }
-            if (!canClipScope(scope)) {
-                if (intersectsWideScope(scope)) {
-                    result.set(start);
-                }
+            // Scope starts are ordered. One seek can skip a gap covering many scopes.
+            if (scope.from > nextCandidate) {
+                nextCandidate =
+                        contains(scope.from)
+                                ? scope.from
+                                : roaring64NavigableMap.select(
+                                        roaring64NavigableMap.rankLong(scope.from - 1));
+            }
+            if (scope.to < nextCandidate) {
                 start++;
                 continue;
             }
-            int end = scopeBatchEnd(scopes, start, last - 1);
-            RoaringNavigableMap64 candidates = intersectScopes(scopes, start, end);
-            for (int i = start; i < end; i++) {
-                Range range = scopes.get(i);
-                if (candidates.intersectsInclusive(range.from, range.to)) {
-                    result.set(i);
+            result.set(start);
+            int end =
+                    scope.from <= bounds.from
+                            ? start + 1
+                            : scopeBatchEnd(scopes, start, bounds.to - 1);
+            if (end > start + 1) {
+                RoaringNavigableMap64 candidates = intersectScopes(scopes, start + 1, end);
+                for (int i = start + 1; i < end; i++) {
+                    Range range = scopes.get(i);
+                    if (candidates.intersectsInclusive(range.from, range.to)) {
+                        result.set(i);
+                    }
                 }
             }
             start = end;
         }
         return result;
+    }
+
+    @Nullable
+    private Range nonNegativeBounds() {
+        if (isEmpty()) {
+            return null;
+        }
+        long first = roaring64NavigableMap.first();
+        if (first < 0) {
+            return null;
+        }
+        long last = last();
+        if (last < 0) {
+            last = roaring64NavigableMap.select(roaring64NavigableMap.rankLong(Long.MAX_VALUE) - 1);
+        }
+        return new Range(first, last);
     }
 
     private boolean intersectsInclusive(long from, long to) {
@@ -371,11 +388,9 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             return Optional.of(Collections.emptyList());
         }
 
-        List<Range> scopes =
-                scope == null || scope instanceof RandomAccess ? scope : new ArrayList<>(scope);
         // Keep bounded primitive endpoints so fitting selections need only one traversal.
         BoundedRanges ranges = new BoundedRanges(maxRanges);
-        return forEachRange(scopes, true, ranges)
+        return forEachRange(scope, true, ranges)
                 ? Optional.of(ranges.toRanges())
                 : Optional.empty();
     }
@@ -383,13 +398,26 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
     private boolean forEachRange(
             @Nullable List<Range> scope, boolean skipLongRuns, RangeVisitor visitor) {
         if (scope != null) {
-            for (int start = 0; start < scope.size(); ) {
-                int end = scopeBatchEnd(scope, start, Long.MAX_VALUE);
+            Range bounds = nonNegativeBounds();
+            if (bounds == null) {
+                return true;
+            }
+            List<Range> scopes = scopePrefix(scope, bounds.to);
+            for (int start = 0; start < scopes.size(); ) {
+                Range range = scopes.get(start);
+                if (range.from > bounds.to) {
+                    break;
+                }
+                if (range.to < bounds.from) {
+                    start++;
+                    continue;
+                }
+                int end = scopeBatchEnd(scopes, start, bounds.to);
                 boolean fits =
-                        canClipScope(scope.get(start))
-                                ? intersectScopes(scope, start, end)
+                        canClipScope(range)
+                                ? intersectScopes(scopes, start, end)
                                         .forEachRange(null, true, visitor)
-                                : visitWideScope(scope.get(start), visitor);
+                                : visitWideScope(range, visitor);
                 if (!fits) {
                     return false;
                 }
@@ -410,6 +438,20 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
 
         return visitRangesByIterator(cardinality, skipLongRuns, visitor);
+    }
+
+    private static List<Range> scopePrefix(List<Range> scopes, long lastCandidate) {
+        if (scopes instanceof RandomAccess) {
+            return scopes;
+        }
+        List<Range> prefix = new ArrayList<>();
+        for (Range scope : scopes) {
+            if (scope.from > lastCandidate) {
+                break;
+            }
+            prefix.add(scope);
+        }
+        return prefix;
     }
 
     private static int scopeBatchEnd(List<Range> scopes, int start, long maxEnd) {
