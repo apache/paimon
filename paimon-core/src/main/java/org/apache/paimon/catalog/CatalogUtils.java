@@ -460,9 +460,13 @@ public class CatalogUtils {
         for (String database : catalog.listDatabases()) {
             try {
                 for (String name : catalog.listTables(database)) {
-                    tables.add(catalog.getTable(Identifier.create(database, name)));
+                    try {
+                        tables.add(catalog.getTable(Identifier.create(database, name)));
+                    } catch (Catalog.TableNotExistException ignored) {
+                        // The table may have been renamed or dropped since it was listed.
+                    }
                 }
-            } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException ignored) {
+            } catch (Catalog.DatabaseNotExistException ignored) {
             }
         }
         return tables;

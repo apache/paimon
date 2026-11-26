@@ -18,11 +18,14 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.ReadonlyTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -32,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -40,6 +44,8 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
 import static org.apache.paimon.table.system.AllTablesTable.TABLE_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 
 /** Unit tests for {@link AllTablesTable}. */
 public class AllTablesTableTest extends TableTestBase {
@@ -73,12 +79,24 @@ public class AllTablesTableTest extends TableTestBase {
     }
 
     @Test
+    void testListsRemainingTablesWhenListedTableDisappears() throws Exception {
+        Catalog reader = spy(DelegateCatalog.rootCatalog(catalog));
+        // The first name was listed before a concurrent rename.
+        doReturn(Arrays.asList("OldName", "T")).when(reader).listTables(database);
+
+        Table tables = reader.getTable(Identifier.create(SYSTEM_DATABASE_NAME, ALL_TABLES));
+        assertThat(read(tables))
+                .extracting(row -> row.getString(1).toString())
+                .containsExactly("T");
+    }
+
+    @Test
     void testAllTablesTableWithOwnerField() throws Exception {
         ReadonlyTable table = allTablesTable;
 
         RowType readType =
                 new RowType(
-                        java.util.Arrays.asList(
+                        Arrays.asList(
                                 TABLE_TYPE.getField(0), // database_name
                                 TABLE_TYPE.getField(1), // table_name
                                 TABLE_TYPE.getField(5))); // owner (field ID 5)
