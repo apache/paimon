@@ -514,9 +514,13 @@ If fragmented candidate ranges slow planning, start with
 `data-evolution.scalar-index.max-selection-ranges=100000`.
 
 When the ranges fit, the planner pushes them down to prune manifests and builds indexed splits by
-intersecting the candidates with each split's merged file ranges. When the probe exceeds the limit,
-the planner can prune whole file groups from the scan plan and count ranges again within the retained
-groups' row-ID ranges. If the scoped ranges fit, it emits indexed splits.
+intersecting the candidates with each split's merged file ranges. When the probe exceeds the limit
+in `full` or `detail`, the planner can skip groups of overlapping manifests whose row-ID bounds are
+disjoint from the candidates. It retains all manifests in a matching group so companion column files and
+deletions stay together. When any manifest lacks row-ID bounds, the planner reads all manifests
+selected by the regular scan filters. It can then prune whole file groups and count the candidate
+ranges within the retained groups. In `fast`, it counts ranges within the original scan plan first
+and prunes file groups if those ranges fit. A successful scoped probe produces indexed splits.
 
 If the scoped ranges still exceed the limit, the planner emits ordinary data splits and keeps the
 original predicate as a residual filter on the same snapshot. In `full` and `detail`, the fallback

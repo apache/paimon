@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BBoxIntersects;
@@ -380,31 +381,46 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Plan planWithFileGroupPruning(
             RoaringNavigableMap64 candidates, int maxRanges, GlobalIndexSearchMode searchMode) {
+        boolean fast = searchMode == GlobalIndexSearchMode.FAST;
+        ManifestsReader manifestsReader = batchScan.snapshotReader().manifestsReader();
         // The snapshot is pinned by index evaluation. Keep the regular predicate on the scan
         // and plan without a row-level LIMIT or TopN before removing any file groups.
-        Plan plan = batchScan.plan();
+        if (!fast) {
+            manifestsReader.withManifestGroupCandidates(candidates);
+        }
+        Plan plan;
+        try {
+            plan = batchScan.plan();
+        } finally {
+            if (!fast) {
+                manifestsReader.withManifestGroupCandidates(null);
+            }
+        }
         if (!(plan instanceof SnapshotReader.Plan)) {
             return plan;
         }
         SnapshotReader.Plan dataPlan = (SnapshotReader.Plan) plan;
-        SnapshotReader.Plan prunedPlan = pruneFileGroups(dataPlan, candidates);
-        if (prunedPlan.splits().isEmpty()) {
-            return prunedPlan;
+        // FAST needs the original plan on overflow because uncovered rows can match the filter.
+        // Removing groups without candidates cannot change the scoped range count.
+        SnapshotReader.Plan fallbackPlan = fast ? dataPlan : pruneFileGroups(dataPlan, candidates);
+        if (fallbackPlan.splits().isEmpty()) {
+            return fallbackPlan;
         }
 
-        List<Range> plannedRanges = GlobalIndexBuilderUtils.calcRowRanges(prunedPlan.dataSplits());
+        List<Range> plannedRanges =
+                GlobalIndexBuilderUtils.calcRowRanges(fallbackPlan.dataSplits());
         Optional<RowRangeIndex> ranges =
                 RowRangeIndex.tryFromBitmap(candidates, maxRanges, plannedRanges);
         if (ranges.isPresent()) {
-            return wrapToIndexSplits(prunedPlan.splits(), ranges.get(), null);
+            SnapshotReader.Plan indexedPlan =
+                    fast ? pruneFileGroups(dataPlan, candidates) : fallbackPlan;
+            return indexedPlan.splits().isEmpty()
+                    ? indexedPlan
+                    : wrapToIndexSplits(indexedPlan.splits(), ranges.get(), null);
         }
-        // In FAST, file groups dropped using index coverage can still contain matching rows.
-        SnapshotReader.Plan fallbackPlan =
-                searchMode == GlobalIndexSearchMode.FAST ? dataPlan : prunedPlan;
         LOG.info(
-                "Scan table '{}' with {} because the row-ID range limit was exceeded.",
-                table.name(),
-                fallbackPlan == dataPlan ? "the original data plan" : "file group pruning");
+                "Scan table '{}' with ordinary data splits because the row-ID range limit was exceeded.",
+                table.name());
         return fallbackPlan;
     }
 

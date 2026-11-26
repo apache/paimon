@@ -51,6 +51,8 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private static final long SCOPE_BATCH_SPAN = 256 * ROARING_CONTAINER_SPAN;
 
+    private static final int SCOPE_BATCH_SAMPLE_SIZE = 8;
+
     private final Roaring64NavigableMap roaring64NavigableMap;
 
     public RoaringNavigableMap64() {
@@ -544,10 +546,9 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
                 long windowEnd = rangeStart + Math.min(SCOPE_BATCH_SPAN - 1, lastRow - rangeStart);
                 long sampleIndex =
                         rangeStartIndex
-                                + Math.min(
-                                        RANGE_LIST_SELECT_SAMPLE_SIZE,
-                                        endIndex - rangeStartIndex - 1);
-                // Batch nearby candidates. Seeking by ordinal handles gaps between candidates.
+                                + Math.min(SCOPE_BATCH_SAMPLE_SIZE, endIndex - rangeStartIndex - 1);
+                // A small lookahead lets dispersed hits share a window. Seek by ordinal across
+                // larger gaps.
                 if (windowEnd == lastRow
                         || roaring64NavigableMap.select(sampleIndex) <= windowEnd) {
                     long end =

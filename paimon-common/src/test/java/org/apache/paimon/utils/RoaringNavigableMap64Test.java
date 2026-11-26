@@ -300,7 +300,7 @@ public class RoaringNavigableMap64Test {
     }
 
     @ParameterizedTest
-    @CsvSource({"1, 2, 1", "3, 2, 1", "3, 1024, 1", "3, 595, 2", "3, 4098, 4097"})
+    @CsvSource({"1, 2, 1", "3, 2, 1", "3, 1024, 1", "3, 595, 2", "3, 4098, 4097", "1, 262200, 1"})
     public void testBoundedProbeKeepsFragmentedSuffixLocal(
             int longRuns, int tailStride, int tailRunSize) throws Exception {
         Roaring64NavigableMap source =

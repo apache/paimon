@@ -560,7 +560,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 new LocalFileIO() {
                     @Override
                     public SeekableInputStream newInputStream(Path path) throws IOException {
-                        if (path.getName().startsWith("manifest-")) {
+                        if (path.getName().startsWith("manifest-")
+                                && !path.getName().startsWith("manifest-list-")) {
                             manifestOpens.incrementAndGet();
                         }
                         return super.newInputStream(path);
@@ -568,13 +569,21 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 };
         FileStoreTable eager =
                 FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        FileStoreTable trackedAdaptive =
+                FileStoreTableFactory.create(fileIO, adaptive.location(), adaptive.schema());
+        eager.newReadBuilder().withFilter(predicate).newScan().plan();
+        int exactOpens = manifestOpens.getAndSet(0);
+        assertThat(exactOpens).isPositive();
+        assertThat(trackedAdaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(DataSplit.class);
+        assertThat(manifestOpens.getAndSet(0)).isEqualTo(exactOpens);
+
         Predicate compactFilter = predicates.in(1, Arrays.asList(match, other));
         eager.newReadBuilder().withFilter(compactFilter).newScan().plan();
         int eagerOpens = manifestOpens.getAndSet(0);
         assertThat(eagerOpens).isPositive();
 
-        FileStoreTable trackedAdaptive =
-                FileStoreTableFactory.create(fileIO, adaptive.location(), adaptive.schema());
         List<Split> compactSelection =
                 trackedAdaptive
                         .newReadBuilder()

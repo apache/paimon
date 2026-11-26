@@ -30,6 +30,8 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TriFilter;
@@ -37,7 +39,9 @@ import org.apache.paimon.utils.TriFilter;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +69,7 @@ public class ManifestsReader {
     @Nullable private PartitionPredicate authPartitionFilter = null;
     @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
     @Nullable protected RowRangeIndex rowRangeIndex = null;
+    @Nullable private RoaringNavigableMap64 manifestGroupCandidates;
 
     public ManifestsReader(
             RowType partitionType,
@@ -139,6 +144,12 @@ public class ManifestsReader {
         return this;
     }
 
+    /** Selects whole groups of overlapping manifests for a row-ID candidate bitmap. */
+    public ManifestsReader withManifestGroupCandidates(@Nullable RoaringNavigableMap64 candidates) {
+        this.manifestGroupCandidates = candidates;
+        return this;
+    }
+
     @Nullable
     public PartitionPredicate partitionFilter() {
         if (partitionFilter == null) {
@@ -173,7 +184,43 @@ public class ManifestsReader {
                                         filterManifestFileMeta(
                                                 m, effectivePartitionFilter, effectiveBucketFilter))
                         .collect(Collectors.toList());
+        if (manifestGroupCandidates != null) {
+            filtered = pruneManifestGroups(filtered, manifestGroupCandidates);
+        }
         return new Result(snapshot, manifests, filtered);
+    }
+
+    static List<ManifestFileMeta> pruneManifestGroups(
+            List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
+        List<Range> ranges = new ArrayList<>(manifests.size());
+        for (ManifestFileMeta manifest : manifests) {
+            Long min = manifest.minRowId();
+            Long max = manifest.maxRowId();
+            if (min == null || max == null || min < 0 || max < min) {
+                return manifests;
+            }
+            ranges.add(new Range(min, max));
+        }
+
+        // A file's companion columns or its DELETE entry can be in another manifest. Keep
+        // entire overlap groups so pruning cannot split the files used to reconstruct a row.
+        List<Range> groups = Range.sortAndMergeOverlap(ranges);
+        BitSet matches = candidates.intersectingRanges(groups);
+        int matchedCount = matches.cardinality();
+        if (matchedCount == groups.size()) {
+            return manifests;
+        }
+
+        List<Range> retained = new ArrayList<>(matchedCount);
+        for (int i = matches.nextSetBit(0); i >= 0; i = matches.nextSetBit(i + 1)) {
+            retained.add(groups.get(i));
+        }
+        RowRangeIndex retainedGroups = RowRangeIndex.create(retained);
+        return manifests.stream()
+                .filter(
+                        manifest ->
+                                retainedGroups.intersects(manifest.minRowId(), manifest.maxRowId()))
+                .collect(Collectors.toList());
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot, ScanMode scanMode) {
