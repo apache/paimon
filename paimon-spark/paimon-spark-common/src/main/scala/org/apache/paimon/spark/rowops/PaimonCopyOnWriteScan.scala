@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark.rowops
 
+import org.apache.paimon.CoreOptions.StartupMode
+import org.apache.paimon.Snapshot
+import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.commands.SparkDataFileMeta
@@ -26,6 +29,7 @@ import org.apache.paimon.spark.read.BaseScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.utils.SnapshotManager
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
@@ -34,6 +38,7 @@ import org.apache.spark.sql.connector.read.SupportsRuntimeV2Filtering
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
+import java.io.FileNotFoundException
 import java.nio.file.Paths
 
 import scala.collection.JavaConverters._
@@ -71,6 +76,20 @@ case class PaimonCopyOnWriteScan(
 
   var dataSplits: Array[DataSplit] = Array()
 
+  // Captured when Spark builds this scan, before the runtime group filter query is planned.
+  // Every load reads it: once a concurrent commit replaced the files the group filter selected, a
+  // load of the latest snapshot would match none of them, and the operation would change nothing.
+  private val readSnapshot: Option[Snapshot] = Option(table.snapshotManager().latestSnapshot())
+
+  // The group filter query reads the table with its options. With options that select another
+  // startup mode, e.g. `scan.snapshot-id` or `scan.mode` = `compacted-full`, it can read an older
+  // snapshot or only part of one, so a file it selected may be missing here for another reason
+  // than an append.
+  private val groupFilterReadsLatest: Boolean = {
+    val mode = table.coreOptions().startupMode()
+    mode == StartupMode.LATEST_FULL || mode == StartupMode.LATEST
+  }
+
   private def loadSplits(): Unit = {
     val snapshotReader = table.newSnapshotReader()
     if (table.coreOptions().manifestDeleteFileDropStats()) {
@@ -79,7 +98,83 @@ case class PaimonCopyOnWriteScan(
     if (filterApplied) {
       snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
     }
-    dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
+    dataSplits = readSnapshot match {
+      case Some(snapshot) =>
+        snapshotReader
+          .withSnapshot(snapshot)
+          .read()
+          .splits()
+          .asScala
+          .collect { case s: DataSplit => s }
+          .toArray
+      case None => Array()
+    }
+    if (filterApplied) {
+      // A scan built on an empty table reads no file, so no change can be lost.
+      readSnapshot.foreach(checkFilteredFilesLoaded)
+    }
+  }
+
+  // Rows in a file the group filter selected and this scan does not read are left unchanged. When
+  // the group filter reads the latest snapshot, that is fine for a file appended after this scan's
+  // snapshot, which the operation does not see, and for a file of another branch, e.g. that of
+  // `scan.fallback-branch` or `scan.primary-branch`, which this scan never reads. Otherwise fail,
+  // so that the operation does not report success without its changes.
+  private def checkFilteredFilesLoaded(snapshot: Snapshot): Unit = {
+    val loaded = dataSplits.iterator.flatMap(_.dataFiles().asScala.map(_.fileName())).toSet
+    val missing = filteredFileNames.filterNot(loaded.contains)
+    if (missing.isEmpty) {
+      return
+    }
+    val sample = missing.take(10).mkString(", ")
+    if (!groupFilterReadsLatest) {
+      throw new IllegalStateException(
+        s"The runtime group filter selected ${missing.size} data files that are not in " +
+          s"snapshot ${snapshot.id()} this copy-on-write scan was built on. With startup mode " +
+          s"${table.coreOptions().startupMode()} the group filter query can read an older " +
+          s"snapshot or part of one, so the scan cannot tell whether a commit replaced them. " +
+          s"Unset the options that select this startup mode, e.g. scan.snapshot-id, " +
+          s"scan.tag-name, scan.mode or incremental-between, for row-level operations. " +
+          s"Missing files: $sample")
+    }
+    if (!onlyAppendedSince(snapshot)) {
+      throw new IllegalStateException(
+        s"The runtime group filter selected ${missing.size} data files that are not in " +
+          s"snapshot ${snapshot.id()} this copy-on-write scan was built on, and a concurrent " +
+          s"commit since then may have replaced files of it. Please retry. Missing files: $sample")
+    }
+  }
+
+  // Whether no commit since `snapshot` removed a file of it: the snapshot file under its id is
+  // still this snapshot (a rollback lets a later commit reuse the id), and every later commit is
+  // an APPEND, which never deletes a file (it becomes an OVERWRITE then), or an ANALYZE.
+  private def onlyAppendedSince(snapshot: Snapshot): Boolean = {
+    val latestId = Option(table.snapshotManager().latestSnapshotId()).map(_.longValue())
+    val sameSnapshot = snapshotFile(snapshot.id()).exists(
+      current =>
+        current.baseManifestList() == snapshot.baseManifestList() &&
+          current.deltaManifestList() == snapshot.deltaManifestList())
+    sameSnapshot && latestId.exists {
+      latest =>
+        latest >= snapshot.id() && (snapshot.id() + 1 to latest).forall {
+          id =>
+            snapshotFile(id).exists {
+              later =>
+                later.commitKind() == CommitKind.APPEND || later.commitKind() == CommitKind.ANALYZE
+            }
+        }
+    }
+  }
+
+  // Reads the snapshot file under `id`, None if it does not exist. It bypasses the snapshot cache,
+  // which still returns a snapshot that a rollback deleted.
+  private def snapshotFile(id: Long): Option[Snapshot] = {
+    val path = table.snapshotManager().snapshotPath(id)
+    try {
+      Some(SnapshotManager.fromPath(table.fileIO(), path))
+    } catch {
+      case e: RuntimeException if e.getCause.isInstanceOf[FileNotFoundException] => None
+    }
   }
 
   def scannedFiles: Seq[SparkDataFileMeta] = {
