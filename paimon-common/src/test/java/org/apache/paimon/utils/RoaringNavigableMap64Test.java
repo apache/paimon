@@ -27,10 +27,12 @@ import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.RandomAccess;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -228,6 +230,122 @@ public class RoaringNavigableMap64Test {
             assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
             assertThat(bitmap.tryToRangeList(expected.size() - 1)).isEmpty();
         }
+    }
+
+    @Test
+    public void testRangeConversionAfterUnionWithCachedCardinality() {
+        long high = Long.MAX_VALUE - 1;
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(5, high);
+        assertThat(bitmap.getLongCardinality()).isEqualTo(2);
+
+        bitmap.or(RoaringNavigableMap64.bitmapOf(8));
+
+        List<Range> expected =
+                Arrays.asList(new Range(5, 5), new Range(8, 8), new Range(high, high));
+        assertThat(bitmap.toRangeList()).containsExactlyElementsOf(expected);
+        assertThat(bitmap.getLongCardinality()).isEqualTo(3);
+        assertThat(bitmap.toArray(3)).containsExactly(5L, 8L, high);
+        assertThat(bitmap.tryToRangeList(2)).isEmpty();
+        assertThat(bitmap.tryToRangeList(3, Collections.singletonList(new Range(0, high))))
+                .contains(expected);
+        assertThat(bitmap.relativeRange(new Range(4, high))).containsExactly(1L, 4L, high - 4);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRangeConversionAfterRemovingRowsWithCachedCardinality(boolean andNot) {
+        long high = Long.MAX_VALUE - 1;
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(5, 8, high);
+        assertThat(bitmap.getLongCardinality()).isEqualTo(3);
+
+        if (andNot) {
+            bitmap.andNot(RoaringNavigableMap64.bitmapOf(8));
+        } else {
+            bitmap.and(RoaringNavigableMap64.bitmapOf(5, high));
+        }
+
+        List<Range> expected = Arrays.asList(new Range(5, 5), new Range(high, high));
+        assertThat(bitmap.toRangeList()).containsExactlyElementsOf(expected);
+        assertThat(bitmap.getLongCardinality()).isEqualTo(2);
+        assertThat(bitmap.tryToRangeList(2, Collections.singletonList(new Range(0, high))))
+                .contains(expected);
+    }
+
+    @Test
+    public void testStaticUnionWithUnsignedTail() {
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.or(
+                        RoaringNavigableMap64.bitmapOf(5),
+                        RoaringNavigableMap64.bitmapOf(Long.MIN_VALUE));
+
+        assertThat(bitmap.getLongCardinality()).isEqualTo(2);
+        assertThat(bitmap.toArray(2)).containsExactly(5L, Long.MIN_VALUE);
+    }
+
+    @Test
+    public void testAddAfterIntersectionRemovesLastAddedBucket() {
+        long high = 1L << 32;
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(5, high);
+
+        bitmap.and(RoaringNavigableMap64.bitmapOf(5));
+        bitmap.add(high + 1);
+
+        assertThat(bitmap.toArray(2)).containsExactly(5L, high + 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testIntersectingRangesStopsAtLastNonNegativeCandidate(boolean unsignedTail) {
+        class OrderedRanges extends AbstractList<Range> implements RandomAccess {
+            private int reads;
+
+            @Override
+            public Range get(int index) {
+                if (++reads > 64) {
+                    throw new AssertionError(
+                            "Probe continued past the last non-negative candidate");
+                }
+                long start = 100L * index;
+                return new Range(start, start + 99);
+            }
+
+            @Override
+            public int size() {
+                return 262_144;
+            }
+        }
+
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(50);
+        if (unsignedTail) {
+            bitmap.add(Long.MIN_VALUE);
+        }
+        assertThat(bitmap.intersectingRanges(new OrderedRanges()).stream().toArray())
+                .containsExactly(0);
+    }
+
+    @Test
+    public void testIntersectingRangesWithOverlappingEndpoints() {
+        List<Range> scopes =
+                Arrays.asList(
+                        new Range(0, 9),
+                        new Range(5, 30),
+                        new Range(6, 7),
+                        new Range(11, 14),
+                        new Range(12, 20),
+                        new Range(12, 12),
+                        new Range(20, 30),
+                        new Range(21, 29),
+                        new Range(30, Long.MAX_VALUE),
+                        new Range(Long.MAX_VALUE, Long.MAX_VALUE));
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(10, 15, 30);
+
+        assertThat(bitmap.intersectingRanges(scopes).stream().toArray())
+                .containsExactly(1, 4, 6, 8);
+        assertThat(
+                        RoaringNavigableMap64.bitmapOf(Long.MIN_VALUE).intersectingRanges(scopes)
+                                .stream()
+                                .toArray())
+                .isEmpty();
     }
 
     @Test
