@@ -110,9 +110,10 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             return selected;
         }
         if (selected.shouldUseSelectRanges(count)) {
-            for (Range run : selected.toRangeListBySelect(count)) {
-                result.addRange(run.addOffset(-range.from));
-            }
+            selected.visitRangesBySelect(
+                    count,
+                    (start, end) ->
+                            result.addRange(new Range(start - range.from, end - range.from)));
         } else {
             selected.roaring64NavigableMap.forEach(row -> result.add(row - range.from));
         }
@@ -302,16 +303,24 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     private List<Range> toRangeListBySelect(long cardinality) {
         List<Range> ranges = new ArrayList<>();
+        visitRangesBySelect(cardinality, (start, end) -> ranges.add(new Range(start, end)));
+        return ranges;
+    }
+
+    private void visitRangesBySelect(long cardinality, RangeVisitor visitor) {
         long rangeStartIndex = 0;
         while (rangeStartIndex < cardinality) {
             long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
             long rangeEndIndex = findRangeEndIndex(rangeStartIndex, cardinality, rangeStart);
             long rangeOffset = rangeEndIndex - rangeStartIndex;
-            ranges.add(new Range(rangeStart, rangeStart + rangeOffset));
+            visitor.visit(rangeStart, rangeStart + rangeOffset);
             rangeStartIndex = rangeEndIndex + 1;
         }
+    }
 
-        return ranges;
+    @FunctionalInterface
+    private interface RangeVisitor {
+        void visit(long start, long end);
     }
 
     private long findRangeEndIndex(long rangeStartIndex, long cardinality, long rangeStart) {
