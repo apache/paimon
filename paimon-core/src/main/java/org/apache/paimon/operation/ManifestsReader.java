@@ -21,6 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.BucketFilter;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -153,6 +155,11 @@ public class ManifestsReader {
     }
 
     @Nullable
+    RoaringNavigableMap64 manifestGroupCandidates() {
+        return manifestGroupCandidates;
+    }
+
+    @Nullable
     public PartitionPredicate partitionFilter() {
         if (partitionFilter == null) {
             return authPartitionFilter;
@@ -195,34 +202,70 @@ public class ManifestsReader {
 
     static List<ManifestFileMeta> pruneManifestGroups(
             List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
+        return pruneManifestGroups(
+                manifests, selectManifestGroups(manifests, candidates, Collections.emptyMap()));
+    }
+
+    /** Returns the selected ADD row domains, or null if group pruning cannot narrow the scan. */
+    @Nullable
+    static RowRangeIndex selectManifestGroups(
+            List<ManifestFileMeta> manifests,
+            RoaringNavigableMap64 candidates,
+            Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries) {
         List<Range> addRanges = new ArrayList<>(manifests.size());
         for (ManifestFileMeta manifest : manifests) {
             if (manifest.numAddedFiles() == 0) {
                 continue;
             }
-            if (!hasValidRowIdBounds(manifest)) {
-                return manifests;
+            List<ManifestEntry> entries = mixedEntries.get(manifest);
+            if (entries == null) {
+                if (!hasValidRowIdBounds(manifest)) {
+                    return null;
+                }
+                addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
+            } else {
+                for (ManifestEntry entry : entries) {
+                    if (entry.kind() == FileKind.ADD) {
+                        Long first = entry.file().firstRowId();
+                        long count = entry.file().rowCount();
+                        if (first == null
+                                || first < 0
+                                || count <= 0
+                                || count - 1 > Long.MAX_VALUE - first) {
+                            return null;
+                        }
+                        addRanges.add(new Range(first, first + (count - 1)));
+                    }
+                }
             }
-            addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
         }
 
-        // Only ADDs can supply companion files. A wide DELETE-only manifest can affect several
-        // groups, but it cannot make their live files depend on each other.
+        // Only ADDs can supply companion files. Exclude DELETE ranges from the connectivity
+        // of groups whenever the ADD ranges are known.
         List<Range> groups = Range.sortAndMergeOverlap(addRanges);
         BitSet matches = candidates.intersectingRanges(groups);
         int matchedCount = matches.cardinality();
-        if (matchedCount == 0) {
-            return Collections.emptyList();
-        }
-        if (matchedCount == groups.size() && addRanges.size() == manifests.size()) {
-            return manifests;
+        if (mixedEntries.isEmpty()
+                && matchedCount == groups.size()
+                && addRanges.size() == manifests.size()) {
+            return null;
         }
 
         List<Range> retained = new ArrayList<>(matchedCount);
         for (int i = matches.nextSetBit(0); i >= 0; i = matches.nextSetBit(i + 1)) {
             retained.add(groups.get(i));
         }
-        RowRangeIndex retainedGroups = RowRangeIndex.create(retained);
+        return RowRangeIndex.create(retained);
+    }
+
+    static List<ManifestFileMeta> pruneManifestGroups(
+            List<ManifestFileMeta> manifests, @Nullable RowRangeIndex retainedGroups) {
+        if (retainedGroups == null) {
+            return manifests;
+        }
+        if (retainedGroups.ranges().isEmpty()) {
+            return Collections.emptyList();
+        }
         // Replay deletes for the retained ADDs. Unknown DELETE bounds may cover any group.
         return manifests.stream()
                 .filter(
