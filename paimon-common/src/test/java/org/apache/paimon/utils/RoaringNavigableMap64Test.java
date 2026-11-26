@@ -19,10 +19,17 @@
 package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.roaringbitmap.longlong.LongIterator;
+import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -218,7 +225,341 @@ public class RoaringNavigableMap64Test {
                 start += runLength + 1;
             }
             assertThat(bitmap.toRangeList()).isEqualTo(expected);
+            assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
+            assertThat(bitmap.tryToRangeList(expected.size() - 1)).isEmpty();
         }
+    }
+
+    @Test
+    public void testBoundedRangesWithinScope() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        for (long id = 0; id < 256; id += 2) {
+            bitmap.add(id);
+        }
+        long high = 1L << 32;
+        bitmap.addRange(new Range(high - 20_000, high + 20_000));
+
+        List<Range> scope =
+                Arrays.asList(
+                        new Range(3, 6),
+                        new Range(high - 5_000, high + 10),
+                        new Range(high + 20, high + 30_000));
+        List<Range> expected =
+                Arrays.asList(
+                        new Range(4, 4),
+                        new Range(6, 6),
+                        new Range(high - 5_000, high + 10),
+                        new Range(high + 20, high + 20_000));
+        assertThat(bitmap.tryToRangeList(4, scope)).contains(expected);
+        assertThat(bitmap.tryToRangeList(3, scope)).isEmpty();
+    }
+
+    @Test
+    public void testRangeLimitStopsAtStartOfOverflowingRun() throws Exception {
+        int maxRanges = 128;
+        Roaring64NavigableMap source = limitedIterator(4 * maxRanges);
+        for (int i = 0; i < maxRanges; i++) {
+            source.add(2L * i);
+        }
+        long denseEnd = 1_000_000_000L;
+        source.addRange(2L * maxRanges, denseEnd + 1);
+        for (int i = 1; i <= 256; i++) {
+            source.add(denseEnd + 2L * i);
+        }
+
+        assertThat(wrap(source).tryToRangeList(maxRanges)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 3})
+    public void testBoundedProbeSkipsLongRunBeforeFragmentedSuffix(int longRuns) throws Exception {
+        Roaring64NavigableMap source = limitedIterator(20_000);
+        List<Range> expected = new ArrayList<>();
+        for (int i = 0; i < 128; i++) {
+            long rowId = 2L * i;
+            source.add(rowId);
+            expected.add(new Range(rowId, rowId));
+        }
+        long runSize = 1_000_000_000L;
+        long denseEnd = 0;
+        for (int i = 0; i < longRuns; i++) {
+            long start = 256 + i * (runSize + 100);
+            denseEnd = start + runSize - 1;
+            source.addRange(start, denseEnd + 1);
+            expected.add(new Range(start, denseEnd));
+        }
+        for (int i = 1; i <= 256; i++) {
+            long rowId = denseEnd + 2L * i;
+            source.add(rowId);
+            expected.add(new Range(rowId, rowId));
+        }
+
+        RoaringNavigableMap64 bitmap = wrap(source);
+        assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
+        assertThat(bitmap.tryToRangeList(129)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1, 2, 1", "3, 2, 1", "3, 1024, 1", "3, 595, 2", "3, 4098, 4097", "1, 262200, 1"})
+    public void testBoundedProbeKeepsFragmentedSuffixLocal(
+            int longRuns, int tailStride, int tailRunSize) throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    private int selections;
+
+                    @Override
+                    public long select(long index) {
+                        if (++selections > 2_048) {
+                            throw new AssertionError(
+                                    "Probe selected individual rows in the full bitmap");
+                        }
+                        return super.select(index);
+                    }
+                };
+        List<Range> expected = new ArrayList<>();
+        for (int i = 0; i < 128; i++) {
+            long rowId = 2L * i;
+            source.add(rowId);
+            expected.add(new Range(rowId, rowId));
+        }
+        long runSize = 110_000_000L;
+        long denseEnd = 0;
+        for (int i = 0; i < longRuns; i++) {
+            long start = 256 + i * (runSize + 100);
+            denseEnd = start + runSize - 1;
+            source.addRange(start, denseEnd + 1);
+            expected.add(new Range(start, denseEnd));
+        }
+        for (int i = 1; i <= 30_000; i++) {
+            long rowId = denseEnd + (long) tailStride * i;
+            source.addRange(rowId, rowId + tailRunSize);
+            expected.add(new Range(rowId, rowId + tailRunSize - 1));
+        }
+        long tail = denseEnd + 30_000L * tailStride + tailRunSize + 1;
+        source.addRange(tail, tail + 257);
+        expected.add(new Range(tail, tail + 256));
+
+        assertThat(wrap(source).tryToRangeList(expected.size())).contains(expected);
+    }
+
+    @Test
+    public void testBoundedProbeClipsSparseClusterAtContainerBoundary() throws Exception {
+        List<Long> boundaryProbes = new ArrayList<>();
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public boolean contains(long value) {
+                        boundaryProbes.add(value);
+                        return super.contains(value);
+                    }
+                };
+        List<Range> expected = new ArrayList<>();
+        source.addRange(0, 5_000);
+        expected.add(new Range(0, 4_999));
+
+        long containerEnd = (1L << 25) + (1L << 16) - 1;
+        long clusterStart = containerEnd - 32;
+        for (int i = 0; i < 8; i++) {
+            long row = clusterStart + 2L * i;
+            source.add(row);
+            expected.add(new Range(row, row));
+        }
+        // The last run crosses the smaller window and must stay contiguous.
+        source.addRange(containerEnd - 4, containerEnd + 9);
+        expected.add(new Range(containerEnd - 4, containerEnd + 8));
+        long distantMatch = 1L << 26;
+        source.add(distantMatch);
+        expected.add(new Range(distantMatch, distantMatch));
+
+        RoaringNavigableMap64 bitmap = wrap(source);
+        assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
+        assertThat(boundaryProbes)
+                .contains(containerEnd)
+                .doesNotContain(clusterStart + (1L << 24) - 1);
+        assertThat(bitmap.tryToRangeList(expected.size() - 1)).isEmpty();
+    }
+
+    @Test
+    public void testBoundedProbeCollectsFittingRangesInOnePass() throws Exception {
+        Roaring64NavigableMap source = limitedIterator(85_000);
+        List<Range> expected = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            long start = 4_002L * i;
+            source.addRange(start, start + 4_000);
+            expected.add(new Range(start, start + 3_999));
+        }
+        long tail = 20 * 4_002L;
+        for (int i = 0; i < 256; i++) {
+            long rowId = tail + 2L * i;
+            source.add(rowId);
+            expected.add(new Range(rowId, rowId));
+        }
+
+        assertThat(wrap(source).tryToRangeList(expected.size())).contains(expected);
+    }
+
+    private static Roaring64NavigableMap limitedIterator(int maxRowsVisited) {
+        return new Roaring64NavigableMap() {
+            private int rowsVisited;
+
+            @Override
+            public LongIterator getLongIterator() {
+                LongIterator iterator = super.getLongIterator();
+                return new LongIterator() {
+                    @Override
+                    public LongIterator clone() {
+                        return iterator.clone();
+                    }
+
+                    @Override
+                    public boolean hasNext() {
+                        return iterator.hasNext();
+                    }
+
+                    @Override
+                    public long next() {
+                        if (++rowsVisited > maxRowsVisited) {
+                            throw new AssertionError("Probe iterated through a long run");
+                        }
+                        return iterator.next();
+                    }
+                };
+            }
+        };
+    }
+
+    @Test
+    public void testBoundedProbeBatchesNearbyScopes() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public long rankLong(long value) {
+                        throw new AssertionError("Probe ranked each scope in the full bitmap");
+                    }
+                };
+        long start = 1L << 32;
+        source.addRange(0, 1_000_000L);
+        source.addRange(start + 2, start + 5);
+        source.add(start + 21);
+        List<Range> scope =
+                Arrays.asList(
+                        new Range(start, start + 10),
+                        new Range(start + 12, start + 19),
+                        new Range(start + 20, start + 30));
+        RoaringNavigableMap64 bitmap = wrap(source);
+        List<Range> expected =
+                Arrays.asList(new Range(start + 2, start + 4), new Range(start + 21, start + 21));
+        assertThat(bitmap.tryToRangeList(2, scope)).contains(expected);
+        assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
+        assertThat(bitmap.intersectingRanges(scope).stream().toArray()).containsExactly(0, 2);
+
+        List<Range> singleScope = Collections.singletonList(new Range(start, start + (1L << 22)));
+        assertThat(bitmap.tryToRangeList(2, singleScope)).contains(expected);
+        assertThat(bitmap.intersectingRanges(singleScope).stream().toArray()).containsExactly(0);
+
+        long outsideFirstClip = start + (1L << 24) + 2;
+        source.add(outsideFirstClip);
+        expected = new ArrayList<>(expected);
+        expected.add(new Range(outsideFirstClip, outsideFirstClip));
+        List<Range> wideScopes =
+                Arrays.asList(
+                        new Range(start, outsideFirstClip + 10),
+                        new Range(start + (1L << 25), start + 3 * (1L << 24)));
+        assertThat(bitmap.tryToRangeList(3, wideScopes)).contains(expected);
+        assertThat(bitmap.tryToRangeList(2, wideScopes)).isEmpty();
+        assertThat(bitmap.intersectingRanges(wideScopes).stream().toArray()).containsExactly(0);
+    }
+
+    @Test
+    public void testBoundedProbePreservesRunAcrossBatchBoundary() {
+        long start = Long.MAX_VALUE - (1L << 25);
+        long boundary = start + (1L << 24);
+        Range run = new Range(boundary - 5, boundary + 5);
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(run);
+        List<Range> scope = Collections.singletonList(new Range(start, Long.MAX_VALUE));
+
+        assertThat(bitmap.tryToRangeList(1, scope)).contains(Collections.singletonList(run));
+        assertThat(bitmap.intersectingRanges(scope).stream().toArray()).containsExactly(0);
+    }
+
+    @Test
+    public void testBoundedProbeSpansLargeGapInWideScope() {
+        Range first = new Range(128, 18_000_127);
+        Range last = new Range(1_000_000_000_000L, 1_000_017_999_999L);
+        List<Range> scope = Collections.singletonList(new Range(first.from, last.to));
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(first);
+        bitmap.addRange(last);
+        bitmap.add(last.to + 2);
+
+        assertThat(bitmap.tryToRangeList(2, scope)).contains(Arrays.asList(first, last));
+        assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
+    }
+
+    @Test
+    public void testRangeLimitStopsBeforeVisitingNextNonemptyScope() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public long select(long index) {
+                        if (index >= 2) {
+                            throw new AssertionError(
+                                    "Probe entered the next scope after the limit");
+                        }
+                        return super.select(index);
+                    }
+                };
+        source.add(0);
+        source.add(2);
+        long nextScopeStart = 1L << 32;
+        source.addRange(nextScopeStart, nextScopeStart + 90);
+        RoaringNavigableMap64 bitmap = wrap(source);
+        Range first = new Range(0, 2);
+        Range empty = new Range(1L << 31, (1L << 31) + 1);
+        assertThat(bitmap.tryToRangeList(2, Arrays.asList(first, empty)))
+                .contains(Arrays.asList(new Range(0, 0), new Range(2, 2)));
+        assertThat(
+                        bitmap.tryToRangeList(
+                                2,
+                                Arrays.asList(
+                                        first,
+                                        empty,
+                                        new Range(nextScopeStart, nextScopeStart + (1L << 25)))))
+                .isEmpty();
+    }
+
+    @Test
+    public void testScopedRangeConversionSkipsExcludedRows() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public LongIterator getLongIterator() {
+                        throw new AssertionError("Scoped lookup iterated the original bitmap");
+                    }
+                };
+        for (int i = 0; i < 128; i++) {
+            source.add(2L * i);
+        }
+        long tail = 1_000_000;
+        source.addRange(256, tail);
+        for (int i = 0; i < 256; i++) {
+            source.add(tail + 1 + 2L * i);
+        }
+        RoaringNavigableMap64 bitmap = wrap(source);
+        List<Range> scope = Collections.singletonList(new Range(tail + 508, tail + 511));
+        List<Range> expected =
+                Arrays.asList(new Range(tail + 509, tail + 509), new Range(tail + 511, tail + 511));
+
+        assertThat(bitmap.tryToRangeList(2, scope)).contains(expected);
+        assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
+    }
+
+    private static RoaringNavigableMap64 wrap(Roaring64NavigableMap source) throws Exception {
+        Constructor<RoaringNavigableMap64> constructor =
+                RoaringNavigableMap64.class.getDeclaredConstructor(Roaring64NavigableMap.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(source);
     }
 
     @Test
@@ -237,6 +578,8 @@ public class RoaringNavigableMap64Test {
                 assertThat((boolean) useSelect.invoke(bitmap, bitmap.getLongCardinality()))
                         .isTrue();
                 assertThat(bitmap.toRangeList()).isEqualTo(expected);
+                assertThat(bitmap.tryToRangeList(2)).contains(expected);
+                assertThat(bitmap.tryToRangeList(1)).isEmpty();
             }
         }
     }
