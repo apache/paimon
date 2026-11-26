@@ -212,8 +212,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             }
             ParquetReadOptions readOptions = readOptionsBuilder.withRecordFilter(filter).build();
             reader = new ParquetFileReader(inputFile, footer, readOptions, inputStream, null);
+            RequestedSchema requestedSchema = getOrCreateRequestedSchema(fileSchema);
+            requestedSchema.warnAboutMissingFields(fileSchema, context.fallbackFields());
             // only the filtered columns, the column index store reads the indexes of all of them
-            reader.setRequestedSchema(getOrCreateRequestedSchema(fileSchema).messageType);
+            reader.setRequestedSchema(requestedSchema.messageType);
             return reader.candidateRowRanges();
         } finally {
             // the reader owns the stream once it is created
@@ -282,6 +284,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     readPlan.isIdentity()
                             ? getOrCreateRequestedSchema(fileSchema)
                             : createRequestedSchema(fileSchema, physicalReadFields);
+
+            requestedSchema.warnAboutMissingFields(fileSchema, context.fallbackFields());
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
@@ -358,14 +362,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private RequestedSchema createRequestedSchema(MessageType fileSchema, DataField[] readFields) {
         LayoutContext listLayout = LayoutContext.fromFileSchema(fileSchema);
-        MessageType rs = clipParquetSchema(fileSchema, readFields);
+        List<String> missingFields = new ArrayList<>();
+        MessageType rs = clipParquetSchema(fileSchema, readFields, missingFields);
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(rs);
         List<ParquetField> f = buildFieldsList(readFields, columnIO, rs, listLayout);
-        return new RequestedSchema(rs, f);
+        return new RequestedSchema(rs, f, missingFields);
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */
-    private MessageType clipParquetSchema(GroupType parquetSchema, DataField[] readFields) {
+    private MessageType clipParquetSchema(
+            GroupType parquetSchema, DataField[] readFields, List<String> missingFields) {
         Type[] types = new Type[readFields.length];
         for (int i = 0; i < readFields.length; ++i) {
             String fieldName = readFields[i].name();
@@ -373,10 +379,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             if (matched != null) {
                 types[i] = clipParquetType(readFields[i].type(), matched);
             } else {
-                LOG.warn(
-                        "{} does not exist in {}, will fill the field with null.",
-                        fieldName,
-                        parquetSchema);
+                missingFields.add(fieldName);
                 types[i] = ParquetSchemaConverter.convertToParquetType(readFields[i]);
             }
         }
@@ -625,10 +628,26 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         private final MessageType messageType;
         private final List<ParquetField> fields;
+        private final List<String> missingFields;
+        private final Set<String> warnedMissingFields = ConcurrentHashMap.newKeySet();
 
-        private RequestedSchema(MessageType messageType, List<ParquetField> fields) {
+        private RequestedSchema(
+                MessageType messageType, List<ParquetField> fields, List<String> missingFields) {
             this.messageType = messageType;
             this.fields = fields;
+            this.missingFields = missingFields;
+        }
+
+        private void warnAboutMissingFields(MessageType fileSchema, Set<String> fallbackFields) {
+            for (String fieldName : missingFields) {
+                // A later read of this cached schema may have no fallback for the same field.
+                if (!fallbackFields.contains(fieldName) && warnedMissingFields.add(fieldName)) {
+                    LOG.warn(
+                            "{} does not exist in {}, will fill the field with null.",
+                            fieldName,
+                            fileSchema);
+                }
+            }
         }
 
         @Override
