@@ -515,9 +515,9 @@ If fragmented candidate ranges slow planning, start with
 
 When the ranges fit, the planner pushes them down to prune manifests and builds indexed splits by
 intersecting the candidates with each split's merged file ranges. When the probe exceeds the limit
-in `full` or `detail`, the planner can skip groups of overlapping manifests whose row-ID bounds are
-disjoint from the candidates. It retains all manifests in a matching group so companion column files and
-deletions stay together. When any manifest lacks row-ID bounds, the planner reads all manifests
+in `full` or `detail`, the planner groups manifests with ADD entries by overlapping row-ID bounds.
+It keeps groups that intersect the candidates, along with DELETE-only manifests that overlap those
+groups or lack bounds. If a manifest with ADD entries lacks bounds, the planner reads all manifests
 selected by the regular scan filters. It can then prune whole file groups and count the candidate
 ranges within the retained groups. In `fast`, it counts ranges within the original scan plan first
 and prunes file groups if those ranges fit. A successful scoped probe produces indexed splits.

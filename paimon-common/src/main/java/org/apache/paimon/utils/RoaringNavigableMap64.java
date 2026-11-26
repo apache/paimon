@@ -543,26 +543,14 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             }
             long rangeStart = roaring64NavigableMap.select(rangeStartIndex);
             if (wideBitmap) {
-                long windowEnd = rangeStart + Math.min(SCOPE_BATCH_SPAN - 1, lastRow - rangeStart);
-                long sampleIndex =
-                        rangeStartIndex
-                                + Math.min(SCOPE_BATCH_SAMPLE_SIZE, endIndex - rangeStartIndex - 1);
-                // A small lookahead lets dispersed hits share a window. Seek by ordinal across
-                // larger gaps.
-                if (windowEnd == lastRow
-                        || roaring64NavigableMap.select(sampleIndex) <= windowEnd) {
-                    long end =
-                            windowEnd == lastRow
-                                    ? windowEnd
-                                    : endBeforeCrossingRun(rangeStart, windowEnd);
-                    if (end >= rangeStart) {
-                        RoaringNavigableMap64 clipped = intersectScope(new Range(rangeStart, end));
-                        if (!clipped.forEachRange(null, true, visitor)) {
-                            return false;
-                        }
-                        rangeStartIndex += clipped.getLongCardinality();
-                        continue;
+                long end = batchWindowEnd(rangeStartIndex, endIndex, rangeStart, lastRow);
+                if (end >= rangeStart) {
+                    RoaringNavigableMap64 clipped = intersectScope(new Range(rangeStart, end));
+                    if (!clipped.forEachRange(null, true, visitor)) {
+                        return false;
                     }
+                    rangeStartIndex += clipped.getLongCardinality();
+                    continue;
                 }
             }
             long rangeEndIndex = findRangeEndIndex(rangeStartIndex, endIndex, rangeStart);
@@ -572,6 +560,29 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
 
         return true;
+    }
+
+    private long batchWindowEnd(long startIndex, long endIndex, long start, long lastRow) {
+        long windowEnd = start + Math.min(SCOPE_BATCH_SPAN - 1, lastRow - start);
+        if (windowEnd == lastRow) {
+            return windowEnd;
+        }
+
+        long remaining = endIndex - startIndex - 1;
+        long sampleIndex = startIndex + Math.min(SCOPE_BATCH_SAMPLE_SIZE, remaining);
+        long sampleRow = roaring64NavigableMap.select(sampleIndex);
+        if (sampleRow > windowEnd) {
+            return start - 1;
+        }
+
+        // A tight cluster can fit in only a few containers with a large gap after it.
+        long fullSampleIndex = startIndex + Math.min(RANGE_LIST_SELECT_SAMPLE_SIZE, remaining);
+        if (sampleRow - start < ROARING_CONTAINER_SPAN
+                && fullSampleIndex != sampleIndex
+                && roaring64NavigableMap.select(fullSampleIndex) > windowEnd) {
+            windowEnd = Math.min(windowEnd, sampleRow | (ROARING_CONTAINER_SPAN - 1));
+        }
+        return endBeforeCrossingRun(start, windowEnd);
     }
 
     @FunctionalInterface

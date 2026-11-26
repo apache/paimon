@@ -343,6 +343,43 @@ public class RoaringNavigableMap64Test {
     }
 
     @Test
+    public void testBoundedProbeClipsSparseClusterAtContainerBoundary() throws Exception {
+        List<Long> boundaryProbes = new ArrayList<>();
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public boolean contains(long value) {
+                        boundaryProbes.add(value);
+                        return super.contains(value);
+                    }
+                };
+        List<Range> expected = new ArrayList<>();
+        source.addRange(0, 5_000);
+        expected.add(new Range(0, 4_999));
+
+        long containerEnd = (1L << 25) + (1L << 16) - 1;
+        long clusterStart = containerEnd - 32;
+        for (int i = 0; i < 8; i++) {
+            long row = clusterStart + 2L * i;
+            source.add(row);
+            expected.add(new Range(row, row));
+        }
+        // The last run crosses the smaller window and must stay contiguous.
+        source.addRange(containerEnd - 4, containerEnd + 9);
+        expected.add(new Range(containerEnd - 4, containerEnd + 8));
+        long distantMatch = 1L << 26;
+        source.add(distantMatch);
+        expected.add(new Range(distantMatch, distantMatch));
+
+        RoaringNavigableMap64 bitmap = wrap(source);
+        assertThat(bitmap.tryToRangeList(expected.size())).contains(expected);
+        assertThat(boundaryProbes)
+                .contains(containerEnd)
+                .doesNotContain(clusterStart + (1L << 24) - 1);
+        assertThat(bitmap.tryToRangeList(expected.size() - 1)).isEmpty();
+    }
+
+    @Test
     public void testBoundedProbeCollectsFittingRangesInOnePass() throws Exception {
         Roaring64NavigableMap source = limitedIterator(85_000);
         List<Range> expected = new ArrayList<>();

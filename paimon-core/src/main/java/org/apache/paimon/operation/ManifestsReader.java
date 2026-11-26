@@ -144,7 +144,9 @@ public class ManifestsReader {
         return this;
     }
 
-    /** Selects whole groups of overlapping manifests for a row-ID candidate bitmap. */
+    /**
+     * Selects whole groups of overlapping manifests for a row-ID candidate bitmap in an ALL scan.
+     */
     public ManifestsReader withManifestGroupCandidates(@Nullable RoaringNavigableMap64 candidates) {
         this.manifestGroupCandidates = candidates;
         return this;
@@ -184,30 +186,35 @@ public class ManifestsReader {
                                         filterManifestFileMeta(
                                                 m, effectivePartitionFilter, effectiveBucketFilter))
                         .collect(Collectors.toList());
-        if (manifestGroupCandidates != null) {
-            filtered = pruneManifestGroups(filtered, manifestGroupCandidates);
+        RoaringNavigableMap64 candidates = manifestGroupCandidates;
+        if (scanMode == ScanMode.ALL && candidates != null) {
+            filtered = pruneManifestGroups(filtered, candidates);
         }
         return new Result(snapshot, manifests, filtered);
     }
 
     static List<ManifestFileMeta> pruneManifestGroups(
             List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
-        List<Range> ranges = new ArrayList<>(manifests.size());
+        List<Range> addRanges = new ArrayList<>(manifests.size());
         for (ManifestFileMeta manifest : manifests) {
-            Long min = manifest.minRowId();
-            Long max = manifest.maxRowId();
-            if (min == null || max == null || min < 0 || max < min) {
+            if (manifest.numAddedFiles() == 0) {
+                continue;
+            }
+            if (!hasValidRowIdBounds(manifest)) {
                 return manifests;
             }
-            ranges.add(new Range(min, max));
+            addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
         }
 
-        // A file's companion columns or its DELETE entry can be in another manifest. Keep
-        // entire overlap groups so pruning cannot split the files used to reconstruct a row.
-        List<Range> groups = Range.sortAndMergeOverlap(ranges);
+        // Only ADDs can supply companion files. A wide DELETE-only manifest can affect several
+        // groups, but it cannot make their live files depend on each other.
+        List<Range> groups = Range.sortAndMergeOverlap(addRanges);
         BitSet matches = candidates.intersectingRanges(groups);
         int matchedCount = matches.cardinality();
-        if (matchedCount == groups.size()) {
+        if (matchedCount == 0) {
+            return Collections.emptyList();
+        }
+        if (matchedCount == groups.size() && addRanges.size() == manifests.size()) {
             return manifests;
         }
 
@@ -216,11 +223,20 @@ public class ManifestsReader {
             retained.add(groups.get(i));
         }
         RowRangeIndex retainedGroups = RowRangeIndex.create(retained);
+        // Replay deletes for the retained ADDs. Unknown DELETE bounds may cover any group.
         return manifests.stream()
                 .filter(
                         manifest ->
-                                retainedGroups.intersects(manifest.minRowId(), manifest.maxRowId()))
+                                !hasValidRowIdBounds(manifest)
+                                        || retainedGroups.intersects(
+                                                manifest.minRowId(), manifest.maxRowId()))
                 .collect(Collectors.toList());
+    }
+
+    private static boolean hasValidRowIdBounds(ManifestFileMeta manifest) {
+        Long min = manifest.minRowId();
+        Long max = manifest.maxRowId();
+        return min != null && max != null && min >= 0 && max >= min;
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot, ScanMode scanMode) {

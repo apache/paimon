@@ -59,12 +59,53 @@ class ManifestsReaderTest {
                 .containsExactly(known, unknown);
     }
 
+    @Test
+    void testPruneKeepsDeleteOnlyManifestForSelectedAdds() {
+        ManifestFileMeta left = manifest("left", 0L, 10L);
+        ManifestFileMeta right = manifest("right", 80L, 90L);
+        ManifestFileMeta spanningDelete = manifest("spanning-delete", 8L, 85L, 0, 2);
+        ManifestFileMeta disjointDelete = manifest("disjoint-delete", 100L, 120L, 0, 1);
+        List<ManifestFileMeta> manifests =
+                Arrays.asList(right, spanningDelete, left, disjointDelete);
+
+        assertThat(
+                        ManifestsReader.pruneManifestGroups(
+                                manifests, RoaringNavigableMap64.bitmapOf(5)))
+                .containsExactly(spanningDelete, left);
+        assertThat(
+                        ManifestsReader.pruneManifestGroups(
+                                manifests, RoaringNavigableMap64.bitmapOf(5, 85)))
+                .containsExactly(right, spanningDelete, left);
+    }
+
+    @Test
+    void testPruneKeepsDeleteWithoutBoundsForSelectedAdds() {
+        ManifestFileMeta skipped = manifest("skipped", 30L, 40L);
+        ManifestFileMeta unknownDelete = manifest("unknown-delete", null, null, 0, 1);
+        ManifestFileMeta selected = manifest("selected", 0L, 10L);
+        List<ManifestFileMeta> manifests = Arrays.asList(skipped, unknownDelete, selected);
+
+        assertThat(
+                        ManifestsReader.pruneManifestGroups(
+                                manifests, RoaringNavigableMap64.bitmapOf(5)))
+                .containsExactly(unknownDelete, selected);
+        assertThat(
+                        ManifestsReader.pruneManifestGroups(
+                                manifests, RoaringNavigableMap64.bitmapOf(20)))
+                .isEmpty();
+    }
+
     private static ManifestFileMeta manifest(String name, Long minRowId, Long maxRowId) {
+        return manifest(name, minRowId, maxRowId, 1, 0);
+    }
+
+    private static ManifestFileMeta manifest(
+            String name, Long minRowId, Long maxRowId, long added, long deleted) {
         return new ManifestFileMeta(
                 name,
                 100,
-                1,
-                0,
+                added,
+                deleted,
                 SimpleStats.EMPTY_STATS,
                 0,
                 null,
