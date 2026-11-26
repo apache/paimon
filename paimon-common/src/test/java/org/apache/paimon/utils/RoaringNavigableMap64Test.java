@@ -355,10 +355,11 @@ public class RoaringNavigableMap64Test {
         return new OrderedRanges();
     }
 
-    @Test
-    public void testIntersectingRangesSkipsEmptyBatchWindows() {
-        long width = 1L << 24;
-        int groups = 8;
+    @ParameterizedTest
+    @ValueSource(longs = {1L << 24, 1L << 25})
+    public void testGroupedAndScopedProbesSkipEmptyBatchWindows(long width) {
+        int groups = 64;
+        long stride = width + 16;
         class GapRanges extends AbstractList<Range> implements RandomAccess {
             private int emptyGroupReads;
 
@@ -367,7 +368,8 @@ public class RoaringNavigableMap64Test {
                 if (index > 0 && index < groups - 1) {
                     emptyGroupReads++;
                 }
-                return new Range(index * width, (index + 1) * width - 1);
+                long start = index * stride;
+                return new Range(start, start + width - 1);
             }
 
             @Override
@@ -377,13 +379,18 @@ public class RoaringNavigableMap64Test {
         }
 
         GapRanges scopes = new GapRanges();
-        RoaringNavigableMap64 bitmap =
-                RoaringNavigableMap64.bitmapOf(50, (groups - 1) * width + 50);
+        long last = (groups - 1) * stride + 50;
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(50, last);
 
         assertThat(bitmap.intersectingRanges(scopes).stream().toArray())
                 .containsExactly(0, groups - 1);
-        // Reading an empty group to check its bounds must not produce a bitmap for the group.
-        assertThat(scopes.emptyGroupReads).isLessThanOrEqualTo(2 * (groups - 2));
+        assertThat(scopes.emptyGroupReads).isLessThanOrEqualTo(groups + 8);
+
+        scopes.emptyGroupReads = 0;
+        assertThat(bitmap.tryToRangeList(2, scopes))
+                .contains(Arrays.asList(new Range(50, 50), new Range(last, last)));
+        // After the first empty window, only read the bounds of the skipped scopes.
+        assertThat(scopes.emptyGroupReads).isLessThanOrEqualTo(groups + 8);
     }
 
     @Test
@@ -636,7 +643,7 @@ public class RoaringNavigableMap64Test {
         assertThat(bitmap.tryToRangeList(1, scope)).isEmpty();
         assertThat(rankLookups).hasValue(0);
         assertThat(bitmap.intersectingRanges(scope).stream().toArray()).containsExactly(0, 2);
-        assertThat(rankLookups).hasValue(1);
+        assertThat(rankLookups).hasValue(0);
 
         List<Range> singleScope = Collections.singletonList(new Range(start, start + (1L << 22)));
         assertThat(bitmap.tryToRangeList(2, singleScope)).contains(expected);
