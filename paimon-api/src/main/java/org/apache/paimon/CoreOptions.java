@@ -3208,6 +3208,18 @@ public class CoreOptions implements Serializable {
                             "Search mode for ordinary Data Evolution scalar batch scans. An explicit "
                                     + "setting also serves as a fallback for scalar prefilters.");
 
+    public static final ConfigOption<Integer> DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES =
+            key("data-evolution.scalar-index.max-selection-ranges")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum number of disjoint candidate row-ID ranges when scalar global index "
+                                    + "results are evaluated during planning for Data Evolution batch scans. "
+                                    + "If the selection exceeds the limit, use ordinary data splits. "
+                                    + "Fast can include matching rows outside index coverage after fallback. "
+                                    + "Start with 100000 when fragmented candidate ranges slow planning. "
+                                    + "An unset value or 0 disables the limit.");
+
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_PREFILTER_SEARCH_MODE =
             key("scalar-index.prefilter.search-mode")
                     .enumType(GlobalIndexSearchMode.class)

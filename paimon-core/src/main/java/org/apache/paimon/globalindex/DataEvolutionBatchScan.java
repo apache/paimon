@@ -25,10 +25,10 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -51,6 +51,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
@@ -317,15 +318,33 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         if (rowRangeIndex == null) {
             Optional<GlobalIndexResult> indexResult;
+            int maxRanges = 0;
             if (canPushDownGlobalIndexTopN()) {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
+                maxRanges = scalarSelectionRangeLimit();
                 indexResult = evalGlobalIndex();
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
+                RoaringNavigableMap64 candidates = result.results();
+                rowRangeIndex =
+                        maxRanges == 0
+                                ? RowRangeIndex.fromBitmap(candidates)
+                                : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
+                if (rowRangeIndex == null) {
+                    GlobalIndexSearchMode searchMode = table.coreOptions().scalarScanSearchMode();
+                    LOG.info(
+                            "Scan table '{}' without global index because the row-ID range limit was exceeded.",
+                            table.name());
+                    if (searchMode == GlobalIndexSearchMode.FAST
+                            || batchScan.snapshotReader().hasNonPartitionFilter()) {
+                        // Index evaluation has pinned the snapshot. Keep the original predicate
+                        // and leave LIMIT and TopN to the caller while that predicate is residual.
+                        return batchScan.plan();
+                    }
+                }
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -508,6 +527,25 @@ public class DataEvolutionBatchScan implements DataTableScan {
         // the table is absent in tests that exercise withFilter in isolation
         CoreOptions options = table == null ? null : table.coreOptions();
         return options != null && options.queryAuthEnabled();
+    }
+
+    private int scalarSelectionRangeLimit() {
+        if (filter == null || globalIndexResult != null || queryAuthEnabled()) {
+            return 0;
+        }
+        CoreOptions options = table.coreOptions();
+        Options configuration = options.toConfiguration();
+        if (!configuration.contains(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
+                || !options.globalIndexEnabled()) {
+            return 0;
+        }
+        int maxSelectionRanges =
+                configuration
+                        .getOptional(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
+                        .orElse(0);
+        Preconditions.checkArgument(
+                maxSelectionRanges >= 0, "Maximum selection range count must be non-negative.");
+        return maxSelectionRanges;
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
