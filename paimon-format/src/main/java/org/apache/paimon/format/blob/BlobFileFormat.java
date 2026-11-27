@@ -52,6 +52,7 @@ public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
     private final int copyBufferSize;
+    private final boolean accessLogEnabled;
     private boolean writeNullOnMissingFile;
     private boolean writeNullOnFetchFailure;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
@@ -59,9 +60,14 @@ public class BlobFileFormat extends FileFormat {
     @Nullable public BlobConsumer writeConsumer;
 
     public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
+        this(blobAsDescriptor, copyBufferSize, false);
+    }
+
+    BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize, boolean accessLogEnabled) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
         this.copyBufferSize = copyBufferSize;
+        this.accessLogEnabled = accessLogEnabled;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -90,7 +96,7 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory(blobAsDescriptor, projectedRowType);
+        return new BlobFormatReaderFactory(blobAsDescriptor, projectedRowType, accessLogEnabled);
     }
 
     @Override
@@ -141,9 +147,12 @@ public class BlobFileFormat extends FileFormat {
         private final int fieldCount;
         private final int blobIndex;
         private final DataType blobFieldType;
+        private final boolean accessLogEnabled;
 
-        public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
+        private BlobFormatReaderFactory(
+                boolean blobAsDescriptor, RowType projectedRowType, boolean accessLogEnabled) {
             this.blobAsDescriptor = blobAsDescriptor;
+            this.accessLogEnabled = accessLogEnabled;
             this.fieldCount = projectedRowType.getFieldCount();
             this.blobIndex = findBlobFieldIndex(projectedRowType);
             Preconditions.checkState(
@@ -165,15 +174,20 @@ public class BlobFileFormat extends FileFormat {
                 throw e;
             }
 
-            return new BlobFormatReader(
-                    fileIO,
-                    filePath,
-                    fileMeta,
-                    in,
-                    fieldCount,
-                    blobIndex,
-                    blobFieldType,
-                    blobAsDescriptor);
+            BlobFormatReader reader =
+                    new BlobFormatReader(
+                            fileIO,
+                            filePath,
+                            fileMeta,
+                            in,
+                            fieldCount,
+                            blobIndex,
+                            blobFieldType,
+                            blobAsDescriptor);
+            if (accessLogEnabled) {
+                reader.enableAccessLog();
+            }
+            return reader;
         }
 
         private static int findBlobFieldIndex(RowType rowType) {

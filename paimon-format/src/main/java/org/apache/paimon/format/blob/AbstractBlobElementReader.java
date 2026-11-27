@@ -19,6 +19,7 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobAccessLogger;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.fs.FileIO;
@@ -39,6 +40,7 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
     private final String filePath;
     private final @Nullable SeekableInputStream in;
     private final boolean blobAsDescriptor;
+    private boolean accessLogEnabled;
 
     AbstractBlobElementReader(
             FileIO fileIO,
@@ -59,9 +61,14 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
         return blobAsDescriptor;
     }
 
+    void enableAccessLog() {
+        accessLogEnabled = true;
+    }
+
     protected final Blob readBlob(long position, long length) {
         if (blobAsDescriptor) {
-            return new BlobRef(uriReader, new BlobDescriptor(filePath, position, length));
+            return new BlobRef(
+                    uriReader, new BlobDescriptor(filePath, position, length), accessLogEnabled);
         }
         return Blob.fromData(readInlineBlob(position, length));
     }
@@ -80,6 +87,9 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
             IOUtils.readFully(in, blobData);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+        if (accessLogEnabled) {
+            BlobAccessLogger.logContent(filePath, position, length);
         }
         return blobData;
     }

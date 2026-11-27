@@ -481,10 +481,18 @@ For details about the blob file format structure, see [File Format - BLOB](../co
 | `row-tracking.enabled` | `false` | Set to `true` for Data Evolution append tables. |
 | `data-evolution.enabled` | `false` | Set to `true` for Data Evolution append tables. |
 | `blob-as-descriptor` | `false` | Return descriptors instead of payload bytes. Can be changed with `ALTER TABLE`. See [video reads](./video#read-frames) for engine-specific behavior. |
+| `blob-access-log.enabled` | `false` | Log BLOB descriptor and content access in the Java reader. Enable on the source table, including when it is accessed through BLOB views. |
 | `blob.target-file-size` | `target-file-size` | Target size for managed BLOB files. |
 | `blob-write-null-on-missing-file` | `false` | On Flink writes, write `NULL` and warn if an input descriptor references a missing file. |
 | `blob-view.resolve.enabled` | `true` | Set to `false` when forwarding serialized BLOB view references. |
 | `video-frame-field` | Not set | Comma-separated scalar BLOB fields using the [video pack format](./video). |
+
+The Java reader logs a file path, byte offset, and length at INFO level under
+`org.apache.paimon.data.BlobAccessLogger`. For managed `.blob` files and resolved BLOB views,
+`DESCRIPTOR_ACCESS` records retrieving an object's descriptor, including during view resolution.
+`CONTENT_ACCESS` records a successful complete read or explicit content-stream open. The range
+identifies the whole object, not the number of bytes the caller consumed from the stream. Reads
+outside the Java reader and references reconstructed from a detached descriptor are not audited.
 
 Specifically, if the storage system of the input BlobDescriptor differs from that used by Paimon,
 you can specify the storage configuration for the input blob descriptor using the prefix

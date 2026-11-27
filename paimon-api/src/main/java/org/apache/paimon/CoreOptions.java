@@ -3049,6 +3049,15 @@ public class CoreOptions implements Serializable {
                                     + "read time. Set to false to preserve BlobViewStruct references "
                                     + "when forwarding blob view values to another blob-view table.");
 
+    public static final ConfigOption<Boolean> BLOB_ACCESS_LOG_ENABLED =
+            key("blob-access-log.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Log BLOB descriptor and content access by file path, offset, and "
+                                    + "length in the Java reader. Enable on the source table, "
+                                    + "including when it is accessed through BLOB views.");
+
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
@@ -5108,6 +5117,10 @@ public class CoreOptions implements Serializable {
 
     public boolean formatTablePartitionOnlyValueInPath() {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
+    }
+
+    public boolean blobAccessLogEnabled() {
+        return options.get(BLOB_ACCESS_LOG_ENABLED);
     }
 
     public boolean blobAsDescriptor() {
