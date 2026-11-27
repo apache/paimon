@@ -3216,7 +3216,7 @@ public class CoreOptions implements Serializable {
                             "Maximum number of disjoint candidate row-ID ranges when scalar global index "
                                     + "results are evaluated during planning for Data Evolution batch scans. "
                                     + "If the selection exceeds the limit, use ordinary data splits. "
-                                    + "Full and detail can prune file groups after building the ordinary scan plan. "
+                                    + "Full and detail can retain manifest and file group pruning. "
                                     + "Fast uses the original scan, which can include matching rows outside index coverage. "
                                     + "Start with 100000 when fragmented candidate ranges slow planning. "
                                     + "An unset value or 0 disables the limit.");

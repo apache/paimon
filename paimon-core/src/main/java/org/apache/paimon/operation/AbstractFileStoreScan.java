@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -45,6 +46,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TriFilter;
@@ -307,7 +309,22 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Snapshot snapshot = manifestsResult.snapshot;
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
-        Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
+        RoaringNavigableMap64 candidates = manifestsReader.manifestGroupCandidates();
+        Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries =
+                scanMode == ScanMode.ALL && candidates != null && limit == null
+                        ? readMixedManifests(manifests)
+                        : Collections.emptyMap();
+        Iterator<ManifestEntry> iterator;
+        if (mixedEntries.isEmpty()) {
+            iterator = readManifestEntries(manifests, false);
+        } else {
+            RowRangeIndex retainedGroups =
+                    ManifestsReader.selectManifestGroupRanges(manifests, candidates, mixedEntries);
+            manifests = ManifestsReader.filterManifestsByRowRanges(manifests, retainedGroups);
+            iterator =
+                    readAndMergeFileEntries(
+                            manifests, Function.identity(), false, mixedEntries, retainedGroups);
+        }
 
         List<ManifestEntry> files = ListUtils.toList(iterator);
         if (postFilterManifestEntriesEnabled()) {
@@ -323,11 +340,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     manifestsResult.allManifests.stream()
                             .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
                             .sum();
+            long scannedManifests =
+                    mixedEntries.isEmpty()
+                            ? manifests.size()
+                            : mixedEntries.size()
+                                    + manifests.stream()
+                                            .filter(manifest -> !mixedEntries.containsKey(manifest))
+                                            .count();
             scanMetrics.reportScan(
                     new ScanStats(
                             scanDuration,
                             snapshot == null ? 0 : snapshot.id(),
-                            manifests.size(),
+                            scannedManifests,
                             allDataFiles - result.size(),
                             result.size()));
         }
@@ -442,18 +466,57 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 : readAndNoMergeFileEntries(manifests, Function.identity(), useSequential);
     }
 
+    private Map<ManifestFileMeta, List<ManifestEntry>> readMixedManifests(
+            List<ManifestFileMeta> manifests) {
+        // The coarse filter already selected these manifests. Load both kinds in one pass using
+        // the normal scan filters, so refinement and the final merge can share the entries.
+        List<ManifestFileMeta> mixed =
+                manifests.stream()
+                        .filter(
+                                manifest ->
+                                        manifest.numAddedFiles() > 0
+                                                && manifest.numDeletedFiles() > 0)
+                        .collect(Collectors.toList());
+        if (mixed.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<ManifestFileMeta, List<ManifestEntry>> entries = new ConcurrentHashMap<>();
+        randomlyOnlyExecute(
+                getExecutorService(parallelism),
+                manifest -> entries.put(manifest, readManifest(manifest)),
+                mixed);
+        return entries;
+    }
+
     private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
             List<ManifestFileMeta> manifests,
             Function<ManifestEntry, T> converter,
             boolean useSequential) {
+        return readAndMergeFileEntries(
+                manifests, converter, useSequential, Collections.emptyMap(), null);
+    }
+
+    private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
+            List<ManifestFileMeta> manifests,
+            Function<ManifestEntry, T> converter,
+            boolean useSequential,
+            Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries,
+            @Nullable RowRangeIndex retainedGroups) {
         Set<Identifier> deletedEntries =
                 FileEntry.readDeletedEntries(
-                        manifest ->
-                                readManifest(
-                                        manifest,
-                                        SimpleFileEntry::from,
-                                        FileEntry.deletedFilter(),
-                                        null),
+                        manifest -> {
+                            List<ManifestEntry> entries = mixedEntries.get(manifest);
+                            return entries == null
+                                    ? readManifest(
+                                            manifest,
+                                            SimpleFileEntry::from,
+                                            FileEntry.deletedFilter(),
+                                            null)
+                                    : entries.stream()
+                                            .filter(entry -> entry.kind() == FileKind.DELETE)
+                                            .map(SimpleFileEntry::from)
+                                            .collect(Collectors.toList());
+                        },
                         manifests,
                         parallelism);
 
@@ -462,13 +525,25 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .filter(file -> file.numAddedFiles() > 0)
                         .collect(Collectors.toList());
 
+        Filter<ManifestEntry> notDeleted = entry -> !deletedEntries.contains(entry.identifier());
         Function<ManifestFileMeta, List<T>> processor =
-                manifest ->
-                        readManifest(
-                                manifest,
-                                converter,
-                                FileEntry.addFilter(),
-                                entry -> !deletedEntries.contains(entry.identifier()));
+                manifest -> {
+                    List<ManifestEntry> entries = mixedEntries.get(manifest);
+                    // A mixed manifest retained for its DELETEs can still have unrelated ADDs.
+                    return entries == null
+                            ? readManifest(manifest, converter, FileEntry.addFilter(), notDeleted)
+                            : entries.stream()
+                                    .filter(
+                                            entry ->
+                                                    entry.kind() == FileKind.ADD
+                                                            && notDeleted.test(entry)
+                                                            && (retainedGroups == null
+                                                                    || retainedGroups.contains(
+                                                                            entry.file()
+                                                                                    .nonNullRowIdRange())))
+                                    .map(converter)
+                                    .collect(Collectors.toList());
+                };
         if (useSequential) {
             return sequentialBatchedExecute(processor, manifests, parallelism).iterator();
         } else {

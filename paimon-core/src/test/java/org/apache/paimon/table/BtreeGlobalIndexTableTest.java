@@ -21,8 +21,10 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -41,6 +43,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
@@ -55,9 +58,12 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -427,6 +433,132 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexReusesMixedManifestOnOverflow(String indexType)
+            throws Exception {
+        Schema schema = schemaDefault();
+        List<DataField> fields = new ArrayList<>(schema.fields());
+        fields.add(DataTypes.FIELD(3, "b1", DataTypes.BLOB()));
+        fields.add(DataTypes.FIELD(4, "b2", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b");
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        fields,
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment()),
+                false);
+        FileStoreTable table = getTableDefault();
+        BinaryString other = BinaryString.fromString("other");
+        RowType normalType = table.rowType().project(Arrays.asList("f0", "f1", "f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        for (int group = 0; group < 4; group++) {
+            try (BatchTableWrite write = builder.newWrite().withWriteType(normalType);
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int row = 0; row < 4; row++) {
+                    BinaryString value = group == 1 && row % 2 == 0 ? null : other;
+                    write.write(GenericRow.of(group * 4 + row, value, other));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        List<DataFileMeta> deletedFiles =
+                table.newScan().plan().splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .filter(
+                                file ->
+                                        file.nonNullFirstRowId() == 0
+                                                || file.nonNullFirstRowId() == 12)
+                        .collect(Collectors.toList());
+        assertThat(deletedFiles).hasSize(2);
+        try (BatchTableWrite write = builder.newWrite().withWriteType(normalType);
+                BatchTableWrite blobWrite =
+                        builder.newWrite()
+                                .withWriteType(table.rowType().project(Arrays.asList("b1", "b2")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(16, null, other));
+            write.write(GenericRow.of(17, other, other));
+            for (int row = 0; row < 4; row++) {
+                blobWrite.write(
+                        GenericRow.of(new BlobData(new byte[] {1}), new BlobData(new byte[] {2})));
+            }
+            List<CommitMessage> blobs = blobWrite.prepareCommit();
+            setFirstRowId(blobs, 8);
+            List<DataFileMeta> blobFiles =
+                    ((CommitMessageImpl) blobs.get(0)).newFilesIncrement().newFiles();
+            assertThat(blobFiles).hasSize(2);
+            // The mixed manifest contains both a selected group and dedicated files for a group
+            // whose normal file is pruned. The dedicated files must stay with their normal file.
+            CommitMessageImpl addition = (CommitMessageImpl) write.prepareCommit().get(0);
+            List<DataFileMeta> addedFiles =
+                    new ArrayList<>(addition.newFilesIncrement().newFiles());
+            addedFiles.addAll(blobFiles);
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    addition.partition(),
+                                    addition.bucket(),
+                                    addition.totalBuckets(),
+                                    new DataIncrement(
+                                            addedFiles, deletedFiles, Collections.emptyList()),
+                                    addition.compactIncrement())));
+        }
+        createIndex("f1", null, indexType);
+
+        List<ManifestFileMeta> manifests =
+                table.newSnapshotReader()
+                        .manifestsReader()
+                        .read(table.snapshotManager().latestSnapshot(), ScanMode.ALL)
+                        .allManifests;
+        ManifestFileMeta mixedManifest =
+                manifests.stream()
+                        .filter(m -> m.numAddedFiles() == 3 && m.numDeletedFiles() == 2)
+                        .findFirst()
+                        .get();
+        ManifestFileMeta unrelatedManifest =
+                manifests.stream()
+                        .filter(m -> Long.valueOf(8).equals(m.minRowId()))
+                        .findFirst()
+                        .get();
+        AtomicInteger mixedOpens = new AtomicInteger();
+        AtomicInteger unrelatedOpens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().equals(mixedManifest.fileName())) {
+                            mixedOpens.incrementAndGet();
+                        } else if (path.getName().equals(unrelatedManifest.fileName())) {
+                            unrelatedOpens.incrementAndGet();
+                        }
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable capped =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES
+                                                .key(),
+                                        "1"));
+        ReadBuilder read =
+                capped.newReadBuilder()
+                        .withFilter(new PredicateBuilder(table.rowType()).isNull(1))
+                        .withProjection(new int[] {0});
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
+        assertThat(mixedOpens).hasValue(1);
+        assertThat(unrelatedOpens).hasValue(0);
+        assertThat(readIds(read, splits)).containsExactlyInAnyOrder(4, 6, 16);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
     public void testAdaptiveScalarIndexKeepsGroupPruningWhenRangesOverflow(String indexType)
             throws Exception {
         createTableDefault();
@@ -534,9 +666,43 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                 .boxed()
                                 .collect(Collectors.toList()));
 
+        AtomicInteger manifestOpens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().startsWith("manifest-")
+                                && !path.getName().startsWith("manifest-list-")) {
+                            manifestOpens.incrementAndGet();
+                        }
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable eager =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        FileStoreTable trackedAdaptive =
+                FileStoreTableFactory.create(fileIO, adaptive.location(), adaptive.schema());
+        eager.newReadBuilder().withFilter(predicate).newScan().plan();
+        int exactOpens = manifestOpens.getAndSet(0);
+        assertThat(exactOpens).isPositive();
+        assertThat(trackedAdaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(DataSplit.class);
+        assertThat(manifestOpens.getAndSet(0)).isEqualTo(exactOpens);
+
         Predicate compactFilter = predicates.in(1, Arrays.asList(match, other));
+        eager.newReadBuilder().withFilter(compactFilter).newScan().plan();
+        int eagerOpens = manifestOpens.getAndSet(0);
+        assertThat(eagerOpens).isPositive();
+
         List<Split> compactSelection =
-                adaptive.newReadBuilder().withFilter(compactFilter).newScan().plan().splits();
+                trackedAdaptive
+                        .newReadBuilder()
+                        .withFilter(compactFilter)
+                        .newScan()
+                        .plan()
+                        .splits();
+        assertThat(manifestOpens.get()).isEqualTo(eagerOpens);
         assertThat(compactSelection)
                 .singleElement()
                 .isInstanceOfSatisfying(
