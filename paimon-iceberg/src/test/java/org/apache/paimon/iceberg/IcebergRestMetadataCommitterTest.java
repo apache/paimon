@@ -229,7 +229,15 @@ public class IcebergRestMetadataCommitterTest {
                 expected,
                 Record::toString);
 
-        PartitionSpec expectedPartitionSpec = PartitionSpec.builderFor(new Schema()).build();
+        PartitionSpec expectedPartitionSpec =
+                PartitionSpec.builderFor(
+                                new Schema(
+                                        NestedField.required(0, "pt1", Types.IntegerType.get()),
+                                        NestedField.required(1, "pt2", Types.StringType.get())))
+                        .withSpecId(1)
+                        .identity("pt1")
+                        .identity("pt2")
+                        .build();
         runPartitionSpecCompatibilityTest(expectedPartitionSpec);
     }
 
