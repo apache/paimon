@@ -24,16 +24,20 @@ import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, DeleteFromPaimonTableCommand, PaimonRowLevelCommand, PaimonSparkWriter}
 import org.apache.paimon.spark.read.PaimonSplitScan
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
@@ -661,6 +665,180 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           Seq(Row(1, 1, 0, 1))
         )
       }
+    }
+  }
+
+  test("Data Evolution: delete by row id range keeps other file groups") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+      sql("INSERT INTO t VALUES (3, 30), (4, 40)")
+
+      sql("DELETE FROM t WHERE id = 3 AND _ROW_ID BETWEEN 2 AND 2")
+      checkAnswer(
+        sql("SELECT id, data, _ROW_ID FROM t ORDER BY id"),
+        Seq(Row(1, 10, 0), Row(2, 20, 1), Row(4, 40, 3)))
+
+      // A row-id condition under OR cannot restrict the scan to that row-id range.
+      sql("DELETE FROM t WHERE _ROW_ID = 0 OR id = 4")
+      checkAnswer(sql("SELECT id, data, _ROW_ID FROM t"), Seq(Row(2, 20, 1)))
+    }
+  }
+
+  test("Data Evolution: user _row_id predicate does not prune metadata row id files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, `_row_id` BIGINT, data INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '100')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 100, 10)")
+      sql("INSERT INTO t VALUES (2, 100, 20)")
+
+      val relation = createRelationV2("t")
+      val userRowId = relation.output.find(_.name == "_row_id").get
+      case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
+
+        def candidates(condition: Expression): Seq[DataSplit] =
+          findCandidateDataSplits(condition, relation)
+      }
+      def fileCount(splits: Seq[DataSplit]): Int =
+        splits.flatMap(_.dataFiles().asScala.map(_.fileName())).distinct.size
+
+      val probe = RowLevelProbe(loadTable("t"))
+      assert(fileCount(probe.candidates(Literal.TrueLiteral)) == 2)
+      assert(fileCount(probe.candidates(EqualTo(userRowId, Literal(100L)))) == 2)
+    }
+  }
+
+  test("Data Evolution: row id delete prunes a multi-file table") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '100')
+            |""".stripMargin)
+      for (batch <- 0 until 12) {
+        sql(
+          s"INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range(${batch * 100}, ${(batch + 1) * 100})")
+      }
+
+      val relation = createRelationV2("t")
+      val rowId = (relation.output ++ relation.metadataOutput)
+        .find(_.name == "_ROW_ID")
+        .get
+      case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
+
+        def candidates(
+            condition: Expression,
+            targetRelation: DataSourceV2Relation = relation): Seq[DataSplit] =
+          findCandidateDataSplits(condition, targetRelation)
+      }
+      val probe = RowLevelProbe(loadTable("t"))
+      def fileCount(splits: Seq[DataSplit]): Int =
+        splits.flatMap(_.dataFiles().asScala.map(_.fileName())).distinct.size
+
+      val unprunedFiles = fileCount(probe.candidates(Literal.TrueLiteral))
+      val prunedFiles =
+        fileCount(probe.candidates(EqualTo(rowId, Literal(550L))))
+      assert(unprunedFiles == 12)
+      assert(prunedFiles == 1)
+
+      val parsed = spark.sessionState.sqlParser.parsePlan("DELETE FROM t WHERE _row_id = 550")
+      val lowerCaseDelete = spark.sessionState.analyzer
+        .execute(parsed)
+        .asInstanceOf[DeleteFromPaimonTableCommand]
+      val lowerCaseFiles =
+        fileCount(probe.candidates(lowerCaseDelete.condition, lowerCaseDelete.relation))
+      assert(
+        lowerCaseFiles == 1,
+        s"condition=${lowerCaseDelete.condition}, references=${lowerCaseDelete.condition.references}, metadata=${lowerCaseDelete.relation.metadataOutput}"
+      )
+
+      sql("DELETE FROM t WHERE _row_id = 550")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1199L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 549 AND 551 ORDER BY id"),
+        Seq(Row(549, 549L), Row(551, 551L)))
+    }
+  }
+
+  test("Data Evolution: row id delete reads aligned split blob files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, picture BINARY NOT NULL, expected BINARY NOT NULL) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'blob-field' = 'picture',
+            |  'blob.target-file-size' = '1 b')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, X'01', X'01' FROM range(0, 1250)")
+
+      val files = loadTable("t")
+        .newSnapshotReader()
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .flatMap(_.dataFiles().asScala)
+      assert(files.exists(file => file.firstRowId() == 0L && file.rowCount() == 1250L))
+      val blobFiles = files.filter(_.fileName().endsWith(".blob"))
+      assert(blobFiles.exists(_.nonNullRowIdRange().from == 0L))
+      assert(blobFiles.exists(_.nonNullRowIdRange().from > 0L))
+
+      sql("DELETE FROM t WHERE picture = expected AND _ROW_ID = 0")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1249L)))
+      sql("DELETE FROM t WHERE _ROW_ID = 1050")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1248L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 1049 AND 1051 ORDER BY id"),
+        Seq(Row(1049, 1049L), Row(1051, 1051L)))
+    }
+  }
+
+  test("Data Evolution: row id delete reads aligned split vector files") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2',
+            |  'vector.target-file-size' = '1 b')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */
+            |  CAST(id AS INT), array(CAST(id AS FLOAT), 0.0f) FROM range(0, 1250)
+            |""".stripMargin)
+
+      val files = loadTable("t")
+        .newSnapshotReader()
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .flatMap(_.dataFiles().asScala)
+      assert(files.exists(file => file.firstRowId() == 0L && file.rowCount() == 1250L))
+      val vectorFiles = files.filter(_.fileName().contains(".vector."))
+      assert(vectorFiles.exists(file => file.firstRowId() == 0L && file.rowCount() == 1000L))
+      assert(vectorFiles.exists(file => file.firstRowId() == 1000L && file.rowCount() == 250L))
+
+      sql("DELETE FROM t WHERE _ROW_ID = 1050")
+      checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(1249L)))
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM t WHERE id BETWEEN 1049 AND 1051 ORDER BY id"),
+        Seq(Row(1049, 1049L), Row(1051, 1051L)))
     }
   }
 

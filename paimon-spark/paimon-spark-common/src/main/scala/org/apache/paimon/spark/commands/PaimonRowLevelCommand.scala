@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
+import org.apache.paimon.globalindex.DataEvolutionBatchScan
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.operation.DataEvolutionSplitRead
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -30,23 +31,27 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile
+import org.apache.paimon.utils.Range
+import org.apache.paimon.utils.RowRangeIndex
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.types.LongType
 
 import java.util.Collections
 import java.util.function.Function
 
 import scala.collection.JavaConverters._
+import scala.util.control.NonFatal
 
 /** Helper trait for paimon row level command, like delete, update, merge into. */
 trait PaimonRowLevelCommand
@@ -75,7 +80,7 @@ trait PaimonRowLevelCommand
 
   protected def findCandidateDataSplits(
       condition: Expression,
-      output: Seq[Attribute]): Seq[DataSplit] = {
+      relation: DataSourceV2Relation): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
     // dropStats after filter push down
@@ -84,11 +89,45 @@ trait PaimonRowLevelCommand
     }
     if (condition != TrueLiteral) {
       val filter =
-        convertConditionToPaimonPredicate(condition, output, rowType, ignorePartialFailure = true)
+        convertConditionToPaimonPredicate(
+          condition,
+          relation.output,
+          rowType,
+          ignorePartialFailure = true)
       filter.foreach(snapshotReader.withFilter)
+      if (coreOptions.dataEvolutionEnabled()) {
+        PaimonRowLevelCommand
+          .conjunctiveRowIdRange(condition, relation.output ++ relation.metadataOutput)
+          .foreach(range => snapshotReader.withRowRanges(Collections.singletonList(range)))
+      }
     }
 
     snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toSeq
+  }
+
+  /** Preserve the selected row range when reading a pruned Data Evolution file group. */
+  protected def candidateReadSplits(
+      candidateDataSplits: Seq[DataSplit],
+      condition: Expression,
+      relation: DataSourceV2Relation): Seq[Split] = {
+    if (!coreOptions.dataEvolutionEnabled()) {
+      candidateDataSplits
+    } else {
+      PaimonRowLevelCommand
+        .conjunctiveRowIdRange(condition, relation.output ++ relation.metadataOutput)
+        .map {
+          range =>
+            DataEvolutionBatchScan
+              .wrapToIndexSplits(
+                candidateDataSplits.map(split => split: Split).asJava,
+                RowRangeIndex.create(Collections.singletonList(range)),
+                null)
+              .splits()
+              .asScala
+              .toSeq
+        }
+        .getOrElse(candidateDataSplits)
+    }
   }
 
   protected def findTouchedFiles(
@@ -103,7 +142,11 @@ trait PaimonRowLevelCommand
       }
     }
 
-    val filteredRelation = createNewScanPlan(candidateDataSplits, relation, Some(condition))
+    val filteredRelation =
+      createNewScanPlan(
+        candidateReadSplits(candidateDataSplits, condition, relation),
+        relation,
+        Some(condition))
     findTouchedFiles(createDataset(sparkSession, filteredRelation), sparkSession)
   }
 
@@ -150,7 +193,10 @@ trait PaimonRowLevelCommand
       sparkSession: SparkSession,
       dataEvolutionEnabled: Boolean = false): Dataset[SparkDeletionVector] = {
     val filteredRelation =
-      createNewScanPlan(candidateDataSplits, relation, Some(condition))
+      createNewScanPlan(
+        candidateReadSplits(candidateDataSplits, condition, relation),
+        relation,
+        Some(condition))
     val dataset = createDataset(sparkSession, filteredRelation)
     val deletionTargets =
       if (dataEvolutionEnabled) {
@@ -309,6 +355,66 @@ trait PaimonRowLevelCommand
 }
 
 object PaimonRowLevelCommand {
+
+  /** Push down only row-id bounds guaranteed by top-level conjuncts. */
+  private[commands] def conjunctiveRowIdRange(
+      condition: Expression,
+      targetAttributes: Seq[Attribute]): Option[Range] = {
+    // A user column named _row_id is legal. Match the resolved metadata attribute by exprId.
+    val rowIdExprIds = targetAttributes.filter(_.name == ROW_ID_COLUMN).map(_.exprId).toSet
+    def isRowId(expression: Expression): Boolean = expression match {
+      case attribute: Attribute =>
+        rowIdExprIds.contains(attribute.exprId)
+      case _ => false
+    }
+
+    def literalLong(expression: Expression): Option[Long] = {
+      if (!expression.foldable || !expression.deterministic || expression.dataType != LongType) {
+        None
+      } else {
+        // Spark may leave an analyzed integer literal as cast(550 as bigint).
+        try {
+          Option(expression.eval()).collect { case value: Long => value }
+        } catch {
+          case NonFatal(_) => None
+        }
+      }
+    }
+
+    def bounds(expression: Expression): Seq[(Option[Long], Option[Long])] = expression match {
+      case And(left, right) => bounds(left) ++ bounds(right)
+      case EqualTo(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (Some(value), Some(value)))
+      case EqualTo(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (Some(value), Some(value)))
+      case GreaterThanOrEqual(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (Some(value), None))
+      case LessThanOrEqual(left, right) if isRowId(left) =>
+        literalLong(right).toSeq.map(value => (None, Some(value)))
+      case GreaterThanOrEqual(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (None, Some(value)))
+      case LessThanOrEqual(left, right) if isRowId(right) =>
+        literalLong(left).toSeq.map(value => (Some(value), None))
+      case GreaterThan(left, right) if isRowId(left) =>
+        literalLong(right).filter(_ < Long.MaxValue).toSeq.map(value => (Some(value + 1), None))
+      case LessThan(left, right) if isRowId(left) =>
+        literalLong(right).filter(_ > Long.MinValue).toSeq.map(value => (None, Some(value - 1)))
+      case GreaterThan(left, right) if isRowId(right) =>
+        literalLong(left).filter(_ > Long.MinValue).toSeq.map(value => (None, Some(value - 1)))
+      case LessThan(left, right) if isRowId(right) =>
+        literalLong(left).filter(_ < Long.MaxValue).toSeq.map(value => (Some(value + 1), None))
+      case _ => Seq.empty
+    }
+
+    val extracted = bounds(condition)
+    if (extracted.isEmpty) {
+      None
+    } else {
+      val from = extracted.flatMap(_._1).foldLeft(Long.MinValue)(Math.max)
+      val to = extracted.flatMap(_._2).foldLeft(Long.MaxValue)(Math.min)
+      if (from <= to) Some(new Range(from, to)) else None
+    }
+  }
 
   /** A data-evolution anchor file and its covered row-id range. */
   final private[commands] case class AnchorRange(from: Long, to: Long, filePath: String)
