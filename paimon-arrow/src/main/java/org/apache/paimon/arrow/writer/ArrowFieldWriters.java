@@ -722,7 +722,14 @@ public class ArrowFieldWriters {
             if (pickedInColumn == null) {
                 lenSize = startIndex + batchRows;
             } else {
-                lenSize = pickedInColumn[startIndex + batchRows - 1] + 1;
+                // The picked indexes are indexed by output position and may be descending or
+                // duplicated (e.g. when generated for the children of a nested collection), so
+                // size the buffers by the largest picked index rather than the last one.
+                int maxPicked = 0;
+                for (int i = startIndex; i < startIndex + batchRows; i++) {
+                    maxPicked = Math.max(maxPicked, pickedInColumn[i]);
+                }
+                lenSize = maxPicked + 1;
             }
 
             // length and child offset for arrays in [0, startIndex + batchRows)
@@ -751,10 +758,12 @@ public class ArrowFieldWriters {
             }
 
             ArrayChildWriteInfo arrayChildWriteInfo =
-                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, offsets, lenSize);
+                    getArrayChildWriteInfo(pickedInColumn, startIndex, batchRows, lengths, offsets);
             if (arrayChildWriteInfo.rowByRow) {
                 writeChildrenByRow(arrayColumnVector, pickedInColumn, startIndex, batchRows);
-            } else {
+            } else if (arrayChildWriteInfo.batchRows > 0) {
+                // Skip the child vector lookup when there is no child element. Some column
+                // vectors (e.g. the fixed partition vectors) don't expose their child vector.
                 elementWriter.write(
                         arrayColumnVector.getColumnVector(),
                         arrayChildWriteInfo.pickedInColumn,
@@ -942,7 +951,14 @@ public class ArrowFieldWriters {
             if (pickedInColumn == null) {
                 lenSize = startIndex + batchRows;
             } else {
-                lenSize = pickedInColumn[startIndex + batchRows - 1] + 1;
+                // The picked indexes are indexed by output position and may be descending or
+                // duplicated (e.g. when generated for the children of a nested collection), so
+                // size the buffers by the largest picked index rather than the last one.
+                int maxPicked = 0;
+                for (int i = startIndex; i < startIndex + batchRows; i++) {
+                    maxPicked = Math.max(maxPicked, pickedInColumn[i]);
+                }
+                lenSize = maxPicked + 1;
             }
 
             // length and child offset for maps in [0, startIndex + batchRows)
@@ -967,10 +983,12 @@ public class ArrowFieldWriters {
             }
 
             ArrayChildWriteInfo arrayChildWriteInfo =
-                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, offsets, lenSize);
+                    getArrayChildWriteInfo(pickedInColumn, startIndex, batchRows, lengths, offsets);
             if (arrayChildWriteInfo.rowByRow) {
                 writeChildrenByRow(mapColumnVector, pickedInColumn, startIndex, batchRows);
-            } else {
+            } else if (arrayChildWriteInfo.batchRows > 0) {
+                // Skip the child vector lookup when there is no child entry. Some column vectors
+                // (e.g. the fixed partition vectors) don't expose their children.
                 keyWriter.write(
                         mapColumnVector.getChildren()[0],
                         arrayChildWriteInfo.pickedInColumn,
@@ -1083,24 +1101,25 @@ public class ArrowFieldWriters {
     private static ArrayChildWriteInfo getArrayChildWriteInfo(
             @Nullable int[] pickedInParentColumn,
             int parentStartIndex,
+            int parentBatchRows,
             int[] parentLengths,
-            int[] parentOffsets,
-            int lenSize) {
+            int[] parentOffsets) {
         return pickedInParentColumn == null
                 ? getArrayChildWriteInfoWithoutDelete(
-                        parentStartIndex, parentLengths, parentOffsets, lenSize)
+                        parentStartIndex, parentBatchRows, parentLengths, parentOffsets)
                 : getArrayChildWriteInfoWithDelete(
                         pickedInParentColumn,
                         parentStartIndex,
+                        parentBatchRows,
                         parentLengths,
-                        parentOffsets,
-                        lenSize);
+                        parentOffsets);
     }
 
     private static ArrayChildWriteInfo getArrayChildWriteInfoWithoutDelete(
-            int parentStartIndex, int[] parentLengths, int[] parentOffsets, int lenSize) {
+            int parentStartIndex, int parentBatchRows, int[] parentLengths, int[] parentOffsets) {
+        int parentEnd = parentStartIndex + parentBatchRows;
         int childBatchRows = 0;
-        for (int i = parentStartIndex; i < lenSize; i++) {
+        for (int i = parentStartIndex; i < parentEnd; i++) {
             childBatchRows += parentLengths[i];
         }
         if (childBatchRows == 0) {
@@ -1114,7 +1133,7 @@ public class ArrowFieldWriters {
         int firstElementIndex = -1;
         int expectedOffset = -1;
         boolean contiguous = true;
-        for (int i = parentStartIndex; i < lenSize; i++) {
+        for (int i = parentStartIndex; i < parentEnd; i++) {
             int length = parentLengths[i];
             if (length == 0) {
                 continue;
@@ -1136,10 +1155,11 @@ public class ArrowFieldWriters {
             return new ArrayChildWriteInfo(null, firstElementIndex, childBatchRows);
         }
 
-        // The children are not contiguous, collect the physical indexes to be written.
+        // The children are not contiguous, collect the physical indexes to be written in output
+        // order. The physical offsets may be descending or duplicated for nested collections.
         int[] childPicked = new int[childBatchRows];
         int childIndex = 0;
-        for (int i = parentStartIndex; i < lenSize; i++) {
+        for (int i = parentStartIndex; i < parentEnd; i++) {
             int length = parentLengths[i];
             int offset = parentOffsets[i];
             for (int j = 0; j < length; j++) {
@@ -1152,37 +1172,33 @@ public class ArrowFieldWriters {
     private static ArrayChildWriteInfo getArrayChildWriteInfoWithDelete(
             int[] pickedInParentColumn,
             int parentStartIndex,
+            int parentBatchRows,
             int[] parentLengths,
-            int[] parentOffsets,
-            int lenSize) {
-        // count the children of the picked parents first
+            int[] parentOffsets) {
+        // count the children of the picked parents first. The picked indexes are indexed by output
+        // position, so they may be descending or duplicated and must be visited in output order.
+        int parentEnd = parentStartIndex + parentBatchRows;
         int childBatchRows = 0;
         boolean offsetsKnown = true;
-        int currentParentPickedIndex = parentStartIndex;
-        for (int i = 0; i < lenSize; i++) {
-            if (i == pickedInParentColumn[currentParentPickedIndex]) {
-                int length = parentLengths[i];
-                if (length > 0 && parentOffsets[i] < 0) {
-                    offsetsKnown = false;
-                }
-                childBatchRows += length;
-                currentParentPickedIndex += 1;
+        for (int i = parentStartIndex; i < parentEnd; i++) {
+            int row = pickedInParentColumn[i];
+            int length = parentLengths[row];
+            if (length > 0 && parentOffsets[row] < 0) {
+                offsetsKnown = false;
             }
+            childBatchRows += length;
         }
         if (!offsetsKnown) {
             return ArrayChildWriteInfo.rowByRow(childBatchRows);
         }
 
-        // objects to calculate child pickedInColumn
+        // objects to calculate child pickedInColumn, preserving the output order of the parents
         IntArrayList childPicked = new IntArrayList(1024);
-        currentParentPickedIndex = parentStartIndex;
-        for (int i = 0; i < lenSize; i++) {
-            if (i == pickedInParentColumn[currentParentPickedIndex]) {
-                int offset = parentOffsets[i];
-                for (int pick = 0; pick < parentLengths[i]; pick++) {
-                    childPicked.add(pick + offset);
-                }
-                currentParentPickedIndex += 1;
+        for (int i = parentStartIndex; i < parentEnd; i++) {
+            int row = pickedInParentColumn[i];
+            int offset = parentOffsets[row];
+            for (int pick = 0; pick < parentLengths[row]; pick++) {
+                childPicked.add(pick + offset);
             }
         }
         return new ArrayChildWriteInfo(childPicked.toArray(), 0, childPicked.size());
