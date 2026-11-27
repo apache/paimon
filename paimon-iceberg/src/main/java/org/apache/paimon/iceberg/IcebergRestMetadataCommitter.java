@@ -332,8 +332,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             // add all schemas
             addAndSetCurrentSchema(
                     newMetadata.schemas(), newMetadata.currentSchemaId(), updateBuilder);
-            updateBuilder.addPartitionSpec(newMetadata.spec());
-            updateBuilder.setDefaultPartitionSpec(newMetadata.defaultSpecId());
+            updateBuilder.setDefaultPartitionSpec(newMetadata.spec());
 
             // add snapshot
             addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
