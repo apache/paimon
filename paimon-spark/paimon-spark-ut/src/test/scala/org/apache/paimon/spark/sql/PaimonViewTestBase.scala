@@ -212,32 +212,54 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
     }
   }
 
-  test("Paimon View: Spark views do not read temporary views they did not refer to") {
-    // On Spark 3.2 Paimon turns CREATE TEMPORARY VIEW in its catalogs into a persistent view.
-    if (gteqSpark3_3) {
-      sql(s"USE $paimonHiveCatalogName")
-      withDatabase("view_db1", "view_db2") {
-        sql("CREATE DATABASE view_db1")
-        sql("CREATE DATABASE view_db2")
-        withTable("view_db1.orders", "view_db2.orders") {
-          withView("view_db1.v") {
-            withTempView("v_temp", "v_temp2", "orders") {
-              sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
-              sql("INSERT INTO view_db1.orders VALUES (1)")
-              sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
-              sql("INSERT INTO view_db2.orders VALUES (2)")
-              sql("CREATE VIEW view_db1.v AS SELECT id FROM orders")
-              sql("USE view_db2")
+  test("Paimon View: views resolving in their namespace do not read temporary views") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("view_db1", "view_db2") {
+      sql("CREATE DATABASE view_db1")
+      sql("CREATE DATABASE view_db2")
+      withTable("view_db1.orders", "view_db2.orders") {
+        withView(
+          Seq("v", "v2", "v_false", "v_temp2", "v_temp3", "v_gtemp2").map("view_db1." + _): _*) {
+          withTempView("orders", "v_temp", "v_temp2", "v_temp3") {
+            sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+            sql("INSERT INTO view_db1.orders VALUES (1)")
+            sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
+            sql("INSERT INTO view_db2.orders VALUES (2)")
+            sql("USE view_db1")
+            sql("CREATE VIEW v AS SELECT id FROM orders")
+            // On Spark 3.2 this is a Paimon view too, resolving in its namespace.
+            sql("CREATE TEMPORARY VIEW v_temp3 AS SELECT id FROM orders")
+            sql("SELECT 5 AS id").createOrReplaceTempView("orders")
+            checkAnswer(sql("SELECT * FROM view_db1.v"), Row(1))
+            // On Spark 3.2 Paimon turns CREATE TEMPORARY VIEW in its catalogs into a
+            // persistent view.
+            if (gteqSpark3_3) {
               sql("CREATE TEMPORARY VIEW v_temp AS SELECT * FROM view_db1.v")
-              sql("CREATE TEMPORARY VIEW orders AS SELECT 5 AS id")
-              // Read directly, the temporary view takes the place of the table.
-              checkAnswer(sql("SELECT * FROM view_db1.v"), Row(5))
-              // v_temp did not refer to it, so Spark does not read it there.
               checkAnswer(sql("SELECT * FROM v_temp"), Row(1))
-              // v_temp2 did, so Spark reads it there.
-              sql("CREATE TEMPORARY VIEW v_temp2 AS SELECT * FROM view_db1.v")
-              checkAnswer(sql("SELECT * FROM v_temp2"), Row(5))
             }
+            // On Spark 3.2 this is a Paimon view, which reads temporary views as before.
+            sql("CREATE TEMPORARY VIEW v_temp2 AS SELECT id FROM orders")
+            checkAnswer(sql("SELECT * FROM v_temp2"), Row(5))
+            if (!gteqSpark3_3) {
+              sql("CREATE GLOBAL TEMPORARY VIEW v_gtemp2 AS SELECT id FROM orders")
+              checkAnswer(sql("SELECT * FROM view_db1.v_gtemp2"), Row(5))
+              sql("DROP VIEW view_db1.v_gtemp2")
+            }
+            val error = intercept[UnsupportedOperationException] {
+              sql("CREATE VIEW v2 AS SELECT id FROM orders")
+            }
+            assert(error.getMessage.contains("cannot read the temporary view orders"))
+            // A view without the property reads temporary views, as before.
+            sql("""
+                  |CREATE VIEW v_false
+                  |TBLPROPERTIES ('spark.view.resolve-in-view-namespace' = 'false')
+                  |AS SELECT id FROM orders
+                  |""".stripMargin)
+            sql("USE view_db2")
+            checkAnswer(sql("SELECT * FROM view_db1.v_false"), Row(5))
+            sql("DROP VIEW orders")
+            val tempView3 = if (gteqSpark3_3) "v_temp3" else "view_db1.v_temp3"
+            checkAnswer(sql(s"SELECT * FROM $tempView3"), Row(1))
           }
         }
       }

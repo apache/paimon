@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonViewRelations
 import org.apache.paimon.spark.catalyst.plans.logical.{CreatePaimonView, DropPaimonView, ResolvedIdentifier, ShowPaimonViews}
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, ResolvedNamespace, UnresolvedView}
+import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, PersistedView, ResolvedNamespace, UnresolvedView}
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.ResolveNamespace
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -46,18 +46,20 @@ case class RewritePaimonViewCommands(spark: SparkSession)
           child,
           allowExisting,
           replace,
-          _) =>
-      val viewQuery = CTESubstitution.apply(child)
-      val viewProperties = PaimonViewRelations.newViewProperties(properties, viewQuery)
+          viewType) =>
+      // Spark 3.2 parses CREATE TEMPORARY VIEW into this statement too, and it becomes a Paimon
+      // view. TBLPROPERTIES cannot be set for it, so one that reads temporary views keeps them.
+      val (viewQuery, viewProperties) = PaimonViewRelations.qualifyNewView(
+        spark,
+        CTESubstitution.apply(child),
+        resolved.catalog.asInstanceOf[SupportView],
+        resolved.identifier,
+        properties,
+        allowTempViews = viewType != PersistedView)
       CreatePaimonView(
         child = resolved,
         queryText = originalText,
-        query = PaimonViewRelations.qualify(
-          spark,
-          viewQuery,
-          resolved.catalog.asInstanceOf[SupportView],
-          resolved.identifier,
-          viewProperties),
+        query = viewQuery,
         columnAliases = userSpecifiedColumns.map(_._1),
         columnComments = userSpecifiedColumns.map(_._2.orElse(Option.empty)),
         comment = comment,

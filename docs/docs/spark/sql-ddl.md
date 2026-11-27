@@ -368,15 +368,15 @@ resolves some names only later in analysis: the table argument of a Paimon table
 function, an `IDENTIFIER(...)` clause (on Spark 4.2 and later, only one whose argument is not a
 string literal), and a CTE in a subquery expression, such as an IN, EXISTS or scalar subquery,
 under `spark.sql.legacy.ctePrecedencePolicy = LEGACY`. For a query with any of these, `CREATE
-VIEW` records `'false'` instead.
+VIEW` records `'false'` instead. Otherwise, a view with `'true'` does not read temporary views,
+as Spark's own persistent views do not, and `CREATE VIEW` fails if its query reads one.
 
 A view without this property, or with it set to `'false'`, resolves its table names in the
 current catalog and database, as views created by Paimon 2.1 or earlier and views created by
-Flink do. A view that reads such a view still gets that view's tables from the current catalog
-and database. Recreate a view with `CREATE OR REPLACE VIEW` to record the property, or set it to
-`'false'` in `TBLPROPERTIES` to keep the earlier behavior. In either case, when the view is read
-directly, a temporary view of the reading session takes the place of a table of the same name in
-the query.
+Flink do, and when it is read directly, a temporary view of the reading session takes the place
+of a table of the same name. A Paimon view that reads such a view still gets that view's tables
+this way. Recreate a view with `CREATE OR REPLACE VIEW` to record the property, or set it to
+`'false'` in `TBLPROPERTIES` to keep the earlier behavior.
 
 See [Views](../concepts/views) for catalog-specific behavior and
 [`alter_view_dialect`](./procedures/metadata#alter_view_dialect) for dialect management.
