@@ -34,7 +34,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -72,19 +71,19 @@ public class CopyFilesUtil {
     }
 
     public static DataFileMeta toNewDataFileMeta(
-            DataFileMeta oldFileMeta, String newFileName, long newSchemaId) {
-        return toNewDataFileMeta(oldFileMeta, newFileName, newSchemaId, null);
+            DataFileMeta oldFileMeta, Path newFilePath, boolean isExternalPath, long newSchemaId) {
+        return toNewDataFileMeta(oldFileMeta, newFilePath, isExternalPath, newSchemaId, null);
     }
 
     public static DataFileMeta toNewDataFileMeta(
             DataFileMeta oldFileMeta,
-            String newFileName,
+            Path newFilePath,
+            boolean isExternalPath,
             long newSchemaId,
             @Nullable TableSchema sourceFileSchema) {
-        String newExternalPath =
-                externalPathDir(oldFileMeta.externalPath().orElse(null))
-                        .map(dir -> dir + "/" + newFileName)
-                        .orElse(null);
+        String newFileName = newFilePath.getName();
+        // The external path names where the copy was written in the target, not the source.
+        String newExternalPath = isExternalPath ? newFilePath.toString() : null;
         List<String> writeCols = oldFileMeta.writeCols();
         if (sourceFileSchema != null && writeCols == null) {
             // A null value is interpreted using the schema id. Materialize its source meaning
@@ -127,9 +126,5 @@ public class CopyFilesUtil {
                 oldFileMeta.rowCount(),
                 oldFileMeta.dvRanges(),
                 isExternalPath ? newFilePath.toString() : null);
-    }
-
-    public static Optional<String> externalPathDir(String externalPath) {
-        return Optional.ofNullable(externalPath).map(Path::new).map(p -> p.getParent().toString());
     }
 }

@@ -74,6 +74,36 @@ public class CopyFilesUtilTest {
     }
 
     @Test
+    void testCopiedDataFileTakesTheExternalPathOfTheTarget() {
+        DataFileMeta source =
+                DataFileMeta.forAppend(
+                        "source.parquet",
+                        10L,
+                        2L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        1L,
+                        0L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        "file:/source-external/bucket-0/source.parquet",
+                        null,
+                        null);
+
+        Path target = new Path("file:/target-external/bucket-0/copied.parquet");
+        DataFileMeta toExternal = CopyFilesUtil.toNewDataFileMeta(source, target, true, 0L);
+        assertThat(toExternal.fileName()).isEqualTo("copied.parquet");
+        assertThat(toExternal.externalPath()).hasValue(target.toString());
+
+        DataFileMeta toBucket =
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("file:/warehouse/t/bucket-0/copied.parquet"), false, 0L);
+        assertThat(toBucket.externalPath()).isEmpty();
+    }
+
+    @Test
     void testNewDataFilePathKeepsTheKindOfTheFile() {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
@@ -119,7 +149,8 @@ public class CopyFilesUtilTest {
                                 Arrays.asList("a", "b"))
                         .withWriteColsSequences(new long[] {2L, 3L});
 
-        DataFileMeta copied = CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 6L);
+        DataFileMeta copied =
+                CopyFilesUtil.toNewDataFileMeta(source, new Path("copied.parquet"), false, 6L);
 
         assertThat(copied.fileName()).isEqualTo("copied.parquet");
         assertThat(copied.schemaId()).isEqualTo(6L);
@@ -160,7 +191,8 @@ public class CopyFilesUtilTest {
                                 .build());
 
         DataFileMeta copied =
-                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("copied.parquet"), false, 9L, sourceSchema);
 
         assertThat(copied.schemaId()).isEqualTo(9L);
         assertThat(copied.writeCols()).containsExactly("id", "name");
@@ -195,7 +227,8 @@ public class CopyFilesUtilTest {
                                 .build());
 
         DataFileMeta copied =
-                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("copied.parquet"), false, 9L, sourceSchema);
 
         assertThat(copied.schemaId()).isEqualTo(9L);
         assertThat(copied.writeCols()).containsExactly("id", "blob", "name");
