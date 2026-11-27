@@ -386,7 +386,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         // Index evaluation pinned the snapshot. Keep the original predicate on the scan and
         // plan before applying a row-level LIMIT or TopN.
-        Plan plan = batchScan.planWithManifestGroupCandidates(candidates);
+        Plan plan = batchScan.plan();
         return plan instanceof SnapshotReader.Plan
                 ? pruneFileGroups((SnapshotReader.Plan) plan, candidates)
                 : plan;

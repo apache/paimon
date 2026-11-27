@@ -19,11 +19,9 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
 /** Batch scan for append tables. */
 public class AppendBatchTableScan extends AbstractBatchTableScan {
@@ -35,16 +33,5 @@ public class AppendBatchTableScan extends AbstractBatchTableScan {
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         super(schema, schemaManager, options, snapshotReader, queryAuth);
-    }
-
-    /** Uses the candidate row IDs for manifest group pruning during this plan. */
-    public Plan planWithManifestGroupCandidates(RoaringNavigableMap64 candidates) {
-        ManifestsReader manifestsReader = snapshotReader.manifestsReader();
-        manifestsReader.withManifestGroupCandidates(candidates);
-        try {
-            return plan();
-        } finally {
-            manifestsReader.withManifestGroupCandidates(null);
-        }
     }
 }
