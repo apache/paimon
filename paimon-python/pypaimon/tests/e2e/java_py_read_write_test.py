@@ -139,6 +139,27 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def test_py_write_float_format_table(self):
+        # testReadPythonFloatFormatTable reads it with Java. Java 11 rejects 2.6887329E11, the Java 19+ name of
+        # 268873285632f, and its own name 1.0E23 of 1e23f, so the names hold the exact values.
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.schema.table_schema import TableSchema
+        from pypaimon.table.format import Format, FormatTable
+        location = os.path.join(self.warehouse, 'py_float_format_table')
+        if self.catalog.file_io.exists(location):
+            self.catalog.file_io.delete(location, recursive=True)
+        arrow_schema = pa.schema([('id', pa.int32()), ('pt', pa.float32())])
+        table = FormatTable(
+            self.catalog.file_io, Identifier.create('default', 'py_float_format_table'),
+            TableSchema.from_schema(0, Schema.from_pyarrow_schema(arrow_schema, partition_keys=['pt'])),
+            location, Format.PARQUET)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            writer.write_arrow(pa.Table.from_pydict(
+                {'id': [1, 2, 3, 4], 'pt': [0.1, 268873285632.0, 1e23, 2.0 ** 90]}, schema=arrow_schema))
+        finally:
+            writer.close()
+
     def test_py_write_bucketed_append_sequence(self):
         # Six one-row commits to one bucket; testReadPythonBucketedAppendOrder
         # compacts them with a Java write and checks the append order.
