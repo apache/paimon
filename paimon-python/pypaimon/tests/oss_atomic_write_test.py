@@ -306,3 +306,46 @@ def test_invalid_sse_is_rejected_before_io(oss_server, settings):
         io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
     assert oss_server.gets == 0
     assert oss_server.puts == 0
+
+
+def test_conditional_create_never_replaces_checkpoint(oss_server):
+    io = file_io(oss_server)
+    path = 'oss://test-bucket/checkpoints/result.json'
+    assert io.create_file_if_absent(path, 'first')
+    assert not io.create_file_if_absent(path, 'second')
+    assert list(oss_server.objects.values()) == [b'first']
+
+
+@pytest.mark.parametrize('versioning', ['Enabled', 'Suspended'])
+def test_conditional_create_rejects_versioning_without_legacy_fallback(oss_server, versioning):
+    io = file_io(oss_server)
+    # Even a cached legacy check must not enable conditional creation after
+    # a bucket configuration change.
+    io._atomic_write_supported = True
+    oss_server.versioning = versioning
+    with mock.patch.object(io, 'rename', side_effect=AssertionError('unsafe fallback')):
+        with pytest.raises(NotImplementedError, match='versioning'):
+            io.create_file_if_absent('oss://test-bucket/checkpoint', 'data')
+    assert oss_server.puts == 0
+    assert oss_server.objects == {}
+
+
+def test_conditional_create_requires_versioning_permission(oss_server):
+    oss_server.fail_method = 'GET'
+    oss_server.failure = (403, 'AccessDenied')
+    with pytest.raises(OSError):
+        file_io(oss_server).create_file_if_absent('oss://test-bucket/checkpoint', 'data')
+    assert oss_server.puts == 0
+    assert oss_server.objects == {}
+
+
+def test_conditional_create_preserves_uncertain_publication(oss_server):
+    io = file_io(oss_server)
+    path = 'oss://test-bucket/checkpoint'
+    oss_server.lose_response = True
+    with pytest.raises(OSError):
+        io.create_file_if_absent(path, 'first')
+    assert list(oss_server.objects.values()) == [b'first']
+    oss_server.lose_response = False
+    assert not io.create_file_if_absent(path, 'retry')
+    assert list(oss_server.objects.values()) == [b'first']

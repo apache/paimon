@@ -33,7 +33,13 @@ class OssFileIO(PyArrowFileIO):
     # cache, preserving its value under the same stability assumption.
     _atomic_write_supported = None
 
+    def create_file_if_absent(self, path: str, content: str) -> bool:
+        return self._write_atomic(path, content, require_conditional=True)
+
     def try_to_write_atomic(self, path: str, content: str) -> bool:
+        return self._write_atomic(path, content, require_conditional=False)
+
+    def _write_atomic(self, path: str, content: str, require_conditional: bool) -> bool:
         uri = urlparse(path)
         if uri.scheme:
             if uri.scheme != 'oss' or self._extract_oss_bucket(path) != self._oss_bucket:
@@ -47,6 +53,8 @@ class OssFileIO(PyArrowFileIO):
                 if bucket != self._oss_bucket:
                     raise ValueError("Atomic write must target the configured OSS bucket")
         if not key or key == '.' or key.endswith('/'):
+            if require_conditional:
+                raise ValueError("Conditional creation requires an OSS object key")
             return False
 
         try:
@@ -61,7 +69,14 @@ class OssFileIO(PyArrowFileIO):
             bucket = self._create_oss_bucket(session)
             headers = self._sse_headers()
             headers['x-oss-forbid-overwrite'] = 'true'
-            if not self._supports_atomic_write(bucket):
+            if require_conditional:
+                # Do not reuse the legacy cached publication mode: checkpoint
+                # claims must fail closed if versioning cannot be verified.
+                if bucket.get_bucket_versioning().status is not None:
+                    raise NotImplementedError(
+                        "Conditional OSS creation requires bucket versioning "
+                        "to be disabled (never enabled)")
+            elif not self._supports_atomic_write(bucket):
                 return super().try_to_write_atomic(path, content)
             try:
                 bucket.put_object(key, content.encode('utf-8'), headers=headers)

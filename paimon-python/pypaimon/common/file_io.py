@@ -510,6 +510,18 @@ class FileIO(ABC):
         with self.new_input_stream(path) as input_stream:
             return input_stream.read().decode('utf-8')
 
+    def create_file_if_absent(self, path: str, content: str) -> bool:
+        """Atomically publish complete UTF-8 content without replacing a file.
+
+        Return False only when the destination already exists. Implementations
+        must protect against competing processes, not just threads. Unsupported
+        stores raise instead of falling back to an existence check and rename.
+        An I/O exception can mean publication succeeded before its response was
+        lost; callers must reconcile the destination before retrying.
+        """
+        raise NotImplementedError(
+            "%s does not support conditional file creation" % type(self).__name__)
+
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         if self.exists(path):
             if self.is_dir(path):
