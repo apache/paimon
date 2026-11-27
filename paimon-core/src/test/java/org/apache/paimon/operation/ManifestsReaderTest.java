@@ -21,10 +21,12 @@ package org.apache.paimon.operation;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,9 +43,7 @@ class ManifestsReaderTest {
         ManifestFileMeta distant = manifest("distant", 100L, 200L);
         List<ManifestFileMeta> manifests = Arrays.asList(tail, adjacent, head, distant, bridge);
 
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(5, 200)))
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(5, 200)))
                 .containsExactly(tail, head, distant, bridge);
     }
 
@@ -53,9 +53,7 @@ class ManifestsReaderTest {
         ManifestFileMeta unknown = manifest("unknown", null, null);
         List<ManifestFileMeta> manifests = Arrays.asList(known, unknown);
 
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(5)))
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(5)))
                 .containsExactly(known, unknown);
     }
 
@@ -68,13 +66,9 @@ class ManifestsReaderTest {
         List<ManifestFileMeta> manifests =
                 Arrays.asList(right, spanningDelete, left, disjointDelete);
 
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(5)))
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(5)))
                 .containsExactly(spanningDelete, left);
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(5, 85)))
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(5, 85)))
                 .containsExactly(right, spanningDelete, left);
     }
 
@@ -85,14 +79,17 @@ class ManifestsReaderTest {
         ManifestFileMeta selected = manifest("selected", 0L, 10L);
         List<ManifestFileMeta> manifests = Arrays.asList(skipped, unknownDelete, selected);
 
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(5)))
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(5)))
                 .containsExactly(unknownDelete, selected);
-        assertThat(
-                        ManifestsReader.pruneManifestGroups(
-                                manifests, RoaringNavigableMap64.bitmapOf(20)))
-                .isEmpty();
+        assertThat(pruneManifests(manifests, RoaringNavigableMap64.bitmapOf(20))).isEmpty();
+    }
+
+    private static List<ManifestFileMeta> pruneManifests(
+            List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
+        RowRangeIndex retainedGroups =
+                ManifestsReader.selectManifestGroupRanges(
+                        manifests, candidates, Collections.emptyMap());
+        return ManifestsReader.filterManifestsByRowRanges(manifests, retainedGroups);
     }
 
     private static ManifestFileMeta manifest(String name, Long minRowId, Long maxRowId) {

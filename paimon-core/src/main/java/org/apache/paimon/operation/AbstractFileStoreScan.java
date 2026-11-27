@@ -317,19 +317,19 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         RowRangeIndex retainedGroups = null;
         if (!mixedEntries.isEmpty()) {
             retainedGroups =
-                    ManifestsReader.selectManifestGroups(manifests, candidates, mixedEntries);
-            manifests = ManifestsReader.pruneManifestGroups(manifests, retainedGroups);
+                    ManifestsReader.selectManifestGroupRanges(manifests, candidates, mixedEntries);
+            manifests = ManifestsReader.filterManifestsByRowRanges(manifests, retainedGroups);
         }
         // Refine after the mixed manifest pass so we only open sidecars for surviving ADDs.
         Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> addBlocks =
                 pruneGroups ? readAddBlockIndexes(manifests) : Collections.emptyMap();
         if (addBlocks.values().stream().anyMatch(Optional::isPresent)) {
             RowRangeIndex blockGroups =
-                    ManifestsReader.selectManifestGroups(
+                    ManifestsReader.selectManifestGroupRanges(
                             manifests, candidates, mixedEntries, addBlocks);
             if (blockGroups != null) {
                 retainedGroups = blockGroups;
-                manifests = ManifestsReader.pruneManifestGroups(manifests, retainedGroups);
+                manifests = ManifestsReader.filterManifestsByRowRanges(manifests, retainedGroups);
             }
         }
         Iterator<ManifestEntry> iterator =

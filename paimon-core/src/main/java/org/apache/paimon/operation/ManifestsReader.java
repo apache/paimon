@@ -197,28 +197,25 @@ public class ManifestsReader {
                         .collect(Collectors.toList());
         RoaringNavigableMap64 candidates = manifestGroupCandidates;
         if (scanMode == ScanMode.ALL && candidates != null) {
-            filtered = pruneManifestGroups(filtered, candidates);
+            RowRangeIndex retainedGroups =
+                    selectManifestGroupRanges(filtered, candidates, Collections.emptyMap());
+            filtered = filterManifestsByRowRanges(filtered, retainedGroups);
         }
         return new Result(snapshot, manifests, filtered);
     }
 
-    static List<ManifestFileMeta> pruneManifestGroups(
-            List<ManifestFileMeta> manifests, RoaringNavigableMap64 candidates) {
-        return pruneManifestGroups(
-                manifests, selectManifestGroups(manifests, candidates, Collections.emptyMap()));
-    }
-
     /** Returns the selected ADD row domains, or null if group pruning cannot narrow the scan. */
     @Nullable
-    static RowRangeIndex selectManifestGroups(
+    static RowRangeIndex selectManifestGroupRanges(
             List<ManifestFileMeta> manifests,
             RoaringNavigableMap64 candidates,
             Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries) {
-        return selectManifestGroups(manifests, candidates, mixedEntries, Collections.emptyMap());
+        return selectManifestGroupRanges(
+                manifests, candidates, mixedEntries, Collections.emptyMap());
     }
 
     @Nullable
-    static RowRangeIndex selectManifestGroups(
+    static RowRangeIndex selectManifestGroupRanges(
             List<ManifestFileMeta> manifests,
             RoaringNavigableMap64 candidates,
             Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries,
@@ -275,7 +272,7 @@ public class ManifestsReader {
         return RowRangeIndex.create(retained);
     }
 
-    static List<ManifestFileMeta> pruneManifestGroups(
+    static List<ManifestFileMeta> filterManifestsByRowRanges(
             List<ManifestFileMeta> manifests, @Nullable RowRangeIndex retainedGroups) {
         if (retainedGroups == null) {
             return manifests;
