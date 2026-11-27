@@ -241,7 +241,7 @@ def _effective_parallelism(
 
 def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
     if runtime is None:
-        return 1
+        return 16
     if runtime < 1:
         raise ValueError(f"blob_parallelism must be >= 1, got {runtime}")
     return runtime
