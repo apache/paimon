@@ -222,21 +222,37 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void truncateTable() {
         checkCommitted();
-        commit.withOperation(Snapshot.Operation.TRUNCATE);
-        commit.truncateTable(COMMIT_IDENTIFIER);
+        withTemporaryOperation(
+                Snapshot.Operation.TRUNCATE, () -> commit.truncateTable(COMMIT_IDENTIFIER));
     }
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
-        commit.withOperation(Snapshot.Operation.TRUNCATE);
-        commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
+        withTemporaryOperation(
+                Snapshot.Operation.TRUNCATE,
+                () -> commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER));
     }
 
     @Override
     public void truncatePartitions(PartitionPredicate partitionFilter) {
         checkNotNull(partitionFilter, "Partition filter cannot be null.");
-        commit.withOperation(Snapshot.Operation.TRUNCATE);
-        commit.dropPartitions(partitionFilter, COMMIT_IDENTIFIER);
+        withTemporaryOperation(
+                Snapshot.Operation.TRUNCATE,
+                () -> commit.dropPartitions(partitionFilter, COMMIT_IDENTIFIER));
+    }
+
+    /**
+     * Records {@code operation} only on snapshots produced by {@code action}. A reused committer
+     * otherwise keeps the marker and later commits, including overwrite, inherit it.
+     */
+    private void withTemporaryOperation(Snapshot.Operation operation, Runnable action) {
+        Snapshot.Operation previous = commit.operation();
+        commit.withOperation(operation);
+        try {
+            action.run();
+        } finally {
+            commit.withOperation(previous);
+        }
     }
 
     @Override

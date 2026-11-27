@@ -33,7 +33,9 @@ try:
 except ImportError:  # Python 3.6
     copy_context = None
 
-from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.uri_reader import FileUriReader
+from pypaimon.table.row.blob import Blob, OffsetInputStream, VideoFrameDescriptor
 
 
 _TORCH_AUTOCAST_DEVICE_TYPES = ("cpu", "cuda", "xpu", "ipu", "hpu", "xla", "mps")
@@ -413,6 +415,106 @@ class _VideoMetadataCache(weakref.WeakValueDictionary):
         super().clear()
 
 
+class _VideoFileHandle:
+    def __init__(self, stream):
+        self.stream = stream
+        self.leases = weakref.WeakSet()
+        self.failed = False
+
+
+class _VideoFileCursor(io.RawIOBase):
+    """An independent cursor on a pooled Arrow input file."""
+
+    def __init__(self, handle):
+        super().__init__()
+        self._handle = handle
+        self._position = 0
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        self._checkClosed()
+        return self._position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        self._checkClosed()
+        if whence == io.SEEK_CUR:
+            offset += self._position
+        elif whence == io.SEEK_END:
+            offset += self._handle.stream.size()
+        elif whence != io.SEEK_SET:
+            raise ValueError("Invalid seek origin: %s" % whence)
+        if offset < 0:
+            raise ValueError("Negative seek position: %s" % offset)
+        self._position = offset
+        return offset
+
+    def read(self, size=-1):
+        self._checkClosed()
+        stream = self._handle.stream
+        try:
+            remaining = max(0, stream.size() - self._position)
+            size = remaining if size is None or size < 0 else min(size, remaining)
+            data = stream.read_at(size, self._position) if size else b""
+        except Exception:
+            self._handle.failed = True
+            raise
+        self._position += len(data)
+        return data
+
+    def readinto(self, buffer):
+        data = self.read(len(buffer))
+        buffer[:len(data)] = data
+        return len(data)
+
+
+class _PooledVideoInputStream(OffsetInputStream):
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast("B")
+        if view.readonly:
+            raise TypeError("readinto requires a writable buffer")
+        return super().readinto(view)
+
+
+class _VideoFilePool:
+    def __init__(self, capacity):
+        self._capacity = capacity
+        self._handles = OrderedDict()
+
+    def open(self, file_io, path):
+        key = (file_io, path)
+        handle = self._handles.get(key)
+        if handle is not None and handle.failed:
+            if any(not lease.closed for lease in handle.leases):
+                return None
+            self._handles.pop(key)
+            handle.stream.close()
+            handle = None
+        if handle is None:
+            if len(self._handles) >= self._capacity:
+                idle = next((item for item, candidate in self._handles.items()
+                             if all(lease.closed for lease in candidate.leases)), None)
+                if idle is None:
+                    return None
+                self._handles.pop(idle).stream.close()
+            handle = _VideoFileHandle(FileUriReader(file_io).new_input_stream(path))
+            self._handles[key] = handle
+        self._handles.move_to_end(key)
+        cursor = _VideoFileCursor(handle)
+        handle.leases.add(cursor)
+        return cursor
+
+    def close(self):
+        with ExitStack() as close:
+            for handle in self._handles.values():
+                close.callback(handle.stream.close)
+            self._handles.clear()
+
+
 class VideoFrameCollator:
     """Decode frame rows in a DataLoader worker while reusing video sessions.
 
@@ -442,6 +544,7 @@ class VideoFrameCollator:
     and worker; decoder buffers, RGB outputs and temporary copies are additional.
 
     The cache is process-local and keyed by physical video payload identity.
+    The table option ``read.video.max-cached-files`` bounds pooled file handles.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
     """
@@ -493,12 +596,11 @@ class VideoFrameCollator:
                 or not isinstance(decode_parallelism, int)
                 or decode_parallelism <= 0):
             raise ValueError("decode_parallelism must be a positive int.")
-
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
             raise ValueError("table must provide raw_table.file_io or file_io.")
-
+        options = getattr(raw_table, "options", None)
         self.file_io = file_io
         self.video_column = video_column
         self.decoder_factory = decoder_factory
@@ -513,6 +615,9 @@ class VideoFrameCollator:
         self._decode_pool = _VideoDecodePool()
         self._decoders = OrderedDict()
         self._video_metadata_cache = _VideoMetadataCache()
+        self._max_cached_video_files = (options.read_video_max_cached_files()
+                                        if isinstance(options, CoreOptions) else 0)
+        self._video_file_pool = None
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -536,6 +641,14 @@ class VideoFrameCollator:
             except Exception as error:
                 if first_error is None:
                     first_error = error
+        if self._video_file_pool is not None:
+            try:
+                self._video_file_pool.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+            finally:
+                self._video_file_pool = None
         if first_error is not None:
             raise first_error
 
@@ -546,6 +659,7 @@ class VideoFrameCollator:
         state["_decoders"] = OrderedDict()
         state["_decode_pool"] = _VideoDecodePool()
         state["_video_metadata_cache"] = None
+        state["_video_file_pool"] = None
         state["_owner_pid"] = None
         return state
 
@@ -687,14 +801,7 @@ class VideoFrameCollator:
             _, evicted = self._decoders.popitem(last=False)
             self._close_resource(evicted)
 
-        # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
-        # options can drop merged REST/DLF storage credentials in workers.
-        stream = Blob.from_file(
-            self.file_io,
-            descriptor.uri,
-            descriptor.offset,
-            descriptor.length,
-        ).new_input_stream()
+        stream = self._open_video_stream(descriptor)
         try:
             retained = sum(
                 getattr(cached_stream, "video_prefetch_bytes", 0)
@@ -736,6 +843,30 @@ class VideoFrameCollator:
         resource = (decoder, stream)
         self._decoders[cache_key] = resource
         return decoder
+
+    def _open_video_stream(self, descriptor):
+        file_io = self.file_io
+        if self._max_cached_video_files and descriptor.uri.endswith(".video"):
+            import pyarrow.fs as pafs
+            from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+            from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+
+            if type(file_io) is RESTTokenFileIO:
+                file_io = file_io.file_io()
+            # Arrow may raise ImportError for missing optional backends.
+            if isinstance(file_io, PyArrowFileIO) and isinstance(
+                    file_io.filesystem, vars(pafs).get("S3FileSystem", ())):
+                if self._video_file_pool is None:
+                    self._video_file_pool = _VideoFilePool(self._max_cached_video_files)
+                cursor = self._video_file_pool.open(file_io, descriptor.uri)
+                if cursor is not None:
+                    try:
+                        return _PooledVideoInputStream(cursor, descriptor.offset, descriptor.length)
+                    except BaseException:
+                        cursor.close()
+                        raise
+        return Blob.from_file(
+            file_io, descriptor.uri, descriptor.offset, descriptor.length).new_input_stream()
 
     def _collate(self, rows):
         if self.collate_fn is not None:

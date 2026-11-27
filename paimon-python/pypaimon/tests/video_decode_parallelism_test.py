@@ -19,16 +19,32 @@ import io
 import multiprocessing
 import os
 import pickle
+import tempfile
 import threading
 import unittest
+from array import array
 from collections import OrderedDict
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import pyarrow as pa
+import pyarrow.fs as pafs
+
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
-from pypaimon.table.row.blob import BlobDescriptor
+from pypaimon.table.row.blob import BlobDescriptor, VideoFrameDescriptor
+
+try:
+    from pyarrow.fs import S3FileSystem
+except ImportError:
+    S3FileSystem = None
 
 
 def identity(value):
@@ -53,6 +69,116 @@ def decode_worker(collator, pool, connection):
 
 
 class VideoDecodeParallelismTest(unittest.TestCase):
+    def test_video_file_pool_falls_back_without_arrow_s3(self):
+        local = LocalFileIO()
+        arrow = object.__new__(PyArrowFileIO)
+        arrow.filesystem = pafs.LocalFileSystem()
+        arrow.new_input_stream = local.new_input_stream
+        options = CoreOptions(Options({"read.video.max-cached-files": "1"}))
+        original_getattr = pafs.__getattr__
+
+        def without_s3(name):
+            if name == "S3FileSystem":
+                raise ImportError("PyArrow has no S3 support")
+            return original_getattr(name)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                vars(pafs), {"__getattr__": without_s3}):
+            vars(pafs).pop("S3FileSystem", None)
+            path = Path(directory) / "local.video"
+            path.write_bytes(b"headerpayload")
+            descriptor = VideoFrameDescriptor(str(path), 6, 7, 0)
+            for file_io in (local, arrow):
+                with self.subTest(file_io=type(file_io).__name__):
+                    collator = VideoFrameCollator(
+                        SimpleNamespace(file_io=file_io, options=options),
+                        video_column="camera", decoder_factory=identity,
+                        decode_fn=lambda source, _, row: source.read())
+                    try:
+                        self.assertEqual(
+                            collator({"camera": descriptor.serialize()})["frame"], b"payload")
+                        self.assertIsNone(collator._video_file_pool)
+                    finally:
+                        collator.close()
+
+    @unittest.skipUnless(S3FileSystem is not None, "requires Arrow S3")
+    def test_video_file_pool_readinto_uses_bytes_and_respects_payload_bounds(self):
+        file_io = object.__new__(PyArrowFileIO)
+        file_io.filesystem = Mock(spec=S3FileSystem)
+        file_io.new_input_stream = lambda _: pa.BufferReader(b"__abcdefghijNEXT")
+        table = SimpleNamespace(file_io=file_io, options=CoreOptions(Options({
+            "read.video.max-cached-files": "1"})))
+
+        def decode(source, _, row):
+            with self.assertRaises(TypeError):
+                source.readinto(b"readonly")
+            self.assertEqual(source.tell(), 0)
+            buffer = array("I", [0, 0])
+            view = memoryview(buffer).cast("B")
+            self.assertEqual(source.readinto(buffer), 8)
+            self.assertEqual(bytes(view), b"abcdefgh")
+            view[:] = b"--------"
+            self.assertEqual(source.readinto(buffer), 2)
+            self.assertEqual(bytes(view), b"ij------")
+            self.assertEqual(source.readinto(buffer), 0)
+            return source.tell()
+
+        collator = VideoFrameCollator(
+            table, video_column="camera", decoder_factory=identity, decode_fn=decode)
+        descriptor = VideoFrameDescriptor("oss://bucket/a.video", 2, 10, 0)
+        try:
+            self.assertEqual(collator({"camera": descriptor.serialize()})["frame"], 10)
+        finally:
+            collator.close()
+
+    @unittest.skipUnless(S3FileSystem is not None, "requires Arrow S3")
+    def test_video_file_pool(self):
+        opens = []
+
+        def open_stream(path):
+            stream = pa.BufferReader(b"abcd")
+            opens.append((path, stream))
+            return stream
+
+        def create_file_io():
+            filesystem = Mock(spec=S3FileSystem)
+            filesystem.open_input_file.side_effect = open_stream
+            with patch.object(PyArrowFileIO, "_initialize_oss_fs", return_value=filesystem):
+                return FileIO.get("oss://bucket/table", Options({"fs.oss.impl": "legacy"}))
+
+        first, second = create_file_io(), create_file_io()
+        self.assertIsInstance(first, OssFileIO)
+        token_io = object.__new__(RESTTokenFileIO)
+        token_io.file_io = Mock(return_value=first)
+        table = SimpleNamespace(file_io=token_io, options=CoreOptions(Options({
+            "read.video.max-cached-files": "1"})))
+        collator = VideoFrameCollator(
+            table, video_column="camera",
+            decoder_factory=identity, decode_fn=lambda source, _, row: source.read(),
+            max_open_videos=2, decode_parallelism=2,
+            collate_fn=list)
+
+        def row(path, offset):
+            descriptor = VideoFrameDescriptor("oss://bucket/" + path, offset, 2, 0)
+            return {"camera": descriptor.serialize()}
+
+        def read(*rows):
+            return [item["frame"] for item in collator(rows)]
+
+        try:
+            self.assertEqual(read(row("a.video", 2), row("a.video", 0)), [b"cd", b"ab"])
+            self.assertEqual(len(opens), 1)
+            self.assertEqual(read(row("b.video", 0)), [b"ab"])
+            self.assertEqual(len(opens), 2)
+            self.assertFalse(opens[0][1].closed)
+            token_io.file_io.return_value = second
+            self.assertEqual(read(row("a.video", 2)), [b"cd"])
+            self.assertTrue(opens[0][1].closed)
+            self.assertEqual(len(opens), 3)
+        finally:
+            collator.close()
+        self.assertTrue(all(stream.closed for _, stream in opens))
+
     def collator(self, capacity=2):
         return VideoFrameCollator(
             SimpleNamespace(file_io="test-file-io"), video_column="camera",

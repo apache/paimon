@@ -207,23 +207,27 @@ class DataSplit(Split):
                     return False
         return True
 
+    @staticmethod
+    def row_count_before_deletions(files: List[DataFileMeta]) -> int:
+        """Count rows on disk, counting overlapping column files only once."""
+        ranges = []
+        for file in files:
+            if file.row_count == 0:
+                continue
+            row_range = file.row_id_range()
+            if row_range is None:
+                return sum(f.row_count for f in files)
+            ranges.append(row_range)
+        return sum(r.count() for r in Range.sort_and_merge_overlap(ranges))
+
     def _data_evolution_merged_row_count(self) -> int:
         if not self._files:
             return 0
-        
-        file_ranges = []
-        for file in self._files:
-            file_ranges.append(file.row_id_range())
-        
-        if not file_ranges:
-            return 0
-
-        ranges = Range.sort_and_merge_overlap(file_ranges, True, True)
-        row_count = sum([r.count() for r in ranges])
+        row_count = self.row_count_before_deletions(self._files)
         if self.data_deletion_files is not None:
             row_count -= sum(
                 deletion_file.cardinality
                 for deletion_file in self.data_deletion_files
-                if deletion_file is not None
+                if deletion_file is not None and deletion_file.cardinality is not None
             )
         return row_count

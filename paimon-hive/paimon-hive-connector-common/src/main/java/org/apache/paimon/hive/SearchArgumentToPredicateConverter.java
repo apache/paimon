@@ -103,11 +103,39 @@ public class SearchArgumentToPredicateConverter {
                                 + "  due to unsupported feature. "
                                 + "This part of filter will be processed by Hive instead.",
                         e);
+            } catch (RuntimeException e) {
+                if (!isDynamicValueUnavailable(e)) {
+                    throw e;
+                }
+                LOG.warn(
+                        "Failed to convert predicate "
+                                + tree
+                                + " because dynamic values are unavailable. "
+                                + "This part of filter will be processed by Hive instead.",
+                        e);
             }
         }
         return converted.isEmpty()
                 ? Optional.empty()
                 : Optional.of(PredicateBuilder.and(converted));
+    }
+
+    private static boolean isDynamicValueUnavailable(Throwable error) {
+        while (error != null) {
+            if ("org.apache.hadoop.hive.ql.plan.DynamicValue$NoDynamicValuesException"
+                    .equals(error.getClass().getName())) {
+                return true;
+            }
+            if (error instanceof IllegalStateException && error.getMessage() != null) {
+                String message = error.getMessage();
+                if (message.equals("DynamicValueRegistry not available")
+                        || message.startsWith("Cannot retrieve dynamic value")) {
+                    return true;
+                }
+            }
+            error = error.getCause();
+        }
+        return false;
     }
 
     private Predicate convertTree(ExpressionTree tree) {

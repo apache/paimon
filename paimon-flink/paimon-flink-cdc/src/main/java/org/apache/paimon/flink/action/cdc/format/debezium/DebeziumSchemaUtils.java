@@ -469,6 +469,10 @@ public class DebeziumSchemaUtils {
     }
 
     public static DataType avroToPaimonDataType(Schema schema) {
+        return avroToPaimonDataType(schema, TypeMapping.defaultMapping());
+    }
+
+    public static DataType avroToPaimonDataType(Schema schema, TypeMapping typeMapping) {
         Map<String, String> connectParameters = getAvroConnectParameters(schema);
         if (!connectParameters.isEmpty()) {
             String typeName =
@@ -482,7 +486,7 @@ public class DebeziumSchemaUtils {
                     Optional.ofNullable(connectParameters.get(SCHEMA_PARAMETER_COLUMN_PRECISION))
                             .map(Integer::valueOf)
                             .orElse(null);
-            return MySqlTypeUtils.toDataType(typeName, length, scale, TypeMapping.defaultMapping());
+            return MySqlTypeUtils.toDataType(typeName, length, scale, typeMapping);
         }
 
         // Mapping by avro schema type

@@ -141,6 +141,53 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon copy files procedure: data files and external paths") {
+    // (source uses external paths, target uses external paths)
+    Seq((false, true), (true, false), (true, true)).foreach {
+      case (sourceExternal, targetExternal) =>
+        withTempDir {
+          dir =>
+            withTable("src", "dst") {
+              def externalOptions(name: String, external: Boolean): String =
+                if (external) {
+                  s""",
+                     |  'data-file.external-paths' = '${new Path(dir.toURI.toString, name)}',
+                     |  'data-file.external-paths.strategy' = 'round-robin'""".stripMargin
+                } else {
+                  ""
+                }
+              Seq("src" -> sourceExternal, "dst" -> targetExternal).foreach {
+                case (name, external) =>
+                  sql(
+                    s"""
+                       |CREATE TABLE $name (k INT, v STRING)
+                       |TBLPROPERTIES ('bucket' = '1', 'bucket-key' = 'k'${externalOptions(name, external)})
+                       |""".stripMargin)
+              }
+              sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
+
+              checkAnswer(
+                sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+                Row(true) :: Nil)
+
+              val target = loadTable("dst")
+              val files = target.store().newScan().plan().files().asScala.map(_.file())
+              assert(files.nonEmpty)
+              files.foreach {
+                file =>
+                  assert(file.externalPath().isPresent == targetExternal, file)
+                  if (targetExternal) {
+                    val path = new Path(file.externalPath().get())
+                    assert(path.getParent.getParent == new Path(dir.toURI.toString, "dst"), file)
+                    assert(target.fileIO().exists(path), file)
+                  }
+              }
+              checkAnswer(sql("SELECT * FROM dst"), Seq(Row(1, "a"), Row(2, "b")))
+            }
+        }
+    }
+  }
+
   test("Paimon copy files procedure: write after copying hash indexes with two external roots") {
     withTempDir {
       dir =>

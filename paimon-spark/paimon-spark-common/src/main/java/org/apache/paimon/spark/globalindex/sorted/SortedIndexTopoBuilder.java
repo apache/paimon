@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
@@ -56,14 +57,18 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.api.java.UDF1;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.apache.spark.sql.functions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -173,7 +178,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
         if (keyExtractor.isIdentity()) {
             List<SortedBuildTask> buildTasks = new ArrayList<>();
-            List<Dataset<Row>> taskInputs = new ArrayList<>();
+            List<List<Split>> taskSplits = new ArrayList<>();
             for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                     partitionRangeSplits.entrySet()) {
                 byte[] partitionBytes =
@@ -187,29 +192,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
                     long taskId = buildTasks.size();
                     buildTasks.add(new SortedBuildTask(taskId, range, partitionBytes));
-                    Dataset<Row> source =
-                            PaimonUtils.createDataset(
-                                    spark,
-                                    ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                            rangeSplits.toArray(new Split[0]), relation));
-                    Dataset<Row> selected =
-                            source.select(
-                                            readType.getFieldNames().stream()
-                                                    .map(functions::col)
-                                                    .toArray(Column[]::new))
-                                    .withColumn(taskIdField, functions.lit(taskId).cast("long"));
-                    taskInputs.add(
-                            selected.select(
-                                    functions.col(taskIdField),
-                                    extraFields.isEmpty()
-                                            ? functions.col(indexField.name())
-                                            : functions
-                                                    .struct(
-                                                            indexNames.stream()
-                                                                    .map(functions::col)
-                                                                    .toArray(Column[]::new))
-                                                    .alias(indexField.name()),
-                                    functions.col(SpecialFields.ROW_ID.name())));
+                    taskSplits.add(rangeSplits);
                 }
             }
 
@@ -221,13 +204,18 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                 && indexOptions.get(
                                         SortedIndexOptions
                                                 .SORTED_INDEX_NULL_BITMAP_SHUFFLE_ENABLED);
-                Dataset<Row> partitioned =
-                        combineAndSortBuildTaskInputs(
-                                taskInputs,
-                                partitionNum,
+                Dataset<Row> input =
+                        createBuildInput(
+                                spark,
+                                relation,
+                                table,
+                                indexNames,
                                 taskIdField,
-                                indexField.name(),
-                                compressNulls);
+                                buildTasks,
+                                taskSplits);
+                Dataset<Row> partitioned =
+                        sortBuildTaskInput(
+                                input, partitionNum, taskIdField, indexField.name(), compressNulls);
                 Map<Long, SortedBuildTask> buildTasksById = new HashMap<>();
                 for (SortedBuildTask task : buildTasks) {
                     buildTasksById.put(task.taskId, task);
@@ -341,28 +329,74 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         return allMessages;
     }
 
-    static Dataset<Row> combineAndSortBuildTaskInputs(
-            List<Dataset<Row>> taskInputs,
-            int partitionNum,
+    private static Dataset<Row> createBuildInput(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            FileStoreTable table,
+            List<String> indexNames,
             String taskIdField,
-            String indexField) {
-        return combineAndSortBuildTaskInputs(
-                taskInputs, partitionNum, taskIdField, indexField, false);
+            List<SortedBuildTask> tasks,
+            List<List<Split>> taskSplits) {
+        Column rowId = functions.col(SpecialFields.ROW_ID.name());
+        Column key =
+                indexNames.size() == 1
+                        ? functions.col(indexNames.get(0))
+                        : functions
+                                .struct(
+                                        indexNames.stream()
+                                                .map(functions::col)
+                                                .toArray(Column[]::new))
+                                .alias(indexNames.get(0));
+        if (table.coreOptions().dataEvolutionEnabled()
+                && !table.coreOptions().queryAuthEnabled()
+                && taskSplits.stream()
+                        .flatMap(List::stream)
+                        .allMatch(IndexedSplit.class::isInstance)) {
+            BuildTaskLookup lookup = BuildTaskLookup.create(tasks);
+            if (lookup != null) {
+                List<Split> splits =
+                        taskSplits.stream().flatMap(List::stream).collect(Collectors.toList());
+                Column taskId =
+                        tasks.size() == 1
+                                ? functions.lit(tasks.get(0).taskId)
+                                : functions
+                                        .udf(lookup, org.apache.spark.sql.types.DataTypes.LongType)
+                                        .asNonNullable()
+                                        .apply(rowId);
+                return readSplits(spark, relation, splits)
+                        .select(taskId.alias(taskIdField), key, rowId);
+            }
+        }
+
+        // When ranges cannot identify a task uniquely, keep the task id attached to its scan.
+        Dataset<Row> combined = null;
+        for (int i = 0; i < tasks.size(); i++) {
+            Dataset<Row> input =
+                    readSplits(spark, relation, taskSplits.get(i))
+                            .select(
+                                    functions.lit(tasks.get(i).taskId).alias(taskIdField),
+                                    key,
+                                    rowId);
+            combined = combined == null ? input : combined.union(input);
+        }
+        return combined;
     }
 
-    static Dataset<Row> combineAndSortBuildTaskInputs(
-            List<Dataset<Row>> taskInputs,
+    private static Dataset<Row> readSplits(
+            SparkSession spark, DataSourceV2Relation relation, List<Split> splits) {
+        return PaimonUtils.createDataset(
+                spark,
+                ScanPlanHelper$.MODULE$.createNewScanPlan(splits.toArray(new Split[0]), relation));
+    }
+
+    static Dataset<Row> sortBuildTaskInput(
+            Dataset<Row> input,
             int partitionNum,
             String taskIdField,
             String indexField,
             boolean compressNulls) {
-        Dataset<Row> combined = taskInputs.get(0);
-        for (int i = 1; i < taskInputs.size(); i++) {
-            combined = combined.union(taskInputs.get(i));
-        }
-
         if (compressNulls) {
-            return NullBitmapShuffle.sort(combined, partitionNum, true);
+            return NullBitmapShuffle.sort(input, partitionNum, true);
         }
 
         Column[] sortFields =
@@ -371,8 +405,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                     functions.col(indexField),
                     functions.col(SpecialFields.ROW_ID.name())
                 };
-        return combined.repartitionByRange(partitionNum, sortFields)
-                .sortWithinPartitions(sortFields);
+        return input.repartitionByRange(partitionNum, sortFields).sortWithinPartitions(sortFields);
     }
 
     private static void addDeletedIndexMessages(
@@ -482,6 +515,52 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 new DataField(BUILD_TASK_ID_FIELD_ID, taskIdField, DataTypes.BIGINT().notNull()),
                 new DataField(sourceField.id(), sourceField.name(), keyType),
                 readType.getField(SpecialFields.ROW_ID.name()));
+    }
+
+    /** Map global RowIDs to the original non-overlapping build ranges. */
+    static class BuildTaskLookup implements UDF1<Long, Long> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final long[] starts;
+        private final long[] ends;
+        private final long[] taskIds;
+
+        @Nullable
+        static BuildTaskLookup create(List<SortedBuildTask> tasks) {
+            List<SortedBuildTask> ordered = new ArrayList<>(tasks);
+            ordered.sort(Comparator.comparingLong(task -> task.rowRange.from));
+            for (int i = 1; i < ordered.size(); i++) {
+                if (ordered.get(i).rowRange.from <= ordered.get(i - 1).rowRange.to) {
+                    return null;
+                }
+            }
+            return new BuildTaskLookup(ordered);
+        }
+
+        private BuildTaskLookup(List<SortedBuildTask> ordered) {
+            starts = new long[ordered.size()];
+            ends = new long[ordered.size()];
+            taskIds = new long[ordered.size()];
+            for (int i = 0; i < ordered.size(); i++) {
+                SortedBuildTask task = ordered.get(i);
+                starts[i] = task.rowRange.from;
+                ends[i] = task.rowRange.to;
+                taskIds[i] = task.taskId;
+            }
+        }
+
+        @Override
+        public Long call(Long rowId) {
+            int index = Arrays.binarySearch(starts, rowId);
+            if (index < 0) {
+                index = -index - 2;
+            }
+            if (index < 0 || rowId > ends[index]) {
+                throw new IllegalStateException("No sorted index build task for RowID " + rowId);
+            }
+            return taskIds[index];
+        }
     }
 
     /** Metadata for one sorted index build range. */

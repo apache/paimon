@@ -68,6 +68,10 @@ def select(paths, full=False):
             continue
         if path.endswith(".md"):
             continue
+        if path.startswith("tools/compatibility/"):
+            selected.add("core")
+            licensing = True
+            continue
         if path.startswith("paimon-python/") or path == ".github/workflows/ci-python.yml":
             python = True
             continue

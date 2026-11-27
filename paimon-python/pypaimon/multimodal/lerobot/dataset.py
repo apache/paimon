@@ -317,10 +317,11 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_PREFETCH_MAX_BYTES.default_value()
         )
+        video_source = SimpleNamespace(file_io=self._file_io, options=table_options)
         self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
-                access,
+                video_source,
                 video_column=key,
                 decoder_factory=partial(
                     _open_video_decoder, backend=self.video_backend,

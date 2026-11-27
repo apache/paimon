@@ -63,6 +63,10 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
         native_builder._native_read_builder(table), predicate, limit, projection,
         read_type=read_type,
         include_row_kind=include_row_kind)
+    if blob_parallelism is None and not runtime.native_http_blob_retry_supported():
+        # Older runtimes fail immediately on HTTP 429. Preserve their serial
+        # default until the installed extension can retry throttled origins.
+        blob_parallelism = 1
     if blob_parallelism is not None:
         builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
