@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import pyarrow
 
+from pypaimon.execution.python.format_table_csv import CsvReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
@@ -44,15 +45,13 @@ def _read_file_to_arrow(
     fmt: Format,
     partition_spec: Optional[Dict[str, str]],
     read_fields: Optional[List[str]],
-    partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
+    partition_key_types: Optional[Dict[str, pyarrow.Field]] = None,
     text_column_name: Optional[str] = None,
+    partition_data_types: Optional[Dict[str, Any]] = None,
     text_line_delimiter: str = "\n",
+    text_reader: Optional[CsvReader] = None,
 ) -> pyarrow.Table:
     path = split.data_path()
-    csv_read_options = None
-    if fmt == Format.CSV:
-        import pyarrow.csv as csv
-        csv_read_options = csv.ReadOptions(block_size=1 << 20)
     try:
         with file_io.new_input_stream(path) as stream:
             chunks = []
@@ -82,13 +81,9 @@ def _read_file_to_arrow(
         except (pyarrow.ArrowException, OSError) as e:
             raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.CSV:
-        import pyarrow.csv as csv
         try:
-            tbl = csv.read_csv(
-                pyarrow.BufferReader(data),
-                read_options=csv_read_options,
-            )
-        except (pyarrow.ArrowException, OSError) as e:
+            tbl = text_reader.read(data)
+        except ValueError as e:
             raise RuntimeError(f"Failed to read {path}") from e
     elif fmt == Format.JSON:
         import json
@@ -118,7 +113,8 @@ def _read_file_to_arrow(
         )
         if not lines:
             return pyarrow.table({})
-        part_keys = set(partition_spec.keys()) if partition_spec else set()
+        # A file above the partition depth has no partition values, so the table's keys name them.
+        part_keys = set(partition_spec or ()) | set(partition_key_types or ())
         col_name = text_column_name if text_column_name else "value"
         if read_fields:
             for f in read_fields:
@@ -131,17 +127,23 @@ def _read_file_to_arrow(
 
     if partition_spec:
         for k, v in partition_spec.items():
-            if k in tbl.column_names:
+            if k in tbl.column_names or (read_fields and k not in read_fields):
                 continue
-            pa_type = (
-                partition_key_types.get(k, pyarrow.string())
-                if partition_key_types
-                else pyarrow.string()
-            )
+            # The table's field, with its nullability, as the columns of files that keep their partitions have.
+            field = (partition_key_types or {}).get(k, pyarrow.field(k, pyarrow.string()))
             arr = pyarrow.array([v] * tbl.num_rows, type=pyarrow.string())
-            if pa_type != pyarrow.string():
-                arr = arr.cast(pa_type)
-            tbl = tbl.append_column(k, arr)
+            if field.type != pyarrow.string():
+                try:
+                    arr = arr.cast(field.type)
+                except (pyarrow.ArrowInvalid, pyarrow.ArrowNotImplementedError):
+                    # Arrow cannot cast every partition type from text, such as TIME; Java's conversion can.
+                    from pypaimon.execution.python.write.partition_spec import (
+                        _partition_spec_value, _UNREPRESENTABLE_PARTITION_VALUE)
+                    value = _partition_spec_value(v, (partition_data_types or {})[k])
+                    if value is _UNREPRESENTABLE_PARTITION_VALUE:
+                        raise ValueError(f"Partition value '{v}' of '{k}' cannot be represented in Python")
+                    arr = pyarrow.array([value] * tbl.num_rows, type=field.type)
+            tbl = tbl.append_column(field, arr)
 
     if read_fields and tbl.num_columns > 0:
         existing = [c for c in read_fields if c in tbl.column_names]
@@ -150,17 +152,23 @@ def _read_file_to_arrow(
     return tbl
 
 
+def _text_reader(table: FormatTable, read_fields: Optional[List[str]]) -> Optional[CsvReader]:
+    if table.format() != Format.CSV:
+        return None
+    data_fields = [f for f in table.fields if f.name not in table.partition_keys]
+    return CsvReader(data_fields, read_fields, table.options())
+
+
 def _partition_key_types(
     table: FormatTable,
-) -> Optional[Dict[str, pyarrow.DataType]]:
-    """Build partition column name -> PyArrow type from table schema."""
+) -> Optional[Dict[str, pyarrow.Field]]:
+    """Build partition column name -> PyArrow field from table schema."""
     if not table.partition_keys:
         return None
     result = {}
     for f in table.fields:
         if f.name in table.partition_keys:
-            pa_field = PyarrowFieldParser.from_paimon_field(f)
-            result[f.name] = pa_field.type
+            result[f.name] = PyarrowFieldParser.from_paimon_field(f)
     return result if result else None
 
 
@@ -181,6 +189,7 @@ def to_arrow(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, read_fields)
     tables = []
     nrows = 0
     for split in splits:
@@ -189,10 +198,13 @@ def to_arrow(
             split,
             fmt,
             split.partition,
-            read_fields,
+            # Files leave the partition columns out, so the read restores the table's column order.
+            read_fields or self.table.field_names,
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
+            partition_data_types={f.name: f.type for f in self.table.fields if f.name in self.table.partition_keys},
         )
         if t.num_rows > 0:
             tables.append(t)
@@ -236,6 +248,7 @@ def to_iterator(
         if fmt == Format.TEXT
         else "\n"
     )
+    text_reader = _text_reader(self.table, self.projection)
     n_yielded = 0
     for split in splits:
         if self.limit is not None and n_yielded >= self.limit:
@@ -245,10 +258,12 @@ def to_iterator(
             split,
             fmt,
             split.partition,
-            self.projection,
+            self.projection or self.table.field_names,
             partition_key_types,
             text_column_name=text_col,
             text_line_delimiter=text_delim,
+            text_reader=text_reader,
+            partition_data_types={f.name: f.type for f in self.table.fields if f.name in self.table.partition_keys},
         )
         for batch in t.to_batches():
             for i in range(batch.num_rows):

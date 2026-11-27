@@ -199,10 +199,12 @@ def test_format_batch_write_public_overrides_are_honored(tmp_path, input_method,
     writer.close()
 
 
-@pytest.mark.parametrize('file_format, content', [
-    (Format.PARQUET, b'not a data file'), (Format.ORC, b'not a data file'), (Format.CSV, b'a,b\n1,2,3\n')])
-def test_format_read_raises_on_unreadable_file(tmp_path, file_format, content):
-    table = _table(tmp_path)
+@pytest.mark.parametrize('file_format, content, options', [
+    (Format.PARQUET, b'not a data file', {}), (Format.ORC, b'not a data file', {}),
+    # As Java, CSV reads a malformed value as null unless csv.mode is FAILFAST.
+    (Format.CSV, b'x\n', {'csv.mode': 'FAILFAST'})])
+def test_format_read_raises_on_unreadable_file(tmp_path, file_format, content, options):
+    table = _table(tmp_path, options)
     table._format = file_format
     directory = Path(table.location()) / 'pt=a'
     directory.mkdir(parents=True)
