@@ -27,6 +27,7 @@ import yaml
 
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.model import CreateModelRequest
+from pypaimon.api.prediction import PredictionSource, SubmitPredictionRequest
 from pypaimon.catalog.model import ModelField, ProviderModelDefinition
 from pypaimon.common.identifier import Identifier
 from pypaimon.function.function import FunctionImpl
@@ -44,8 +45,13 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.instant import Instant
 
-# RESTApi methods with no entry in dlf_openapi_actions; they are signed without an action.
-WITHOUT_ACTION = frozenset()
+# REST-only APIs with no DLF POP action; they are signed without x-acs-action.
+WITHOUT_ACTION = frozenset({
+    "cancel_prediction",
+    "get_prediction",
+    "list_predictions",
+    "submit_prediction",
+})
 
 _SPEC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), *[os.pardir] * 4, "docs", "static")
 _SPEC_FILES = ("rest-catalog-open-api.yaml", "rest-management-open-api.yaml")
@@ -62,6 +68,12 @@ _ARGUMENTS = {
             "qwen3.8-flash",
             [ModelField("video", "BLOB", "video")],
         ),
+    ),
+    SubmitPredictionRequest: SubmitPredictionRequest(
+        source=PredictionSource("db", "t"),
+        model=Identifier.create("db", "qwen_vl"),
+        inputs={"video": "content"},
+        instructions="classify",
     ),
     str: "SELECT",
     bool: False,

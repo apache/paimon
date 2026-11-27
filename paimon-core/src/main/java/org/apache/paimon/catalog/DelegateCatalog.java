@@ -408,6 +408,32 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Prediction submitPrediction(Identifier identifier, PredictionSpec spec)
+            throws DatabaseNotExistException, TableNotExistException, ModelNotExistException {
+        return wrapped.submitPrediction(identifier, spec);
+    }
+
+    @Override
+    public Prediction getPrediction(String predictionId) throws PredictionNotExistException {
+        return wrapped.getPrediction(predictionId);
+    }
+
+    @Override
+    public PagedList<Prediction> listPredictions(
+            @Nullable Identifier source,
+            @Nullable String name,
+            @Nullable PredictionStatus.State state,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        return wrapped.listPredictions(source, name, state, maxResults, pageToken);
+    }
+
+    @Override
+    public Prediction cancelPrediction(String predictionId) throws PredictionNotExistException {
+        return wrapped.cancelPrediction(predictionId);
+    }
+
+    @Override
     public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
         return wrapped.listFunctions(databaseName);
     }

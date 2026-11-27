@@ -111,6 +111,112 @@ class MultimodalTable:
         return MultimodalTable(
             self.catalog, raw_table.identifier.get_full_name(), raw_table)
 
+    def predict(
+            self,
+            *,
+            model,
+            inputs,
+            instructions,
+            merge_key_columns=None,
+            name=None,
+            where=None,
+            options=None,
+            idempotency_token=None):
+        """Submit an asynchronous prediction without reading rows locally.
+
+        ``options`` uses Paimon dynamic table option names. Time travel uses
+        ``scan.snapshot-id`` or ``scan.tag-name``.
+
+        The returned waiter exposes the prediction ID immediately. Calling
+        ``result()`` is optional and intended for interactive clients; durable
+        workflows should persist the ID and observe the prediction
+        asynchronously.
+        """
+        from pypaimon.catalog.prediction import PredictionSpec
+        from pypaimon.multimodal.prediction_wait import PredictionWait
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        if not isinstance(self.raw_table, FileStoreTable):
+            raise NotImplementedError(
+                "Prediction requires a Paimon file store table")
+        table_options = self.raw_table.options.options.to_map()
+        allowed = {"scan.snapshot-id", "scan.tag-name"}
+        prediction_options = dict(options or {})
+
+        def unsupported_scan_option(key):
+            return key not in allowed and (
+                key.startswith("scan.")
+                or key.startswith("incremental-")
+                or key == "stream-scan-mode")
+
+        unsupported = [
+            key for key in table_options
+            if unsupported_scan_option(key)
+        ]
+        unsupported.extend([
+            key for key in prediction_options
+            if unsupported_scan_option(key)
+        ])
+        if unsupported:
+            raise ValueError(
+                "Prediction does not support scan options: {}".format(
+                    unsupported))
+        for key in allowed:
+            table_value = table_options.get(key)
+            if table_value is None:
+                continue
+            request_value = prediction_options.get(key)
+            if request_value is not None and request_value != table_value:
+                raise ValueError(
+                    "Conflicting prediction option: {}".format(key))
+            prediction_options[key] = table_value
+        spec = PredictionSpec(
+            name=name,
+            model=model,
+            inputs=inputs,
+            instructions=instructions,
+            merge_key_columns=(
+                [] if merge_key_columns is None else merge_key_columns),
+            where=where,
+            options=prediction_options,
+            idempotency_token=idempotency_token,
+        )
+        prediction = self.catalog.submit_prediction(
+            self.raw_table.identifier, spec)
+        return PredictionWait(self.catalog, prediction)
+
+    def get_prediction(self, prediction_id):
+        """Return metadata for one asynchronous prediction."""
+        return self.catalog.get_prediction(prediction_id)
+
+    def cancel_prediction(self, prediction_id):
+        """Request cancellation and return a wait handle."""
+        from pypaimon.multimodal.prediction_wait import PredictionWait
+
+        prediction = self.catalog.cancel_prediction(prediction_id)
+        return PredictionWait(self.catalog, prediction)
+
+    def list_predictions(
+            self,
+            *,
+            name=None,
+            state=None,
+            max_results=None,
+            page_token=None):
+        """List prediction metadata for this table."""
+        from pypaimon.catalog.prediction import PredictionState
+
+        if isinstance(state, str):
+            state = PredictionState(state)
+        page = self.catalog.list_predictions(
+            source=self.raw_table.identifier,
+            name=name,
+            state=state,
+            max_results=max_results,
+            page_token=page_token,
+        )
+        return page
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()

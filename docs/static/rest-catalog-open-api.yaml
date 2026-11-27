@@ -133,6 +133,102 @@ paths:
         "404":
           $ref: '#/components/responses/DatabaseOrModelNotExistErrorResponse'
         "501": {description: Models are not supported}
+  /v1/{prefix}/predictions:
+    post:
+      tags: [prediction]
+      summary: Submit a prediction job
+      operationId: submitPrediction
+      description: >-
+        Records the source snapshot and resolves the registered model. Execution reads
+        the recorded snapshot and fails if it is no longer available.
+        Reusing an idempotencyToken with the same payload returns the existing job;
+        conflicting reuse returns 409.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPredictionRequest'
+      responses:
+        "202":
+          description: Prediction accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableOrModelNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+        "501": {description: Predictions are not supported}
+    get:
+      tags: [prediction]
+      summary: List prediction jobs
+      operationId: listPredictions
+      description: Newest first.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: query, required: false, schema: {type: string}}
+        - {name: table, in: query, required: false, schema: {type: string}}
+        - {name: name, in: query, required: false, schema: {type: string}}
+        - name: state
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PredictionState'
+        - {name: maxResults, in: query, required: false, schema: {type: integer, format: int32, minimum: 1}}
+        - {name: pageToken, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Prediction jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPredictionsResponse'
+        "501": {description: Predictions are not supported}
+  /v1/{prefix}/predictions/{predictionId}:
+    get:
+      tags: [prediction]
+      summary: Get a prediction job
+      operationId: getPrediction
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: predictionId, in: path, required: true, schema: {$ref: '#/components/schemas/PredictionId'}}
+      responses:
+        "200":
+          description: Prediction metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "404":
+          $ref: '#/components/responses/PredictionNotExistErrorResponse'
+        "501": {description: Predictions are not supported}
+  /v1/{prefix}/predictions/{predictionId}/cancel:
+    post:
+      tags: [prediction]
+      summary: Cancel a prediction job
+      operationId: cancelPrediction
+      description: >-
+        Requests cancellation and returns the latest state. Terminal jobs are
+        unchanged.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: predictionId, in: path, required: true, schema: {$ref: '#/components/schemas/PredictionId'}}
+      responses:
+        "200":
+          description: Latest prediction metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPredictionResponse'
+        "404":
+          $ref: '#/components/responses/PredictionNotExistErrorResponse'
+        "501": {description: Predictions are not supported}
   /v1/config:
     get:
       tags:
@@ -2881,6 +2977,32 @@ components:
                 resourceType: MODEL
                 resourceName: model
                 code: 404
+    TableOrModelNotExistErrorResponse:
+      description: Database, table, or model not found
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "DATABASE", "TABLE", "MODEL" ]
+    PredictionNotExistErrorResponse:
+      description: Prediction not found
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                required: [ resourceType ]
+                properties:
+                  resourceType:
+                    type: string
+                    enum: [ "PREDICTION" ]
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -3264,7 +3386,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "PREDICTION", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
@@ -4467,6 +4589,12 @@ components:
       minLength: 1
       pattern: '^(?!\.{1,2}$).+'
       description: A non-empty path segment other than `.` or `..`.
+    PredictionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^(?!\.{1,2}$).+'
+      description: A prediction identifier other than `.` or `..`.
     ModelField:
       type: object
       additionalProperties: false
@@ -4546,6 +4674,158 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetModelResponse'
+        nextPageToken:
+          type: [ string, "null" ]
+    PredictionState:
+      type: string
+      enum: [PENDING, RUNNING, TERMINATING, TERMINATED]
+    PredictionTerminationCode:
+      type: string
+      enum: [SUCCESS, SUCCESS_WITH_FAILURES, FAILED, CANCELED]
+    PredictionTerminationDetails:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: '#/components/schemas/PredictionTerminationCode'
+        message:
+          type: string
+    PredictionStatus:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          $ref: '#/components/schemas/PredictionState'
+        terminationDetails:
+          $ref: '#/components/schemas/PredictionTerminationDetails'
+      oneOf:
+        - properties:
+            state: {enum: [PENDING, RUNNING]}
+          not:
+            required: [terminationDetails]
+        - properties:
+            state: {const: TERMINATING}
+        - properties:
+            state: {const: TERMINATED}
+          required: [terminationDetails]
+      description: >-
+        terminationDetails is forbidden for PENDING and RUNNING, optional for
+        TERMINATING, and required for TERMINATED.
+    PredictionSource:
+      type: object
+      additionalProperties: false
+      required: [database, table]
+      properties:
+        database: {type: string, minLength: 1, maxLength: 128}
+        table: {type: string, minLength: 1, maxLength: 128}
+    PredictionOutput:
+      type: object
+      additionalProperties: false
+      required: [table]
+      properties:
+        table:
+          $ref: '#/components/schemas/PredictionSource'
+          description: >-
+            Managed result table containing source identity columns, a response string,
+            and an error string.
+    SubmitPredictionRequest:
+      type: object
+      additionalProperties: false
+      required: [source, model, inputs, instructions]
+      properties:
+        source:
+          $ref: '#/components/schemas/PredictionSource'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Optional non-unique label.
+        idempotencyToken:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Optional token reused for retries of one logical submission. SDKs generate
+            one by default; requests without a token are independent submissions.
+        model:
+          allOf:
+            - $ref: '#/components/schemas/Identifier'
+          required: [database, object]
+          properties:
+            database: {type: string, minLength: 1, maxLength: 128}
+            object: {type: string, minLength: 1, maxLength: 128}
+        inputs:
+          type: object
+          minProperties: 1
+          propertyNames: {type: string, minLength: 1, maxLength: 128}
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: Model input-to-column mappings.
+        mergeKeyColumns:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 128}
+          description: >-
+            Stable source columns used when table primary keys or row IDs are unavailable.
+            Omit to let the server derive identity; without stable identity the prediction
+            runs as a full refresh.
+        instructions:
+          type: string
+          minLength: 1
+          maxLength: 1048576
+          description: Natural-language guidance for the prediction.
+        where:
+          type: string
+          minLength: 1
+          maxLength: 1048576
+        options:
+          type: object
+          propertyNames: {type: string, minLength: 1, maxLength: 128}
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: >-
+            Paimon dynamic options. Use scan.snapshot-id or scan.tag-name for time
+            travel; the two options are mutually exclusive.
+    GetPredictionResponse:
+      type: object
+      additionalProperties: false
+      required: [predictionId, source, status, snapshotId, model]
+      properties:
+        predictionId: {$ref: '#/components/schemas/PredictionId'}
+        source:
+          $ref: '#/components/schemas/PredictionSource'
+        name: {type: string, minLength: 1, maxLength: 128}
+        status:
+          $ref: '#/components/schemas/PredictionStatus'
+        snapshotId: {type: integer, format: int64, minimum: 1}
+        model:
+          $ref: '#/components/schemas/Identifier'
+        output:
+          $ref: '#/components/schemas/PredictionOutput'
+        startTime:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Start time as Unix epoch milliseconds in UTC.
+        endTime:
+          type: integer
+          format: int64
+          minimum: 0
+          description: End time as Unix epoch milliseconds in UTC.
+    ListPredictionsResponse:
+      type: object
+      required: [predictions]
+      properties:
+        predictions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetPredictionResponse'
         nextPageToken:
           type: [ string, "null" ]
     ConsumerInfo:

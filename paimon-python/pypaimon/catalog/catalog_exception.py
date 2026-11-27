@@ -135,6 +135,14 @@ class ModelAlreadyExistException(CatalogException):
         super().__init__(f"Model {identifier.get_full_name()} already exists")
 
 
+class PredictionNotExistException(CatalogException):
+    """Prediction not exist exception"""
+
+    def __init__(self, prediction_id: str):
+        self.prediction_id = prediction_id
+        super().__init__(f"Prediction {prediction_id} does not exist")
+
+
 class ColumnNotExistException(CatalogException):
     """Column not exist exception"""
 

@@ -31,6 +31,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import okhttp3.mockwebserver.MockResponse;
 
+import javax.annotation.Nullable;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +103,11 @@ final class RESTCatalogModelHandler {
                                         .identifier()
                                         .getDatabaseName()
                                         .equals(databaseName));
+    }
+
+    @Nullable
+    Model getModel(Identifier identifier) {
+        return modelStore.get(identifier.getFullName());
     }
 
     private MockResponse list(String databaseName, Map<String, String> parameters) {

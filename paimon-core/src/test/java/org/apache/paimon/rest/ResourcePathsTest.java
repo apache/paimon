@@ -71,4 +71,13 @@ public class ResourcePathsTest {
                 "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies/drop",
                 paths.dropPolicy(table));
     }
+
+    @Test
+    public void testPredictionRejectsDotSegments() {
+        ResourcePaths paths = new ResourcePaths("paimon");
+        assertThrows(IllegalArgumentException.class, () -> paths.prediction("."));
+        assertThrows(IllegalArgumentException.class, () -> paths.prediction(".."));
+        assertThrows(IllegalArgumentException.class, () -> paths.cancelPrediction("."));
+        assertThrows(IllegalArgumentException.class, () -> paths.cancelPrediction(".."));
+    }
 }
