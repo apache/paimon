@@ -143,16 +143,10 @@ public class ManifestsReader {
         return this;
     }
 
-    public ManifestsReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
-        this.rowRangeIndex = rowRangeIndex;
-        return this;
-    }
-
-    /**
-     * Selects whole groups of overlapping manifests for a row-ID candidate bitmap in an ALL scan.
-     */
-    public ManifestsReader withManifestGroupCandidates(@Nullable RoaringNavigableMap64 candidates) {
-        this.manifestGroupCandidates = candidates;
+    public ManifestsReader withRowRangeIndex(@Nullable RowRangeIndex rowRangeIndex) {
+        this.manifestGroupCandidates =
+                rowRangeIndex == null ? null : rowRangeIndex.fileGroupCandidates();
+        this.rowRangeIndex = manifestGroupCandidates == null ? rowRangeIndex : null;
         return this;
     }
 

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 /** Tests for {@link RowRangeIndex}. */
 class RowRangeIndexTest {
@@ -46,6 +47,20 @@ class RowRangeIndexTest {
                 .containsExactly(
                         new Range(Long.MIN_VALUE, Long.MIN_VALUE),
                         new Range(Long.MAX_VALUE, Long.MAX_VALUE));
+    }
+
+    @Test
+    void testFileGroupCandidatesRequireResolution() {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 3);
+        RowRangeIndex index = RowRangeIndex.forFileGroupPruning(bitmap);
+        Range range = new Range(0, 7);
+
+        assertThat(index.fileGroupCandidates()).isSameAs(bitmap);
+        assertThatIllegalStateException().isThrownBy(index::ranges);
+        assertThatIllegalStateException().isThrownBy(() -> index.intersects(0, 7));
+        assertThatIllegalStateException().isThrownBy(() -> index.contains(range));
+        assertThatIllegalStateException().isThrownBy(() -> index.containsExactly(range));
+        assertThatIllegalStateException().isThrownBy(() -> index.intersectedRanges(0, 7));
     }
 
     @Test

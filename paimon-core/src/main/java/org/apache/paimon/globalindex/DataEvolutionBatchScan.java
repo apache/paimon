@@ -29,7 +29,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BBoxIntersects;
@@ -385,15 +384,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return batchScan.plan();
         }
 
-        ManifestsReader manifestsReader = batchScan.snapshotReader().manifestsReader();
         // Index evaluation pinned the snapshot. Keep the original predicate on the scan and
         // plan before applying a row-level LIMIT or TopN.
-        manifestsReader.withManifestGroupCandidates(candidates);
+        batchScan.withRowRangeIndex(RowRangeIndex.forFileGroupPruning(candidates));
         Plan plan;
         try {
             plan = batchScan.plan();
         } finally {
-            manifestsReader.withManifestGroupCandidates(null);
+            batchScan.withRowRangeIndex(null);
         }
         return plan instanceof SnapshotReader.Plan
                 ? pruneFileGroups((SnapshotReader.Plan) plan, candidates)
