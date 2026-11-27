@@ -389,8 +389,35 @@ public class RoaringNavigableMap64Test {
         scopes.emptyGroupReads = 0;
         assertThat(bitmap.tryToRangeList(2, scopes))
                 .contains(Arrays.asList(new Range(50, 50), new Range(last, last)));
-        // After the first empty window, only read the bounds of the skipped scopes.
+        // After the first two empty windows, only read the bounds of the skipped scopes.
         assertThat(scopes.emptyGroupReads).isLessThanOrEqualTo(groups + 8);
+    }
+
+    @Test
+    public void testScopedProbeDoesNotSeekAcrossIsolatedEmptyWindows() throws Exception {
+        Roaring64NavigableMap source =
+                new Roaring64NavigableMap() {
+                    @Override
+                    public long rankLong(long value) {
+                        throw new AssertionError("Scoped probe sought across an isolated window");
+                    }
+                };
+        List<Range> scopes = new ArrayList<>();
+        List<Range> expected = new ArrayList<>();
+        long stride = 1L << 24;
+        for (int i = 0; i < 8; i++) {
+            long start = i * stride;
+            scopes.add(new Range(start, start + 99));
+            if (i % 2 == 0) {
+                long row = start + 50;
+                source.add(row);
+                expected.add(new Range(row, row));
+            }
+        }
+
+        RoaringNavigableMap64 bitmap = wrap(source);
+        assertThat(bitmap.tryToRangeList(expected.size(), scopes)).contains(expected);
+        assertThat(bitmap.tryToRangeList(expected.size() - 1, scopes)).isEmpty();
     }
 
     @Test

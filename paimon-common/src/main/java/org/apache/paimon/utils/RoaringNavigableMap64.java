@@ -417,6 +417,7 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         }
         List<Range> scopes = scopePrefix(scope, bounds.to);
         long nextCandidate = bounds.from;
+        int consecutiveEmptyWindows = 0;
         for (int start = 0; start < scopes.size(); ) {
             Range range = scopes.get(start);
             if (range.from > bounds.to) {
@@ -435,8 +436,12 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
             if (!fits) {
                 return false;
             }
-            if (visitor.size() == previousCount) {
+            // A global seek adds work when matches alternate with empty windows.
+            consecutiveEmptyWindows =
+                    visitor.size() == previousCount ? consecutiveEmptyWindows + 1 : 0;
+            if (consecutiveEmptyWindows == 2) {
                 nextCandidate = nextScopedCandidate(scopes, end, bounds);
+                consecutiveEmptyWindows = 0;
             }
             start = end;
         }
