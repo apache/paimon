@@ -94,6 +94,8 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(self.suites(['paimon-eslib/pom.xml']), {'eslib'})
         self.assertEqual(self.suites(['paimon-e2e-tests/pom.xml']),
                          {'e2e-flink1', 'e2e-flink2'})
+        self.assertEqual(self.suites(['tools/compatibility/run-table-compatibility.sh']),
+                         {'core'})
         self.assertTrue(plan.select(['.github/workflows/ci-python.yml'])['python'])
         self.assertFalse(plan.select(['.github/workflows/ci-python.yml'])['java'])
         self.assertTrue(plan.select(['.github/workflows/ci-docs.yml'])['docs'])
