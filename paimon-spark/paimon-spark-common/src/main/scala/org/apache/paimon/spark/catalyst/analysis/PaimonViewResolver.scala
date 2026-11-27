@@ -49,7 +49,11 @@ case class PaimonViewResolver(spark: SparkSession)
             _) =>
         try {
           val view = catalog.loadView(ident)
-          dependencyChecker.validate(catalog, ident, view.query(SupportView.DIALECT))
+          dependencyChecker.validate(
+            catalog,
+            ident,
+            view.query(SupportView.DIALECT),
+            PaimonViewRelations.viewOptions(view))
           createViewRelation(parts, catalog, ident, view)
         } catch {
           case _: ViewNotExistException =>
@@ -84,7 +88,8 @@ case class PaimonViewResolver(spark: SparkSession)
       spark,
       earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan)),
       catalog,
-      ident)
+      ident,
+      PaimonViewRelations.viewOptions(view))
 
     // Spark internally replaces CharType/VarcharType with StringType during V2 table resolution,
     // so the view's schema must also use StringType to avoid UpCast failures

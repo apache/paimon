@@ -360,6 +360,24 @@ CREATE OR REPLACE TEMPORARY VIEW temporary_events
 AS SELECT * FROM events WHERE behavior = 'pv';
 ```
 
+Table names in the query of a persistent view resolve in the view's catalog and database,
+whatever the current catalog and database are when the view is read: `events` above is the table
+of the database that holds `event_view`. `CREATE VIEW` records this as the view property
+`'spark.view.resolve-in-view-namespace' = 'true'`, unless `TBLPROPERTIES` sets it. Spark
+resolves some names only later in analysis: the table argument of a Paimon table-valued
+function, an `IDENTIFIER(...)` clause (on Spark 4.2 and later, only one whose argument is not a
+string literal), and a CTE in a subquery expression, such as an IN, EXISTS or scalar subquery,
+under `spark.sql.legacy.ctePrecedencePolicy = LEGACY`. For a query with any of these, `CREATE
+VIEW` records `'false'` instead.
+
+A view without this property, or with it set to `'false'`, resolves its table names in the
+current catalog and database, as views created by Paimon 2.1 or earlier and views created by
+Flink do. A view that reads such a view still gets that view's tables from the current catalog
+and database. Recreate a view with `CREATE OR REPLACE VIEW` to record the property, or set it to
+`'false'` in `TBLPROPERTIES` to keep the earlier behavior. In either case, when the view is read
+directly, a temporary view of the reading session takes the place of a table of the same name in
+the query.
+
 See [Views](../concepts/views) for catalog-specific behavior and
 [`alter_view_dialect`](./procedures/metadata#alter_view_dialect) for dialect management.
 

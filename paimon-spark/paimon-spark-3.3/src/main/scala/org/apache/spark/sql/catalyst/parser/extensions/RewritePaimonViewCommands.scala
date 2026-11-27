@@ -46,18 +46,21 @@ case class RewritePaimonViewCommands(spark: SparkSession)
           query,
           allowExisting,
           replace) =>
+      val viewQuery = CTESubstitution.apply(query)
+      val viewProperties = PaimonViewRelations.newViewProperties(properties, viewQuery)
       CreatePaimonView(
         child = resolved,
         queryText = queryText,
         query = PaimonViewRelations.qualify(
           spark,
-          CTESubstitution.apply(query),
+          viewQuery,
           resolved.catalog.asInstanceOf[SupportView],
-          resolved.identifier),
+          resolved.identifier,
+          viewProperties),
         columnAliases = userSpecifiedColumns.map(_._1),
         columnComments = userSpecifiedColumns.map(_._2.orElse(Option.empty)),
         comment = comment,
-        properties = properties,
+        properties = viewProperties,
         allowExisting = allowExisting,
         replace = replace
       )

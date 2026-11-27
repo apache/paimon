@@ -136,14 +136,16 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
             sql("USE view_db2")
             checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(2), Row(3)))
           }
+          // The view records it, so it binds the same way under another CTE policy.
+          checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(2), Row(3)))
         }
       }
     }
   }
 
   test("Paimon View: names resolved later in analysis bind in the current namespace") {
-    // Paimon table-valued functions name their table with a string, and IDENTIFIER(...) with a
-    // non-literal argument is resolved during analysis. A body with either binds as before.
+    // Paimon table-valued functions name their table with a string, and IDENTIFIER(...) is
+    // resolved during analysis (before Spark 4.2 also with a literal). Such a body binds as before.
     val bodies =
       Seq("SELECT id FROM paimon_incremental_query('orders', 0, 1)") ++
         (if (gteqSpark3_5) Seq("SELECT id FROM IDENTIFIER('ord' || 'ers')") else Nil)
@@ -164,6 +166,145 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
               sql("USE view_db2")
               checkAnswer(sql("SELECT * FROM view_db1.v ORDER BY id"), Seq(Row(2), Row(3)))
             }
+        }
+      }
+    }
+  }
+
+  test("Paimon View: views without the namespace option resolve in the current namespace") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("view_db1", "view_db2") {
+      sql("CREATE DATABASE view_db1")
+      sql("CREATE DATABASE view_db2")
+      withTable("view_db1.orders", "view_db2.orders") {
+        withView("view_db1.v") {
+          sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+          sql("INSERT INTO view_db1.orders VALUES (1)")
+          sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
+          sql("INSERT INTO view_db2.orders VALUES (2)")
+          // Simulate a view persisted by an older Paimon version, which has no such option.
+          spark.sessionState.catalogManager.currentCatalog
+            .asInstanceOf[SupportView]
+            .createView(
+              Identifier.of(Array("view_db1"), "v"),
+              sql("SELECT * FROM view_db1.orders").schema,
+              "SELECT * FROM orders",
+              null,
+              Collections.emptyMap[String, String](),
+              false
+            )
+          sql("USE view_db2")
+          checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(2)))
+
+          // CREATE VIEW sets the option unless the statement sets it.
+          sql("USE view_db1")
+          sql("CREATE OR REPLACE VIEW v AS SELECT * FROM orders")
+          sql("USE view_db2")
+          checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(1)))
+          sql("""
+                |CREATE OR REPLACE VIEW view_db1.v
+                |TBLPROPERTIES ('spark.view.resolve-in-view-namespace' = 'false')
+                |AS SELECT * FROM orders
+                |""".stripMargin)
+          checkAnswer(sql("SELECT * FROM view_db1.v"), Seq(Row(2)))
+        }
+      }
+    }
+  }
+
+  test("Paimon View: Spark views do not read temporary views they did not refer to") {
+    // On Spark 3.2 Paimon turns CREATE TEMPORARY VIEW in its catalogs into a persistent view.
+    if (gteqSpark3_3) {
+      sql(s"USE $paimonHiveCatalogName")
+      withDatabase("view_db1", "view_db2") {
+        sql("CREATE DATABASE view_db1")
+        sql("CREATE DATABASE view_db2")
+        withTable("view_db1.orders", "view_db2.orders") {
+          withView("view_db1.v") {
+            withTempView("v_temp", "v_temp2", "orders") {
+              sql("CREATE TABLE view_db1.orders (id INT) USING paimon")
+              sql("INSERT INTO view_db1.orders VALUES (1)")
+              sql("CREATE TABLE view_db2.orders (id INT) USING paimon")
+              sql("INSERT INTO view_db2.orders VALUES (2)")
+              sql("CREATE VIEW view_db1.v AS SELECT id FROM orders")
+              sql("USE view_db2")
+              sql("CREATE TEMPORARY VIEW v_temp AS SELECT * FROM view_db1.v")
+              sql("CREATE TEMPORARY VIEW orders AS SELECT 5 AS id")
+              // Read directly, the temporary view takes the place of the table.
+              checkAnswer(sql("SELECT * FROM view_db1.v"), Row(5))
+              // v_temp did not refer to it, so Spark does not read it there.
+              checkAnswer(sql("SELECT * FROM v_temp"), Row(1))
+              // v_temp2 did, so Spark reads it there.
+              sql("CREATE TEMPORARY VIEW v_temp2 AS SELECT * FROM view_db1.v")
+              checkAnswer(sql("SELECT * FROM v_temp2"), Row(5))
+            }
+          }
+        }
+      }
+    }
+  }
+
+  test("Paimon View: databases named like data sources resolve in the view catalog") {
+    // A view of paimon_hive is read from the catalog paimon. parquet and orc name file sources,
+    // jdbc names a source that cannot read files. Only paimon_hive has orc.
+    val tables = Seq(
+      paimonHiveCatalogName -> "parquet",
+      paimonHiveCatalogName -> "jdbc",
+      paimonHiveCatalogName -> "orc",
+      "paimon" -> "parquet",
+      "paimon" -> "jdbc")
+    val ids = Map(paimonHiveCatalogName -> 1, "paimon" -> 2)
+    val databases = tables.map { case (catalog, db) => s"$catalog.$db" }
+    val view = s"$paimonHiveCatalogName.view_db1.v"
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase(databases :+ s"$paimonHiveCatalogName.view_db1": _*) {
+      withTable(databases.map(db => s"$db.orders"): _*) {
+        tables.foreach {
+          case (catalog, db) =>
+            sql(s"CREATE DATABASE $catalog.$db")
+            sql(s"CREATE TABLE $catalog.$db.orders (id INT) USING paimon")
+            sql(s"INSERT INTO $catalog.$db.orders VALUES (${ids(catalog)})")
+        }
+        sql("CREATE DATABASE view_db1")
+        withView(view) {
+          sql(s"""
+                 |CREATE VIEW $view AS SELECT id FROM parquet.orders
+                 |UNION ALL SELECT id FROM jdbc.orders UNION ALL SELECT id FROM orc.orders
+                 |""".stripMargin)
+          sql("USE paimon")
+          checkAnswer(sql(s"SELECT * FROM $view"), Seq(Row(1), Row(1), Row(1)))
+          // A path is still read as a file.
+          withTempDir {
+            dir =>
+              val path = s"${dir.getCanonicalPath}/data"
+              sql("SELECT 7 AS id").write.parquet(path)
+              withView(s"$paimonHiveCatalogName.view_db1.v_file") {
+                sql(s"CREATE VIEW $paimonHiveCatalogName.view_db1.v_file AS " +
+                  s"SELECT id FROM parquet.`$path`")
+                checkAnswer(sql(s"SELECT * FROM $paimonHiveCatalogName.view_db1.v_file"), Row(7))
+              }
+          }
+          def assertNotFound(query: String): Unit = {
+            val error = intercept[Exception](sql(query).collect())
+            val message = error.getMessage.replace("`", "")
+            assert(message.contains(s"$paimonHiveCatalogName.parquet.orders"), message)
+          }
+          withTempView("v_temp") {
+            // Spark resolves the body of this temporary view in the catalog paimon. On Spark 3.2
+            // Paimon turns CREATE TEMPORARY VIEW in its catalogs into a persistent view.
+            if (gteqSpark3_3) {
+              sql(s"CREATE TEMPORARY VIEW v_temp AS SELECT * FROM $view")
+            }
+            // Without the table in the view catalog, parquet.orders is still not read from the
+            // catalog where Spark looks it up before reading a file.
+            sql(s"DROP TABLE $paimonHiveCatalogName.parquet.orders")
+            assertNotFound(s"SELECT * FROM $view")
+            if (gteqSpark3_3) {
+              sql(s"USE $paimonHiveCatalogName")
+              assertNotFound("SELECT * FROM v_temp")
+            }
+          }
+          sql(s"USE $paimonHiveCatalogName")
         }
       }
     }
@@ -441,6 +582,7 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
                     |COMMENT 'test comment'
                     |TBLPROPERTIES \(
                     |  'k1' = 'v1',
+                    |  'spark.view.resolve-in-view-namespace' = 'true',
                     |  'transient_lastDdlTime' = '\d+'\)
                     |AS
                     |SELECT \* FROM t
