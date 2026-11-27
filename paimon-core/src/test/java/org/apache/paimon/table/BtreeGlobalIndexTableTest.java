@@ -558,9 +558,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 };
         FileStoreTable tracked =
                 FileStoreTableFactory.create(fileIO, table.location(), table.schema());
-        RowRangeIndex fileGroupCandidates =
-                RowRangeIndex.forFileGroupPruning(RoaringNavigableMap64.bitmapOf(1, 3));
-        FileStoreScan scan = tracked.store().newScan().withRowRangeIndex(fileGroupCandidates);
+        FileStoreScan scan = tracked.store().newScan();
+        scan.manifestsReader().withManifestGroupCandidates(RoaringNavigableMap64.bitmapOf(1, 3));
         assertThat(scan.plan().files())
                 .extracting(ManifestEntry::fileName)
                 .containsExactlyInAnyOrder(anchor.fileName(), companion.fileName());
@@ -568,22 +567,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .isEqualTo(expectedBlocks.stream().mapToLong(b -> b.length).sum());
         assertThat(sidecarOpens).hasValue(1);
 
-        assertThat(scan.withRowRangeIndex(null).plan().files())
-                .extracting(ManifestEntry::fileName)
-                .containsExactlyInAnyOrder(
-                        anchor.fileName(), companion.fileName(), next.fileName());
-
         sidecarMissing.set(true);
         sidecarOpens.set(0);
         FileStoreTable withoutSidecar =
                 FileStoreTableFactory.create(fileIO, table.location(), table.schema());
         // The bucket filter also uses the sidecar in the regular read path.
-        FileStoreScan fallback =
-                withoutSidecar
-                        .store()
-                        .newScan()
-                        .withBucket(0)
-                        .withRowRangeIndex(fileGroupCandidates);
+        FileStoreScan fallback = withoutSidecar.store().newScan().withBucket(0);
+        fallback.manifestsReader()
+                .withManifestGroupCandidates(RoaringNavigableMap64.bitmapOf(1, 3));
         assertThat(fallback.plan().files())
                 .extracting(ManifestEntry::fileName)
                 .containsExactlyInAnyOrder(

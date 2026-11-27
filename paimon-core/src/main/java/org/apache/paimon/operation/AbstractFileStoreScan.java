@@ -259,14 +259,25 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withRowRanges(List<Range> rowRanges) {
-        return withRowRangeIndex(rowRanges == null ? null : RowRangeIndex.create(rowRanges));
+        if (rowRanges == null) {
+            this.rowRangeIndex = null;
+            manifestsReader.withRowRangeIndex(null);
+            return this;
+        }
+        this.rowRangeIndex = RowRangeIndex.create(rowRanges);
+        manifestsReader.withRowRangeIndex(this.rowRangeIndex);
+        return this;
     }
 
     @Override
-    public FileStoreScan withRowRangeIndex(@Nullable RowRangeIndex rowRangeIndex) {
+    public FileStoreScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        if (rowRangeIndex == null) {
+            this.rowRangeIndex = null;
+            manifestsReader.withRowRangeIndex(null);
+            return this;
+        }
+        this.rowRangeIndex = rowRangeIndex;
         manifestsReader.withRowRangeIndex(rowRangeIndex);
-        this.rowRangeIndex =
-                manifestsReader.manifestGroupCandidates() == null ? rowRangeIndex : null;
         return this;
     }
 

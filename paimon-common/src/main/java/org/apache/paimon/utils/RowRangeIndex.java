@@ -18,28 +18,22 @@
 
 package org.apache.paimon.utils;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Index over exact row ranges or unresolved candidates for file-group pruning. */
+/** Index for row ranges. */
 public class RowRangeIndex {
 
     private final List<Range> ranges;
     private final long[] starts;
     private final long[] ends;
-    @Nullable private final RoaringNavigableMap64 fileGroupCandidates;
 
-    private RowRangeIndex(List<Range> ranges, @Nullable RoaringNavigableMap64 fileGroupCandidates) {
+    private RowRangeIndex(List<Range> ranges) {
         this.ranges = ranges;
-        this.fileGroupCandidates = fileGroupCandidates;
         this.starts = new long[ranges.size()];
         this.ends = new long[ranges.size()];
         for (int i = 0; i < ranges.size(); i++) {
@@ -47,17 +41,6 @@ public class RowRangeIndex {
             starts[i] = range.from;
             ends[i] = range.to;
         }
-    }
-
-    /** Holds the candidate bitmap for the scan planner to resolve against complete file groups. */
-    public static RowRangeIndex forFileGroupPruning(RoaringNavigableMap64 candidates) {
-        return new RowRangeIndex(Collections.emptyList(), checkNotNull(candidates));
-    }
-
-    /** Returns the unresolved bitmap if this index was created for file-group pruning. */
-    @Nullable
-    public RoaringNavigableMap64 fileGroupCandidates() {
-        return fileGroupCandidates;
     }
 
     /** Builds an index from a bitmap, skipping sorting and merging for already ordered ranges. */
@@ -81,7 +64,7 @@ public class RowRangeIndex {
         if (ranges.size() > 1 && ranges.get(0).from > ranges.get(ranges.size() - 1).from) {
             return create(ranges);
         }
-        return new RowRangeIndex(ranges, null);
+        return new RowRangeIndex(ranges);
     }
 
     public static RowRangeIndex create(List<Range> ranges) {
@@ -90,22 +73,19 @@ public class RowRangeIndex {
 
     public static RowRangeIndex create(List<Range> ranges, boolean mergeAdjacent) {
         checkArgument(ranges != null, "Ranges cannot be null");
-        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, mergeAdjacent), null);
+        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, mergeAdjacent));
     }
 
     public List<Range> ranges() {
-        requireExactRanges();
         return Collections.unmodifiableList(ranges);
     }
 
     public boolean intersects(long start, long end) {
-        requireExactRanges();
         int candidate = lowerBound(ends, start);
         return candidate < starts.length && starts[candidate] <= end;
     }
 
     public boolean contains(Range range) {
-        requireExactRanges();
         int candidate = lowerBound(ends, range.from);
         return candidate < starts.length
                 && starts[candidate] <= range.from
@@ -113,7 +93,6 @@ public class RowRangeIndex {
     }
 
     public boolean containsExactly(Range range) {
-        requireExactRanges();
         int candidate = lowerBound(starts, range.from);
         return candidate < starts.length
                 && starts[candidate] == range.from
@@ -121,7 +100,6 @@ public class RowRangeIndex {
     }
 
     public List<Range> intersectedRanges(long start, long end) {
-        requireExactRanges();
         int left = lowerBound(ends, start);
         if (left >= ranges.size()) {
             return Collections.emptyList();
@@ -152,10 +130,6 @@ public class RowRangeIndex {
             }
         }
         return expected;
-    }
-
-    private void requireExactRanges() {
-        checkState(fileGroupCandidates == null, "Resolve file groups before accessing row ranges.");
     }
 
     private static int lowerBound(long[] sorted, long target) {
