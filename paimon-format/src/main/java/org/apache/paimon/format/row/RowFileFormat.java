@@ -22,7 +22,10 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
+import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 
@@ -35,11 +38,13 @@ public class RowFileFormat extends FileFormat {
 
     private static final int DEFAULT_BLOCK_SIZE = 65536;
 
+    private final Options options;
     private final int blockSize;
     private final int zstdLevel;
 
     public RowFileFormat(FormatContext formatContext) {
         super(RowFileFormatFactory.IDENTIFIER);
+        this.options = formatContext.options();
         this.zstdLevel = formatContext.zstdLevel();
         MemorySize bs = formatContext.blockSize();
         this.blockSize = bs != null ? (int) bs.getBytes() : DEFAULT_BLOCK_SIZE;
@@ -55,7 +60,12 @@ public class RowFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new RowFormatWriterFactory(type, blockSize, zstdLevel);
+        RowFormatWriterFactory rawFactory = new RowFormatWriterFactory(type, blockSize, zstdLevel);
+        VariantShreddingWritePlanFactory writePlanFactory =
+                new VariantShreddingWritePlanFactory(type, options);
+        return writePlanFactory.shouldCreateWritePlan()
+                ? new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory)
+                : rawFactory;
     }
 
     @Override

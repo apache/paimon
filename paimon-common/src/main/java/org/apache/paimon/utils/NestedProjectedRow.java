@@ -91,7 +91,14 @@ public class NestedProjectedRow implements InternalRow {
      */
     @Nullable
     public static NestedProjectedRow create(RowType dataSchema, RowType projectedSchema) {
-        if (dataSchema.equals(projectedSchema)) {
+        return create(dataSchema, projectedSchema, dataSchema);
+    }
+
+    /** Projects logical fields from a physical ROW that can contain shredded Variants. */
+    @Nullable
+    public static NestedProjectedRow create(
+            RowType dataSchema, RowType projectedSchema, RowType physicalSchema) {
+        if (dataSchema.equals(projectedSchema) && dataSchema.equals(physicalSchema)) {
             return null;
         }
 
@@ -117,20 +124,27 @@ public class NestedProjectedRow implements InternalRow {
                     projected.name());
             indexMapping[i] = dataIdx;
 
-            if (dataField.type().is(DataTypeRoot.VARIANT)
-                    && VariantMetadataUtils.isVariantRowType(projected.type())) {
-                if (variantProjections == null) {
-                    variantProjections = new VariantProjection[projectedSize];
+            DataType physicalType = physicalSchema.getTypeAt(dataIdx);
+            if (dataField.type().is(DataTypeRoot.VARIANT)) {
+                RowType extractionType =
+                        VariantMetadataUtils.isVariantRowType(projected.type())
+                                ? (RowType) projected.type()
+                                : null;
+                if (physicalType instanceof RowType || extractionType != null) {
+                    if (variantProjections == null) {
+                        variantProjections = new VariantProjection[projectedSize];
+                    }
+                    variantProjections[i] = new VariantProjection(physicalType, extractionType);
+                    continue;
                 }
-                variantProjections[i] = new VariantProjection((RowType) projected.type());
-                continue;
             }
 
             DataTypeRoot typeRoot = projected.type().getTypeRoot();
             if (typeRoot == DataTypeRoot.ROW) {
                 RowType dataNestedType = (RowType) dataField.type();
                 RowType projectedNestedType = (RowType) projected.type();
-                NestedProjectedRow sub = create(dataNestedType, projectedNestedType);
+                NestedProjectedRow sub =
+                        create(dataNestedType, projectedNestedType, (RowType) physicalType);
                 if (sub != null) {
                     if (nestedProjections == null) {
                         nestedProjections = new NestedProjectedRow[projectedSize];
@@ -309,6 +323,9 @@ public class NestedProjectedRow implements InternalRow {
 
     @Override
     public Variant getVariant(int pos) {
+        if (variantProjections != null && variantProjections[pos] != null) {
+            return variantProjections[pos].variant(row, indexMapping[pos]);
+        }
         return row.getVariant(indexMapping[pos]);
     }
 
@@ -345,7 +362,7 @@ public class NestedProjectedRow implements InternalRow {
         if (variantProjections != null && variantProjections[pos] != null) {
             return row.isNullAt(indexMapping[pos])
                     ? null
-                    : variantProjections[pos].project(row.getVariant(indexMapping[pos]));
+                    : variantProjections[pos].project(row, indexMapping[pos]);
         }
         if (nestedProjections != null && nestedProjections[pos] != null) {
             InternalRow inner = row.getRow(indexMapping[pos], nestedArity[pos]);
@@ -354,20 +371,44 @@ public class NestedProjectedRow implements InternalRow {
         return row.getRow(indexMapping[pos], numFields);
     }
 
-    /** Extracts requested fields from an ordinary Variant using the shared cast semantics. */
+    /** Reconstructs full Variants or extracts requested paths using the physical Variant layout. */
     private static class VariantProjection {
 
+        private final boolean shredded;
         private final VariantSchema schema;
-        private final FieldToExtract[] fields;
+        @Nullable private final FieldToExtract[] fields;
 
-        private VariantProjection(RowType projectedType) {
+        private VariantProjection(DataType physicalType, @Nullable RowType extractionType) {
+            this.shredded = physicalType instanceof RowType;
             this.schema =
                     PaimonShreddingUtils.buildVariantSchema(
-                            PaimonShreddingUtils.variantShreddingSchema(DataTypes.VARIANT()));
-            this.fields = PaimonShreddingUtils.getFieldsToExtract(projectedType, schema);
+                            shredded
+                                    ? (RowType) physicalType
+                                    : PaimonShreddingUtils.variantShreddingSchema(
+                                            DataTypes.VARIANT()));
+            this.fields =
+                    extractionType == null
+                            ? null
+                            : PaimonShreddingUtils.getFieldsToExtract(extractionType, schema);
         }
 
-        private InternalRow project(Variant variant) {
+        private Variant variant(InternalRow row, int pos) {
+            if (!shredded) {
+                return row.getVariant(pos);
+            }
+            return row.isNullAt(pos)
+                    ? null
+                    : PaimonShreddingUtils.assembleVariant(
+                            row.getRow(pos, schema.numFields), schema);
+        }
+
+        private InternalRow project(InternalRow row, int pos) {
+            InternalRow physicalRow =
+                    shredded ? row.getRow(pos, schema.numFields) : variantRow(row.getVariant(pos));
+            return PaimonShreddingUtils.assembleVariantStruct(physicalRow, schema, fields);
+        }
+
+        private InternalRow variantRow(Variant variant) {
             GenericVariant value =
                     variant instanceof GenericVariant
                             ? (GenericVariant) variant
@@ -375,7 +416,7 @@ public class NestedProjectedRow implements InternalRow {
             GenericRow physicalRow = new GenericRow(schema.numFields);
             physicalRow.setField(schema.variantIdx, value.value());
             physicalRow.setField(schema.topLevelMetadataIdx, value.metadata());
-            return PaimonShreddingUtils.assembleVariantStruct(physicalRow, schema, fields);
+            return physicalRow;
         }
     }
 

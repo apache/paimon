@@ -28,17 +28,25 @@ class RowFileFooter {
     static final int FOOTER_SIZE = 32;
     static final int MAGIC = 0x524F5753; // "ROWS"
     static final byte VERSION = 1;
+    static final byte VERSION_WITH_SCHEMA = 2;
 
     final long totalRowCount;
     final int blockCount;
     final long indexOffset;
     final int indexLength;
+    private final byte version;
 
     RowFileFooter(long totalRowCount, int blockCount, long indexOffset, int indexLength) {
+        this(totalRowCount, blockCount, indexOffset, indexLength, VERSION);
+    }
+
+    RowFileFooter(
+            long totalRowCount, int blockCount, long indexOffset, int indexLength, byte version) {
         this.totalRowCount = totalRowCount;
         this.blockCount = blockCount;
         this.indexOffset = indexOffset;
         this.indexLength = indexLength;
+        this.version = version;
     }
 
     void writeTo(PositionOutputStream out) throws IOException {
@@ -47,7 +55,7 @@ class RowFileFooter {
         writeIntLE(buf, 8, blockCount);
         writeLongLE(buf, 12, indexOffset);
         writeIntLE(buf, 20, indexLength);
-        buf[24] = VERSION;
+        buf[24] = version;
         // bytes 25-27 reserved (zeros)
         writeIntLE(buf, 28, MAGIC);
         out.write(buf);
@@ -62,7 +70,7 @@ class RowFileFooter {
         }
 
         byte version = buf[offset + 24];
-        if (version != VERSION) {
+        if (version != VERSION && version != VERSION_WITH_SCHEMA) {
             throw new IOException("Unsupported row file version: " + version);
         }
 
@@ -71,7 +79,7 @@ class RowFileFooter {
         long indexOffset = readLongLE(buf, offset + 12);
         int indexLength = readIntLE(buf, offset + 20);
 
-        return new RowFileFooter(totalRowCount, blockCount, indexOffset, indexLength);
+        return new RowFileFooter(totalRowCount, blockCount, indexOffset, indexLength, version);
     }
 
     /**
@@ -94,6 +102,18 @@ class RowFileFooter {
         if (totalRowCount < 0) {
             throw new IOException("Invalid row file row count: " + totalRowCount);
         }
+    }
+
+    /** Returns the physical schema length after the index and before the footer. */
+    int physicalSchemaLength(long fileSize) throws IOException {
+        if (version == VERSION) {
+            return 0;
+        }
+        long length = fileSize - FOOTER_SIZE - indexOffset - indexLength;
+        if (length <= 0 || length > Integer.MAX_VALUE) {
+            throw new IOException("Invalid row file physical schema length: " + length);
+        }
+        return (int) length;
     }
 
     static void writeIntLE(byte[] buf, int offset, int value) {

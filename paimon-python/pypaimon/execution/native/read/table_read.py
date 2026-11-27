@@ -25,12 +25,13 @@ from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.row_format import VERSION_PLAIN, read_row_footer
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
-from pypaimon.schema.data_types import DataField, MapType
+from pypaimon.schema.data_types import DataField, MapType, contains_variant
 
 _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC,
@@ -121,6 +122,8 @@ class NativeTableRead:
         try:
             if not self._orc_shared_shredding_supported(splits):
                 return self._fallback("ORC shared-shredding MAP columns require the Python reader")
+            if not self._row_shredding_supported(splits):
+                return self._fallback("ROW v2 files with shredded VARIANT require the Python reader")
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
             runtime._raise_if_native_fork_safety_error(e)
@@ -198,6 +201,29 @@ class NativeTableRead:
             options = CoreOptions.from_dict(schema.options)
             if any(options.map_storage_layout(field.name) == 'shared-shredding' for field in schema.fields):
                 return False
+        return True
+
+    def _row_shredding_supported(self, splits):
+        table = self._read.table
+        files_with_variant = set()
+        schema_has_variant = {}
+        for split in splits:
+            for file in split.files:
+                if not file.file_name.lower().endswith('.row'):
+                    continue
+                if file.schema_id not in schema_has_variant:
+                    schema = (table.table_schema if file.schema_id == table.table_schema.id
+                              else table.schema_manager.get_schema(file.schema_id))
+                    schema_has_variant[file.schema_id] = any(
+                        contains_variant(field.type) for field in schema.fields)
+                if schema_has_variant[file.schema_id]:
+                    files_with_variant.add((file.physical_path(), file.file_size))
+
+        # Table options can change without rewriting retained files. Check their actual version.
+        for path, size in files_with_variant:
+            with table.file_io.new_input_stream(path) as stream:
+                if read_row_footer(stream, size)[24] != VERSION_PLAIN:
+                    return False
         return True
 
     def convert_batches(self, batches, schema):

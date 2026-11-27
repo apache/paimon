@@ -110,11 +110,39 @@ public class VariantSchema {
     /** DateType. */
     public static final class DateType extends ScalarType {}
 
+    abstract static class TimestampScalarType extends ScalarType {
+        private final int microsPerUnit;
+
+        TimestampScalarType(int precision) {
+            this.microsPerUnit = (int) Math.pow(10, Math.max(0, 6 - precision));
+        }
+
+        Long cast(long micros) {
+            return micros % microsPerUnit == 0 ? micros : null;
+        }
+    }
+
     /** TimestampType. */
-    public static final class TimestampType extends ScalarType {}
+    public static final class TimestampType extends TimestampScalarType {
+        public TimestampType() {
+            this(6);
+        }
+
+        TimestampType(int precision) {
+            super(precision);
+        }
+    }
 
     /** TimestampNTZType. */
-    public static final class TimestampNTZType extends ScalarType {}
+    public static final class TimestampNTZType extends TimestampScalarType {
+        public TimestampNTZType() {
+            this(6);
+        }
+
+        TimestampNTZType(int precision) {
+            super(precision);
+        }
+    }
 
     /** UuidType. */
     public static final class UuidType extends ScalarType {}

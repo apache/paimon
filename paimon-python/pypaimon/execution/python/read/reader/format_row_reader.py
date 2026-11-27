@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import struct
 from decimal import Decimal, localcontext
 from typing import Any, List, Optional, Tuple
@@ -25,16 +26,12 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.row_format import FOOTER_SIZE, VERSION_PLAIN, VERSION_WITH_SCHEMA, read_row_footer
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     ArrayType, DataField, MapType, MultisetType, PyarrowFieldParser, RowType, VectorType, AtomicType
 )
 from pypaimon.table.special_fields import SpecialFields
-
-FOOTER_SIZE = 32
-MAGIC = 0x524F5753  # "ROWS"
-VERSION = 1
-
 
 def _special_field(name: str):
     if name == SpecialFields.ROW_ID.name:
@@ -65,6 +62,7 @@ class FormatRowReader(RecordBatchReader):
         self._missing_fields = [name for name in read_fields
                                 if name not in full_fields_map]
         self._all_fields = full_fields
+        self._variant_converters = {}
         self._physical_schema = PyarrowFieldParser.from_paimon_schema(self._projected_fields)
 
         self._block_compressed_sizes: List[int] = []
@@ -158,22 +156,23 @@ class FormatRowReader(RecordBatchReader):
         pass
 
     def _read_metadata(self):
-        if self._file_size < FOOTER_SIZE:
-            raise IOError(f"Invalid row file: {self._file_size} bytes hold no {FOOTER_SIZE}-byte footer")
+        with self._file_io.new_input_stream(self._file_path) as stream:
+            footer_bytes = read_row_footer(stream, self._file_size)
+            index_length, schema_length = self._parse_footer(footer_bytes)
+            stream.seek(self._index_offset)
+            index_bytes = stream.read(index_length)
+            if len(index_bytes) != index_length:
+                raise IOError("Invalid row file: cannot read block index")
+            self._parse_block_index(index_bytes)
+            if schema_length:
+                schema_bytes = stream.read(schema_length)
+                if len(schema_bytes) != schema_length:
+                    raise IOError("Invalid row file: cannot read physical schema")
+                self._read_physical_schema(schema_bytes)
 
-        with self._file_io.new_input_stream(self._file_path) as f:
-            f.seek(self._file_size - FOOTER_SIZE)
-            footer_bytes = f.read(FOOTER_SIZE)
-
-        if len(footer_bytes) != FOOTER_SIZE:
-            raise IOError("Invalid row file: cannot read footer")
-
-        magic = struct.unpack_from('<I', footer_bytes, 28)[0]
-        if magic != MAGIC:
-            raise IOError(f"Invalid row file magic: expected 0x{MAGIC:08X}, got 0x{magic:08X}")
-
+    def _parse_footer(self, footer_bytes):
         version = footer_bytes[24]
-        if version != VERSION:
+        if version not in (VERSION_PLAIN, VERSION_WITH_SCHEMA):
             raise IOError(f"Unsupported row file version: {version}")
 
         self._total_row_count = struct.unpack_from('<q', footer_bytes, 0)[0]
@@ -193,14 +192,29 @@ class FormatRowReader(RecordBatchReader):
         if self._total_row_count < 0:
             raise IOError(f"Invalid row file row count: {self._total_row_count}")
 
-        with self._file_io.new_input_stream(self._file_path) as f:
-            f.seek(index_offset)
-            index_bytes = f.read(index_length)
+        if version == VERSION_PLAIN:
+            return index_length, 0
+        schema_length = self._file_size - FOOTER_SIZE - index_offset - index_length
+        if not 0 < schema_length <= (1 << 31) - 1:
+            raise IOError(f"Invalid row file physical schema length: {schema_length}")
+        return index_length, schema_length
 
-        if len(index_bytes) != index_length:
-            raise IOError("Invalid row file: cannot read block index")
+    def _read_physical_schema(self, schema_bytes):
+        try:
+            schema = RowType.from_dict(json.loads(schema_bytes.decode('utf-8')))
+        except (TypeError, ValueError, AttributeError) as error:
+            raise IOError("Invalid row file physical schema") from error
+        if not isinstance(schema, RowType) or [field.name for field in schema.fields] != [
+                field.name for field in self._all_fields]:
+            raise IOError("Row file physical schema does not match the data fields")
 
-        self._parse_block_index(index_bytes)
+        projected_names = {field.name for field in self._projected_fields}
+        for i, (logical, physical) in enumerate(zip(self._all_fields, schema.fields)):
+            if logical.name in projected_names:
+                converter = _variant_converter(logical.type, physical.type)
+                if converter is not None:
+                    self._variant_converters[i] = converter
+        self._all_fields = schema.fields
 
     def _parse_block_index(self, index_data: bytes):
         pos = 0
@@ -369,9 +383,48 @@ class FormatRowReader(RecordBatchReader):
                 else:
                     value = _read_field(decoder, self._all_fields[field_idx].type)
                     if field_idx in proj_set:
+                        converter = self._variant_converters.get(field_idx)
+                        if converter is not None:
+                            value = converter(value)
                         columns[proj_col_map[field_idx]].append(value)
 
         return columns, rows_to_read_count
+
+
+def _variant_converter(logical_type, physical_type):
+    if not isinstance(physical_type, RowType) or logical_type == physical_type:
+        return None
+    if isinstance(logical_type, AtomicType) and logical_type.type == 'VARIANT':
+        from pypaimon.data.variant_shredding import build_variant_schema
+        from pypaimon.execution.python.read.variant_shredding import rebuild
+
+        schema = build_variant_schema(PyarrowFieldParser.from_paimon_type(physical_type))
+        if schema.is_unshredded():
+            return None
+
+        def assemble(row):
+            value, metadata = rebuild(row, schema)
+            return {'value': value, 'metadata': metadata}
+
+        return assemble
+
+    if isinstance(logical_type, RowType):
+        logical_fields = {field.name: field.type for field in logical_type.fields}
+        converters = {}
+        for field in physical_type.fields:
+            converter = _variant_converter(logical_fields[field.name], field.type)
+            if converter is not None:
+                converters[field.name] = converter
+        if converters:
+            def assemble_nested(row):
+                for name, converter in converters.items():
+                    if row[name] is not None:
+                        row[name] = converter(row[name])
+                return row
+
+            return assemble_nested
+
+    return None
 
 
 class _RowDecoder:

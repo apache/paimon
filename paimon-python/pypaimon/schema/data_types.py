@@ -276,6 +276,18 @@ class MapType(DataType):
         return "MAP<{}, {}>{}".format(self.key, self.value, null_suffix)
 
 
+def contains_variant(data_type: DataType) -> bool:
+    if isinstance(data_type, AtomicType):
+        return data_type.type.upper() == 'VARIANT'
+    if isinstance(data_type, (ArrayType, MultisetType)):
+        return contains_variant(data_type.element)
+    if isinstance(data_type, MapType):
+        return contains_variant(data_type.key) or contains_variant(data_type.value)
+    if isinstance(data_type, RowType):
+        return any(contains_variant(field.type) for field in data_type.fields)
+    return False
+
+
 def is_blob_type(data_type: DataType) -> bool:
     return isinstance(data_type, AtomicType) and data_type.type.upper() == 'BLOB'
 

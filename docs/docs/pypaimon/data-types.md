@@ -66,15 +66,15 @@ in the [Parquet Variant binary encoding](https://github.com/apache/parquet-forma
 pypaimon exposes VARIANT columns as Arrow `struct<value: binary NOT NULL, metadata: binary NOT NULL>` and
 provides `GenericVariant` for encoding and decoding.
 
-Paimon supports two Parquet storage layouts for VARIANT:
+Parquet and ROW support two storage layouts for VARIANT.
 
 - **Plain VARIANT** — the standard two-field struct (`value` + `metadata`). Default for all writes.
-- **Shredded VARIANT** — typed sub-columns are stored alongside overflow bytes, enabling column-skipping
-  inside the Parquet file. Controlled by the `variant.shreddingSchema` table option.
+- **Shredded VARIANT** — typed fields are stored alongside overflow bytes. Enable this layout
+  with the `variant.shreddingSchema` table option.
 
-Plain VARIANT also supports `file.format=row`. The ROW format stores the same `value` and
-`metadata` bytes inside compressed row blocks and exposes the same Arrow struct when read.
-ROW does not support Variant shredding or sub-field I/O pruning.
+ROW v2 stores the physical schema for shredded VARIANT in the file. PyPaimon reads these files
+using its Python reader and returns the same Arrow struct for both file versions. ROW reads and
+decompresses selected blocks in full. Parquet can skip individual sub-columns.
 
 <Tabs groupId="variant-read-write">
 
@@ -147,15 +147,14 @@ payload (GROUP)
 
 **Read — automatic reassembly**
 
-When pypaimon reads a Parquet file that contains shredded VARIANT columns (whether written by Paimon Java
-or by pypaimon with shredding enabled), it **automatically detects and reassembles** them back to the
-standard `struct<value, metadata>` form before returning any batch. No code changes are needed on the
-read side:
+PyPaimon automatically reassembles shredded VARIANT columns from Parquet and ROW v2 into the
+standard `struct<value, metadata>` before returning each batch. Both Java and Python writes use
+the same file layout for each format.
 
 ```python
 from pypaimon.data.generic_variant import GenericVariant
 
-# Works identically for both shredded and plain Parquet files
+# Works for both shredded and plain Parquet and ROW files
 read_builder = table.new_read_builder()
 result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
 
@@ -165,11 +164,8 @@ for record in result.to_pylist():
         print(gv.to_python())
 ```
 
-Reassembly (reconstructing the variant binary from `typed_value` sub-columns and overflow bytes)
-happens inside `FormatPyArrowReader.read_arrow_batch()` — that is, **at batch read time**, before
-the Arrow data is returned to the caller. Note: When sub-field projection is active
-(`with_variant_sub_fields`), reassembly is skipped entirely and only the requested typed
-sub-columns are decoded.
+For Parquet, `with_variant_sub_fields` can read the requested typed sub-columns without
+reassembling the full VARIANT.
 
 **Write — shredding mode**
 
@@ -305,6 +301,5 @@ creates intermediate objects or extends arrays.
 
 **Limitations:**
 
-- Plain `VARIANT` supports Parquet and ROW file formats. Shredded `VARIANT` requires Parquet.
-  ORC and Avro are not supported.
+- Shredded `VARIANT` supports Parquet and ROW v2. PyPaimon uses an explicit schema to write it.
 - `VARIANT` cannot be used as a primary key or partition key.

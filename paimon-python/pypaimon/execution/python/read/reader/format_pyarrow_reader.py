@@ -62,6 +62,7 @@ from pypaimon.schema.data_types import (
     MultisetType,
     PyarrowFieldParser,
     RowType,
+    contains_variant,
 )
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.arrow_utils import zero_column_batch as _zero_column_batch
@@ -640,7 +641,7 @@ class FormatPyArrowReader(RecordBatchReader):
     def _has_projected_variant(self) -> bool:
         return any(
             f.name in self.existing_fields
-            and _contains_variant(f.type)
+            and contains_variant(f.type)
             for f in self.read_fields)
 
     @staticmethod
@@ -1112,19 +1113,6 @@ class _RowRunSlicer:
                     break
             self._run_index = run_index
             position = part_end
-
-
-def _contains_variant(data_type) -> bool:
-    if isinstance(data_type, AtomicType):
-        return data_type.type.upper() == 'VARIANT'
-    if isinstance(data_type, (ArrayType, MultisetType)):
-        return _contains_variant(data_type.element)
-    if isinstance(data_type, MapType):
-        return (_contains_variant(data_type.key)
-                or _contains_variant(data_type.value))
-    if isinstance(data_type, RowType):
-        return any(_contains_variant(field.type) for field in data_type.fields)
-    return False
 
 
 def _assemble_variant_column(column, data_type, schema_cache):

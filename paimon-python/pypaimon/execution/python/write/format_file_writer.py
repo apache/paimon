@@ -44,12 +44,13 @@ def parquet_write_data(data, schema=None):
     return data if data.schema.equals(schema, check_metadata=True) else data.cast(schema)
 
 
-def write_row_file(file_io, path, data, fields=None, zstd_level=1):
+def write_row_file(file_io, path, data, fields=None, zstd_level=1, write_physical_schema=False):
     try:
         if fields is None:
             fields = PyarrowFieldParser.to_paimon_schema(data.schema)
         with file_io.new_output_stream(path) as output_stream:
-            writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+            writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level,
+                                     write_physical_schema=write_physical_schema)
             writer.write_table(data)
             writer.close()
     except Exception as error:

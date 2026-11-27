@@ -24,11 +24,15 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.NestedProjectedRow;
 
 import java.io.IOException;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /** Factory for creating {@link RowFormatReader}. */
 public class RowFormatReaderFactory implements FormatReaderFactory {
@@ -83,19 +87,56 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
             }
             blockIndex.validate(footer);
 
+            int schemaLength = footer.physicalSchemaLength(fileSize);
+            RowType physicalSchema =
+                    schemaLength == 0
+                            ? rowType
+                            : readPhysicalSchema(in, tailBuf, tailOffset, footer, schemaLength);
             return new RowFormatReader(
                     in,
                     path,
                     footer,
                     blockIndex,
-                    rowType,
+                    physicalSchema,
                     // Each reader needs its own wrapper: it is mutated in place per row,
                     // so sharing one instance across readers corrupts interleaved reads.
-                    NestedProjectedRow.create(rowType, projectedRowType),
+                    NestedProjectedRow.create(rowType, projectedRowType, physicalSchema),
                     context.selection());
         } catch (Throwable t) {
             IOUtils.closeQuietly(in);
             throw t;
         }
+    }
+
+    private RowType readPhysicalSchema(
+            SeekableInputStream in,
+            byte[] tailBuf,
+            long tailOffset,
+            RowFileFooter footer,
+            int schemaLength)
+            throws IOException {
+        long schemaOffset = footer.indexOffset + footer.indexLength;
+        String schemaJson;
+        if (schemaOffset >= tailOffset) {
+            schemaJson =
+                    new String(tailBuf, (int) (schemaOffset - tailOffset), schemaLength, UTF_8);
+        } else {
+            in.seek(schemaOffset);
+            byte[] schemaBytes = new byte[schemaLength];
+            IOUtils.readFully(in, schemaBytes);
+            schemaJson = new String(schemaBytes, UTF_8);
+        }
+
+        DataType schema;
+        try {
+            schema = JsonSerdeUtil.fromJson(schemaJson, DataType.class);
+        } catch (RuntimeException e) {
+            throw new IOException("Invalid row file physical schema", e);
+        }
+        if (!(schema instanceof RowType)
+                || !((RowType) schema).getFieldNames().equals(rowType.getFieldNames())) {
+            throw new IOException("Row file physical schema does not match the data fields");
+        }
+        return (RowType) schema;
     }
 }

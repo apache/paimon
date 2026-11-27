@@ -37,6 +37,7 @@ import org.apache.paimon.data.variant.VariantPathSegment.ObjectExtraction;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
@@ -411,10 +412,14 @@ public class PaimonShreddingUtils {
                             scalarSchema = new VariantSchema.DateType();
                             break;
                         case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                            scalarSchema = new VariantSchema.TimestampType();
+                            scalarSchema =
+                                    new VariantSchema.TimestampType(
+                                            DataTypeChecks.getPrecision(dataType));
                             break;
                         case TIMESTAMP_WITHOUT_TIME_ZONE:
-                            scalarSchema = new VariantSchema.TimestampNTZType();
+                            scalarSchema =
+                                    new VariantSchema.TimestampNTZType(
+                                            DataTypeChecks.getPrecision(dataType));
                             break;
                         case DECIMAL:
                             DecimalType d = (DecimalType) dataType;

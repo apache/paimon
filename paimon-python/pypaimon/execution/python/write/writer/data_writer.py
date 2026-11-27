@@ -28,7 +28,7 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import PyarrowFieldParser, is_variant_struct
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
@@ -110,7 +110,9 @@ class DataWriter(ABC):
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+        if (self.file_format in (CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ROW)
+                or (self.changelog_producer == ChangelogProducer.INPUT
+                    and self.changelog_file_format == CoreOptions.FILE_FORMAT_PARQUET)):
             shredding_json = self.options.variant_shredding_schema()
             if shredding_json:
                 from pypaimon.data.variant_shredding import (
@@ -330,9 +332,12 @@ class DataWriter(ABC):
             self._buffer.reset(pending.slice(split_row))
 
     def _write_file(self, file_path: str, data: pa.Table, file_format: str, stats_collector):
-        """Write the file and return its shredding statistics and optional Parquet metadata."""
+        """Write logical rows and return shredding statistics and optional Parquet metadata."""
+        physical_data = data
+        if self._variant_shredding and file_format in (CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ROW):
+            physical_data = self._apply_variant_shredding(data)
         if file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            return self._write_parquet_data(file_path, data, stats_collector)
+            return self._write_parquet_data(file_path, physical_data, stats_collector)
         elif file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -346,7 +351,8 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
-            write_row_file(self.file_io, file_path, data, zstd_level=self.zstd_level)
+            write_row_file(self.file_io, file_path, physical_data, zstd_level=self.zstd_level,
+                           write_physical_schema=physical_data is not data)
         else:
             raise ValueError(f"Unsupported file format: {file_format}")
         return {}, None
@@ -360,14 +366,10 @@ class DataWriter(ABC):
         is_external_path = self.external_path_provider is not None
         external_path_str = file_path if is_external_path else None
 
-        logical_data = data
         extra_files = []
         row_sidecar_path = None
         changelog_meta = None
         shared_shredding_stats = {}
-        if self._variant_shredding:
-            data = self._apply_variant_shredding(data)
-
         # One data file means up to three files on disk -- the data file, its row
         # sidecar and its changelog -- and none of them is committed until all of
         # them have landed. A caller that retries the flush still holds these
@@ -375,7 +377,7 @@ class DataWriter(ABC):
         # exists would make the retry write a second copy of rows the first meta
         # already covers.
         try:
-            stats_collector = self._file_value_stats_collector(logical_data)
+            stats_collector = self._file_value_stats_collector(data)
             shared_shredding_stats, parquet_metadata = self._write_file(
                 file_path, data, self.file_format, stats_collector)
 
@@ -385,12 +387,12 @@ class DataWriter(ABC):
                 write_row_file(
                     self.file_io,
                     row_sidecar_path,
-                    logical_data,
-                    fields=self._row_sidecar_fields(logical_data),
+                    data,
+                    fields=self._row_sidecar_fields(data),
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
 
-            statistics = self._data_file_statistics(logical_data, stats_collector, parquet_metadata)
+            statistics = self._data_file_statistics(data, stats_collector, parquet_metadata)
             data_meta = self._create_data_file_meta(
                 file_name=file_name,
                 file_path=file_path,
@@ -409,7 +411,7 @@ class DataWriter(ABC):
             if (self.changelog_producer == ChangelogProducer.INPUT
                     and not self._writes_changelog_before_merge()):
                 changelog_meta = self._write_changelog_file(
-                    logical_data, is_external=external_path_str is not None)
+                    data, is_external=external_path_str is not None)
         except Exception:
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
@@ -552,7 +554,8 @@ class DataWriter(ABC):
         changed = False
 
         for i, f in enumerate(fields):
-            if f.name in self._variant_shredding:
+            if (f.name in self._variant_shredding and pa.types.is_struct(f.type)
+                    and is_variant_struct(f.type)):
                 obj_fields, target_type = self._variant_shredding[f.name]
                 columns[i] = shred_variant_column(columns[i], obj_fields, target_type)
                 pid = self._paimon_field_id.get(f.name)
@@ -582,8 +585,7 @@ class DataWriter(ABC):
                 raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
                                  f"Supported formats: parquet, orc, avro.")
             collector = self._file_value_stats_collector(data, is_changelog=True)
-            physical_data = self._apply_variant_shredding(data) if self._variant_shredding else data
-            _, parquet_metadata = self._write_file(changelog_file_path, physical_data, cl_fmt, collector)
+            _, parquet_metadata = self._write_file(changelog_file_path, data, cl_fmt, collector)
             statistics = self._data_file_statistics(data, collector, parquet_metadata)
 
             return DataFileMeta.create(

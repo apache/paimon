@@ -23,9 +23,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LongArrayList;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /** Writer that produces row-store format files with block-level ZSTD compression. */
 public class RowFormatWriter implements FormatWriter {
@@ -34,6 +39,7 @@ public class RowFormatWriter implements FormatWriter {
     private final ZstdBlockCompressor compressor;
     private final int blockSizeThreshold;
     private final RowBlockWriter blockWriter;
+    @Nullable private final RowType physicalSchema;
 
     private final LongArrayList blockCompressedSizes;
     private final LongArrayList blockUncompressedSizes;
@@ -43,10 +49,20 @@ public class RowFormatWriter implements FormatWriter {
 
     public RowFormatWriter(
             PositionOutputStream out, RowType rowType, int blockSize, int zstdLevel) {
+        this(out, rowType, blockSize, zstdLevel, false);
+    }
+
+    RowFormatWriter(
+            PositionOutputStream out,
+            RowType rowType,
+            int blockSize,
+            int zstdLevel,
+            boolean writePhysicalSchema) {
         this.out = out;
         this.compressor = new ZstdBlockCompressor(zstdLevel);
         this.blockSizeThreshold = blockSize;
         this.blockWriter = new RowBlockWriter(new BlockOutput(blockSize), rowType);
+        this.physicalSchema = writePhysicalSchema ? rowType : null;
         this.blockCompressedSizes = new LongArrayList(128);
         this.blockUncompressedSizes = new LongArrayList(128);
         this.blockRowStarts = new LongArrayList(128);
@@ -83,9 +99,18 @@ public class RowFormatWriter implements FormatWriter {
         index.writeTo(out);
         int indexLength = (int) (out.getPos() - indexOffset);
 
+        if (physicalSchema != null) {
+            out.write(JsonSerdeUtil.toFlatJson(physicalSchema).getBytes(UTF_8));
+        }
         RowFileFooter footer =
                 new RowFileFooter(
-                        totalRowCount, blockCompressedSizes.size(), indexOffset, indexLength);
+                        totalRowCount,
+                        blockCompressedSizes.size(),
+                        indexOffset,
+                        indexLength,
+                        physicalSchema == null
+                                ? RowFileFooter.VERSION
+                                : RowFileFooter.VERSION_WITH_SCHEMA);
         footer.writeTo(out);
 
         out.flush();

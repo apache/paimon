@@ -121,16 +121,13 @@ The binary representation avoids storing and reparsing JSON syntax. It also reta
 each scalar value. Extracting a sub-field from a plain Variant still requires reading the binary
 `value` field for that Variant column.
 
-The [ROW format](../concepts/spec/rowformat.md) also supports plain Variant values. Set
-`file.format` to `row` to store the same `value` and `metadata` bytes inside compressed row blocks.
-ROW reads and decompresses the selected blocks in full; it does not support Variant shredding or
-sub-field I/O pruning.
+With `file.format=row`, plain Variant stores the same `value` and `metadata` bytes inside
+compressed row blocks. [ROW format specification](../concepts/spec/rowformat.md)
 
 ### Shredded Variant
 
-Shredding materializes selected Variant paths as typed Parquet sub-columns while keeping the
-logical table column as `VARIANT`. For example, shredding `age` and `city` produces a layout similar
-to:
+Shredding materializes selected Variant paths as typed fields while keeping the logical table
+column as `VARIANT`. In Parquet, shredding `age` and `city` produces these sub-columns.
 
 ```text
 payload (GROUP)
@@ -151,6 +148,11 @@ value. This is most useful when a document is wide but queries repeatedly access
 paths. Paimon's Spark connector does not push these extractions yet; see
 [Query Pushdown](#query-pushdown).
 
+With `file.format=row`, shredded Variant uses typed fields inside compressed row blocks. Each
+ROW v2 file stores its own physical schema. Readers can scan ROW v1 and v2 files together.
+ROW decompresses each selected block in full. Java readers can extract a projected path from
+the typed fields and overflow bytes without reconstructing the full Variant.
+
 Shredding is lossless:
 
 - Fields absent from the shredding schema remain in the overflow `value` bytes.
@@ -168,7 +170,8 @@ sparse documents with few repeated fields.
 ### Explicit Schema
 
 Set `variant.shreddingSchema` to a JSON-encoded Paimon `ROW` type. Top-level fields identify Variant
-columns in the table; their nested types describe the paths to materialize.
+columns in the table. Their nested types describe the paths to materialize. Both Parquet and ROW
+accept this option.
 
 ```sql
 CREATE TABLE user_events (
@@ -201,8 +204,8 @@ predictable physical layout and avoids inference buffering.
 
 ### Automatic Schema Inference
 
-By default, Paimon infers a shredding schema independently for each output file
-when inference is enabled:
+When inference is enabled, Paimon's Java writers infer a shredding schema independently for each
+Parquet or ROW output file by default.
 
 ```sql
 CREATE TABLE inferred_events (
@@ -255,9 +258,9 @@ and result are the same for plain, shredded, and mixed-layout files.
 
 ## Limitations
 
-- Plain Variant data files can use Parquet or ROW. Variant shredding requires Parquet. ORC and
-  Avro are not supported.
+- Variant data files can use Parquet or ROW, including for shredding. Shredded ROW files require a
+  reader that supports ROW v2.
 - `VARIANT` cannot be used as a primary key or partition key.
-- Variant extraction does not by itself create an index or guarantee predicate pushdown. Use
-  shredding to reduce sub-column I/O; use an appropriate index or modeled table column when a path
-  needs indexed filtering.
+- Variant extraction does not by itself create an index or guarantee predicate pushdown. Parquet
+  can reduce sub-column I/O with path projection. Use an appropriate index or modeled table column
+  when a path needs indexed filtering.

@@ -38,6 +38,7 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.BlobFetchMetrics;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
@@ -385,9 +386,17 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Nullable
     private FileFormat rowSidecarFileFormat() {
-        return options.dataEvolutionEnabled() && options.dataEvolutionRowSidecarEnabled()
-                ? FileFormat.fromIdentifier("row", options.toConfiguration())
-                : null;
+        if (!options.dataEvolutionEnabled() || !options.dataEvolutionRowSidecarEnabled()) {
+            return null;
+        }
+        // Sidecars use the plain ROW layout, including when their primary file is shredded.
+        Options sidecarOptions = new Options(options.toMap());
+        sidecarOptions.remove(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA);
+        sidecarOptions.remove(CoreOptions.VARIANT_SHREDDING_SCHEMA);
+        CoreOptions.VARIANT_SHREDDING_SCHEMA
+                .fallbackKeys()
+                .forEach(key -> sidecarOptions.remove(key.getKey()));
+        return FileFormat.fromIdentifier("row", sidecarOptions);
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

@@ -18,15 +18,17 @@
 
 package org.apache.paimon.format.row;
 
+import org.apache.paimon.data.shredding.ShreddingWritePlan;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.shredding.SupportsShreddingWritePlan;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 
 /** Factory for creating {@link RowFormatWriter}. */
-public class RowFormatWriterFactory implements FormatWriterFactory {
+public class RowFormatWriterFactory implements FormatWriterFactory, SupportsShreddingWritePlan {
 
     private final RowType rowType;
     private final int blockSize;
@@ -41,5 +43,14 @@ public class RowFormatWriterFactory implements FormatWriterFactory {
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
         return new RowFormatWriter(out, rowType, blockSize, zstdLevel);
+    }
+
+    @Override
+    public FormatWriter createWithShreddingWritePlan(
+            PositionOutputStream out, String compression, ShreddingWritePlan writePlan)
+            throws IOException {
+        RowType physicalType = writePlan.physicalRowType();
+        return new RowFormatWriter(
+                out, physicalType, blockSize, zstdLevel, !physicalType.equals(rowType));
     }
 }

@@ -297,12 +297,12 @@ public class VariantShreddingWriter {
                 break;
             case TIMESTAMP:
                 if (targetType instanceof VariantSchema.TimestampType) {
-                    return v.getLong();
+                    return ((VariantSchema.TimestampType) targetType).cast(v.getLong());
                 }
                 break;
             case TIMESTAMP_NTZ:
                 if (targetType instanceof VariantSchema.TimestampNTZType) {
-                    return v.getLong();
+                    return ((VariantSchema.TimestampNTZType) targetType).cast(v.getLong());
                 }
                 break;
             case FLOAT:

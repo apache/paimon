@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.row;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -27,11 +28,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilder;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -42,6 +46,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -55,6 +60,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
@@ -62,6 +68,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -69,12 +76,129 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the row-store file format. */
 public class RowFormatReadWriteTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testShreddedVariantAndPlainFiles() throws IOException {
+        DataField payload = DataTypes.FIELD(1, "payload", DataTypes.VARIANT());
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.INT()), payload);
+        Options options = new Options();
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_SCHEMA,
+                JsonSerdeUtil.toFlatJson(
+                        DataTypes.ROW(
+                                payload.newType(
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(
+                                                        2, "score", DataTypes.BIGINT()))))));
+
+        List<InternalRow> rows =
+                Arrays.asList(
+                        GenericRow.of(
+                                1, GenericVariant.fromJson("{\"score\":7,\"extra\":\"first\"}")),
+                        GenericRow.of(
+                                2,
+                                GenericVariant.fromJson("{\"score\":\"8\",\"extra\":\"second\"}")),
+                        GenericRow.of(3, GenericVariant.fromJson("null")),
+                        GenericRow.of(4, null));
+        FileFormat plainFormat = FileFormat.fromIdentifier("row", new Options());
+        writeRows(plainFormat, rowType, new Path(tempDir.toString(), "plain.row"), rows);
+        writeRows(
+                FileFormat.fromIdentifier("row", options),
+                rowType,
+                new Path(tempDir.toString(), "shredded.row"),
+                rows);
+
+        assertThat(readPhysicalSchema("shredded.row")).contains("typed_value", "score");
+        assertThat(readPhysicalSchema("plain.row")).isEmpty();
+
+        RowType extractionType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.BIGINT(), "$.score")
+                        .field(DataTypes.STRING(), "$.extra")
+                        .build();
+        FormatReaderFactory readerFactory =
+                plainFormat.createReaderFactory(
+                        rowType, DataTypes.ROW(payload.newType(extractionType)), null);
+        LocalFileIO fileIO = new LocalFileIO();
+        RoaringBitmap32 selection = RoaringBitmap32.bitmapOf(0, 1, 3);
+        for (String name : Arrays.asList("shredded.row", "plain.row")) {
+            Path path = new Path(tempDir.toString(), name);
+            List<InternalRow> result = readAllRows(plainFormat, rowType, path);
+            assertThat(result).hasSize(rows.size());
+            for (int i = 0; i < rows.size() - 1; i++) {
+                assertThat(result.get(i).getVariant(1).toJson())
+                        .isEqualTo(rows.get(i).getVariant(1).toJson());
+            }
+            assertThat(result.get(3).isNullAt(1)).isTrue();
+
+            try (FileRecordReader<InternalRow> reader =
+                    readerFactory.createReader(
+                            new FormatReaderContext(
+                                    fileIO, path, fileIO.getFileSize(path), selection, null))) {
+                FileRecordIterator<InternalRow> batch = reader.readBatch();
+                InternalRow first = batch.next().getRow(0, 2);
+                assertThat(first.getLong(0)).isEqualTo(7);
+                assertThat(first.getString(1).toString()).isEqualTo("first");
+                InternalRow second = batch.next().getRow(0, 2);
+                assertThat(second.getLong(0)).isEqualTo(8);
+                assertThat(second.getString(1).toString()).isEqualTo("second");
+                assertThat(batch.returnedPosition()).isEqualTo(1);
+                assertThat(batch.next().isNullAt(0)).isTrue();
+                assertThat(batch.returnedPosition()).isEqualTo(3);
+                assertThat(batch.next()).isNull();
+                batch.releaseBatch();
+            }
+        }
+    }
+
+    @Test
+    public void testShreddedTimestampPreservesMicroseconds() throws IOException {
+        DataField field = DataTypes.FIELD(0, "payload", DataTypes.VARIANT());
+        RowType rowType = DataTypes.ROW(field);
+        Options options = new Options();
+        options.set(
+                CoreOptions.VARIANT_SHREDDING_SCHEMA,
+                JsonSerdeUtil.toFlatJson(DataTypes.ROW(field.newType(DataTypes.TIMESTAMP(3)))));
+        FileFormat format = FileFormat.fromIdentifier("row", options);
+        GenericVariantBuilder builder = new GenericVariantBuilder(false);
+        builder.appendTimestampNtz(1_234_567);
+        Variant value = builder.result();
+        Path path = new Path(tempDir.toString(), "timestamp.row");
+
+        writeRows(format, rowType, path, Arrays.asList(GenericRow.of(value)));
+
+        assertThat(readAllRows(format, rowType, path).get(0).getVariant(0).toJson())
+                .isEqualTo(value.toJson());
+    }
+
+    @Test
+    public void testInfersNestedVariantSchemaPerFile() throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA, true);
+        RowType nestedType = DataTypes.ROW(DataTypes.FIELD(1, "payload", DataTypes.VARIANT()));
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "nested", nestedType));
+        FileFormat format = FileFormat.fromIdentifier("row", options);
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+
+        for (String key : Arrays.asList("first", "second")) {
+            String json = "{\"" + key + "\":1}";
+            Path path = new Path(tempDir.toString(), key + ".row");
+            try (PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
+                    FormatWriter writer = writerFactory.create(out, "zstd")) {
+                writer.addElement(GenericRow.of(GenericRow.of(GenericVariant.fromJson(json))));
+            }
+            assertThat(readPhysicalSchema(key + ".row")).contains("typed_value", key);
+            InternalRow row = readAllRows(format, rowType, path).get(0);
+            assertThat(row.getRow(0, 1).getVariant(0).toJson()).isEqualTo(json);
+        }
+    }
 
     @Test
     public void testBasicReadWrite() throws IOException {
@@ -1366,15 +1490,26 @@ public class RowFormatReadWriteTest {
 
     // ======================== Helpers ========================
 
+    private String readPhysicalSchema(String name) throws IOException {
+        byte[] bytes = Files.readAllBytes(tempDir.resolve(name));
+        RowFileFooter footer =
+                RowFileFooter.readFrom(bytes, bytes.length - RowFileFooter.FOOTER_SIZE);
+        return new String(
+                bytes,
+                (int) (footer.indexOffset + footer.indexLength),
+                footer.physicalSchemaLength(bytes.length),
+                UTF_8);
+    }
+
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)
             throws IOException {
         LocalFileIO fileIO = new LocalFileIO();
-        PositionOutputStream out = fileIO.newOutputStream(path, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        for (InternalRow row : rows) {
-            writer.addElement(row);
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd")) {
+            for (InternalRow row : rows) {
+                writer.addElement(row);
+            }
         }
-        writer.close();
     }
 
     private List<InternalRow> readAllRows(FileFormat format, RowType rowType, Path path)

@@ -83,6 +83,26 @@ class RowFormatReaderFactoryLeakTest {
     }
 
     @Test
+    void versionTwoWithoutAPhysicalSchemaDoesNotLeakTheInputStream() throws Exception {
+        Path path = new Path(new Path(tempDir.toString()), "missing-schema.row");
+        CountingFileIO fileIO = new CountingFileIO();
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            new RowBlockIndex(new long[0], new long[0], new long[0]).writeTo(out);
+            new RowFileFooter(0, 0, 0, (int) out.getPos(), RowFileFooter.VERSION_WITH_SCHEMA)
+                    .writeTo(out);
+        }
+
+        RowType rowType = RowType.of(DataTypes.VARIANT());
+        FormatReaderFactory readerFactory = new RowFormatReaderFactory(rowType, rowType);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), null, null);
+
+        assertThatThrownBy(() -> readerFactory.createReader(context))
+                .hasMessageContaining("Invalid row file physical schema length");
+        assertThat(fileIO.openInputStreams()).isZero();
+    }
+
+    @Test
     void anEmptyFileDoesNotLeakTheInputStream() throws Exception {
         Path path = new Path(new Path(tempDir.toString()), "empty.row");
         CountingFileIO fileIO = new CountingFileIO();

@@ -229,7 +229,10 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
             else:
                 micros = raw_value * {'s': 1_000_000, 'ms': 1000, 'us': 1}[
                     arrow_type.unit]
-            builder.append_timestamp_ntz(micros)
+            if arrow_type.tz is None:
+                builder.append_timestamp_ntz(micros)
+            else:
+                builder.append_timestamp(micros)
     elif pa.types.is_decimal(arrow_type):
         decimal = (
             value if isinstance(value, _decimal.Decimal)

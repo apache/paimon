@@ -34,14 +34,15 @@ reading, and decompressing its block, so end-to-end lookup is not O(1).
 ## File Layout
 
 A `.row` file contains independently compressed data blocks, an encoded block index, and a
-fixed-size footer. The footer locates the index; the index describes the data blocks.
+fixed-size footer. Version 2 also stores the physical row schema between the index and the footer.
 
-[![A Row file ends with its block index and 32-byte footer. A decompressed block contains serialized rows, a row-offset array, and a row count.](/img/concepts-row-format.svg)](/img/concepts-row-format.svg)
+[![A version 1 Row file ends with its block index and 32-byte footer. A decompressed block contains serialized rows, a row-offset array, and a row count.](/img/concepts-row-format.svg)](/img/concepts-row-format.svg)
 
 | Section | Role |
 | --- | --- |
 | [Data blocks](#data-block) | Store rows with per-row offsets inside each compressed block. |
 | [Block index](#block-index) | Store block sizes and starting row numbers. |
+| [Physical schema](#physical-schema) | Describe the fields serialized in version 2 files. |
 | [Footer](#footer) | Locate the block index and identify the format. |
 
 ## Data Block
@@ -173,6 +174,19 @@ A well-formed index satisfies all of the following, and a reader rejects a file 
   least one row.
 - An empty index has `blockCount` 0 and `totalRowCount` 0.
 
+## Physical Schema
+
+Version 1 readers decode rows using the file's logical write schema. Version 2 stores a physical
+schema as an uncompressed, UTF-8 JSON-encoded Paimon `ROW` type. Its bytes start at
+`indexOffset + indexLength` and end 32 bytes before the end of the file. The schema describes every
+field in serialization order, including nested fields.
+
+When a writer applies Variant shredding, it uses version 2 and replaces each affected logical
+`VARIANT` with a physical `ROW` containing `metadata`, overflow `value` bytes, and optional
+`typed_value` fields. The physical `ROW` uses the regular row serialization rules. Other Variant
+fields can use the plain `VARIANT` encoding. Readers use the file's physical schema to reconstruct
+the logical Variant or extract the requested paths. The same table can contain both file versions.
+
 ## Footer
 
 The footer occupies the last 32 bytes of the file. Offsets below are relative to the start of
@@ -184,7 +198,7 @@ the footer. All multi-byte numeric fields are little-endian.
 | `8` | `blockCount` | 4 bytes | Number of data blocks. |
 | `12` | `indexOffset` | 8 bytes | Absolute file offset of the block index. |
 | `20` | `indexLength` | 4 bytes | Block-index length in bytes. |
-| `24` | `version` | 1 byte | Format version, currently `1`. |
+| `24` | `version` | 1 byte | `1` for the original layout or `2` for files with a physical schema. |
 | `25` | `reserved` | 3 bytes | Reserved bytes, written as zero. |
 | `28` | `magic` | 4 bytes | Integer `0x524F5753`, serialized as bytes `53 57 4F 52`. |
 
@@ -196,16 +210,19 @@ To read a row by its zero-based row number within the file:
 
 1. **Read Footer**: Seek to file end - 32 bytes, read the 32-byte footer. Validate magic number.
 2. **Read Block Index**: Seek to `indexOffset`, read `indexLength` bytes, decode the three arrays. Compute block offsets by prefix sum of `blockCompressedSizes[]`.
-3. **Check Consistency**: Verify the block index against the footer, as described under Block Index. A reader that bounds its block loop by one of the two — the footer's `blockCount` or the index array length — must reject a file where they disagree rather than silently reading fewer blocks.
+3. **Check Consistency**: Verify the block index against the footer, as described under Block Index. Reject a file when the footer's `blockCount` and the index array length disagree. If the version is `2`, read the physical schema after the index.
 4. **Select Block**: Find block `b` where `blockRowStarts[b] <= rowNum < blockEnd`. For the last block, `blockEnd` is `totalRowCount`; otherwise it is `blockRowStarts[b + 1]`.
 5. **Read Block**: Seek to `blockOffset(b)`, read `blockCompressedSizes[b]` bytes.
 6. **Decompress**: ZSTD decompress into a buffer of size `blockUncompressedSizes[b]`.
 7. **Locate Row**: Compute `localIdx = rowNum - blockRowStarts[b]`. Read `offsets[localIdx]` from the offset array at the end of the decompressed block.
-8. **Deserialize**: Read the row starting at the computed offset using the row serialization format.
+8. **Deserialize**: Read the row starting at the computed offset using the file's physical schema in version 2 or its logical write schema in version 1.
 
 ## Projection
 
 Column projection is applied after full row deserialization. Since the compact row format serializes fields sequentially without per-field offset metadata, individual fields cannot be skipped during deserialization. After the complete row is deserialized, a projection mapping selects the requested columns.
+
+Java readers can extract a projected Variant path from its typed field or overflow bytes in the
+decoded row without rebuilding the complete Variant.
 
 ## Selection (Deletion Vectors)
 

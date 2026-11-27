@@ -27,7 +27,9 @@ import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -97,10 +99,11 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
-        schemaBuilder.column("f2", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.VARIANT());
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
         Schema schema = schemaBuilder.build();
         catalog.createTable(identifier(), schema, true);
 
@@ -109,7 +112,8 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
             write.write(
-                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+                    GenericRow.of(
+                            1, BinaryString.fromString("a"), GenericVariant.fromJson("{\"b\":1}")));
             messages = write.prepareCommit();
             builder.newCommit().commit(messages);
         }
@@ -125,12 +129,62 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
             for (DataFileMeta file : commitMessage.newFilesIncrement().newFiles()) {
                 for (String extraFile : file.extraFiles()) {
                     if (extraFile.endsWith(".row")) {
-                        table.fileIO()
-                                .getFileStatus(dataFilePathFactory.toAlignedPath(extraFile, file));
+                        Path path = dataFilePathFactory.toAlignedPath(extraFile, file);
+                        try (SeekableInputStream in = table.fileIO().newInputStream(path)) {
+                            in.seek(table.fileIO().getFileSize(path) - 8);
+                            assertThat(in.read()).isEqualTo(1);
+                        }
                     }
                 }
             }
         }
+    }
+
+    @Test
+    public void testShreddedVariantInRowFormatPartialUpdate() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payload", DataTypes.VARIANT())
+                        .option(CoreOptions.FILE_FORMAT.key(), "row")
+                        .option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), schema, true);
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, GenericVariant.fromJson("{\"old\":1}")));
+            write.write(GenericRow.of(2, GenericVariant.fromJson("{\"old\":2}")));
+            commit.commit(write.prepareCommit());
+        }
+
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true")),
+                false);
+        builder = getTableDefault().newBatchWriteBuilder();
+        RowType updateType = schema.rowType().project(Collections.singletonList("payload"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(updateType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(GenericVariant.fromJson("{\"updated\":10}")));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            commit.commit(messages);
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        Map<Integer, String> result = new HashMap<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> result.put(row.getInt(0), row.getVariant(1).toJson()));
+        }
+        assertThat(result.size()).isEqualTo(2);
+        assertThat(result.get(1)).isEqualTo("{\"updated\":10}");
+        assertThat(result.get(2)).isEqualTo("{\"old\":2}");
     }
 
     @Test

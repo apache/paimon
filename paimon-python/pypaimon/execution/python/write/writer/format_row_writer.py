@@ -16,6 +16,7 @@
 # under the License.
 
 import datetime
+import json
 import re
 import struct
 from decimal import Decimal, localcontext
@@ -24,22 +25,22 @@ from typing import Any, List
 import pyarrow as pa
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
+from pypaimon.common.row_format import FOOTER_SIZE, MAGIC, VERSION_PLAIN, VERSION_WITH_SCHEMA
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, MultisetType, RowType, VectorType
 )
 
-FOOTER_SIZE = 32
-MAGIC = 0x524F5753  # "ROWS"
-VERSION = 1
 DEFAULT_BLOCK_SIZE = 65536
 
 
 class FormatRowWriter:
 
     def __init__(self, output_stream, fields: List[DataField],
-                 block_size: int = DEFAULT_BLOCK_SIZE, zstd_level: int = 1):
+                 block_size: int = DEFAULT_BLOCK_SIZE, zstd_level: int = 1,
+                 write_physical_schema: bool = False):
         self._out = output_stream
         self._fields = fields
+        self._write_physical_schema = write_physical_schema
         self._block_size = block_size
         self._zstd_level = zstd_level
 
@@ -72,6 +73,10 @@ class FormatRowWriter:
         self._write_block_index()
         index_length = self._bytes_written - index_offset
 
+        if self._write_physical_schema:
+            schema = json.dumps(RowType(True, self._fields).to_dict(), separators=(',', ':')).encode('utf-8')
+            self._out.write(schema)
+            self._bytes_written += len(schema)
         self._write_footer(index_offset, index_length)
         self._out.flush()
 
@@ -136,7 +141,7 @@ class FormatRowWriter:
         struct.pack_into('<i', buf, 8, len(self._block_compressed_sizes))
         struct.pack_into('<q', buf, 12, index_offset)
         struct.pack_into('<i', buf, 20, index_length)
-        buf[24] = VERSION
+        buf[24] = VERSION_WITH_SCHEMA if self._write_physical_schema else VERSION_PLAIN
         # bytes 25-27 reserved (zeros)
         struct.pack_into('<I', buf, 28, MAGIC)
         self._out.write(bytes(buf))

@@ -17,10 +17,12 @@
 
 """Integration tests for the ROW file format across all table types."""
 
+import json
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -595,6 +597,57 @@ def test_row_table_preserves_variant_values(tmp_path, table_kind):
     projected_result = projected.new_read().to_arrow(
         projected.new_scan().plan().splits()).sort_by('id')
     assert projected_result.to_pydict() == data.select(['payload', 'id']).to_pydict()
+
+
+@pytest.mark.execution_defaults
+def test_row_table_reads_plain_and_shredded_variants(tmp_path):
+    values = [
+        {'score': 1}, {'score': 2, 'overflow': {'nested': ['value']}},
+        {'score': 'mismatch'}, None,
+    ]
+    payloads = GenericVariant.to_arrow_array(
+        [GenericVariant.from_python(value) for value in values] + [None])
+    data = pa.table({'id': pa.array(range(5), type=pa.int32()), 'payload': payloads})
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    catalog.create_table('default.variants', Schema.from_pyarrow_schema(data.schema, options={
+        'file.format': 'row', 'scan.native-plan.enabled': 'false',
+        'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+    }), False)
+    table = catalog.get_table('default.variants')
+    shredding_schema = json.dumps({'type': 'ROW', 'fields': [{
+        'name': 'payload', 'type': {'type': 'ROW', 'fields': [
+            {'name': 'score', 'type': 'INT'},
+        ]},
+    }]})
+
+    for write_table, batch, version in [
+        (table, data.slice(0, 1), b'\x01'),
+        (table.copy({'variant.shreddingSchema': shredding_schema}), data.slice(1), b'\x02'),
+    ]:
+        builder = write_table.new_batch_write_builder()
+        writer, committer = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(batch)
+            messages = writer.prepare_commit()
+            file = messages[0].new_files[0]
+            with table.file_io.new_input_stream(file.physical_path()) as stream:
+                stream.seek(file.file_size - 8)
+                assert stream.read(1) == version
+            committer.commit(messages)
+        finally:
+            writer.close()
+            committer.close()
+
+    reader = table.new_read_builder().with_projection(['payload', 'id'])
+    splits = reader.new_scan().plan().splits()
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        result = reader.new_read().to_arrow(splits).sort_by('id')
+        native.assert_not_called()
+    assert result.column('id').to_pylist() == list(range(5))
+    restored = result.column('payload').to_pylist()
+    assert [GenericVariant.from_arrow_struct(row).to_python() for row in restored[:-1]] == values
+    assert restored[-1] is None
 
 
 if __name__ == '__main__':
