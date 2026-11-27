@@ -62,7 +62,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -311,37 +310,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
         RoaringNavigableMap64 candidates = manifestsReader.manifestGroupCandidates();
-        boolean pruneGroups = scanMode == ScanMode.ALL && candidates != null && limit == null;
         Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries =
-                pruneGroups ? readMixedManifests(manifests) : Collections.emptyMap();
-        RowRangeIndex retainedGroups = null;
-        if (!mixedEntries.isEmpty()) {
-            retainedGroups =
+                scanMode == ScanMode.ALL && candidates != null && limit == null
+                        ? readMixedManifests(manifests)
+                        : Collections.emptyMap();
+        Iterator<ManifestEntry> iterator;
+        if (mixedEntries.isEmpty()) {
+            iterator = readManifestEntries(manifests, false);
+        } else {
+            RowRangeIndex retainedGroups =
                     ManifestsReader.selectManifestGroups(manifests, candidates, mixedEntries);
             manifests = ManifestsReader.pruneManifestGroups(manifests, retainedGroups);
+            iterator =
+                    readAndMergeFileEntries(
+                            manifests, Function.identity(), false, mixedEntries, retainedGroups);
         }
-        // Refine after the mixed manifest pass so we only open sidecars for surviving ADDs.
-        Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> addBlocks =
-                pruneGroups ? readAddBlockIndexes(manifests) : Collections.emptyMap();
-        if (addBlocks.values().stream().anyMatch(Optional::isPresent)) {
-            RowRangeIndex blockGroups =
-                    ManifestsReader.selectManifestGroups(
-                            manifests, candidates, mixedEntries, addBlocks);
-            if (blockGroups != null) {
-                retainedGroups = blockGroups;
-                manifests = ManifestsReader.pruneManifestGroups(manifests, retainedGroups);
-            }
-        }
-        Iterator<ManifestEntry> iterator =
-                mixedEntries.isEmpty() && addBlocks.isEmpty()
-                        ? readManifestEntries(manifests, false)
-                        : readAndMergeFileEntries(
-                                manifests,
-                                Function.identity(),
-                                false,
-                                mixedEntries,
-                                retainedGroups,
-                                addBlocks);
 
         List<ManifestEntry> files = ListUtils.toList(iterator);
         if (postFilterManifestEntriesEnabled()) {
@@ -505,49 +488,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return entries;
     }
 
-    private Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> readAddBlockIndexes(
-            List<ManifestFileMeta> manifests) {
-        // A v1 sidecar covers both entry kinds. Only ADD-only blocks can define file groups.
-        List<ManifestFileMeta> indexed =
-                manifests.stream()
-                        .filter(
-                                manifest ->
-                                        manifest.numAddedFiles() > 1
-                                                && manifest.numDeletedFiles() == 0
-                                                && ManifestSidecar.fileName(manifest) != null)
-                        .collect(Collectors.toList());
-        if (indexed.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
-        BucketFilter bucketFilter = createBucketFilter();
-        Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> selections =
-                new ConcurrentHashMap<>();
-        randomlyOnlyExecute(
-                getExecutorService(parallelism),
-                manifest -> {
-                    ManifestSidecar.Selection selection =
-                            manifestFileFactory
-                                    .create()
-                                    .readBlockIndex(
-                                            manifest, rowRangeIndex, partitionFilter, bucketFilter);
-                    selections.put(manifest, Optional.ofNullable(selection));
-                },
-                indexed);
-        return selections;
-    }
-
     private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
             List<ManifestFileMeta> manifests,
             Function<ManifestEntry, T> converter,
             boolean useSequential) {
         return readAndMergeFileEntries(
-                manifests,
-                converter,
-                useSequential,
-                Collections.emptyMap(),
-                null,
-                Collections.emptyMap());
+                manifests, converter, useSequential, Collections.emptyMap(), null);
     }
 
     private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
@@ -555,8 +501,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             Function<ManifestEntry, T> converter,
             boolean useSequential,
             Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries,
-            @Nullable RowRangeIndex retainedGroups,
-            Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> addBlocks) {
+            @Nullable RowRangeIndex retainedGroups) {
         Set<Identifier> deletedEntries =
                 FileEntry.readDeletedEntries(
                         manifest -> {
@@ -584,15 +529,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<ManifestFileMeta, List<T>> processor =
                 manifest -> {
                     List<ManifestEntry> entries = mixedEntries.get(manifest);
-                    Optional<ManifestSidecar.Selection> blocks = addBlocks.get(manifest);
-                    if (blocks != null) {
-                        return readManifest(
-                                manifest,
-                                converter,
-                                FileEntry.addFilter(),
-                                notDeleted,
-                                blocks.map(selection -> selection.withRowGroups(retainedGroups)));
-                    }
                     // A mixed manifest retained for its DELETEs can still have unrelated ADDs.
                     return entries == null
                             ? readManifest(manifest, converter, FileEntry.addFilter(), notDeleted)
@@ -665,26 +601,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             Function<ManifestEntry, T> converter,
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
-        return readManifest(manifest, converter, additionalFilter, additionalTFilter, null);
-    }
 
-    private <T> List<T> readManifest(
-            ManifestFileMeta manifest,
-            Function<ManifestEntry, T> converter,
-            @Nullable Filter<InternalRow> additionalFilter,
-            @Nullable Filter<ManifestEntry> additionalTFilter,
-            @Nullable Optional<ManifestSidecar.Selection> prefetchedBlocks) {
         ManifestFile manifestFile = manifestFileFactory.create();
         BucketFilter bucketFilter = createBucketFilter();
-        // An empty prefetched result already selected the ordinary manifest read.
         ManifestSidecar.Selection selected =
-                prefetchedBlocks == null
-                        ? manifestFile.selectBlocks(
-                                manifest,
-                                rowRangeIndex,
-                                manifestsReader.partitionFilter(),
-                                bucketFilter)
-                        : prefetchedBlocks.orElse(null);
+                manifestFile.selectBlocks(
+                        manifest, rowRangeIndex, manifestsReader.partitionFilter(), bucketFilter);
         if (selected != null && selected.blocks().isEmpty()) {
             return Collections.emptyList();
         }

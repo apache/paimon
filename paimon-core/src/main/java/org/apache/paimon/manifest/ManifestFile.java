@@ -499,19 +499,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter) {
         boolean hasFilter = query != null || partitionFilter != null || bucketFilter != null;
-        return !hasFilter && cache == null
-                ? null
-                : readBlockIndex(manifest, query, partitionFilter, bucketFilter);
-    }
-
-    /** Reads the sidecar even when the scan has no block filters or manifest cache. */
-    @Nullable
-    public ManifestSidecar.Selection readBlockIndex(
-            ManifestFileMeta manifest,
-            @Nullable RowRangeIndex query,
-            @Nullable PartitionPredicate partitionFilter,
-            @Nullable BucketFilter bucketFilter) {
-        return !options.manifestSidecarEnabled()
+        return !options.manifestSidecarEnabled() || (!hasFilter && cache == null)
                 ? null
                 : ManifestSidecar.read(
                         fileIO,
