@@ -41,6 +41,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit;
+
 /** Action to rescale one partition of a table. */
 public class RescaleAction extends TableActionBase {
 
@@ -79,7 +81,8 @@ public class RescaleAction extends TableActionBase {
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         env.configure(flinkConf);
 
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        FileStoreTable fileStoreTable =
+                rejectRewriteUnderQueryAuthOnCommit((FileStoreTable) table, "Rescale");
         Optional<Snapshot> optionalSnapshot = fileStoreTable.latestSnapshot();
         if (!optionalSnapshot.isPresent()) {
             throw new IllegalArgumentException(

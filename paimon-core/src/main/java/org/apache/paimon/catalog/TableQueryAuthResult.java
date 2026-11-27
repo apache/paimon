@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.And;
@@ -28,6 +29,8 @@ import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
@@ -36,6 +39,7 @@ import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -140,6 +144,105 @@ public class TableQueryAuthResult implements Serializable {
             throw new UnsupportedOperationException(
                     "Search is not supported on a query-auth table: the index ranks raw values, "
                             + "which a column mask invalidates.");
+        }
+    }
+
+    /**
+     * Rejects the rewrite now, and returns a copy of {@code table} to write it with, whose commits
+     * reject it again. A rule added before the rewrite reads the table is then seen when it
+     * commits, wherever the read is planned.
+     */
+    public static FileStoreTable rejectRewriteUnderQueryAuthOnCommit(
+            FileStoreTable table, String operation) {
+        rejectRewriteUnderQueryAuth(table, operation);
+        // Keep the schema of a table pinned to a snapshot, which a time travel would replace.
+        return table.copyWithoutTimeTravel(
+                Collections.singletonMap(CoreOptions.COMMIT_REWRITE_OPERATION.key(), operation));
+    }
+
+    /** See {@link #rejectRewriteUnderQueryAuthOnCommit(FileStoreTable, String)}. */
+    public static Table rejectRewriteUnderQueryAuthOnCommit(Table table, String operation) {
+        if (table instanceof FileStoreTable) {
+            return rejectRewriteUnderQueryAuthOnCommit((FileStoreTable) table, operation);
+        }
+        rejectRewriteUnderQueryAuth(table, operation);
+        return table;
+    }
+
+    /**
+     * Rejects the rewrite before it commits {@code table}. Besides {@code table}, it authorizes the
+     * table loaded again from the catalog, which a read that loads the table again uses, so query
+     * auth enabled or a branch read with the table added since {@code table} was loaded is seen.
+     */
+    public static void rejectRewriteBeforeCommit(FileStoreTable table, String operation) {
+        rejectRewriteUnderQueryAuth(table, operation);
+        CatalogEnvironment environment = table.catalogEnvironment();
+        Identifier identifier = environment.identifier();
+        CatalogLoader catalogLoader = environment.catalogLoader();
+        // Query auth needs the catalog, so a table without it has no rules.
+        if (identifier == null || catalogLoader == null) {
+            return;
+        }
+        List<Identifier> identifiers = new ArrayList<>();
+        identifiers.add(identifier);
+        if (table.coreOptions().isChainTable() && identifier.getBranchName() != null) {
+            // A chain table branch is loaded with its own identifier. Compaction writes the
+            // snapshot branch but reads the delta branch, which only the chain table holds.
+            identifiers.add(
+                    Identifier.create(identifier.getDatabaseName(), identifier.getTableName()));
+        }
+        List<Table> latest = new ArrayList<>();
+        try (Catalog catalog = catalogLoader.load()) {
+            for (Identifier id : identifiers) {
+                latest.add(catalog.getTable(id));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to load " + identifier.getFullName() + " to authorize " + operation, e);
+        }
+        for (Table loaded : latest) {
+            rejectRewriteUnderQueryAuth(loaded, operation);
+        }
+    }
+
+    public static void rejectRewriteUnderQueryAuth(@Nullable Table table, String operation) {
+        if (table instanceof RowTrackingTable) {
+            // Data Evolution rewrites read the table through its row tracking table.
+            rejectRewriteUnderQueryAuth(((RowTrackingTable) table).wrapped(), operation);
+            return;
+        }
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            CoreOptions options = fileStoreTable.coreOptions();
+            if (options.queryAuthEnabled()) {
+                CatalogEnvironment environment = fileStoreTable.catalogEnvironment();
+                rejectRewriteUnderQueryAuthRules(
+                        environment.tableQueryAuth(options).auth(null), operation);
+                // The identifier can name another branch than the one the table reads.
+                Identifier identifier = environment.identifier();
+                if (identifier != null
+                        && !identifier.getBranchNameOrDefault().equals(options.branch())) {
+                    Identifier branch =
+                            new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    options.branch());
+                    rejectRewriteUnderQueryAuthRules(
+                            environment.copy(branch).tableQueryAuth(options).auth(null), operation);
+                }
+            }
+            if (fileStoreTable instanceof FallbackReadFileStoreTable) {
+                rejectRewriteUnderQueryAuth(
+                        ((FallbackReadFileStoreTable) fileStoreTable).other(), operation);
+            }
+        }
+    }
+
+    private static void rejectRewriteUnderQueryAuthRules(
+            @Nullable TableQueryAuthResult authResult, String operation) {
+        if (authResult != null && authResult.hasRules()) {
+            throw new UnsupportedOperationException(
+                    operation + " requires full-table access without row filters or column masks.");
         }
     }
 

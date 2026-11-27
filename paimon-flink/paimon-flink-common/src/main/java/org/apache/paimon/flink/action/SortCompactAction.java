@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit;
+
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
 
@@ -78,7 +80,8 @@ public class SortCompactAction extends CompactAction {
                     "Sort Compact only support batch mode yet. Please add -Dexecution.runtime-mode=BATCH. The action this time will shift to batch mode forcely.");
             env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         }
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        FileStoreTable fileStoreTable =
+                rejectRewriteUnderQueryAuthOnCommit((FileStoreTable) table, "Sort compaction");
 
         if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
             throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");

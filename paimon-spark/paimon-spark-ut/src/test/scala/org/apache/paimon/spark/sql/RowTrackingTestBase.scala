@@ -701,6 +701,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       val relation = createRelationV2("t")
       val userRowId = relation.output.find(_.name == "_row_id").get
       case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override protected def rewriteOperation: String = "DELETE"
+
         override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
 
         def candidates(condition: Expression): Seq[DataSplit] =
@@ -734,6 +736,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         .find(_.name == "_ROW_ID")
         .get
       case class RowLevelProbe(override val table: FileStoreTable) extends PaimonRowLevelCommand {
+        override protected def rewriteOperation: String = "DELETE"
+
         override def run(sparkSession: SparkSession): Seq[Row] = Seq.empty
 
         def candidates(

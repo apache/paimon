@@ -81,6 +81,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;
+    @Nullable private Runnable commitCheck;
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoManager tagAutoManager;
@@ -219,15 +220,29 @@ public class TableCommitImpl implements InnerTableCommit {
         commit(COMMIT_IDENTIFIER, commitMessages);
     }
 
+    /** Runs {@code check} before each commit; a failing check aborts the commit. */
+    public TableCommitImpl withCommitCheck(@Nullable Runnable check) {
+        this.commitCheck = check;
+        return this;
+    }
+
+    private void checkBeforeCommit() {
+        if (commitCheck != null) {
+            commitCheck.run();
+        }
+    }
+
     @Override
     public void truncateTable() {
         checkCommitted();
+        checkBeforeCommit();
         withTemporaryOperation(
                 Snapshot.Operation.TRUNCATE, () -> commit.truncateTable(COMMIT_IDENTIFIER));
     }
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
+        checkBeforeCommit();
         withTemporaryOperation(
                 Snapshot.Operation.TRUNCATE,
                 () -> commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER));
@@ -236,6 +251,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void truncatePartitions(PartitionPredicate partitionFilter) {
         checkNotNull(partitionFilter, "Partition filter cannot be null.");
+        checkBeforeCommit();
         withTemporaryOperation(
                 Snapshot.Operation.TRUNCATE,
                 () -> commit.dropPartitions(partitionFilter, COMMIT_IDENTIFIER));
@@ -312,6 +328,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
+        checkBeforeCommit();
         if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {

@@ -29,6 +29,8 @@ import org.apache.paimon.catalog.Model;
 import org.apache.paimon.catalog.ModelField;
 import org.apache.paimon.catalog.ProviderModelDefinition;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.management.ListPermissionsRequest;
@@ -66,10 +68,15 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -110,6 +117,7 @@ import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.apache.paimon.rest.RESTApi.READ_VIA_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -1841,6 +1849,144 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(result.columnMasking()).isNotEmpty();
         assertThat(result.columnMasking()).containsKey("col2");
         assertThat(result.columnMasking().get("col2")).isEqualTo(transformJson);
+
+        catalog.dropTable(identifier, true);
+        catalog.dropDatabase(identifier.getDatabaseName(), true, true);
+    }
+
+    @Test
+    void testRewriteCommitAuthorizesAgain() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "rewrite_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.STRING())
+                        .option(CoreOptions.QUERY_AUTH_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder rewrite =
+                TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit(table, "UPDATE")
+                        .newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = rewrite.newWrite()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("a")));
+            messages = write.prepareCommit();
+        }
+
+        // A rule added after the rewrite started fails its commits.
+        restCatalogServer.setColumnMaskingAuth(
+                identifier,
+                Collections.singletonMap(
+                        "col2",
+                        new UpperTransform(
+                                Collections.singletonList(
+                                        new FieldRef(1, "col2", DataTypes.STRING())))));
+        try (BatchTableCommit commit = rewrite.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(messages))
+                    .hasMessageContaining("UPDATE requires full-table access");
+        }
+        try (BatchTableCommit commit = rewrite.newCommit()) {
+            assertThatThrownBy(commit::truncateTable)
+                    .hasMessageContaining("UPDATE requires full-table access");
+        }
+        assertThat(table.latestSnapshot()).isEmpty();
+
+        restCatalogServer.setColumnMaskingAuth(identifier, Collections.emptyMap());
+        try (BatchTableCommit commit = rewrite.newCommit()) {
+            commit.commit(messages);
+        }
+        assertThat(table.latestSnapshot()).isPresent();
+
+        catalog.dropTable(identifier, true);
+        catalog.dropDatabase(identifier.getDatabaseName(), true, true);
+    }
+
+    @Test
+    void testChainCompactionCommitAuthorizesDeltaBranch() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "chain_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("note", DataTypes.STRING())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .primaryKey("dt", "id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET_KEY.key(), "id")
+                        .option(CoreOptions.SEQUENCE_FIELD.key(), "id")
+                        .option(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true")
+                        .option(CoreOptions.QUERY_AUTH_ENABLED.key(), "true")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$dt")
+                        .option(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd")
+                        .build(),
+                false);
+        catalog.createBranch(identifier, "snapshot", null);
+        catalog.createBranch(identifier, "delta", null);
+        for (String branch : Arrays.asList(null, "snapshot", "delta")) {
+            catalog.alterTable(
+                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch),
+                    Arrays.asList(
+                            SchemaChange.setOption(
+                                    CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot"),
+                            SchemaChange.setOption(
+                                    CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta")),
+                    false);
+        }
+        // Only the delta branch, which the compaction also reads, enables query auth.
+        for (String branch : Arrays.asList(null, "snapshot")) {
+            catalog.alterTable(
+                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch),
+                    Collections.singletonList(
+                            SchemaChange.setOption(CoreOptions.QUERY_AUTH_ENABLED.key(), "false")),
+                    false);
+        }
+
+        FallbackReadFileStoreTable table =
+                (FallbackReadFileStoreTable) catalog.getTable(identifier);
+        FileStoreTable snapshotBranch = ((ChainGroupReadTable) table.other()).wrapped();
+        BatchWriteBuilder compaction =
+                TableQueryAuthResult.rejectRewriteUnderQueryAuthOnCommit(
+                                snapshotBranch, "Chain table compaction")
+                        .newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = compaction.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("one"),
+                            BinaryString.fromString("20261001")));
+            messages = write.prepareCommit();
+        }
+
+        // The delta branch is read with its own identifier, so its rules are the ones it uses.
+        Identifier delta =
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), "delta");
+        restCatalogServer.setColumnMaskingAuth(
+                delta,
+                Collections.singletonMap(
+                        "note",
+                        new UpperTransform(
+                                Collections.singletonList(
+                                        new FieldRef(1, "note", DataTypes.STRING())))));
+        try (BatchTableCommit commit = compaction.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(messages))
+                    .hasMessageContaining("Chain table compaction requires full-table access");
+        }
+        assertThat(snapshotBranch.latestSnapshot()).isEmpty();
+
+        // The mock server cannot commit a branch through the main table's identifier, so check
+        // that full access passes without committing.
+        restCatalogServer.setColumnMaskingAuth(delta, Collections.emptyMap());
+        assertThatCode(
+                        () ->
+                                TableQueryAuthResult.rejectRewriteUnderQueryAuth(
+                                        snapshotBranch, "Chain table compaction"))
+                .doesNotThrowAnyException();
 
         catalog.dropTable(identifier, true);
         catalog.dropDatabase(identifier.getDatabaseName(), true, true);

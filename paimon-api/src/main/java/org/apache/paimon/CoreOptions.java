@@ -2481,6 +2481,15 @@ public class CoreOptions implements Serializable {
                             "Enable query auth to give Catalog the opportunity to perform "
                                     + "column level and row level permission validation on queries.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> COMMIT_REWRITE_OPERATION =
+            key("commit.rewrite-operation")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The rewrite that writes the table. Its commits fail when query auth "
+                                    + "returns row filters or column masks.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -3862,6 +3871,11 @@ public class CoreOptions implements Serializable {
 
     public boolean queryAuthEnabled() {
         return options.get(QUERY_AUTH_ENABLED);
+    }
+
+    @Nullable
+    public String commitRewriteOperation() {
+        return options.get(COMMIT_REWRITE_OPERATION);
     }
 
     public boolean ignoreDelete() {

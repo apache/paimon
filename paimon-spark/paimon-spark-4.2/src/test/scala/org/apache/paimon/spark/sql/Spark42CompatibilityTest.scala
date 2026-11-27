@@ -18,11 +18,14 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.predicate.{Equal, FieldRef, FieldTransform, LeafPredicate, Predicate}
 import org.apache.paimon.rest.RESTCatalogServer
 import org.apache.paimon.rest.auth.BearTokenAuthProvider
 import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
@@ -227,6 +230,41 @@ class Spark42CompatibilityTest extends QueryTest with SharedSparkSession {
         checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 99), Row(2, 20), Row(3, 30)))
         sql("DELETE FROM t")
         checkAnswer(sql("SELECT COUNT(*) FROM t"), Seq(Row(0L)))
+      }
+    }
+  }
+
+  test("insert-only merges with v2 writes require full-table access") {
+    withSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      withTable("t_auth") {
+        sql("CREATE TABLE t_auth (id INT, v INT) TBLPROPERTIES ('query-auth.enabled'='true')")
+        sql("INSERT INTO t_auth VALUES (1, 10), (2, 20)")
+        val identifier = Identifier.create("test", "t_auth")
+        val merge = "MERGE INTO t_auth t USING (SELECT 2 AS id, 22 AS v) s ON t.id = s.id " +
+          "WHEN NOT MATCHED THEN INSERT *"
+        // The row filter hides id = 2, so the merge would insert it again.
+        server.setRowFilterAuth(
+          identifier,
+          Collections.singletonList[Predicate](
+            LeafPredicate.of(
+              new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+              Equal.INSTANCE,
+              Collections.singletonList[AnyRef](Integer.valueOf(1))))
+        )
+        try {
+          val e = intercept[Exception](sql(merge).collect())
+          assert(
+            Iterator
+              .iterate[Throwable](e)(_.getCause)
+              .takeWhile(_ != null)
+              .exists(
+                t => String.valueOf(t.getMessage).contains("MERGE requires full-table access")))
+        } finally {
+          server.setRowFilterAuth(identifier, null)
+        }
+        checkAnswer(sql("SELECT * FROM t_auth"), Seq(Row(1, 10), Row(2, 20)))
+        sql(merge)
+        checkAnswer(sql("SELECT * FROM t_auth"), Seq(Row(1, 10), Row(2, 20)))
       }
     }
   }
