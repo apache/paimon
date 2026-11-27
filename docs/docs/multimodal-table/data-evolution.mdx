@@ -510,3 +510,9 @@ Choose [file sizes](./data-evolution-maintenance#file-sizing) with future
 partial-update costs in mind. See the [metadata reference](./data-evolution-file-layout#compact-write-column-metadata)
 before enabling compact write-column encoding, and use the
 [`$files` query](./data-evolution-file-layout#inspect-the-layout) to inspect alignment.
+
+## Splitting descriptor scans
+
+For batch descriptor reads, `blob-descriptor.scan.max-files-per-split` limits BLOB
+files per split (`0`: disabled). Requires one normal file covering disjoint BLOB
+ranges without deletion vectors. Smaller splits may increase normal-file IO.

@@ -75,6 +75,12 @@ under the License.
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
+            <td><h5>blob-descriptor.scan.max-files-per-split</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>Opt-in maximum BLOB files per row-range split for batch descriptor reads. Zero disables splitting. Only a single normal file with disjoint BLOB ranges and no deletion vectors is supported. Other layouts retain their original splits. Smaller values can increase normal-file IO.</td>
+        </tr>
+        <tr>
             <td><h5>blob-descriptor.source-table</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

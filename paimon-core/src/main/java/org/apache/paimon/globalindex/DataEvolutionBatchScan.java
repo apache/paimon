@@ -370,7 +370,23 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
 
         if (rowRangeIndex == null) {
-            return batchScan.plan();
+            Plan plan = batchScan.plan();
+            int maxFiles =
+                    table.coreOptions()
+                            .toConfiguration()
+                            .get(CoreOptions.BLOB_DESCRIPTOR_SCAN_MAX_FILES);
+            if (maxFiles > 0
+                    && table.coreOptions().blobAsDescriptor()
+                    && !queryAuthEnabled()
+                    && pushDownLimit == null
+                    && topN == null) {
+                List<Split> splits = new ArrayList<>();
+                for (Split split : plan.splits()) {
+                    splits.addAll(BlobDescriptorSplitPlanner.split(split, maxFiles));
+                }
+                return () -> splits;
+            }
+            return plan;
         }
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
