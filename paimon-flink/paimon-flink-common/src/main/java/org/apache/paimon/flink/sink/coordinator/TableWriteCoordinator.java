@@ -69,9 +69,6 @@ public class TableWriteCoordinator {
         checkNotNull(table.getManifestCache());
         this.latestCommittedIdentifiers = new ConcurrentHashMap<>();
         this.scan = table.store().newScan();
-        if (table.coreOptions().manifestDeleteFileDropStats()) {
-            scan.dropStats();
-        }
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.pageSize =
                 (int)
@@ -107,9 +104,6 @@ public class TableWriteCoordinator {
             // used so the shared request `scan`'s bucket/partition state never narrows the
             // warm-up.
             FileStoreScan prefetchScan = table.store().newScan().withSnapshot(snapshot);
-            if (table.coreOptions().manifestDeleteFileDropStats()) {
-                prefetchScan.dropStats();
-            }
             prefetchScan.plan();
         }
     }

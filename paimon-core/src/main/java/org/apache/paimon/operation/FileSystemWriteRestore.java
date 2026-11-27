@@ -69,11 +69,6 @@ public class FileSystemWriteRestore implements WriteRestore {
         this.scan = scan;
         this.indexFileHandler = indexFileHandler;
         this.snapshotId = snapshotId;
-        if (options.manifestDeleteFileDropStats()) {
-            if (this.scan != null) {
-                this.scan.dropStats();
-            }
-        }
     }
 
     @Override
