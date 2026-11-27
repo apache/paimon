@@ -238,6 +238,8 @@ public class FileSystemSchemaManager implements SchemaManager {
             if (oldTableSchema.version() == newTableSchema.version()
                     && oldTableSchema.highestFieldId() == newTableSchema.highestFieldId()
                     && oldTableSchema.toSchema().equals(newTableSchema.toSchema())) {
+                // Branch existence can change even when the schema is unchanged.
+                SchemaValidation.validateFallbackBranch(this, newTableSchema);
                 return Pair.of(oldTableSchema, false);
             }
             try {

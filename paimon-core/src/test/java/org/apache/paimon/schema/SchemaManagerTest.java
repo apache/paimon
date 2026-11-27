@@ -254,6 +254,36 @@ public class SchemaManagerTest {
         assertThat(manager.listAllIds()).containsExactly(original.id());
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"scan.fallback-branch", "scan.primary-branch"})
+    public void testCommitUnchangedBranchOptionAfterBranchDeletion(String optionKey)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tableRoot = new Path(tempDir.toString());
+        SchemaManager manager = new FileSystemSchemaManager(fileIO, tableRoot);
+        TableSchema original = manager.createTable(schema);
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tableRoot);
+        String branchName = "read_branch";
+        table.createBranch(branchName);
+        SchemaChange change = SchemaChange.setOption(optionKey, branchName);
+        TableSchema updated = manager.commitChanges(change);
+
+        TableSchema unchanged = manager.commitChanges(change);
+        assertThat(unchanged.id()).isEqualTo(updated.id());
+        assertThat(unchanged).isEqualTo(updated);
+
+        table.deleteBranch(branchName);
+        assertThat(manager.copyWithBranch(branchName).latest()).isEmpty();
+
+        assertThatThrownBy(() -> manager.commitChanges(change))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        String.format(
+                                "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
+                                optionKey, branchName, branchName));
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
+    }
+
     @Test
     public void testCommitChangedSchemaWithUnchangedChanges() throws Exception {
         SchemaManager manager =
