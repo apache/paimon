@@ -392,7 +392,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 : plan;
     }
 
-    @VisibleForTesting
     static SnapshotReader.Plan pruneFileGroups(
             SnapshotReader.Plan dataPlan, RoaringNavigableMap64 candidates) {
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
