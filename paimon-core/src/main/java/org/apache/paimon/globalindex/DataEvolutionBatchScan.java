@@ -383,7 +383,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         boolean fast = searchMode == GlobalIndexSearchMode.FAST;
         // The snapshot is pinned by index evaluation. Keep the regular predicate on the scan
         // and plan without a row-level LIMIT or TopN before removing any file groups.
-        Plan plan = fast ? batchScan.plan() : batchScan.planWithManifestGroupCandidates(candidates);
+        Plan plan = batchScan.plan();
         if (!(plan instanceof SnapshotReader.Plan)) {
             return plan;
         }
