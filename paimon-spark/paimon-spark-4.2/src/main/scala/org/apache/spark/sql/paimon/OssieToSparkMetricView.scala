@@ -53,7 +53,8 @@ private[paimon] object OssieToSparkMetricView {
   private val dateTruncUnits =
     Set("YEAR", "QUARTER", "MONTH", "WEEK", "DAY", "HOUR", "MINUTE", "SECOND")
   private val dateTruncFunction = Seq("system", "builtin", "date_trunc")
-  private val extractFunctions = Map("YEAR" -> "year", "MONTH" -> "month", "DAY" -> "dayofmonth")
+  private val extractFunctions =
+    Map("YEAR" -> "year", "QUARTER" -> "quarter", "MONTH" -> "month", "DAY" -> "dayofmonth")
 
   case class Conversion(yaml: String, dateTruncOrigins: Set[Origin])
 
