@@ -38,6 +38,7 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -81,6 +82,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
@@ -195,6 +197,355 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         });
 
         assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexRangeLimit(String indexType) throws Exception {
+        createTableDefault();
+        // Leave a matching row outside index coverage.
+        appendRows(0, 1);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BinaryString match = BinaryString.fromString("a0");
+        BinaryString other = BinaryString.fromString("other");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 1; i <= 6; i++) {
+                write.write(GenericRow.of(i, i % 2 == 0 ? match : other, other));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f1", Collections.singletonList(new Range(1, 6)), indexType);
+
+        String rangeLimit = CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key();
+        FileStoreTable adaptive = table.copy(Collections.singletonMap(rangeLimit, "4"));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, match);
+        assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+
+        FileStoreTable limited = adaptive.copy(Collections.singletonMap(rangeLimit, "3"));
+        ReadBuilder read =
+                limited.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
+        TableScan.Plan plan = read.newScan().plan();
+        assertThat(plan.splits()).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
+        List<Integer> ids = new ArrayList<>();
+        read.newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        assertThat(ids).containsExactlyInAnyOrder(0, 2, 4, 6);
+
+        FileStoreTable fastAtLimit = tableWithSearchMode(limited, "fast");
+        assertThat(fastAtLimit.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+
+        FileStoreTable unlimited = limited.copy(Collections.singletonMap(rangeLimit, "0"));
+        assertThat(unlimited.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexFallsBackOnPinnedSnapshot(String indexType)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        int rowCount = 200_002;
+        BinaryString match = BinaryString.fromString("match");
+        BinaryString other = BinaryString.fromString("other");
+        BinaryString point = BinaryString.fromString("point");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                BinaryString value = i % 2 == 0 ? match : other;
+                write.write(GenericRow.of(i, value, other));
+            }
+            write.write(GenericRow.of(rowCount, point, other));
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f1", null, indexType);
+        long indexedSnapshot = table.snapshotManager().latestSnapshot().id();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(GenericRow.of(rowCount + 1, match, other));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> adaptiveOptions =
+                Collections.singletonMap(
+                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                        "100000");
+        FileStoreTable pinned =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                Long.toString(indexedSnapshot)));
+        FileStoreTable adaptive = pinned.copy(adaptiveOptions);
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate predicate = predicates.equal(1, match);
+        assertThat(pinned.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+        List<Integer> expectedIds =
+                IntStream.range(0, rowCount / 2)
+                        .map(i -> 2 * i)
+                        .boxed()
+                        .collect(Collectors.toList());
+        for (String mode : Arrays.asList("full", "detail", "fast")) {
+            ReadBuilder read =
+                    tableWithSearchMode(adaptive, mode)
+                            .newReadBuilder()
+                            .withFilter(predicate)
+                            .withProjection(new int[] {0});
+            List<Split> splits = read.newScan().plan().splits();
+            assertThat(splits)
+                    .as("%s overflow", mode)
+                    .isNotEmpty()
+                    .allSatisfy(
+                            split ->
+                                    assertThat(split)
+                                            .isInstanceOfSatisfying(
+                                                    DataSplit.class,
+                                                    data ->
+                                                            assertThat(data.snapshotId())
+                                                                    .isEqualTo(indexedSnapshot)));
+            List<Integer> ids = readIds(read, splits);
+            Collections.sort(ids);
+            assertThat(ids).containsExactlyElementsOf(expectedIds);
+        }
+
+        assertThat(
+                        adaptive.newReadBuilder()
+                                .withFilter(predicates.equal(1, point))
+                                .newScan()
+                                .plan()
+                                .splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testFastRangeOverflowUsesOrdinaryScan(String indexType) throws Exception {
+        createTableDefault();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BinaryString match = BinaryString.fromString("match");
+        BinaryString other = BinaryString.fromString("other");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        for (int start = 0; start < 32; start += 8) {
+            try (BatchTableWrite write = writes.newWrite();
+                    BatchTableCommit commit = writes.newCommit()) {
+                for (int id = start; id < start + 8; id++) {
+                    int position = id % 8;
+                    write.write(
+                            GenericRow.of(
+                                    id,
+                                    position == 0 || position >= 4 && id % 2 == 0 ? match : other,
+                                    position <= 4 && id % 2 == 0 ? match : other));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        createIndex("f1", Collections.singletonList(new Range(0, 15)), indexType);
+        createIndex("f2", Collections.singletonList(new Range(8, 23)), indexType);
+
+        FileStoreTable fast = tableWithSearchMode(table, "fast");
+        FileStoreTable capped =
+                fast.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "1"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate left =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(1, match),
+                        builder.lessThan(1, BinaryString.fromString("match-z")));
+        Predicate right = builder.equal(2, match);
+        assertFastOverflowUsesOrdinaryScan(
+                fast,
+                capped,
+                PredicateBuilder.or(left, right),
+                Arrays.asList(0, 4, 6, 8, 10, 12, 14, 16, 18, 20));
+        assertFastOverflowUsesOrdinaryScan(
+                fast, capped, PredicateBuilder.and(left, right), Arrays.asList(8, 12));
+        assertFastOverflowUsesOrdinaryScan(
+                fast,
+                capped.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b")),
+                PredicateBuilder.and(builder.greaterThan(0, 3), PredicateBuilder.or(left, right)),
+                Arrays.asList(4, 6, 8, 10, 12, 14, 16, 18, 20));
+    }
+
+    private void assertFastOverflowUsesOrdinaryScan(
+            FileStoreTable fast,
+            FileStoreTable capped,
+            Predicate predicate,
+            List<Integer> expectedFast)
+            throws IOException {
+        ReadBuilder exact =
+                fast.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
+        List<Split> exactSplits = exact.newScan().plan().splits();
+        assertThat(exactSplits).isNotEmpty().hasOnlyElementsOfType(IndexedSplit.class);
+        assertThat(readIds(exact, exactSplits)).containsExactlyInAnyOrderElementsOf(expectedFast);
+
+        ReadBuilder ordinary =
+                capped.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"))
+                        .newReadBuilder()
+                        .withFilter(predicate)
+                        .withProjection(new int[] {0});
+        List<Split> ordinarySplits = ordinary.newScan().plan().splits();
+
+        ReadBuilder limited =
+                capped.newReadBuilder().withFilter(predicate).withProjection(new int[] {0});
+        List<Split> planned = limited.newScan().plan().splits();
+        assertThat(planned)
+                .isNotEmpty()
+                .hasOnlyElementsOfType(DataSplit.class)
+                .containsExactlyInAnyOrderElementsOf(ordinarySplits);
+        assertThat(readIds(limited, planned))
+                .containsExactlyInAnyOrderElementsOf(readIds(ordinary, ordinarySplits));
+    }
+
+    private List<Integer> readIds(ReadBuilder read, List<Split> splits) throws IOException {
+        List<Integer> ids = new ArrayList<>();
+        for (Split split : splits) {
+            read.newRead()
+                    .executeFilter()
+                    .createReader(split)
+                    .forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexKeepsGroupPruningWhenRangesOverflow(String indexType)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        int rowCount = 200_002;
+        BinaryString match = BinaryString.fromString("match");
+        BinaryString other = BinaryString.fromString("other");
+        BinaryString updated = BinaryString.fromString("updated");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(i, i % 2 == 0 ? match : other, other));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        try (BatchTableWrite write =
+                        writes.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Collections.singletonList("f2")));
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(updated));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0);
+            commit.commit(messages);
+        }
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            // The column stats admit "match" in this group, but its index has no matching rows.
+            write.write(GenericRow.of(rowCount, BinaryString.fromString("a"), other));
+            write.write(GenericRow.of(rowCount + 1, BinaryString.fromString("z"), other));
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f1", null, indexType);
+        // In older groups the new column is implicitly null, even without file min/max stats.
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.INT()), false);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(GenericRow.of(rowCount + 2, match, other, 1));
+            write.write(GenericRow.of(rowCount + 3, other, other, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 gb"));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate predicate = predicates.equal(1, match);
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        TableScan.Plan beforePruning =
+                withoutIndex
+                        .newReadBuilder()
+                        .withFilter(predicate)
+                        .withProjection(new int[] {0, 2})
+                        .newScan()
+                        .plan();
+        assertThat(beforePruning.splits())
+                .singleElement()
+                .satisfies(
+                        split ->
+                                assertThat(((DataSplit) split).dataFiles())
+                                        .extracting(DataFileMeta::nonNullFirstRowId)
+                                        .containsExactlyInAnyOrder(
+                                                0L, 0L, (long) rowCount, rowCount + 2L));
+
+        FileStoreTable adaptive =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "100000"));
+        ReadBuilder read =
+                adaptive.newReadBuilder().withFilter(predicate).withProjection(new int[] {0, 2});
+        TableScan.Plan plan = read.newScan().plan();
+        assertThat(plan.splits())
+                .singleElement()
+                .satisfies(
+                        split ->
+                                assertThat(((DataSplit) split).dataFiles())
+                                        .extracting(DataFileMeta::nonNullFirstRowId)
+                                        .containsExactlyInAnyOrder(0L, 0L, rowCount + 2L));
+
+        List<Integer> ids = new ArrayList<>();
+        read.newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(
+                        row -> {
+                            int id = row.getInt(0);
+                            assertThat(row.getString(1)).isEqualTo(id < rowCount ? updated : other);
+                            ids.add(id);
+                        });
+        Collections.sort(ids);
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        IntStream.concat(
+                                        IntStream.range(0, rowCount / 2).map(i -> 2 * i),
+                                        IntStream.of(rowCount + 2))
+                                .boxed()
+                                .collect(Collectors.toList()));
+
+        Predicate compactFilter = predicates.in(1, Arrays.asList(match, other));
+        List<Split> compactSelection =
+                adaptive.newReadBuilder().withFilter(compactFilter).newScan().plan().splits();
+        assertThat(compactSelection)
+                .singleElement()
+                .isInstanceOfSatisfying(
+                        IndexedSplit.class,
+                        split ->
+                                assertThat(split.rowRanges())
+                                        .containsExactly(
+                                                new Range(0, rowCount - 1L),
+                                                new Range(rowCount + 2L, rowCount + 3L)));
     }
 
     @Test
