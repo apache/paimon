@@ -71,6 +71,11 @@ public class ContinuousFileStoreSource extends FlinkSource {
     }
 
     @Override
+    protected int maxRecordsPerPoll() {
+        return Options.fromMap(options).get(FlinkConnectorOptions.SCAN_MAX_RECORDS_PER_POLL);
+    }
+
+    @Override
     public Boundedness getBoundedness() {
         Long boundedWatermark = CoreOptions.fromMap(options).scanBoundedWatermark();
         return boundedWatermark != null ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;

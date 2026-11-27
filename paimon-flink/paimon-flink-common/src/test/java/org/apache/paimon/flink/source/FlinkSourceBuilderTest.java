@@ -134,6 +134,85 @@ public class FlinkSourceBuilderTest {
     }
 
     @Test
+    void testEmissionBudgetSupportsNativeStreamingConsumer() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "budget_native",
+                        true,
+                        1,
+                        "scan.max-records-per-poll",
+                        "1",
+                        "consumer-id",
+                        "test",
+                        "consumer.expiration-time",
+                        "1 d",
+                        "consumer.mode",
+                        "at-least-once");
+        assertThat(
+                        new FlinkSourceBuilder(table)
+                                .sourceBounded(false)
+                                .buildSource()
+                                .getBoundedness())
+                .isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        assertThat(
+                        new FlinkSourceBuilder(table)
+                                .env(env)
+                                .sourceBounded(false)
+                                .build()
+                                .getTransformation())
+                .isInstanceOf(SourceTransformation.class);
+    }
+
+    @Test
+    void testNegativeEmissionBudget() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "budget_negative", true, 1, "scan.max-records-per-poll", "-1");
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(false).buildSource())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be negative");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "consumer-id",
+                "source.checkpoint-align.enabled",
+                "scan.dedicated-split-generation"
+            })
+    void testEmissionBudgetRejectsUnsupportedTopologies(String option) throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "budget_unsupported",
+                        true,
+                        1,
+                        "scan.max-records-per-poll",
+                        "1",
+                        option,
+                        option.equals("consumer-id") ? "test" : "true",
+                        "consumer.expiration-time",
+                        "1 d");
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(false).buildSource())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires the native streaming source");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        assertThatThrownBy(
+                        () -> new FlinkSourceBuilder(table).env(env).sourceBounded(false).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires the native streaming source");
+    }
+
+    @Test
+    void testEmissionBudgetRejectsBoundedSource() throws Exception {
+        Table table =
+                createTableWithOptions("budget_bounded", true, 1, "scan.max-records-per-poll", "1");
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(true).buildSource())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires the native streaming source");
+    }
+
+    @Test
     public void testSplitFileSizeOrRowCountUsesDataSplitFileSize() {
         FileStoreSourceSplit split =
                 new FileStoreSourceSplit(
