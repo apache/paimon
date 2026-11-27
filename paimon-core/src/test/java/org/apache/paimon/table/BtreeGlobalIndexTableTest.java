@@ -20,11 +20,13 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -42,8 +44,13 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestSidecar;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
@@ -51,6 +58,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -66,6 +74,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -77,6 +86,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -86,7 +96,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -429,6 +441,169 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     .forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         return ids;
+    }
+
+    @Test
+    public void testCandidatePlanPrunesManifestBlocksWithCompanionsAndDeletes() throws Exception {
+        Schema schema = schemaDefault();
+        List<DataField> fields = new ArrayList<>(schema.fields());
+        fields.add(DataTypes.FIELD(3, "payload", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.MANIFEST_SIDECAR_ENABLED.key(), "true");
+        options.put(CoreOptions.MANIFEST_COMPRESSION.key(), "null");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(), "true");
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        fields,
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment()),
+                false);
+        FileStoreTable table = getTableDefault();
+        char[] padding = new char[65_536];
+        Arrays.fill(padding, 'p');
+        List<String> extraFiles = Collections.singletonList(new String(padding));
+        List<String> payload = Collections.singletonList("payload");
+        long schemaId = table.schema().id();
+        // Each entry fills its own Avro block. The BLOBs overlap the anchor without a direct hit.
+        DataFileMeta anchor = manifestBlockFile("anchor.parquet", 0, 8, schemaId, extraFiles, null);
+        DataFileMeta companion =
+                manifestBlockFile("payload.blob", 4, 4, schemaId, extraFiles, payload);
+        DataFileMeta obsolete =
+                manifestBlockFile("obsolete.blob", 4, 4, schemaId, extraFiles, payload);
+        DataFileMeta next = manifestBlockFile("next.parquet", 8, 4, schemaId, extraFiles, null);
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableCommit commit = writes.newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    new DataIncrement(
+                                            Arrays.asList(anchor, companion, obsolete, next),
+                                            Collections.emptyList(),
+                                            Collections.emptyList()),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        try (BatchTableCommit commit = writes.newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    new DataIncrement(
+                                            Collections.emptyList(),
+                                            Collections.singletonList(obsolete),
+                                            Collections.emptyList()),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        ManifestFileMeta addManifest =
+                table.newSnapshotReader().manifestsReader()
+                        .read(table.snapshotManager().latestSnapshot(), ScanMode.ALL).allManifests
+                        .stream()
+                        .filter(meta -> meta.numAddedFiles() == 4)
+                        .findFirst()
+                        .get();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        assertThat(
+                        manifestFile
+                                .selectBlocks(
+                                        addManifest,
+                                        RowRangeIndex.create(
+                                                Collections.singletonList(new Range(0, 11))))
+                                .blocks())
+                .hasSize(4);
+        List<ManifestSidecar.Block> expectedBlocks =
+                manifestFile
+                        .selectBlocks(
+                                addManifest,
+                                RowRangeIndex.create(Collections.singletonList(new Range(0, 7))))
+                        .blocks();
+        assertThat(expectedBlocks).hasSize(3);
+
+        AtomicLong bodyBytes = new AtomicLong();
+        AtomicInteger sidecarOpens = new AtomicInteger();
+        AtomicBoolean sidecarMissing = new AtomicBoolean();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().equals(ManifestSidecar.fileName(addManifest))) {
+                            sidecarOpens.incrementAndGet();
+                            if (sidecarMissing.get()) {
+                                throw new FileNotFoundException(path.toString());
+                            }
+                        }
+                        SeekableInputStream stream = super.newInputStream(path);
+                        if (!path.getName().equals(addManifest.fileName())) {
+                            return stream;
+                        }
+                        return new SeekableInputStreamWrapper(stream) {
+                            @Override
+                            public int read(byte[] buffer, int offset, int length)
+                                    throws IOException {
+                                int size = super.read(buffer, offset, length);
+                                if (size > 0) {
+                                    bodyBytes.addAndGet(size);
+                                }
+                                return size;
+                            }
+                        };
+                    }
+                };
+        FileStoreTable tracked =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        FileStoreScan scan = tracked.store().newScan();
+        scan.manifestsReader().withManifestGroupCandidates(RoaringNavigableMap64.bitmapOf(1, 3));
+        assertThat(scan.plan().files())
+                .extracting(ManifestEntry::fileName)
+                .containsExactlyInAnyOrder(anchor.fileName(), companion.fileName());
+        assertThat(bodyBytes.get())
+                .isEqualTo(expectedBlocks.stream().mapToLong(b -> b.length).sum());
+        assertThat(sidecarOpens).hasValue(1);
+
+        sidecarMissing.set(true);
+        sidecarOpens.set(0);
+        FileStoreTable withoutSidecar =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        // The bucket filter also uses the sidecar in the regular read path.
+        FileStoreScan fallback = withoutSidecar.store().newScan().withBucket(0);
+        fallback.manifestsReader()
+                .withManifestGroupCandidates(RoaringNavigableMap64.bitmapOf(1, 3));
+        assertThat(fallback.plan().files())
+                .extracting(ManifestEntry::fileName)
+                .containsExactlyInAnyOrder(
+                        anchor.fileName(), companion.fileName(), next.fileName());
+        assertThat(sidecarOpens).hasValue(1);
+    }
+
+    private static DataFileMeta manifestBlockFile(
+            String name,
+            long firstRowId,
+            long rowCount,
+            long schemaId,
+            List<String> extraFiles,
+            List<String> writeColumns) {
+        return DataFileMeta.forAppend(
+                name,
+                100,
+                rowCount,
+                SimpleStats.EMPTY_STATS,
+                0,
+                0,
+                schemaId,
+                extraFiles,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                writeColumns);
     }
 
     @ParameterizedTest
