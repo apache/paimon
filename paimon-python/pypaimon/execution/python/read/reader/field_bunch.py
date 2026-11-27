@@ -22,7 +22,7 @@ These classes help organize DataFileMeta objects into groups based on their fiel
 supporting both regular data files and blob files.
 """
 from abc import ABC
-from typing import List, Optional
+from typing import AbstractSet, List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.utils.range import Range
@@ -53,100 +53,15 @@ class DataBunch(FieldBunch):
         return [self.data_file]
 
 
-class _SpecialFieldBunch(FieldBunch):
-    """Base class for partial field files (blob/vector)."""
-
-    def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
-        self._files: List[DataFileMeta] = []
-        self.expected_row_count = expected_row_count
-        self.row_id_push_down = row_id_push_down
-        self.latest_first_row_id = -1
-        self.expected_next_first_row_id = -1
-        self.latest_max_sequence_number = -1
-        self._row_count = 0
-
-    def _is_special_file(self, file_name: str) -> bool:
-        raise NotImplementedError
-
-    def _file_type_label(self) -> str:
-        raise NotImplementedError
-
-    def add(self, file: DataFileMeta) -> None:
-        if not self._is_special_file(file.file_name):
-            raise ValueError(
-                f"Only {self._file_type_label()} file can be added to "
-                f"a {self._file_type_label()} bunch.")
-
-        if self._files and file.write_cols != self._files[0].write_cols:
-            raise ValueError(
-                f"All files in a {self._file_type_label()} bunch should "
-                f"have the same write columns."
-            )
-
-        if file.first_row_id == self.latest_first_row_id:
-            if file.max_sequence_number >= self.latest_max_sequence_number:
-                raise ValueError(
-                    f"{self._file_type_label().capitalize()} file with same first row id "
-                    f"should have decreasing sequence number."
-                )
-            return
-
-        if self._files:
-            first_row_id = file.first_row_id
-            if self.row_id_push_down:
-                if first_row_id < self.expected_next_first_row_id:
-                    if file.max_sequence_number > self.latest_max_sequence_number:
-                        last_file = self._files.pop()
-                        self._row_count -= last_file.row_count
-                    else:
-                        return
-            else:
-                if first_row_id < self.expected_next_first_row_id:
-                    if file.max_sequence_number >= self.latest_max_sequence_number:
-                        raise ValueError(
-                            f"{self._file_type_label().capitalize()} file with overlapping "
-                            f"row id should have decreasing sequence number."
-                        )
-                    return
-                elif first_row_id > self.expected_next_first_row_id:
-                    raise ValueError(
-                        f"{self._file_type_label().capitalize()} file first row id should "
-                        f"be continuous, expect {self.expected_next_first_row_id} "
-                        f"but got {first_row_id}"
-                    )
-
-            if self._files:
-                if file.write_cols != self._files[0].write_cols:
-                    raise ValueError(
-                        f"All files in a {self._file_type_label()} bunch should "
-                        f"have the same write columns."
-                    )
-
-        self._files.append(file)
-        self._row_count += file.row_count
-        if self._row_count > self.expected_row_count:
-            raise ValueError(
-                f"{self._file_type_label().capitalize()} files row count exceed "
-                f"the expect {self.expected_row_count}"
-            )
-
-        self.latest_max_sequence_number = file.max_sequence_number
-        self.latest_first_row_id = file.first_row_id
-        self.expected_next_first_row_id = self.latest_first_row_id + file.row_count
-
-    def row_count(self) -> int:
-        return self._row_count
-
-    def files(self) -> List[DataFileMeta]:
-        return self._files
-
-
-class BlobBunch(_SpecialFieldBunch):
+class BlobBunch(FieldBunch):
     """Files for partial field (blob files)."""
 
     def __init__(self, expected_row_count: int, row_id_push_down: bool = False,
                  expected_row_range: Optional[Range] = None):
-        super().__init__(expected_row_count, row_id_push_down)
+        self._files: List[DataFileMeta] = []
+        self.expected_row_count = expected_row_count
+        self.row_id_push_down = row_id_push_down
+        self._row_count = 0
         # The normal file is the logical anchor. A Blob column added later may
         # physically cover only part of its row-id range.
         self.expected_row_range = expected_row_range
@@ -156,7 +71,7 @@ class BlobBunch(_SpecialFieldBunch):
     def add(self, file: DataFileMeta) -> None:
         if self._finished:
             raise ValueError("Cannot add a blob file to a finished blob bunch.")
-        if not self._is_special_file(file.file_name):
+        if not DataFileMeta.is_blob_file(file.file_name):
             raise ValueError("Only blob file can be added to a blob bunch.")
         if self._files and file.write_cols != self._files[0].write_cols:
             raise ValueError("All files in a blob bunch should have the same write columns.")
@@ -200,6 +115,9 @@ class BlobBunch(_SpecialFieldBunch):
         self.finish()
         return self._row_count
 
+    def files(self) -> List[DataFileMeta]:
+        return self._files
+
     def logical_range(self) -> Range:
         if self.expected_row_range is not None:
             return self.expected_row_range
@@ -226,18 +144,16 @@ class BlobBunch(_SpecialFieldBunch):
         return Range.sort_and_merge_overlap(
             [blob_file.row_id_range() for blob_file in self._files], True, True)
 
-    def _is_special_file(self, file_name: str) -> bool:
-        return DataFileMeta.is_blob_file(file_name)
 
-    def _file_type_label(self) -> str:
-        return "blob"
+class VectorBunch(FieldBunch):
+    """Sequential files that provide the same projected vector fields."""
 
+    def __init__(self, files: List[DataFileMeta], field_ids: AbstractSet[int]):
+        self._files = files
+        self.field_ids = field_ids
 
-class VectorBunch(_SpecialFieldBunch):
-    """Files for partial field (vector files)."""
+    def row_count(self) -> int:
+        return sum(file.row_count for file in self._files)
 
-    def _is_special_file(self, file_name: str) -> bool:
-        return DataFileMeta.is_vector_file(file_name)
-
-    def _file_type_label(self) -> str:
-        return "vector"
+    def files(self) -> List[DataFileMeta]:
+        return self._files

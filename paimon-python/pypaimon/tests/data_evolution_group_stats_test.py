@@ -27,7 +27,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.execution.python.read.scanner.data_evolution_split_generator import (DataEvolutionSplitGenerator)
 from pypaimon.execution.python.read.scanner.data_evolution_stats import (DataEvolutionGroupStatsFilter)
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, VectorType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -300,6 +300,26 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
         self.assertTrue(self._filter(
             builder.equal('payload', b'not-present'), {0: fields}, 0
         ).may_match([base, vector]))
+
+    def test_dedicated_vector_versions_can_invalidate_inline_stats(self):
+        fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'embedding', VectorType(True, AtomicType('FLOAT'), 2)),
+        ]
+        inline = _file(
+            'inline.parquet', 0, 10, fields, [0, None], [9, None],
+            null_counts=[0, 10], sequence=1)
+        builder = PredicateBuilder(fields)
+        stats_filter = self._filter(builder.is_not_null('embedding'), {0: fields}, 0)
+        scalar_filter = self._filter(builder.equal('id', 50), {0: fields}, 0)
+
+        for sequence, may_match in ((0, False), (1, True), (2, True)):
+            with self.subTest(sequence=sequence):
+                vector = _file(
+                    'delta.vector.parquet', 3, 2, fields, [], [], sequence=sequence,
+                    write_cols=['embedding'], value_stats_cols=[])
+                self.assertEqual(may_match, stats_filter.may_match([inline, vector]))
+                self.assertFalse(scalar_filter.may_match([inline, vector]))
 
     def test_partial_newer_file_fails_open(self):
         fields = [DataField(0, 'value', AtomicType('INT'))]
