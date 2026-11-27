@@ -517,5 +517,12 @@ When the ranges fit, the planner pushes them down to prune manifests and builds 
 intersecting the candidates with each split's merged file ranges.
 
 If the selection exceeds the limit, the planner emits ordinary data splits and keeps the original
-predicate as a residual filter on the same snapshot. In `fast`, this can include matching rows
-outside a predicate branch's index coverage.
+predicate as a residual filter on the same snapshot. In `full` and `detail`, the planner can retain
+manifest and file group pruning. It groups manifests with ADD entries by overlapping row-ID bounds
+and selects groups that intersect the candidates. It retains DELETE-only manifests that overlap
+selected groups or lack bounds. For selected mixed manifests, it refines the groups using the ADD
+entries' file ranges and reuses the loaded entries. If ADD bounds are incomplete, it uses the
+regular manifest filters. The resulting plan can drop whole file groups that have no candidates.
+
+In `fast`, the planner uses the original scan plan, which can include matching rows outside a
+predicate branch's index coverage.

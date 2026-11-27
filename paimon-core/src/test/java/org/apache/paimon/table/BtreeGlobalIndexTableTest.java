@@ -21,8 +21,10 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -38,8 +40,10 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
@@ -54,9 +58,12 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -422,6 +429,289 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     .forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         return ids;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexReusesMixedManifestOnOverflow(String indexType)
+            throws Exception {
+        Schema schema = schemaDefault();
+        List<DataField> fields = new ArrayList<>(schema.fields());
+        fields.add(DataTypes.FIELD(3, "b1", DataTypes.BLOB()));
+        fields.add(DataTypes.FIELD(4, "b2", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b");
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        fields,
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment()),
+                false);
+        FileStoreTable table = getTableDefault();
+        BinaryString other = BinaryString.fromString("other");
+        RowType normalType = table.rowType().project(Arrays.asList("f0", "f1", "f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        for (int group = 0; group < 4; group++) {
+            try (BatchTableWrite write = builder.newWrite().withWriteType(normalType);
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int row = 0; row < 4; row++) {
+                    BinaryString value = group == 1 && row % 2 == 0 ? null : other;
+                    write.write(GenericRow.of(group * 4 + row, value, other));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        List<DataFileMeta> deletedFiles =
+                table.newScan().plan().splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .filter(
+                                file ->
+                                        file.nonNullFirstRowId() == 0
+                                                || file.nonNullFirstRowId() == 12)
+                        .collect(Collectors.toList());
+        assertThat(deletedFiles).hasSize(2);
+        try (BatchTableWrite write = builder.newWrite().withWriteType(normalType);
+                BatchTableWrite blobWrite =
+                        builder.newWrite()
+                                .withWriteType(table.rowType().project(Arrays.asList("b1", "b2")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(16, null, other));
+            write.write(GenericRow.of(17, other, other));
+            for (int row = 0; row < 4; row++) {
+                blobWrite.write(
+                        GenericRow.of(new BlobData(new byte[] {1}), new BlobData(new byte[] {2})));
+            }
+            List<CommitMessage> blobs = blobWrite.prepareCommit();
+            setFirstRowId(blobs, 8);
+            List<DataFileMeta> blobFiles =
+                    ((CommitMessageImpl) blobs.get(0)).newFilesIncrement().newFiles();
+            assertThat(blobFiles).hasSize(2);
+            // The mixed manifest contains both a selected group and dedicated files for a group
+            // whose normal file is pruned. The dedicated files must stay with their normal file.
+            CommitMessageImpl addition = (CommitMessageImpl) write.prepareCommit().get(0);
+            List<DataFileMeta> addedFiles =
+                    new ArrayList<>(addition.newFilesIncrement().newFiles());
+            addedFiles.addAll(blobFiles);
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    addition.partition(),
+                                    addition.bucket(),
+                                    addition.totalBuckets(),
+                                    new DataIncrement(
+                                            addedFiles, deletedFiles, Collections.emptyList()),
+                                    addition.compactIncrement())));
+        }
+        createIndex("f1", null, indexType);
+
+        List<ManifestFileMeta> manifests =
+                table.newSnapshotReader()
+                        .manifestsReader()
+                        .read(table.snapshotManager().latestSnapshot(), ScanMode.ALL)
+                        .allManifests;
+        ManifestFileMeta mixedManifest =
+                manifests.stream()
+                        .filter(m -> m.numAddedFiles() == 3 && m.numDeletedFiles() == 2)
+                        .findFirst()
+                        .get();
+        ManifestFileMeta unrelatedManifest =
+                manifests.stream()
+                        .filter(m -> Long.valueOf(8).equals(m.minRowId()))
+                        .findFirst()
+                        .get();
+        AtomicInteger mixedOpens = new AtomicInteger();
+        AtomicInteger unrelatedOpens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().equals(mixedManifest.fileName())) {
+                            mixedOpens.incrementAndGet();
+                        } else if (path.getName().equals(unrelatedManifest.fileName())) {
+                            unrelatedOpens.incrementAndGet();
+                        }
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable capped =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES
+                                                .key(),
+                                        "1"));
+        ReadBuilder read =
+                capped.newReadBuilder()
+                        .withFilter(new PredicateBuilder(table.rowType()).isNull(1))
+                        .withProjection(new int[] {0});
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).isNotEmpty().hasOnlyElementsOfType(DataSplit.class);
+        assertThat(mixedOpens).hasValue(1);
+        assertThat(unrelatedOpens).hasValue(0);
+        assertThat(readIds(read, splits)).containsExactlyInAnyOrder(4, 6, 16);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testAdaptiveScalarIndexKeepsGroupPruningWhenRangesOverflow(String indexType)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        int rowCount = 200_002;
+        BinaryString match = BinaryString.fromString("match");
+        BinaryString other = BinaryString.fromString("other");
+        BinaryString updated = BinaryString.fromString("updated");
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(i, i % 2 == 0 ? match : other, other));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        try (BatchTableWrite write =
+                        writes.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Collections.singletonList("f2")));
+                BatchTableCommit commit = writes.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(updated));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0);
+            commit.commit(messages);
+        }
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            // The column stats admit "match" in this group, but its index has no matching rows.
+            write.write(GenericRow.of(rowCount, BinaryString.fromString("a"), other));
+            write.write(GenericRow.of(rowCount + 1, BinaryString.fromString("z"), other));
+            commit.commit(write.prepareCommit());
+        }
+        createIndex("f1", null, indexType);
+        // In older groups the new column is implicitly null, even without file min/max stats.
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.INT()), false);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(GenericRow.of(rowCount + 2, match, other, 1));
+            write.write(GenericRow.of(rowCount + 3, other, other, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 gb"));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate predicate = predicates.equal(1, match);
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        TableScan.Plan beforePruning =
+                withoutIndex
+                        .newReadBuilder()
+                        .withFilter(predicate)
+                        .withProjection(new int[] {0, 2})
+                        .newScan()
+                        .plan();
+        assertThat(beforePruning.splits())
+                .singleElement()
+                .satisfies(
+                        split ->
+                                assertThat(((DataSplit) split).dataFiles())
+                                        .extracting(DataFileMeta::nonNullFirstRowId)
+                                        .containsExactlyInAnyOrder(
+                                                0L, 0L, (long) rowCount, rowCount + 2L));
+
+        FileStoreTable adaptive =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "100000"));
+        ReadBuilder read =
+                adaptive.newReadBuilder().withFilter(predicate).withProjection(new int[] {0, 2});
+        TableScan.Plan plan = read.newScan().plan();
+        assertThat(plan.splits())
+                .singleElement()
+                .satisfies(
+                        split ->
+                                assertThat(((DataSplit) split).dataFiles())
+                                        .extracting(DataFileMeta::nonNullFirstRowId)
+                                        .containsExactlyInAnyOrder(0L, 0L, rowCount + 2L));
+
+        List<Integer> ids = new ArrayList<>();
+        read.newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(
+                        row -> {
+                            int id = row.getInt(0);
+                            assertThat(row.getString(1)).isEqualTo(id < rowCount ? updated : other);
+                            ids.add(id);
+                        });
+        Collections.sort(ids);
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        IntStream.concat(
+                                        IntStream.range(0, rowCount / 2).map(i -> 2 * i),
+                                        IntStream.of(rowCount + 2))
+                                .boxed()
+                                .collect(Collectors.toList()));
+
+        AtomicInteger manifestOpens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        if (path.getName().startsWith("manifest-")
+                                && !path.getName().startsWith("manifest-list-")) {
+                            manifestOpens.incrementAndGet();
+                        }
+                        return super.newInputStream(path);
+                    }
+                };
+        FileStoreTable eager =
+                FileStoreTableFactory.create(fileIO, table.location(), table.schema());
+        FileStoreTable trackedAdaptive =
+                FileStoreTableFactory.create(fileIO, adaptive.location(), adaptive.schema());
+        eager.newReadBuilder().withFilter(predicate).newScan().plan();
+        int exactOpens = manifestOpens.getAndSet(0);
+        assertThat(exactOpens).isPositive();
+        assertThat(trackedAdaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(DataSplit.class);
+        assertThat(manifestOpens.getAndSet(0)).isEqualTo(exactOpens);
+
+        Predicate compactFilter = predicates.in(1, Arrays.asList(match, other));
+        eager.newReadBuilder().withFilter(compactFilter).newScan().plan();
+        int eagerOpens = manifestOpens.getAndSet(0);
+        assertThat(eagerOpens).isPositive();
+
+        List<Split> compactSelection =
+                trackedAdaptive
+                        .newReadBuilder()
+                        .withFilter(compactFilter)
+                        .newScan()
+                        .plan()
+                        .splits();
+        assertThat(manifestOpens.get()).isEqualTo(eagerOpens);
+        assertThat(compactSelection)
+                .singleElement()
+                .isInstanceOfSatisfying(
+                        IndexedSplit.class,
+                        split ->
+                                assertThat(split.rowRanges())
+                                        .containsExactly(
+                                                new Range(0, rowCount - 1L),
+                                                new Range(rowCount + 2L, rowCount + 3L)));
     }
 
     @Test
