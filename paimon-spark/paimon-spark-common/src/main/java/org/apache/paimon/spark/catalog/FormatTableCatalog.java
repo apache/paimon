@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.options.Options;
@@ -105,7 +106,9 @@ public interface FormatTableCatalog {
             options.set("nullvalue", options.get(CsvOptions.NULL_LITERAL));
             options.set("mode", options.get(CsvOptions.MODE).getValue());
             if (options.contains(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)) {
-                options.set("compression", options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION));
+                options.set(
+                        "compression",
+                        sparkCompression(options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)));
             }
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
@@ -118,10 +121,12 @@ public interface FormatTableCatalog {
                     partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.TEXT) {
             options.set("lineSep", options.get(TextOptions.LINE_DELIMITER));
-            dsOptions = new CaseInsensitiveStringMap(options.toMap());
             if (options.contains(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)) {
-                options.set("compression", options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION));
+                options.set(
+                        "compression",
+                        sparkCompression(options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)));
             }
+            dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedTextTable(
                     ident.name(),
                     spark,
@@ -164,5 +169,19 @@ public interface FormatTableCatalog {
                             + " format "
                             + formatTable.format().name());
         }
+    }
+
+    /**
+     * Spark knows codecs by a few short names only, zstd not among them, but it also takes a codec
+     * class name. Pass the Hadoop codec Paimon uses for the same name.
+     */
+    static String sparkCompression(String compression) {
+        return HadoopCompressionType.fromValue(compression)
+                .map(
+                        type ->
+                                type.hadoopCodecClassName() == null
+                                        ? "none"
+                                        : type.hadoopCodecClassName())
+                .orElse(compression);
     }
 }

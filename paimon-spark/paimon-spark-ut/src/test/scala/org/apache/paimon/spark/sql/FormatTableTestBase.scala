@@ -221,6 +221,103 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  private def formatTable(name: String): FormatTable =
+    paimonCatalog.getTable(Identifier.create(hiveDbName, name)).asInstanceOf[FormatTable]
+
+  private def dataFiles(name: String): Seq[String] = {
+    val table = formatTable(name)
+    table
+      .fileIO()
+      .listStatus(new Path(table.location()))
+      .map(_.getPath.getName)
+      .filterNot(n => n.startsWith("_") || n.startsWith("."))
+      .toSeq
+  }
+
+  test("Format table: engine writes with the format options of the table") {
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      withTable("t") {
+        sql("CREATE TABLE t (v STRING) USING text TBLPROPERTIES ('file.compression' = 'gzip')")
+        sql("INSERT INTO t VALUES ('a')")
+        checkAnswer(sql("SELECT * FROM t"), Row("a"))
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".txt.gz")), files)
+      }
+
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, data STRING) USING csv
+              |TBLPROPERTIES ('csv.field-delimiter' = ';', 'file.compression' = 'gzip')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'x,y')")
+        checkAnswer(sql("SELECT * FROM t"), Row(1, "x,y"))
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".csv.gz")), files)
+      }
+
+      // zstd is no short codec name in Spark, which resolves the codec of a CSV or TEXT table
+      // whenever it reads or writes one
+      for (
+        (format, file, content, row) <- Seq(
+          ("csv", "part-00000-0-c000.csv", "1,a", Row(1, "a")),
+          ("text", "part-00000-0-c000.txt", "1", Row("1")))
+      ) {
+        withTable("t") {
+          val columns = if (format == "csv") "id INT, data STRING" else "v STRING"
+          sql(
+            s"CREATE TABLE t ($columns) USING $format TBLPROPERTIES ('file.compression' = 'zstd')")
+          val table = formatTable("t")
+          table.fileIO().writeFile(new Path(table.location(), file), content, false)
+          checkAnswer(sql("SELECT * FROM t"), row)
+        }
+      }
+    }
+  }
+
+  test("Format table: engine writes a table with a streaming sink log with its format options") {
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      withTable("t") {
+        sql("CREATE TABLE t (v STRING) USING text TBLPROPERTIES ('file.compression' = 'gzip')")
+        // with this directory the table's file index is the metadata log index of the shim
+        val table = formatTable("t")
+        assert(table.fileIO().mkdirs(new Path(table.location(), "_spark_metadata")))
+        sql("INSERT INTO t VALUES ('a')")
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".txt.gz")), files)
+        // the empty log lists no files, so an empty read shows the metadata log index was used
+        checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+      }
+    }
+  }
+
+  test("Format table: engine INSERT options override the format options of the table") {
+    // INSERT ... WITH (options) comes with Spark 4.0
+    assume(gteqSpark4_0)
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, data STRING) USING csv
+              |TBLPROPERTIES ('csv.field-delimiter' = ';', 'file.compression' = 'gzip')
+              |""".stripMargin)
+        sql("INSERT INTO t WITH ('compression' = 'none') VALUES (1, 'x,y')")
+        // the delimiter of the table still applies
+        checkAnswer(sql("SELECT * FROM t"), Row(1, "x,y"))
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".csv")), files)
+      }
+
+      // the table spells lineSep in camel case, and the statement's key still replaces it
+      withTable("t") {
+        sql("CREATE TABLE t (v STRING) USING text")
+        val insert = sql("INSERT INTO t WITH ('lineSep' = '|') VALUES ('a')")
+        val options = insert.queryExecution.analyzed
+          .collectFirst { case command: InsertIntoHadoopFsRelationCommand => command.options }
+          .getOrElse(fail("INSERT is not a V1 write"))
+        assert(options.filter(_._1.equalsIgnoreCase("lineSep")).values.toSeq == Seq("|"), options)
+      }
+    }
+  }
+
   test("Format table: engine retains Spark's V1 write path and LEGACY casts") {
     withSparkSQLConf(
       "spark.paimon.format-table.implementation" -> "engine",
