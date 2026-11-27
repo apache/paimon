@@ -27,7 +27,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
+import org.apache.hadoop.hive.ql.io.sarg.LiteralDelegate;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
@@ -282,6 +284,30 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
+    public void testUnavailableDynamicValue() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        SearchArgument sarg =
+                builder.startAnd()
+                        .between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L)
+                        .lessThanEquals("f_int", PredicateLeaf.Type.LONG, 10L)
+                        .end()
+                        .build();
+        sarg.getLeaves()
+                .set(
+                        0,
+                        new PredicateLeafImpl(
+                                PredicateLeaf.Operator.BETWEEN,
+                                PredicateLeaf.Type.LONG,
+                                "f_bigint",
+                                null,
+                                Arrays.asList(
+                                        new UnavailableDynamicValue(),
+                                        new UnavailableDynamicValue())));
+
+        assertExpected(sarg, BUILDER.lessOrEqual(0, 10));
+    }
+
+    @Test
     public void testNotBetween() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
@@ -530,5 +556,26 @@ public class SearchArgumentToPredicateConverterTest {
                 new SearchArgumentToPredicateConverter(sarg, COLUMN_NAMES, COLUMN_TYPES, null);
         Predicate actual = converter.convert().orElse(null);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    private static class UnavailableDynamicValue implements LiteralDelegate {
+
+        @Override
+        public Object getLiteral() {
+            throw new IllegalStateException("DynamicValueRegistry not available");
+        }
+
+        @Override
+        public String getId() {
+            return "unavailable";
+        }
+
+        @Override
+        public void setConf(Configuration conf) {}
+
+        @Override
+        public Configuration getConf() {
+            return null;
+        }
     }
 }
