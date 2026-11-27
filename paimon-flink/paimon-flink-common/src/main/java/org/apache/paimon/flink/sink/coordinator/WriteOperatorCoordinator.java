@@ -195,7 +195,13 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
 
         @Override
         public OperatorCoordinator create(Context context) {
-            MetricGroup metricGroup = context.metricGroup();
+            MetricGroup metricGroup;
+            try {
+                metricGroup = context.metricGroup();
+            } catch (NoSuchMethodError e) {
+                // OperatorCoordinator.Context only exposes metrics from Flink 1.18 onward.
+                return new WriteOperatorCoordinator(table);
+            }
             return new WriteOperatorCoordinator(
                     table, metricGroup == null ? null : new FlinkMetricRegistry(metricGroup));
         }

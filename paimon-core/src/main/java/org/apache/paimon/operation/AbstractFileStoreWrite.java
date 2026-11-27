@@ -406,6 +406,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             if (compactionMetrics != null) {
                 compactionMetrics.close();
             }
+            if (scanMetrics != null) {
+                scanMetrics.close();
+            }
         }
     }
 

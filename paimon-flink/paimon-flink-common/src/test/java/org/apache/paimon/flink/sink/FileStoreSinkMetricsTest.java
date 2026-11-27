@@ -21,6 +21,8 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.FileSystemWriteRestore;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,14 +33,80 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.testutils.MetricListener;
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
+import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
+import org.apache.flink.runtime.metrics.groups.AbstractMetricGroup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for sink manifest scan metrics. */
 class FileStoreSinkMetricsTest extends TableTestBase {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testWriterReplacementRefreshesScanMetrics(boolean primaryKey) throws Exception {
+        FileStoreTable table = createTable(primaryKey);
+        write(table, GenericRow.of(1, 10));
+
+        MetricListener metrics = new MetricListener();
+        CoreOptions options = table.coreOptions();
+        AbstractMetricGroup<?> replacementScanGroup;
+        try (IOManager flinkIOManager = new IOManagerAsync()) {
+            StoreSinkWriteImpl writer =
+                    new StoreSinkWriteImpl(
+                            table,
+                            "metrics",
+                            new NoopStoreSinkWriteState(0),
+                            flinkIOManager,
+                            false,
+                            false,
+                            true,
+                            new MemoryPoolFactory(
+                                    new HeapMemorySegmentPool(
+                                            options.writeBufferSize(), options.pageSize())),
+                            metrics.getMetricGroup());
+            try {
+                writer.write(GenericRow.of(1, 11));
+                Histogram originalDuration = scanDuration(metrics, table);
+                Gauge<Long> originalSnapshot = scanGauge(metrics, table, "lastScannedSnapshotId");
+                assertThat(originalDuration.getCount()).isEqualTo(1L);
+                assertThat(originalSnapshot.getValue()).isEqualTo(1L);
+
+                // Schema and configuration changes replace the writer under the same metric group.
+                writer.replace(table);
+                replacementScanGroup =
+                        (AbstractMetricGroup<?>)
+                                metrics.getMetricGroup()
+                                        .addGroup("paimon")
+                                        .addGroup("table", table.name())
+                                        .addGroup("scan");
+                Histogram replacementDuration = scanDuration(metrics, table);
+                assertThat(replacementDuration).isNotSameAs(originalDuration);
+                assertThat(replacementDuration.getCount()).isZero();
+                assertThat(scanGauge(metrics, table, "lastScannedSnapshotId").getValue()).isZero();
+
+                write(table, GenericRow.of(2, 20));
+                writer.write(GenericRow.of(2, 21));
+                assertThat(replacementDuration.getCount()).isEqualTo(1L);
+                assertThat(scanGauge(metrics, table, "lastScannedSnapshotId").getValue())
+                        .isEqualTo(2L);
+                assertThat(scanGauge(metrics, table, "lastScanResultedTableFiles").getValue())
+                        .isEqualTo(1L);
+
+                writer.write(GenericRow.of(3, 30));
+                assertThat(replacementDuration.getCount()).isEqualTo(2L);
+                assertThat(originalDuration.getCount()).isEqualTo(1L);
+                assertThat(originalSnapshot.getValue()).isEqualTo(1L);
+            } finally {
+                writer.close();
+            }
+        }
+        assertThat(replacementScanGroup.isClosed()).isTrue();
+    }
 
     @ParameterizedTest
     @CsvSource({"false, false", "false, true", "true, false", "true, true"})

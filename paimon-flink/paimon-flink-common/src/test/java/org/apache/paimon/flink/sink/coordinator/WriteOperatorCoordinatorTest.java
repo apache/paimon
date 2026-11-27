@@ -72,6 +72,29 @@ class WriteOperatorCoordinatorTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void testProviderWorksWithoutCoordinatorMetrics(boolean metricGroupMethodPresent)
+            throws Exception {
+        FileStoreTable table = createTable(1024 * 1024);
+        commit(table, 1, GenericRow.of(1L, 3));
+
+        OperatorCoordinator.Context context = mock(OperatorCoordinator.Context.class);
+        if (!metricGroupMethodPresent) {
+            when(context.metricGroup())
+                    .thenThrow(new NoSuchMethodError("OperatorCoordinator.Context.metricGroup()"));
+        }
+
+        try (WriteOperatorCoordinator coordinator =
+                (WriteOperatorCoordinator)
+                        new WriteOperatorCoordinator.Provider(new OperatorID(), table)
+                                .create(context)) {
+            coordinator.start();
+            assertThat(scan(coordinator).extractDataFiles()).hasSize(1);
+            assertThat(latestIdentifier(coordinator)).isEqualTo(1L);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void testScanMetricsIncludePrefetchAndRecovery(boolean prefetch) throws Exception {
         FileStoreTable table =
                 createTable(128)
