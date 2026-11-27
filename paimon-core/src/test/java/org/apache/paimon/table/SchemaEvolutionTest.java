@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
@@ -1119,6 +1120,59 @@ public class SchemaEvolutionTest {
         // file 4 won't be filtered
         List<String> rows = readRecords(table, p);
         assertThat(rows).containsExactlyInAnyOrder("2, 2", "3, 3");
+    }
+
+    @Test
+    public void testRenameNestedFieldPreservesParentAggregation() throws Exception {
+        try (Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), tablePath)) {
+            Identifier identifier = new Identifier("db", "events");
+            catalog.createDatabase(identifier.getDatabaseName(), false);
+            catalog.createTable(
+                    identifier,
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column(
+                                    "payload",
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(0, "old_status", DataTypes.INT()),
+                                            DataTypes.FIELD(1, "message", DataTypes.INT())))
+                            .column("status", DataTypes.INT())
+                            .primaryKey("id")
+                            .option("bucket", "1")
+                            .option("merge-engine", "aggregation")
+                            .option("fields.payload.aggregate-function", "first_value")
+                            .build(),
+                    false);
+
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            try (StreamTableWrite write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, GenericRow.of(11, 1000), 100));
+                commit.commit(0, write.prepareCommit(false, 0));
+            }
+
+            catalog.alterTable(
+                    identifier,
+                    SchemaChange.renameColumn(new String[] {"payload", "old_status"}, "new_status"),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+            RowType rowType = table.rowType();
+            assertThat(((RowType) rowType.getTypeAt(1)).getFieldNames())
+                    .containsExactly("new_status", "message");
+
+            try (StreamTableWrite write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, GenericRow.of(22, 2000), 200));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            List<String> rows = new ArrayList<>();
+            forEachRemaining(
+                    table,
+                    null,
+                    row -> rows.add(DataFormatTestUtil.toStringWithRowKind(row, rowType)));
+            assertThat(rows).containsExactly("1, (11, 1000), 200");
+        }
     }
 
     @Test
