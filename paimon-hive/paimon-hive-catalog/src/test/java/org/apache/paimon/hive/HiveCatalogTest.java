@@ -311,6 +311,63 @@ public class HiveCatalogTest extends CatalogTestBase {
         }
     }
 
+    @ParameterizedTest(name = "unchanged = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testAlterTableFailurePreservesExistingSchema(boolean unchanged) throws Exception {
+        String databaseName = "test_db";
+        Identifier identifier = Identifier.create(databaseName, "new_table");
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder().column("id", DataTypes.INT()).option("key", "value").build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = table.schemaManager();
+        TableSchema original = table.schema();
+
+        Field clientField = HiveCatalog.class.getDeclaredField("clients");
+        clientField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ClientPool<IMetaStoreClient, TException> clients =
+                (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+        TException failure = new TException("Metastore update failed");
+        ClientPool<IMetaStoreClient, TException> failingClients =
+                new ClientPool<IMetaStoreClient, TException>() {
+                    @Override
+                    public <R> R run(Action<R, IMetaStoreClient, TException> action)
+                            throws TException, InterruptedException {
+                        return clients.run(action);
+                    }
+
+                    @Override
+                    public void execute(ExecuteAction<IMetaStoreClient, TException> action)
+                            throws TException {
+                        throw failure;
+                    }
+                };
+
+        clientField.set(catalog, failingClients);
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier,
+                                            SchemaChange.setOption(
+                                                    "key", unchanged ? "value" : "changed"),
+                                            false))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasCause(failure);
+        } finally {
+            clientField.set(catalog, clients);
+        }
+
+        assertThat(schemaManager.listAllIds())
+                .as("The existing schema must survive a failed metastore update")
+                .containsExactly(original.id());
+        assertThat(((FileStoreTable) catalog.getTable(identifier)).schema().toString())
+                .isEqualTo(original.toString());
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testAlterAndDropTableWithInvalidOptions(boolean external) throws Exception {

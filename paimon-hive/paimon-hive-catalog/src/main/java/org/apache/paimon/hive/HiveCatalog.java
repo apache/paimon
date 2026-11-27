@@ -1483,11 +1483,13 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
-        SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
-        TableSchema schema;
+        FileSystemSchemaManager schemaManager =
+                schemaManager(identifier, getTableLocation(identifier));
+        Pair<TableSchema, Boolean> schemaCommit;
         try {
             // first commit changes to underlying files
-            schema = runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            schemaCommit =
+                    runWithLock(identifier, () -> schemaManager.commitChangesWithResult(changes));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
@@ -1502,6 +1504,7 @@ public class HiveCatalog extends AbstractCatalog {
             return;
         }
 
+        TableSchema schema = schemaCommit.getLeft();
         Set<String> removedOptions =
                 changes.stream()
                         .filter(c -> c instanceof SchemaChange.RemoveOption)
@@ -1510,7 +1513,9 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             alterTableToHms(table, identifier, schema, removedOptions);
         } catch (Exception te) {
-            schemaManager.deleteSchema(schema.id());
+            if (schemaCommit.getRight()) {
+                schemaManager.deleteSchema(schema.id());
+            }
             throw new RuntimeException(te);
         }
     }
@@ -1997,7 +2002,7 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private SchemaManager schemaManager(Identifier identifier, Path location) {
+    private FileSystemSchemaManager schemaManager(Identifier identifier, Path location) {
         return new FileSystemSchemaManager(
                 fileIO(location), location, identifier.getBranchNameOrDefault());
     }

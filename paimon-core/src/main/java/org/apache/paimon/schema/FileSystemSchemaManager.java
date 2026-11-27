@@ -30,6 +30,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -202,6 +203,17 @@ public class FileSystemSchemaManager implements SchemaManager {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
+        return commitChangesWithResult(changes).getLeft();
+    }
+
+    /**
+     * Update {@link SchemaChange}s and report whether a new schema version was committed.
+     *
+     * @return a pair containing the resulting schema and whether this call committed it
+     */
+    public Pair<TableSchema, Boolean> commitChangesWithResult(List<SchemaChange> changes)
+            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+                    Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager =
                 new SnapshotManager(fileIO, tableRoot, branch, null, null);
         LazyField<Boolean> hasSnapshots =
@@ -226,12 +238,12 @@ public class FileSystemSchemaManager implements SchemaManager {
             if (oldTableSchema.version() == newTableSchema.version()
                     && oldTableSchema.highestFieldId() == newTableSchema.highestFieldId()
                     && oldTableSchema.toSchema().equals(newTableSchema.toSchema())) {
-                return oldTableSchema;
+                return Pair.of(oldTableSchema, false);
             }
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
-                    return newTableSchema;
+                    return Pair.of(newTableSchema, true);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);

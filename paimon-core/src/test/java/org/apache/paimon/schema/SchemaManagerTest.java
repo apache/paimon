@@ -47,6 +47,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -271,6 +272,34 @@ public class SchemaManagerTest {
         assertThat(updated.comment()).isEqualTo("updated comment");
         assertThat(manager.commitChanges(changes).toString()).isEqualTo(updated.toString());
         assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
+    }
+
+    @Test
+    public void testCommitChangesWithResultAfterConcurrentCommit() throws Exception {
+        Path tableRoot = new Path(tempDir.toString());
+        FileSystemSchemaManager otherManager =
+                new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
+        TableSchema original = otherManager.createTable(schema);
+        SchemaChange change = SchemaChange.setOption("key", "changed");
+        FileSystemSchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), tableRoot) {
+                    @Override
+                    public boolean commit(TableSchema newSchema) throws Exception {
+                        // Another writer commits the requested change before our atomic write.
+                        otherManager.commitChanges(change);
+                        return super.commit(newSchema);
+                    }
+                };
+
+        Pair<TableSchema, Boolean> result =
+                manager.commitChangesWithResult(Collections.singletonList(change));
+
+        assertThat(result.getRight()).isFalse();
+        assertThat(result.getLeft().id()).isEqualTo(original.id() + 1);
+        assertThat(result.getLeft().options()).containsEntry("key", "changed");
+        assertThat(result.getLeft().toString()).isEqualTo(otherManager.latest().get().toString());
+        assertThat(manager.listAllIds())
+                .containsExactlyInAnyOrder(original.id(), result.getLeft().id());
     }
 
     @Test
