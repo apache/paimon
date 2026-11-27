@@ -44,7 +44,8 @@ public class CheckpointCommittablesSerializer
         // v1: checkpointId + watermark + committables
         // v2: v1 + idle bit (appended before the committable list to keep the ordering explicit)
         // v3: v2 + savepoint-tag bit (appended after idle, still before the committable list)
-        return 3;
+        // v4: v3 + terminal bit after the committable list
+        return 4;
     }
 
     @Override
@@ -64,12 +65,13 @@ public class CheckpointCommittablesSerializer
             out.writeInt(wrapped.length);
             out.write(wrapped);
         }
+        out.writeBoolean(value.terminal());
         return out.getCopyOfBuffer();
     }
 
     @Override
     public CheckpointCommittables deserialize(int version, byte[] serialized) throws IOException {
-        if (version != 1 && version != 2 && version != 3) {
+        if (version < 1 || version > 4) {
             throw new IOException("Unknown version " + version);
         }
         DataInputDeserializer in = new DataInputDeserializer(serialized);
@@ -89,7 +91,8 @@ public class CheckpointCommittablesSerializer
             in.readFully(bytes);
             committables.add(committableSerializer.deserialize(committableVersion, bytes));
         }
+        boolean terminal = version >= 4 && in.readBoolean();
         return new CheckpointCommittables(
-                checkpointId, committables, watermark, idle, shouldCreateSavepointTag);
+                checkpointId, committables, watermark, idle, shouldCreateSavepointTag, terminal);
     }
 }

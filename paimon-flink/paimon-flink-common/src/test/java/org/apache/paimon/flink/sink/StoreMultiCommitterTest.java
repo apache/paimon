@@ -98,7 +98,7 @@ class StoreMultiCommitterTest {
     @BeforeEach
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
-        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toUri().getPath());
         String databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
@@ -456,10 +456,11 @@ class StoreMultiCommitterTest {
         testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);
         testHarness.close();
+        write1.close();
+        write2.close();
         assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
                 .isEqualTo(2048L);
-        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
-                .isEqualTo(2048L);
+        assertThat(table2.snapshotManager().latestSnapshot()).isNull();
     }
 
     @Test
