@@ -19,10 +19,13 @@
 package org.apache.paimon.fs.local;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,5 +48,18 @@ public class LocalFileIOTest {
 
         fileIO.copyFile(srcFile, dstFile, false);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
+    }
+
+    @Test
+    public void testListStatusWithColonInChildName() throws Exception {
+        Files.createFile(tempDir.resolve("tag-demo:old"));
+        Files.createFile(tempDir.resolve("plain.txt"));
+
+        FileIO fileIO = new LocalFileIO();
+        FileStatus[] statuses = fileIO.listStatus(new Path(tempDir.toString()));
+
+        assertThat(statuses)
+                .extracting(status -> status.getPath().getName())
+                .containsExactlyInAnyOrder("tag-demo:old", "plain.txt");
     }
 }
