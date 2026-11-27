@@ -50,7 +50,7 @@ read = SimpleNamespace(
     include_row_kind=False,
     _parquet_row_group_cache=request,
     _output_arrow_schema=lambda splits: schema,
-    _resolve_parallelism=lambda value, count: 1,
+    _resolve_parallelism=lambda value, count, materialized_native=False: 1,
     _resolve_blob_parallelism=lambda value: 1,
     _batches_to_arrow=lambda batches, output_schema: pa.Table.from_batches(batches, schema=output_schema))
 with patch('pypaimon.read.read_dispatch._native_read_execution',
