@@ -331,7 +331,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     private int prepareVectorizedBatch(
             ColumnVector[] columns, @Nullable int[] selected, int startIndex, int maxBatchRows) {
         // Consume successful slices once and carry their measured size into the next slice.
-        // Double at most: a short prefix must not trigger allocation for an entire skewed batch.
+        // Grow conservatively: a short prefix must not allocate an entire skewed batch.
         int batchRows = Math.min(vectorBatchRows, maxBatchRows);
         while (true) {
             long memoryUsed;
@@ -353,13 +353,18 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
                 continue;
             }
 
+            int nextBatchRows =
+                    batchRows > Integer.MAX_VALUE / 2 ? Integer.MAX_VALUE : batchRows * 2;
+            if (maxBatchRows < vectorBatchRows && batchRows == maxBatchRows) {
+                // An input-limited tail does not invalidate the previous target. Memory usage
+                // can still lower it below, and allocation or memory retries bypass this case.
+                nextBatchRows = Math.max(nextBatchRows, vectorBatchRows);
+            }
             vectorBatchRows =
                     Math.min(
                             arrowFormatWriter.getBatchSize(),
                             Math.min(
-                                    batchRows > Integer.MAX_VALUE / 2
-                                            ? Integer.MAX_VALUE
-                                            : batchRows * 2,
+                                    nextBatchRows,
                                     rowsWithinMemory(batchRows, memoryUsed, writeBatchMemory)));
             return batchRows;
         }
