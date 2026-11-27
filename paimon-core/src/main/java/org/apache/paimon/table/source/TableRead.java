@@ -28,6 +28,7 @@ import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,10 @@ import java.util.List;
  * @since 0.4.0
  */
 @Public
-public interface TableRead {
+public interface TableRead extends Closeable {
+
+    @Override
+    default void close() throws IOException {}
 
     /** Set {@link MetricRegistry} to table read. */
     TableRead withMetricRegistry(MetricRegistry registry);

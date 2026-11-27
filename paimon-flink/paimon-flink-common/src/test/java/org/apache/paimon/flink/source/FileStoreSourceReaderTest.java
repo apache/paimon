@@ -18,19 +18,26 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IteratorRecordReader;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
@@ -46,14 +53,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for the {@link FileStoreSourceReader}. */
 public class FileStoreSourceReaderTest {
@@ -150,6 +166,75 @@ public class FileStoreSourceReaderTest {
         reader.close();
 
         assertThat(tableRead.ioManager()).isNotNull();
+    }
+
+    @Test
+    public void testCheckpointDuringFetchAndRestore() throws Exception {
+        TableRead tableRead = mock(TableRead.class, RETURNS_SELF);
+        CountDownLatch preparing = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        when(tableRead.createReader(any(Split.class)))
+                .thenAnswer(
+                        invocation -> {
+                            preparing.countDown();
+                            assertThat(resume.await(15, TimeUnit.SECONDS)).isTrue();
+                            return changelogRecords();
+                        });
+        List<FileStoreSourceSplit> checkpoint;
+        try (FileStoreSourceReader reader = createReader(new TestingReaderContext(), tableRead)) {
+            reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
+            reader.start();
+            try {
+                assertThat(preparing.await(10, TimeUnit.SECONDS)).isTrue();
+                assertTimeoutPreemptively(
+                        Duration.ofSeconds(5),
+                        () ->
+                                assertThat(reader.snapshotState(1L))
+                                        .extracting(FileStoreSourceSplit::recordsToSkip)
+                                        .containsExactly(0L));
+            } finally {
+                resume.countDown();
+            }
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            while (output.getEmittedRecords().isEmpty()) {
+                reader.isAvailable().get(10, TimeUnit.SECONDS);
+                reader.pollNext(output);
+            }
+            assertThat(output.getEmittedRecords())
+                    .extracting(row -> row.getRowKind().shortString() + " " + row.getLong(0))
+                    .containsExactly("-U 1", "+U 2");
+            checkpoint = reader.snapshotState(2L);
+            assertThat(checkpoint)
+                    .extracting(FileStoreSourceSplit::recordsToSkip)
+                    .containsExactly(2L);
+        }
+        verify(tableRead).close();
+        TableRead restoredRead = mock(TableRead.class, RETURNS_SELF);
+        when(restoredRead.createReader(any(Split.class))).thenReturn(changelogRecords());
+        try (FileStoreSourceReader restored =
+                createReader(new TestingReaderContext(), restoredRead)) {
+            restored.addSplits(checkpoint);
+            restored.start();
+            TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+            while (restored.getNumberOfCurrentlyAssignedSplits() > 0) {
+                restored.isAvailable().get(10, TimeUnit.SECONDS);
+                restored.pollNext(output);
+            }
+            assertThat(output.getEmittedRecords())
+                    .extracting(row -> row.getRowKind().shortString() + " " + row.getLong(0))
+                    .containsExactly("+I 3");
+        }
+    }
+
+    private static RecordReader<InternalRow> changelogRecords() throws Exception {
+        List<InternalRow> update =
+                Arrays.asList(
+                        GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1L),
+                        GenericRow.ofKind(RowKind.UPDATE_AFTER, 2L));
+        List<InternalRow> insert = Collections.singletonList(GenericRow.of(3L));
+        return ConcatRecordReader.create(
+                () -> new IteratorRecordReader<>(update.iterator()),
+                () -> new IteratorRecordReader<>(insert.iterator()));
     }
 
     protected FileStoreSourceReader createReader(TestingReaderContext context) {

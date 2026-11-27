@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.CoreOptions.ChangelogProducer
 import org.apache.paimon.Snapshot
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
@@ -99,7 +98,7 @@ class PaimonV2Write(
         buffer += PaimonDeletedRecordsMetric()
       }
     }
-    if (!coreOptions.changelogProducer().equals(ChangelogProducer.NONE)) {
+    if (coreOptions.producesChangelogFiles()) {
       buffer += PaimonAppendedChangelogFilesMetric()
     }
     if (!table.partitionKeys().isEmpty) {
