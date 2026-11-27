@@ -47,7 +47,6 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -237,6 +236,37 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testCommitLegacyPrimaryKeyNullability() throws Exception {
+        FileSystemSchemaManager manager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false");
+        // Legacy clients could persist nullable primary keys without primary-key.nullable.
+        TableSchema original =
+                new TableSchema(
+                        0,
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "payload", DataTypes.INT())),
+                        1,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        assertThat(manager.commit(original)).isTrue();
+        assertThat(manager.latest().get().fields().get(0).type().isNullable()).isTrue();
+
+        TableSchema updated =
+                manager.commitChanges(SchemaChange.updateColumnNullability("id", false));
+
+        assertThat(updated.id()).isEqualTo(original.id() + 1);
+        assertThat(updated.fields().get(0).type().isNullable()).isFalse();
+        assertThat(manager.latest().get().fields()).isEqualTo(updated.fields());
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
+    }
+
+    @Test
     public void testCommitUnchangedOptionOnNonEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString());
         SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
@@ -304,8 +334,9 @@ public class SchemaManagerTest {
         assertThat(manager.listAllIds()).containsExactlyInAnyOrder(original.id(), updated.id());
     }
 
-    @Test
-    public void testCommitChangesWithResultAfterConcurrentCommit() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testCommitChangesAfterConcurrentCommit(boolean allowSchemaReuse) throws Exception {
         Path tableRoot = new Path(tempDir.toString());
         FileSystemSchemaManager otherManager =
                 new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
@@ -321,15 +352,15 @@ public class SchemaManagerTest {
                     }
                 };
 
-        Pair<TableSchema, Boolean> result =
-                manager.commitChangesWithResult(Collections.singletonList(change));
+        TableSchema result =
+                manager.commitChanges(Collections.singletonList(change), allowSchemaReuse);
 
-        assertThat(result.getRight()).isFalse();
-        assertThat(result.getLeft().id()).isEqualTo(original.id() + 1);
-        assertThat(result.getLeft().options()).containsEntry("key", "changed");
-        assertThat(result.getLeft().toString()).isEqualTo(otherManager.latest().get().toString());
+        assertThat(result.id()).isEqualTo(original.id() + (allowSchemaReuse ? 1 : 2));
+        assertThat(result.options()).containsEntry("key", "changed");
+        assertThat(result.toString()).isEqualTo(otherManager.latest().get().toString());
         assertThat(manager.listAllIds())
-                .containsExactlyInAnyOrder(original.id(), result.getLeft().id());
+                .hasSize(allowSchemaReuse ? 2 : 3)
+                .contains(original.id(), original.id() + 1);
     }
 
     @Test

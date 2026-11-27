@@ -1483,13 +1483,17 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
+        boolean isMainBranch = DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault());
         FileSystemSchemaManager schemaManager =
                 schemaManager(identifier, getTableLocation(identifier));
-        Pair<TableSchema, Boolean> schemaCommit;
+        TableSchema schema;
         try {
             // first commit changes to underlying files
-            schemaCommit =
-                    runWithLock(identifier, () -> schemaManager.commitChangesWithResult(changes));
+            // Main-branch ALTERs need separate versions: a failed HMS update may delete this
+            // call's version after a concurrent ALTER has already completed successfully.
+            schema =
+                    runWithLock(
+                            identifier, () -> schemaManager.commitChanges(changes, !isMainBranch));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
@@ -1500,11 +1504,10 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         // currently only changes to main branch affects metastore
-        if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
+        if (!isMainBranch) {
             return;
         }
 
-        TableSchema schema = schemaCommit.getLeft();
         Set<String> removedOptions =
                 changes.stream()
                         .filter(c -> c instanceof SchemaChange.RemoveOption)
@@ -1513,9 +1516,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             alterTableToHms(table, identifier, schema, removedOptions);
         } catch (Exception te) {
-            if (schemaCommit.getRight()) {
-                schemaManager.deleteSchema(schema.id());
-            }
+            schemaManager.deleteSchema(schema.id());
             throw new RuntimeException(te);
         }
     }

@@ -30,7 +30,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.LazyField;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -203,15 +202,17 @@ public class FileSystemSchemaManager implements SchemaManager {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
-        return commitChangesWithResult(changes).getLeft();
+        return commitChanges(changes, true);
     }
 
     /**
-     * Update {@link SchemaChange}s and report whether a new schema version was committed.
+     * Update {@link SchemaChange}s, optionally reusing the latest schema if it is unchanged.
      *
-     * @return a pair containing the resulting schema and whether this call committed it
+     * @param allowSchemaReuse whether an unchanged result can reuse the latest schema version.
+     *     Callers that may roll back their schema commit must disable reuse so that each ALTER has
+     *     its own version to delete.
      */
-    public Pair<TableSchema, Boolean> commitChangesWithResult(List<SchemaChange> changes)
+    public TableSchema commitChanges(List<SchemaChange> changes, boolean allowSchemaReuse)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager =
@@ -234,18 +235,23 @@ public class FileSystemSchemaManager implements SchemaManager {
             TableSchema newTableSchema =
                     SchemaManager.generateTableSchema(
                             oldTableSchema, changes, hasSnapshots, lazyIdentifier);
-            // Ignore the revision ID and timestamp when checking for schema changes.
-            if (oldTableSchema.version() == newTableSchema.version()
+            // Ignore the revision ID and timestamp without normalizing the persisted content.
+            if (allowSchemaReuse
+                    && oldTableSchema.version() == newTableSchema.version()
                     && oldTableSchema.highestFieldId() == newTableSchema.highestFieldId()
-                    && oldTableSchema.toSchema().equals(newTableSchema.toSchema())) {
+                    && oldTableSchema.fields().equals(newTableSchema.fields())
+                    && oldTableSchema.partitionKeys().equals(newTableSchema.partitionKeys())
+                    && oldTableSchema.primaryKeys().equals(newTableSchema.primaryKeys())
+                    && oldTableSchema.options().equals(newTableSchema.options())
+                    && Objects.equals(oldTableSchema.comment(), newTableSchema.comment())) {
                 // Branch existence can change even when the schema is unchanged.
                 SchemaValidation.validateFallbackBranch(this, newTableSchema);
-                return Pair.of(oldTableSchema, false);
+                return oldTableSchema;
             }
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
-                    return Pair.of(newTableSchema, true);
+                    return newTableSchema;
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
