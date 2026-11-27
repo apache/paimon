@@ -237,6 +237,60 @@ public class IcebergCompatibilityTest {
         }
     }
 
+    @Test
+    public void testRebuiltHistoryAcceptsNumericallyReusedCheckpoint() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        // a consumer holds this checkpoint: rows 1 and 2 are its committed state
+        long staleCheckpoint = getIcebergTable().currentSnapshot().snapshotId();
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.write(GenericRow.of(4, 40));
+        commit.commit(4, write.prepareCommit(false, 4));
+        write.close();
+        commit.close();
+
+        table.rollbackTo(1);
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.write(GenericRow.of(10, 100));
+        commit2.commit(3, write2.prepareCommit(false, 3));
+        write2.close();
+        commit2.close();
+
+        // the rebuild is the root of a new history and re-exported rows 1 and 9
+        org.apache.iceberg.Table rebuilt = getIcebergTable();
+        assertThat(rebuilt.snapshot(staleCheckpoint).parentId()).isNull();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(9, 90)", "Record(10, 100)");
+
+        // documented limitation: the rebuilt history reuses Paimon snapshot IDs, so the stale
+        // checkpoint still resolves and Iceberg accepts it. The incremental plan covers only
+        // snapshot 3 (row 10) and silently misses row 9 re-exported by the rebuild. Consumers
+        // must invalidate pre-rebuild checkpoints externally.
+        try (CloseableIterable<FileScanTask> files =
+                rebuilt.newIncrementalAppendScan()
+                        .fromSnapshotExclusive(staleCheckpoint)
+                        .planFiles()) {
+            assertThat(files)
+                    .extracting(task -> task.file().recordCount())
+                    .containsExactly(1L);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testInitialIcebergSnapshotCanBeReadAsAppend(boolean overwrite) throws Exception {
