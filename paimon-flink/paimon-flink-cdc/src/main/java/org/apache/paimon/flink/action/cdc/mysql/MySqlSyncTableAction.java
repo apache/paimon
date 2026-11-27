@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
 import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
@@ -38,6 +39,7 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -74,6 +76,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class MySqlSyncTableAction extends SyncTableActionBase {
 
     private JdbcSchemasInfo mySqlSchemasInfo;
+    private boolean addMissingColumnsOnStartup;
 
     public MySqlSyncTableAction(
             String database,
@@ -81,6 +84,33 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
         super(database, table, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
+    }
+
+    public MySqlSyncTableAction withAddMissingColumnsOnStartup(boolean enabled) {
+        this.addMissingColumnsOnStartup = enabled;
+        return this;
+    }
+
+    @Override
+    protected FileStoreTable validateExistingTableSchema(
+            Identifier identifier, FileStoreTable table, Schema expected, Schema source)
+            throws Exception {
+        if (!addMissingColumnsOnStartup) {
+            return super.validateExistingTableSchema(identifier, table, expected, source);
+        }
+        validateMetadataComputedColumns(table.primaryKeys(), source.fields());
+        FileStoreTable updated =
+                MySqlStartupSchemaEvolution.addMissingColumns(
+                        catalog,
+                        identifier,
+                        table,
+                        expected,
+                        source,
+                        caseSensitive,
+                        tableConfig,
+                        typeMapping);
+        assertSchemaCompatible(updated.schema(), expected.fields());
+        return updated;
     }
 
     @Override

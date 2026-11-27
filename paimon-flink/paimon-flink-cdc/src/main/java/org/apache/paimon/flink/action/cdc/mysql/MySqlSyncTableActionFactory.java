@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.SyncTableActionFactoryBase;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlStartupSchemaEvolution.ADD_MISSING_COLUMNS_ON_STARTUP;
 
 /** Factory to create {@link MySqlSyncTableAction}. */
 public class MySqlSyncTableActionFactory extends SyncTableActionFactoryBase {
@@ -43,6 +46,14 @@ public class MySqlSyncTableActionFactory extends SyncTableActionFactoryBase {
     }
 
     @Override
+    protected void withParams(MultipleParameterToolAdapter params, SyncTableActionBase action) {
+        super.withParams(params, action);
+        ((MySqlSyncTableAction) action)
+                .withAddMissingColumnsOnStartup(
+                        params.getBoolean(ADD_MISSING_COLUMNS_ON_STARTUP, false));
+    }
+
+    @Override
     public void printHelp() {
         System.out.println(
                 "Action \"mysql_sync_table\" creates a streaming job "
@@ -57,6 +68,7 @@ public class MySqlSyncTableActionFactory extends SyncTableActionFactoryBase {
                         + "--table <table_name> \\\n"
                         + "[--partition_keys <partition_keys>] \\\n"
                         + "[--primary_keys <primary_keys>] \\\n"
+                        + "[--add_missing_columns_on_startup <true/false>] \\\n"
                         + "[--type_mapping <option1,option2...>] \\\n"
                         + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \\\n"
                         + "[--metadata_column <metadata_column>] \\\n"
@@ -86,6 +98,12 @@ public class MySqlSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println(
                 "--metadata_column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
+        System.out.println();
+
+        System.out.println(
+                "--add_missing_columns_on_startup is false by default. Set it to true to append "
+                        + "missing MySQL columns as nullable fields and widen compatible existing "
+                        + "source column types before checking schema compatibility.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

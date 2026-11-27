@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +35,27 @@ public class SchemaChangeTest {
     private static void assertEqualHashCode(SchemaChange a, SchemaChange b) {
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
+    }
+
+    @Test
+    void testCheckSchemaVersionJsonRoundTrip() {
+        SchemaChange change = SchemaChange.checkSchemaVersion(42L);
+
+        SchemaChange.CheckSchemaVersion restored =
+                (SchemaChange.CheckSchemaVersion)
+                        JsonSerdeUtil.fromJson(JsonSerdeUtil.toJson(change), SchemaChange.class);
+
+        assertEqualHashCode(change, restored);
+        assertThat(restored.schemaId()).isEqualTo(42L);
+        assertThat(JsonSerdeUtil.toFlatJson(change)).contains("\"action\":\"checkSchemaVersion\"");
+    }
+
+    @Test
+    void testCheckSchemaVersionEquality() {
+        assertEqualHashCode(
+                SchemaChange.checkSchemaVersion(42L), SchemaChange.checkSchemaVersion(42L));
+        assertThat(SchemaChange.checkSchemaVersion(42L))
+                .isNotEqualTo(SchemaChange.checkSchemaVersion(43L));
     }
 
     @Test

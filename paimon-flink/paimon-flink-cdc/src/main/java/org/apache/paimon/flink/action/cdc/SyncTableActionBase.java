@@ -122,10 +122,8 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = alterTableOptions(identifier, fileStoreTable);
-            List<DataField> sourceFields;
             try {
                 Schema retrievedSchema = retrieveSchema();
-                sourceFields = retrievedSchema.fields();
                 computedColumns =
                         buildComputedColumns(
                                 computedColumnArgs,
@@ -133,7 +131,9 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                                 metadataConverters,
                                 caseSensitive);
                 Schema paimonSchema = buildPaimonSchema(retrievedSchema);
-                assertSchemaCompatible(fileStoreTable.schema(), paimonSchema.fields());
+                fileStoreTable =
+                        validateExistingTableSchema(
+                                identifier, fileStoreTable, paimonSchema, retrievedSchema);
             } catch (SchemaRetrievalException e) {
                 LOG.info(
                         "Failed to retrieve schema from record data but there exists specified Paimon table. "
@@ -143,7 +143,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 // schema evolution will add the computed columns
                 // These fields may include metadata outputs. Runtime validation resolves ambiguous
                 // references against the actual source record when the topic becomes available.
-                sourceFields = fileStoreTable.schema().fields();
+                List<DataField> sourceFields = fileStoreTable.schema().fields();
                 computedColumns =
                         buildComputedColumns(
                                 computedColumnArgs,
@@ -152,8 +152,8 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                                 caseSensitive);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
+                validateMetadataComputedColumns(fileStoreTable.primaryKeys(), sourceFields);
             }
-            validateMetadataComputedColumns(fileStoreTable.primaryKeys(), sourceFields);
         } catch (Catalog.TableNotExistException e) {
             Schema retrievedSchema = retrieveSchema();
             computedColumns =
@@ -169,7 +169,15 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         }
     }
 
-    private void validateMetadataComputedColumns(
+    protected FileStoreTable validateExistingTableSchema(
+            Identifier identifier, FileStoreTable table, Schema expected, Schema source)
+            throws Exception {
+        assertSchemaCompatible(table.schema(), expected.fields());
+        validateMetadataComputedColumns(table.primaryKeys(), source.fields());
+        return table;
+    }
+
+    protected void validateMetadataComputedColumns(
             List<String> targetPrimaryKeys, List<DataField> sourceFields) {
         if (targetPrimaryKeys.isEmpty()) {
             return;

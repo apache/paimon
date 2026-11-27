@@ -36,6 +36,8 @@ import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -55,6 +57,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -737,6 +740,297 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                     new FileSystemSchemaManager(table.fileIO(), table.location());
             schemaManager.commitChanges(SchemaChange.dropColumn("v"));
         }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testAddMissingColumnsOnStartupAfterRename() throws Exception {
+        String sourceTable = "startup_add_column";
+        Map<String, String> tableConfig = getBasicTableConfig();
+        RowType originalRowType = RowType.builder().field("id", DataTypes.INT().notNull()).build();
+        FileStoreTable originalTable =
+                createFileStoreTable(
+                        originalRowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        tableConfig);
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + DATABASE_NAME);
+            statement.executeUpdate("CREATE TABLE " + sourceTable + " (id INT PRIMARY KEY)");
+            replaceTableWithAddedColumn(statement, sourceTable);
+        }
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", sourceTable);
+        MySqlSyncTableAction defaultAction =
+                syncTableActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+        assertThatThrownBy(defaultAction::build)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Paimon schema and source table schema are not compatible.");
+        assertThat(getFileStoreTable().schema().id()).isEqualTo(originalTable.schema().id());
+
+        MySqlSyncTableAction repairAction = actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+        repairAction.withStreamExecutionEnvironment(env).build();
+
+        TableSchema repairedSchema = getFileStoreTable().schema();
+        assertThat(repairedSchema.id()).isEqualTo(originalTable.schema().id() + 1);
+        assertThat(repairedSchema.fieldNames()).containsExactly("id", "v");
+        assertThat(repairedSchema.fields().get(1).type()).isEqualTo(DataTypes.INT());
+
+        try (StreamExecutionEnvironment retryEnv =
+                streamExecutionEnvironmentBuilder().streamingMode().build()) {
+            MySqlSyncTableAction retryAction =
+                    actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+            retryAction.withStreamExecutionEnvironment(retryEnv).build();
+        }
+        assertThat(getFileStoreTable().schema().id()).isEqualTo(repairedSchema.id());
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRestoreSavepointAfterAddingMissingColumnsOnStartup() throws Exception {
+        String sourceTable = "startup_add_column_restore";
+        Map<String, String> tableConfig = getBasicTableConfig();
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", sourceTable);
+        mySqlConfig.put("scan.parse.online.schema.changes.enabled", "false");
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + DATABASE_NAME);
+            statement.executeUpdate("CREATE TABLE " + sourceTable + " (id INT PRIMARY KEY)");
+            statement.executeUpdate("INSERT INTO " + sourceTable + " VALUES (1)");
+
+            MySqlSyncTableAction initialAction =
+                    syncTableActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+            JobClient initialClient = runActionWithDefaultEnv(initialAction);
+            FileStoreTable table = getFileStoreTable();
+            List<String> primaryKeys = Collections.singletonList("id");
+            waitForResult(
+                    initialClient,
+                    Collections.singletonList("+I[1]"),
+                    table,
+                    RowType.builder().field("id", DataTypes.INT().notNull()).build(),
+                    primaryKeys);
+            String savepoint =
+                    initialClient
+                            .stopWithSavepoint(
+                                    false,
+                                    temporaryFolder.toUri().toString(),
+                                    SavepointFormatType.CANONICAL)
+                            .get(45, TimeUnit.SECONDS);
+
+            replaceTableWithAddedColumn(statement, sourceTable);
+            // A fresh latest-offset startup skips the row written before resubmission.
+            statement.executeUpdate("INSERT INTO " + sourceTable + " VALUES (2, 42)");
+            statement.executeUpdate("INSERT INTO " + sourceTable + " (id) VALUES (3)");
+            mySqlConfig.put("scan.startup.mode", "latest-offset");
+
+            Configuration restoreConfig = new Configuration();
+            SavepointRestoreSettings.toConfiguration(
+                    SavepointRestoreSettings.forPath(savepoint, false), restoreConfig);
+            try (StreamExecutionEnvironment restoredEnv =
+                    streamExecutionEnvironmentBuilder()
+                            .streamingMode()
+                            .parallelism(env.getParallelism())
+                            .checkpointIntervalMs(1000)
+                            .build()) {
+                restoredEnv.configure(restoreConfig);
+                MySqlSyncTableAction restoredAction =
+                        actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+                restoredAction.withStreamExecutionEnvironment(restoredEnv).build();
+
+                JobClient restoredClient = restoredEnv.executeAsync();
+                RowType repairedRowType =
+                        RowType.builder()
+                                .field("id", DataTypes.INT().notNull())
+                                .field("v", DataTypes.INT())
+                                .build();
+                waitForResult(
+                        restoredClient,
+                        Arrays.asList("+I[1, NULL]", "+I[2, 42]", "+I[3, 7]"),
+                        getFileStoreTable(),
+                        repairedRowType,
+                        primaryKeys);
+            }
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWidenColumnsOnStartupAfterRename() throws Exception {
+        String sourceTable = "startup_widen_columns";
+        String shadowTable = "_" + sourceTable + "_gho";
+        String oldTable = "_" + sourceTable + "_del";
+        Map<String, String> tableConfig = getBasicTableConfig();
+        RowType originalRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT().notNull())
+                        .field("name", DataTypes.VARCHAR(32))
+                        .field("amount", DataTypes.INT())
+                        .build();
+        FileStoreTable originalTable =
+                createFileStoreTable(
+                        originalRowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        tableConfig);
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", sourceTable);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "CREATE TABLE "
+                            + sourceTable
+                            + " (id INT PRIMARY KEY, name VARCHAR(32), amount INT)");
+            statement.executeUpdate("CREATE TABLE " + shadowTable + " LIKE " + sourceTable);
+            statement.executeUpdate(
+                    "ALTER TABLE "
+                            + shadowTable
+                            + " MODIFY COLUMN name VARCHAR(128), MODIFY COLUMN amount BIGINT");
+            statement.executeUpdate(
+                    "RENAME TABLE "
+                            + sourceTable
+                            + " TO "
+                            + oldTable
+                            + ", "
+                            + shadowTable
+                            + " TO "
+                            + sourceTable);
+
+            try (StreamExecutionEnvironment defaultEnv =
+                    streamExecutionEnvironmentBuilder().streamingMode().build()) {
+                MySqlSyncTableAction defaultAction =
+                        syncTableActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+                defaultAction.withStreamExecutionEnvironment(defaultEnv).build();
+            }
+            TableSchema unchangedSchema = getFileStoreTable().schema();
+            assertThat(unchangedSchema.id()).isEqualTo(originalTable.schema().id());
+            assertThat(unchangedSchema.fields().get(1).type()).isEqualTo(DataTypes.VARCHAR(32));
+            assertThat(unchangedSchema.fields().get(2).type()).isEqualTo(DataTypes.INT());
+
+            statement.executeUpdate(
+                    "ALTER TABLE " + sourceTable + " ADD COLUMN v INT NOT NULL DEFAULT 7");
+            String longValue = "a-string-value-that-is-longer-than-thirty-two-characters";
+            statement.executeUpdate(
+                    "INSERT INTO "
+                            + sourceTable
+                            + " (id, name, amount) VALUES (1, '"
+                            + longValue
+                            + "', 2147483648)");
+
+            MySqlSyncTableAction repairAction =
+                    actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+            repairAction.withStreamExecutionEnvironment(env).build();
+            TableSchema repairedSchema = getFileStoreTable().schema();
+            assertThat(repairedSchema.id()).isEqualTo(originalTable.schema().id() + 1);
+            assertThat(repairedSchema.fieldNames()).containsExactly("id", "name", "amount", "v");
+            assertThat(repairedSchema.fields().get(1).type()).isEqualTo(DataTypes.VARCHAR(128));
+            assertThat(repairedSchema.fields().get(2).type()).isEqualTo(DataTypes.BIGINT());
+            assertThat(repairedSchema.fields().get(3).type()).isEqualTo(DataTypes.INT());
+            assertThat(repairedSchema.fields().get(3).defaultValue()).isNull();
+
+            try (StreamExecutionEnvironment retryEnv =
+                    streamExecutionEnvironmentBuilder().streamingMode().build()) {
+                MySqlSyncTableAction retryAction =
+                        actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+                retryAction.withStreamExecutionEnvironment(retryEnv).build();
+            }
+            assertThat(getFileStoreTable().schema().id()).isEqualTo(repairedSchema.id());
+
+            JobClient client = env.executeAsync();
+            RowType repairedRowType =
+                    RowType.builder()
+                            .field("id", DataTypes.INT().notNull())
+                            .field("name", DataTypes.VARCHAR(128))
+                            .field("amount", DataTypes.BIGINT())
+                            .field("v", DataTypes.INT())
+                            .build();
+            waitForResult(
+                    client,
+                    Collections.singletonList("+I[1, " + longValue + ", 2147483648, 7]"),
+                    getFileStoreTable(),
+                    repairedRowType,
+                    Collections.singletonList("id"));
+        }
+    }
+
+    @Test
+    public void testIncompatibleStartupTypeChangeDoesNotAddMissingColumns() throws Exception {
+        String sourceTable = "startup_incompatible_type";
+        Map<String, String> tableConfig = getBasicTableConfig();
+        RowType originalRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT().notNull())
+                        .field("value", DataTypes.VARCHAR(32))
+                        .build();
+        FileStoreTable originalTable =
+                createFileStoreTable(
+                        originalRowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        tableConfig);
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "CREATE TABLE " + sourceTable + " (id INT PRIMARY KEY, value INT, v INT)");
+        }
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", sourceTable);
+        MySqlSyncTableAction action = actionWithStartupSchemaRepair(mySqlConfig, tableConfig);
+        assertThatThrownBy(action::build)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Paimon schema and source table schema are not compatible.");
+        TableSchema unchangedSchema = getFileStoreTable().schema();
+        assertThat(unchangedSchema.id()).isEqualTo(originalTable.schema().id());
+        assertThat(unchangedSchema.fields()).isEqualTo(originalTable.schema().fields());
+    }
+
+    private MySqlSyncTableAction actionWithStartupSchemaRepair(
+            Map<String, String> mySqlConfig, Map<String, String> tableConfig) {
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                MySqlSyncTableActionFactory.IDENTIFIER,
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--add_missing_columns_on_startup",
+                                "true"));
+        args.addAll(mapToArgs("--mysql_conf", mySqlConfig));
+        args.addAll(mapToArgs("--table_conf", tableConfig));
+        return createAction(MySqlSyncTableAction.class, args);
+    }
+
+    private void replaceTableWithAddedColumn(Statement statement, String sourceTable)
+            throws SQLException {
+        String shadowTable = "_" + sourceTable + "_gho";
+        String oldTable = "_" + sourceTable + "_del";
+        statement.executeUpdate("CREATE TABLE " + shadowTable + " LIKE " + sourceTable);
+        statement.executeUpdate(
+                "ALTER TABLE " + shadowTable + " ADD COLUMN v INT NOT NULL DEFAULT 7");
+        statement.executeUpdate(
+                "INSERT INTO " + shadowTable + " (id) SELECT id FROM " + sourceTable);
+        statement.executeUpdate(
+                "RENAME TABLE "
+                        + sourceTable
+                        + " TO "
+                        + oldTable
+                        + ", "
+                        + shadowTable
+                        + " TO "
+                        + sourceTable);
     }
 
     @Test

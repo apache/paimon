@@ -65,6 +65,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -1650,6 +1651,57 @@ public class SchemaManagerTest {
                 SchemaChange.renameColumn(new String[] {"v", "f2", "f2"}, "f100");
         assertThatCode(() -> manager.commitChanges(newNameAlreadyExistRenameColumn))
                 .hasMessageContaining("Column v.f2.f100 already exists");
+    }
+
+    @Test
+    public void testChangesWithMatchingSchemaVersion() throws Exception {
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        TableSchema original =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .column("value", DataTypes.INT().notNull())
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .build());
+
+        TableSchema updated =
+                manager.commitChanges(
+                        SchemaChange.checkSchemaVersion(original.id()),
+                        SchemaChange.addColumn("added", DataTypes.STRING()),
+                        SchemaChange.updateColumnType("value", DataTypes.BIGINT(), true));
+
+        assertThat(updated.fields().get(0).type()).isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(updated.fields().get(0).id()).isEqualTo(original.fields().get(0).id());
+        assertThat(updated.fieldNames()).containsExactly("value", "added");
+        assertThat(updated.fields().get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThat(updated.id()).isEqualTo(original.id() + 1);
+    }
+
+    @Test
+    public void testStaleSchemaVersionPreventsPartialCommit() throws Exception {
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        TableSchema original =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .column("value", DataTypes.INT())
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .build());
+        TableSchema competing =
+                manager.commitChanges(SchemaChange.setOption("comment", "concurrent change"));
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.addColumn("added", DataTypes.STRING()),
+                                        SchemaChange.checkSchemaVersion(original.id()),
+                                        SchemaChange.updateColumnType(
+                                                "value", DataTypes.BIGINT(), true)))
+                .isInstanceOf(ConcurrentModificationException.class)
+                .hasMessageContaining("Expected schema version " + original.id())
+                .hasMessageContaining("found " + competing.id());
+
+        assertThat(manager.latest().get()).isEqualTo(competing);
+        assertThat(manager.latest().get().fieldNames()).containsExactly("value");
+        assertThat(manager.listAll()).hasSize(2);
     }
 
     @Test

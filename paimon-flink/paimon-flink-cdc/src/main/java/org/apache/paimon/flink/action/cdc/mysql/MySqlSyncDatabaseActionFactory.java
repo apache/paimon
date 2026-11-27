@@ -26,6 +26,7 @@ import java.util.Arrays;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlStartupSchemaEvolution.ADD_MISSING_COLUMNS_ON_STARTUP;
 
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionFactory
@@ -55,7 +56,9 @@ public class MySqlSyncDatabaseActionFactory
     @Override
     protected void withParams(MultipleParameterToolAdapter params, MySqlSyncDatabaseAction action) {
         super.withParams(params, action);
-        action.ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
+        action.withAddMissingColumnsOnStartup(
+                        params.getBoolean(ADD_MISSING_COLUMNS_ON_STARTUP, false))
+                .ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
                 .mergeShards(
                         !params.has(MERGE_SHARDS) || Boolean.parseBoolean(params.get(MERGE_SHARDS)))
                 .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
@@ -87,6 +90,7 @@ public class MySqlSyncDatabaseActionFactory
                         + "[--excluding_tables <mysql_table_name|name_regular_expr>] \\\n"
                         + "[--mode <sync_mode>] \\\n"
                         + "[--metadata_column <metadata_column>] \\\n"
+                        + "[--add_missing_columns_on_startup <true/false>] \\\n"
                         + "[--type_mapping <option1,option2...>] \\\n"
                         + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] \\\n"
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
@@ -138,6 +142,12 @@ public class MySqlSyncDatabaseActionFactory
 
         System.out.println(
                 "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+        System.out.println();
+
+        System.out.println(
+                "--add_missing_columns_on_startup is false by default. Set it to true to append "
+                        + "missing MySQL columns as nullable fields and widen compatible existing "
+                        + "source column types before checking schema compatibility.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

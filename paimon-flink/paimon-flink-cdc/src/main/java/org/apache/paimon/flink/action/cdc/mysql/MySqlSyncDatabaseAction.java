@@ -51,6 +51,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.schemaCompatible;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.tableList;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -96,6 +97,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
 
     private boolean ignoreIncompatible = false;
+    private boolean addMissingColumnsOnStartup;
 
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
@@ -109,6 +111,11 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
         this.ignoreIncompatible = ignoreIncompatible;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withAddMissingColumnsOnStartup(boolean enabled) {
+        this.addMissingColumnsOnStartup = enabled;
         return this;
     }
 
@@ -143,13 +150,15 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             database,
                             tableNameConverter.convert("", tableInfo.toPaimonTableName()));
             FileStoreTable table;
+            Map<String, String> targetOptions =
+                    tableConfig(tableInfo.identifiers().get(0).getObjectName());
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
                             identifier.getFullName(),
                             partitionKeys,
                             primaryKeys,
                             Collections.emptyList(),
-                            tableConfig(tableInfo.identifiers().get(0).getObjectName()),
+                            targetOptions,
                             tableInfo.schema(),
                             metadataConverters,
                             caseSensitive,
@@ -160,12 +169,36 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
+                if (addMissingColumnsOnStartup
+                        && (primaryKeys.isEmpty()
+                                || fromMySql
+                                        .primaryKeys()
+                                        .equals(listCaseConvert(primaryKeys, caseSensitive)))
+                        && fromMySql
+                                .partitionKeys()
+                                .equals(listCaseConvert(partitionKeys, caseSensitive))) {
+                    try {
+                        table =
+                                MySqlStartupSchemaEvolution.addMissingColumns(
+                                        catalog,
+                                        identifier,
+                                        table,
+                                        fromMySql,
+                                        tableInfo.schema(),
+                                        caseSensitive,
+                                        targetOptions,
+                                        typeMapping);
+                    } catch (MySqlStartupSchemaEvolution.IncompatibleSchemaException e) {
+                        if (!ignoreIncompatible) {
+                            throw new IllegalArgumentException(errMsg.get() + e.getMessage(), e);
+                        }
+                        LOG.warn("{}{} This table will be ignored.", errMsg.get(), e.getMessage());
+                        excludedTables.addAll(tableInfo.identifiers());
+                        continue;
+                    }
+                }
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    table =
-                            alterTableOptions(
-                                    identifier,
-                                    table,
-                                    tableConfig(tableInfo.identifiers().get(0).getObjectName()));
+                    table = alterTableOptions(identifier, table, targetOptions);
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
                 } else {

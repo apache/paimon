@@ -46,6 +46,9 @@ import java.util.Objects;
         property = SchemaChange.Actions.FIELD_ACTION)
 @JsonSubTypes({
     @JsonSubTypes.Type(
+            value = SchemaChange.CheckSchemaVersion.class,
+            name = SchemaChange.Actions.CHECK_SCHEMA_VERSION_ACTION),
+    @JsonSubTypes.Type(
             value = SchemaChange.SetOption.class,
             name = SchemaChange.Actions.SET_OPTION_ACTION),
     @JsonSubTypes.Type(
@@ -83,6 +86,11 @@ import java.util.Objects;
             name = SchemaChange.Actions.DROP_PRIMARY_KEY_ACTION),
 })
 public interface SchemaChange extends Serializable {
+
+    /** Requires the current schema to have the given version before applying changes. */
+    static SchemaChange checkSchemaVersion(long schemaId) {
+        return new CheckSchemaVersion(schemaId);
+    }
 
     static SchemaChange setOption(String key, String value) {
         return new SetOption(key, value);
@@ -169,6 +177,43 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange dropPrimaryKey() {
         return new DropPrimaryKey();
+    }
+
+    /** A SchemaChange requiring the current schema version to match the expected version. */
+    final class CheckSchemaVersion implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_SCHEMA_ID = "schemaId";
+
+        @JsonProperty(FIELD_SCHEMA_ID)
+        private final long schemaId;
+
+        @JsonCreator
+        private CheckSchemaVersion(@JsonProperty(FIELD_SCHEMA_ID) long schemaId) {
+            this.schemaId = schemaId;
+        }
+
+        @JsonGetter(FIELD_SCHEMA_ID)
+        public long schemaId() {
+            return schemaId;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            CheckSchemaVersion that = (CheckSchemaVersion) o;
+            return schemaId == that.schemaId;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(schemaId);
+        }
     }
 
     /** A SchemaChange to set a table option. */
@@ -839,6 +884,7 @@ public interface SchemaChange extends Serializable {
     /** Actions for schema changes： identify for schema change. */
     class Actions {
         public static final String FIELD_ACTION = "action";
+        public static final String CHECK_SCHEMA_VERSION_ACTION = "checkSchemaVersion";
         public static final String SET_OPTION_ACTION = "setOption";
         public static final String REMOVE_OPTION_ACTION = "removeOption";
         public static final String UPDATE_COMMENT_ACTION = "updateComment";
