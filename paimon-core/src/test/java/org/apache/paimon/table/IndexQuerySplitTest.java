@@ -827,26 +827,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     @CsvSource({"btree,false", "btree,true", "bitmap,false", "bitmap,true"})
     public void testPartitionIndexDoesNotPruneIndexedTail(String indexType, boolean topN)
             throws Exception {
-        catalog.createTable(
-                identifier(),
-                Schema.newBuilder()
-                        .column("f0", DataTypes.INT())
-                        .column("f1", DataTypes.STRING())
-                        .column("pt", DataTypes.STRING())
-                        .partitionKeys("pt")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .build(),
-                false);
-        FileStoreTable table = getTableDefault();
-        for (int i = 0; i < 2; i++) {
-            try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
-                    BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                write.write(GenericRow.of(i, str("a" + i), str("p")));
-                commit.commit(write.prepareCommit());
-            }
-        }
-        table = smallSplits(getTableDefault());
+        FileStoreTable table = createPartitionedTable(2);
         List<Split> dataSplits = table.newScan().plan().splits();
         assertThat(dataSplits).hasSize(2);
         createIndex(indexType, "pt", Collections.singletonList((DataSplit) dataSplits.get(1)));
@@ -880,6 +861,55 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         assertThat(expected).containsExactly(topN ? 0 : 1);
         assertThat(read(indexQueryRead, indexQueryRead.newScan().plan().splits()))
                 .containsExactlyElementsOf(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testFastRangeLimitRetriesPartitionFilterWithinManifestScope(String indexType)
+            throws Exception {
+        FileStoreTable table = createPartitionedTable(3);
+        List<DataSplit> indexedFiles =
+                table.newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .filter(split -> split.dataFiles().get(0).nonNullFirstRowId() != 1)
+                        .collect(Collectors.toList());
+        createIndex(indexType, "pt", indexedFiles);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(), "1");
+        FileStoreTable capped = table.copy(options);
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(2, str("p"));
+        SnapshotReader snapshotReader =
+                capped.newSnapshotReader()
+                        .withManifestEntryFilter(entry -> entry.file().nonNullFirstRowId() > 0);
+        List<Split> splits =
+                capped.newScan(ignored -> snapshotReader).withFilter(predicate).plan().splits();
+        assertThat(splits).singleElement().isInstanceOf(IndexedSplit.class);
+        assertThat(read(capped.newReadBuilder().withFilter(predicate), splits)).containsExactly(2);
+    }
+
+    private FileStoreTable createPartitionedTable(int rowCount) throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        for (int i = 0; i < rowCount; i++) {
+            try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                    BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                write.write(GenericRow.of(i, str("a" + i), str("p")));
+                commit.commit(write.prepareCommit());
+            }
+        }
+        return smallSplits(getTableDefault());
     }
 
     @Test

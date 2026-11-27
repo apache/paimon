@@ -666,6 +666,26 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                 .boxed()
                                 .collect(Collectors.toList()));
 
+        ReadBuilder scopedRead =
+                adaptive.newReadBuilder()
+                        .withFilter(PredicateBuilder.and(predicate, predicates.isNotNull(3)))
+                        .withProjection(new int[] {0});
+        TableScan.Plan scopedPlan = scopedRead.newScan().plan();
+        assertThat(scopedPlan.splits())
+                .singleElement()
+                .isInstanceOfSatisfying(
+                        IndexedSplit.class,
+                        split ->
+                                assertThat(split.rowRanges())
+                                        .containsExactly(new Range(rowCount + 2L, rowCount + 3L)));
+        List<Integer> scopedIds = new ArrayList<>();
+        scopedRead
+                .newRead()
+                .executeFilter()
+                .createReader(scopedPlan)
+                .forEachRemaining(row -> scopedIds.add(row.getInt(0)));
+        assertThat(scopedIds).containsExactly(rowCount + 2);
+
         AtomicInteger manifestOpens = new AtomicInteger();
         LocalFileIO fileIO =
                 new LocalFileIO() {

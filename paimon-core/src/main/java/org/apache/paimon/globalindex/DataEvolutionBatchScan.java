@@ -343,13 +343,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
                 if (rowRangeIndex == null) {
                     GlobalIndexSearchMode searchMode = table.coreOptions().scalarScanSearchMode();
-                    LOG.info(
-                            "Scan table '{}' with ordinary data splits because the row-ID range limit was exceeded.",
-                            table.name());
                     if (searchMode == GlobalIndexSearchMode.FAST
                             || batchScan.snapshotReader().hasNonPartitionFilter()) {
-                        return planWithFileGroupPruning(candidates, searchMode);
+                        return planWithFileGroupPruning(candidates, maxRanges, searchMode);
                     }
+                    LOG.info(
+                            "Scan table '{}' without global index because the row-ID range limit was exceeded.",
+                            table.name());
                 }
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
@@ -380,24 +380,48 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private Plan planWithFileGroupPruning(
-            RoaringNavigableMap64 candidates, GlobalIndexSearchMode searchMode) {
-        if (searchMode == GlobalIndexSearchMode.FAST) {
-            return batchScan.plan();
-        }
-
+            RoaringNavigableMap64 candidates, int maxRanges, GlobalIndexSearchMode searchMode) {
+        boolean fast = searchMode == GlobalIndexSearchMode.FAST;
         ManifestsReader manifestsReader = batchScan.snapshotReader().manifestsReader();
-        // Index evaluation pinned the snapshot. Keep the original predicate on the scan and
-        // plan before applying a row-level LIMIT or TopN.
-        manifestsReader.withManifestGroupCandidates(candidates);
+        // The snapshot is pinned by index evaluation. Keep the regular predicate on the scan
+        // and plan without a row-level LIMIT or TopN before removing any file groups.
+        if (!fast) {
+            manifestsReader.withManifestGroupCandidates(candidates);
+        }
         Plan plan;
         try {
             plan = batchScan.plan();
         } finally {
-            manifestsReader.withManifestGroupCandidates(null);
+            if (!fast) {
+                manifestsReader.withManifestGroupCandidates(null);
+            }
         }
-        return plan instanceof SnapshotReader.Plan
-                ? pruneFileGroups((SnapshotReader.Plan) plan, candidates)
-                : plan;
+        if (!(plan instanceof SnapshotReader.Plan)) {
+            return plan;
+        }
+        SnapshotReader.Plan dataPlan = (SnapshotReader.Plan) plan;
+        // FAST needs the original plan on overflow because uncovered rows can match the filter.
+        // Removing groups without candidates cannot change the scoped range count.
+        SnapshotReader.Plan fallbackPlan = fast ? dataPlan : pruneFileGroups(dataPlan, candidates);
+        if (fallbackPlan.splits().isEmpty()) {
+            return fallbackPlan;
+        }
+
+        List<Range> plannedRanges =
+                GlobalIndexBuilderUtils.calcRowRanges(fallbackPlan.dataSplits());
+        Optional<RowRangeIndex> ranges =
+                RowRangeIndex.tryFromBitmap(candidates, maxRanges, plannedRanges);
+        if (ranges.isPresent()) {
+            SnapshotReader.Plan indexedPlan =
+                    fast ? pruneFileGroups(dataPlan, candidates) : fallbackPlan;
+            return indexedPlan.splits().isEmpty()
+                    ? indexedPlan
+                    : wrapToIndexSplits(indexedPlan.splits(), ranges.get(), null);
+        }
+        LOG.info(
+                "Scan table '{}' with ordinary data splits because the row-ID range limit was exceeded.",
+                table.name());
+        return fallbackPlan;
     }
 
     @VisibleForTesting
