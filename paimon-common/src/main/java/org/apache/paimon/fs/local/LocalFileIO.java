@@ -240,6 +240,25 @@ public class LocalFileIO implements FileIO {
         }
     }
 
+    /**
+     * Writes a hidden temporary file and moves it over the target atomically, so a failed write
+     * never leaves a partially written target behind.
+     */
+    @Override
+    public void overwriteFileUtf8(Path path, String content) throws IOException {
+        Path tmp = path.createTempPath();
+        boolean success = false;
+        try {
+            writeFile(tmp, content, false);
+            Files.move(toFile(tmp).toPath(), toFile(path).toPath(), StandardCopyOption.ATOMIC_MOVE);
+            success = true;
+        } finally {
+            if (!success) {
+                deleteQuietly(tmp);
+            }
+        }
+    }
+
     @Override
     public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         LOG.debug("Invoking copyFile for {} to {}", sourcePath, targetPath);

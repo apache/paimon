@@ -117,6 +117,12 @@ under the License.
             <td>To store Iceberg metadata in a separate directory or under table location<br /><br />Possible values:<ul><li>"table-location": Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Java API access. Can also be used with Hive Catalog</li><li>"catalog-location": Store Iceberg metadata in a separate directory. Allows integration with Hive Catalog or Hadoop Catalog.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.sync-full-history</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When Iceberg metadata has to be created from scratch (for example, Iceberg compatibility is enabled on a table that already has snapshots, or the previous Iceberg metadata is unusable), rebuild it from all Paimon snapshots that are still retained instead of only the latest one, so Iceberg readers keep time travel and tags. The rebuild cost is proportional to the number of retained snapshots. Readers that resolve Iceberg metadata files (table-location, hadoop-catalog, hive-catalog) see the full replayed history; a rest-catalog only receives the final state.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.table</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
