@@ -172,7 +172,7 @@ class ConflictDetection:
             commit_kind,
             delta_index_entries=None):
         try:
-            FileEntry.merge_entries(delta_entries)
+            merged_delta_entries = FileEntry.merge_entries(delta_entries)
         except Exception as e:
             return RuntimeError(
                 "File deletion conflicts detected! Give up committing. " + str(e))
@@ -224,6 +224,11 @@ class ConflictDetection:
                 base_entries, delta_entries, next_row_id)
             if conflict is not None:
                 return conflict
+
+        conflict = self.check_intra_commit_row_id_column_conflicts(
+            commit_kind, merged_delta_entries)
+        if conflict is not None:
+            return conflict
 
         conflict = self.check_row_id_range_conflicts(commit_kind, merged_entries)
         if conflict is not None:
@@ -501,6 +506,35 @@ class ConflictDetection:
             if key not in existing_index:
                 return RowIdExistenceConflict(entry)
 
+        return None
+
+    def check_intra_commit_row_id_column_conflicts(self, commit_kind, delta_entries):
+        if (not self.data_evolution_enabled or commit_kind == "COMPACT"
+                or self._row_id_check_from_snapshot is None):
+            return None
+
+        # Existing files may share ranges with deltas; compare only new additions.
+        by_location = {}
+        for entry in delta_entries:
+            if entry.kind == 0 and entry.file.first_row_id is not None:
+                by_location.setdefault((entry.partition, entry.bucket), []).append(entry)
+
+        checker = RowIdColumnConflictChecker([], self.table.schema_manager)
+        for entries in by_location.values():
+            latest_by_field = {}
+            for entry in sorted(entries, key=lambda item: item.file.first_row_id):
+                file = entry.file
+                end = file.first_row_id + file.row_count - 1
+                for field_id in checker._write_field_ids(file):
+                    previous = latest_by_field.get(field_id)
+                    if previous is not None and previous[0] >= file.first_row_id:
+                        return RuntimeError(
+                            "For Data Evolution table, prepared updates write the "
+                            "same row-id range and column in one commit: {} and {}.".format(
+                                self._file_description(previous[1]),
+                                self._file_description(entry)))
+                    if previous is None or end > previous[0]:
+                        latest_by_field[field_id] = (end, entry)
         return None
 
     def check_row_id_range_conflicts(self, commit_kind, commit_entries):

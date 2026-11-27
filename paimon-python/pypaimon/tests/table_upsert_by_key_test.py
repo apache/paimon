@@ -1501,6 +1501,30 @@ class TableUpsertByKeyBatchTest(
 ):
     """All shared upsert tests under batch (``BatchWriteBuilder``) semantics."""
 
+    def test_combined_prepared_upserts_same_file_reject_conflict(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2], 'name': ['Alice', 'Bob'],
+            'age': [25, 30], 'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        before_snapshot = table.snapshot_manager().get_latest_snapshot().id
+        messages = []
+        for key, age in ((1, 26), (2, 31)):
+            builder = self._make_write_builder(table)
+            updater = builder.new_update().with_update_type(['age'])
+            messages.extend(updater.upsert_by_arrow_with_key(
+                pa.Table.from_pydict({
+                    'id': [key], 'name': ['ignored'], 'age': [age],
+                    'city': ['ignored'],
+                }, schema=self.pa_schema), ['id']))
+
+        with self.assertRaisesRegex(RuntimeError, 'same row-id range and column'):
+            builder.new_commit().commit(messages)
+
+        self.assertEqual(before_snapshot, table.snapshot_manager().get_latest_snapshot().id)
+        self.assertEqual([25, 30],
+                         self._read_all(table)['age'].to_pylist())
+
 
 class TableUpsertByKeyStreamTest(
     _StreamModeMixin, _TableUpsertByKeyTestBase, unittest.TestCase
