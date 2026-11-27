@@ -15,10 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 import unittest
 
 import pyarrow as pa
 
+from pypaimon import CatalogFactory
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema import Schema
@@ -106,6 +108,49 @@ class SchemaPrimaryKeyNullabilityTest(unittest.TestCase):
             options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'},
         )
         self.assertTrue(schema.fields[0].type.nullable)
+
+    def test_nullable_primary_key_does_not_relax_non_key_field(self):
+        bigint = AtomicType('BIGINT', nullable=False)
+        fields = [DataField(0, 'id', bigint, 'Primary key'), DataField(1, 'value', bigint)]
+        schema = Schema(fields, primary_keys=['id'],
+                        options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'})
+
+        self.assertTrue(schema.fields[0].type.nullable)
+        self.assertEqual(schema.fields[0].description, 'Primary key')
+        self.assertFalse(schema.fields[1].type.nullable)
+        self.assertFalse(fields[0].type.nullable)
+
+    def test_shared_type_keeps_payload_nullable_in_persisted_schema(self):
+        bigint = AtomicType('BIGINT')
+        fields = [DataField(0, 'id', bigint), DataField(1, 'value', bigint)]
+        options = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'write-only': 'true',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+            'read.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false',
+        }
+        with tempfile.TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('test', False)
+            catalog.create_table('test.pk', Schema(fields, primary_keys=['id'], options=options), False)
+            table = catalog.get_table('test.pk')
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.table({'id': [1], 'value': pa.array([None], type=pa.int64())}))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+            self.assertEqual([field.type.nullable for field in table.fields], [False, True])
+            self.assertTrue(bigint.nullable)
+            reader = table.new_read_builder()
+            rows = reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist()
+            self.assertEqual(rows, [{'id': 1, 'value': None}])
 
     def test_primary_key_nullable_requires_primary_key_table(self):
         with self.assertRaisesRegex(

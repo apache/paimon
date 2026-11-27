@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 import pyarrow as pa
@@ -54,10 +55,17 @@ class Schema:
                 "Option 'primary-key.nullable' can only be enabled for a table "
                 "with primary keys."
             )
-        pk_set = set(self.primary_keys)
-        for field in self.fields:
-            if field.name in pk_set:
-                field.type.nullable = primary_key_nullable
+        if self.primary_keys:
+            pk_set = set(self.primary_keys)
+            normalized_fields = []
+            for field in self.fields:
+                if field.name in pk_set and field.type.nullable != primary_key_nullable:
+                    # A type instance may be shared with another field or schema.
+                    field_type = copy(field.type)
+                    field_type.nullable = primary_key_nullable
+                    field = replace(field, type=field_type)
+                normalized_fields.append(field)
+            self.fields = normalized_fields
 
         changelog_producer = self.options.get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
         if changelog_producer != 'none' and not self.primary_keys:
