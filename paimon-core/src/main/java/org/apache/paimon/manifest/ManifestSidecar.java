@@ -28,7 +28,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCodec;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SerializationUtils;
@@ -102,26 +101,12 @@ public final class ManifestSidecar {
         public final long length;
         public final long firstRecord;
         public final long recordCount;
-        private final long minRowId;
-        private final long maxRowId;
 
         public Block(long offset, long length, long firstRecord, long recordCount) {
-            this(offset, length, firstRecord, recordCount, -1, -1);
-        }
-
-        private Block(
-                long offset,
-                long length,
-                long firstRecord,
-                long recordCount,
-                long minRowId,
-                long maxRowId) {
             this.offset = offset;
             this.length = length;
             this.firstRecord = firstRecord;
             this.recordCount = recordCount;
-            this.minRowId = minRowId;
-            this.maxRowId = maxRowId;
         }
     }
 
@@ -137,33 +122,6 @@ public final class ManifestSidecar {
 
         public List<Block> blocks() {
             return blocks;
-        }
-
-        /** Returns the row-ID bounds per block, or null if any selected block lacks bounds. */
-        @Nullable
-        public List<Range> rowIdBounds() {
-            List<Range> ranges = new ArrayList<>(blocks.size());
-            for (Block block : blocks) {
-                if (block.minRowId < 0) {
-                    return null;
-                }
-                ranges.add(new Range(block.minRowId, block.maxRowId));
-            }
-            return ranges;
-        }
-
-        /** Keeps blocks that can overlap the selected file groups. */
-        public Selection withRowGroups(@Nullable RowRangeIndex groups) {
-            if (groups == null) {
-                return this;
-            }
-            List<Block> selected = new ArrayList<>();
-            for (Block block : blocks) {
-                if (block.minRowId < 0 || groups.intersects(block.minRowId, block.maxRowId)) {
-                    selected.add(block);
-                }
-            }
-            return selected.size() == blocks.size() ? this : new Selection(header, selected);
         }
     }
 
@@ -529,8 +487,8 @@ public final class ManifestSidecar {
                 ids = new DeltaVarintCodec.Reader(partitionPayload, 0, partitions - 1L);
                 require(ids.count() > 0 && ids.count() <= records && ids.count() <= partitions);
             }
-            long min = -1;
-            long max = -1;
+            long min = 0;
+            long max = 0;
             DeltaVarintCodec.Reader endpoints = null;
             if (rowPayload != null) {
                 require(rowPayload.remaining() >= 2 * Long.BYTES + 1);
@@ -622,7 +580,7 @@ public final class ManifestSidecar {
                     continue;
                 }
             }
-            selected.add(new Block(offset, length, blockFirstRecord, records, min, max));
+            selected.add(new Block(offset, length, blockFirstRecord, records));
         }
         require(!in.hasRemaining() && nextOffset == manifest.fileSize() && firstRecord == entries);
         return new Selection(header, selected);

@@ -25,7 +25,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.SimpleStats;
@@ -48,7 +47,6 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
@@ -214,15 +212,6 @@ public class ManifestsReader {
             List<ManifestFileMeta> manifests,
             RoaringNavigableMap64 candidates,
             Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries) {
-        return selectManifestGroups(manifests, candidates, mixedEntries, Collections.emptyMap());
-    }
-
-    @Nullable
-    static RowRangeIndex selectManifestGroups(
-            List<ManifestFileMeta> manifests,
-            RoaringNavigableMap64 candidates,
-            Map<ManifestFileMeta, List<ManifestEntry>> mixedEntries,
-            Map<ManifestFileMeta, Optional<ManifestSidecar.Selection>> addBlocks) {
         List<Range> addRanges = new ArrayList<>(manifests.size());
         for (ManifestFileMeta manifest : manifests) {
             if (manifest.numAddedFiles() == 0) {
@@ -230,16 +219,10 @@ public class ManifestsReader {
             }
             List<ManifestEntry> entries = mixedEntries.get(manifest);
             if (entries == null) {
-                ManifestSidecar.Selection selection =
-                        addBlocks.getOrDefault(manifest, Optional.empty()).orElse(null);
-                List<Range> blockBounds = selection == null ? null : selection.rowIdBounds();
-                if (blockBounds != null) {
-                    addRanges.addAll(blockBounds);
-                } else if (hasValidRowIdBounds(manifest)) {
-                    addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
-                } else {
+                if (!hasValidRowIdBounds(manifest)) {
                     return null;
                 }
+                addRanges.add(new Range(manifest.minRowId(), manifest.maxRowId()));
             } else {
                 for (ManifestEntry entry : entries) {
                     if (entry.kind() == FileKind.ADD) {
