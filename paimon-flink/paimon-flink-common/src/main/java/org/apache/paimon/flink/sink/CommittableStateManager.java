@@ -27,8 +27,13 @@ import java.util.List;
  */
 public interface CommittableStateManager<GlobalCommitT> extends Serializable {
 
-    void initializeState(Committer.Context context, Committer<?, GlobalCommitT> committer)
-            throws Exception;
+    /**
+     * Initializes the state and returns restored committables which must remain pending in the
+     * operator.
+     */
+    List<GlobalCommitT> initializeState(
+            Committer.Context context, Committer<?, GlobalCommitT> committer) throws Exception;
 
-    void snapshotState(List<GlobalCommitT> committables) throws Exception;
+    /** Snapshots pending committables together with the complete end-input state. */
+    void snapshotState(List<GlobalCommitT> committables, boolean completeEndInput) throws Exception;
 }
