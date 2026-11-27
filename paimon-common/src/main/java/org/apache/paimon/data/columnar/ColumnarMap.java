@@ -50,6 +50,15 @@ public final class ColumnarMap implements InternalMap, Serializable {
         this.fileIO = fileIO;
     }
 
+    /**
+     * Returns the physical index of the first entry in the key and value column vectors. It is not
+     * always equal to the number of entries of the preceding maps, because some readers (e.g. the
+     * parquet reader) reserve a placeholder slot for null or empty maps.
+     */
+    public int getOffset() {
+        return offset;
+    }
+
     @Override
     public int size() {
         return numElements;

@@ -31,6 +31,8 @@ import org.apache.paimon.data.columnar.BooleanColumnVector;
 import org.apache.paimon.data.columnar.ByteColumnVector;
 import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.DoubleColumnVector;
 import org.apache.paimon.data.columnar.FloatColumnVector;
@@ -693,6 +695,8 @@ public class ArrowFieldWriters {
 
         private int[] reusableLengths;
 
+        private int[] reusableOffsets;
+
         public ArrayWriter(
                 FieldVector fieldVector, ArrowFieldWriter elementWriter, boolean isNullable) {
             super(fieldVector, isNullable);
@@ -721,30 +725,42 @@ public class ArrowFieldWriters {
                 lenSize = pickedInColumn[startIndex + batchRows - 1] + 1;
             }
 
-            // length for arrays in [0, startIndex + batchRows)
-            int[] lengths;
+            // length and child offset for arrays in [0, startIndex + batchRows)
             if (reusableLengths == null || reusableLengths.length < lenSize) {
                 reusableLengths = new int[lenSize];
+                reusableOffsets = new int[lenSize];
             }
-            lengths = reusableLengths;
+            int[] lengths = reusableLengths;
+            int[] offsets = reusableOffsets;
             // Only use the first lenSize elements, reset if needed
             for (int i = 0; i < lenSize; i++) {
                 if (arrayColumnVector.isNullAt(i)) {
                     // null values don't occupy space
                     lengths[i] = 0;
                 } else {
-                    int size = arrayColumnVector.getArray(i).size();
-                    lengths[i] = size;
+                    InternalArray array = arrayColumnVector.getArray(i);
+                    lengths[i] = array.size();
+                    // the child elements of an array are not necessarily placed right after the
+                    // elements of the previous array, some readers (e.g. parquet) insert a
+                    // placeholder slot for null / empty arrays
+                    offsets[i] =
+                            array instanceof ColumnarArray
+                                    ? ((ColumnarArray) array).getOffset()
+                                    : -1;
                 }
             }
 
             ArrayChildWriteInfo arrayChildWriteInfo =
-                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, lenSize);
-            elementWriter.write(
-                    arrayColumnVector.getColumnVector(),
-                    arrayChildWriteInfo.pickedInColumn,
-                    arrayChildWriteInfo.startIndex,
-                    arrayChildWriteInfo.batchRows);
+                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, offsets, lenSize);
+            if (arrayChildWriteInfo.rowByRow) {
+                writeChildrenByRow(arrayColumnVector, pickedInColumn, startIndex, batchRows);
+            } else {
+                elementWriter.write(
+                        arrayColumnVector.getColumnVector(),
+                        arrayChildWriteInfo.pickedInColumn,
+                        arrayChildWriteInfo.startIndex,
+                        arrayChildWriteInfo.batchRows);
+            }
 
             // set ListVector
             ListVector listVector = (ListVector) fieldVector;
@@ -756,6 +772,30 @@ public class ArrowFieldWriters {
                     listVector.startNewValue(i);
                     listVector.endValue(i, lengths[row]);
                 }
+            }
+        }
+
+        /**
+         * Writes the elements one by one through {@link InternalArray}, which is used when the
+         * physical child offsets are unknown. Reading through the array always addresses the child
+         * elements correctly.
+         */
+        private void writeChildrenByRow(
+                ArrayColumnVector arrayColumnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            int childIndex = 0;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (arrayColumnVector.isNullAt(row)) {
+                    continue;
+                }
+                InternalArray array = arrayColumnVector.getArray(row);
+                for (int j = 0; j < array.size(); j++) {
+                    elementWriter.write(childIndex + j, array, j);
+                }
+                childIndex += array.size();
             }
         }
 
@@ -870,6 +910,8 @@ public class ArrowFieldWriters {
 
         private int[] reusableLengths;
 
+        private int[] reusableOffsets;
+
         public MapWriter(
                 FieldVector fieldVector,
                 ArrowFieldWriter keyWriter,
@@ -903,33 +945,43 @@ public class ArrowFieldWriters {
                 lenSize = pickedInColumn[startIndex + batchRows - 1] + 1;
             }
 
-            // length for arrays in [0, startIndex + batchRows)
+            // length and child offset for maps in [0, startIndex + batchRows)
             if (reusableLengths == null || reusableLengths.length < lenSize) {
                 reusableLengths = new int[lenSize];
+                reusableOffsets = new int[lenSize];
             }
             int[] lengths = reusableLengths;
+            int[] offsets = reusableOffsets;
             for (int i = 0; i < lenSize; i++) {
                 if (mapColumnVector.isNullAt(i)) {
                     // null values don't occupy space
                     lengths[i] = 0;
                 } else {
-                    int size = mapColumnVector.getMap(i).size();
-                    lengths[i] = size;
+                    InternalMap map = mapColumnVector.getMap(i);
+                    lengths[i] = map.size();
+                    // the entries of a map are not necessarily placed right after the entries of
+                    // the previous map, some readers (e.g. parquet) insert a placeholder slot for
+                    // null / empty maps
+                    offsets[i] = map instanceof ColumnarMap ? ((ColumnarMap) map).getOffset() : -1;
                 }
             }
 
             ArrayChildWriteInfo arrayChildWriteInfo =
-                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, lenSize);
-            keyWriter.write(
-                    mapColumnVector.getChildren()[0],
-                    arrayChildWriteInfo.pickedInColumn,
-                    arrayChildWriteInfo.startIndex,
-                    arrayChildWriteInfo.batchRows);
-            valueWriter.write(
-                    mapColumnVector.getChildren()[1],
-                    arrayChildWriteInfo.pickedInColumn,
-                    arrayChildWriteInfo.startIndex,
-                    arrayChildWriteInfo.batchRows);
+                    getArrayChildWriteInfo(pickedInColumn, startIndex, lengths, offsets, lenSize);
+            if (arrayChildWriteInfo.rowByRow) {
+                writeChildrenByRow(mapColumnVector, pickedInColumn, startIndex, batchRows);
+            } else {
+                keyWriter.write(
+                        mapColumnVector.getChildren()[0],
+                        arrayChildWriteInfo.pickedInColumn,
+                        arrayChildWriteInfo.startIndex,
+                        arrayChildWriteInfo.batchRows);
+                valueWriter.write(
+                        mapColumnVector.getChildren()[1],
+                        arrayChildWriteInfo.pickedInColumn,
+                        arrayChildWriteInfo.startIndex,
+                        arrayChildWriteInfo.batchRows);
+            }
 
             // set inner struct and map
             MapVector mapVector = (MapVector) fieldVector;
@@ -947,6 +999,33 @@ public class ArrowFieldWriters {
                     listVector.startNewValue(i);
                     listVector.endValue(i, lengths[row]);
                 }
+            }
+        }
+
+        /**
+         * Writes the entries one by one through {@link InternalMap}, which is used when the
+         * physical child offsets are unknown. Reading through the map always addresses the child
+         * entries correctly.
+         */
+        private void writeChildrenByRow(
+                MapColumnVector mapColumnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            int childIndex = 0;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (mapColumnVector.isNullAt(row)) {
+                    continue;
+                }
+                InternalMap map = mapColumnVector.getMap(row);
+                InternalArray keyArray = map.keyArray();
+                InternalArray valueArray = map.valueArray();
+                for (int j = 0; j < map.size(); j++) {
+                    keyWriter.write(childIndex + j, keyArray, j);
+                    valueWriter.write(childIndex + j, valueArray, j);
+                }
+                childIndex += map.size();
             }
         }
 
@@ -974,61 +1053,136 @@ public class ArrowFieldWriters {
         @Nullable final int[] pickedInColumn;
         final int startIndex;
         final int batchRows;
+        // whether the child elements must be written one by one because their physical offsets are
+        // unknown
+        final boolean rowByRow;
 
-        ArrayChildWriteInfo(@Nullable int[] pickedInColumn, int startIndex, int batchRows) {
+        private ArrayChildWriteInfo(@Nullable int[] pickedInColumn, int startIndex, int batchRows) {
+            this(pickedInColumn, startIndex, batchRows, false);
+        }
+
+        private ArrayChildWriteInfo(
+                @Nullable int[] pickedInColumn, int startIndex, int batchRows, boolean rowByRow) {
             this.pickedInColumn = pickedInColumn;
             this.startIndex = startIndex;
             this.batchRows = batchRows;
+            this.rowByRow = rowByRow;
+        }
+
+        static ArrayChildWriteInfo rowByRow(int batchRows) {
+            return new ArrayChildWriteInfo(null, 0, batchRows, true);
         }
     }
 
+    /**
+     * Computes how the child column vector should be written.
+     *
+     * @param parentOffsets the physical offset of each parent's children in the child column
+     *     vector, or a negative value if it is unknown
+     */
     private static ArrayChildWriteInfo getArrayChildWriteInfo(
             @Nullable int[] pickedInParentColumn,
             int parentStartIndex,
             int[] parentLengths,
+            int[] parentOffsets,
             int lenSize) {
         return pickedInParentColumn == null
-                ? getArrayChildWriteInfoWithoutDelete(parentStartIndex, parentLengths, lenSize)
+                ? getArrayChildWriteInfoWithoutDelete(
+                        parentStartIndex, parentLengths, parentOffsets, lenSize)
                 : getArrayChildWriteInfoWithDelete(
-                        pickedInParentColumn, parentStartIndex, parentLengths, lenSize);
+                        pickedInParentColumn,
+                        parentStartIndex,
+                        parentLengths,
+                        parentOffsets,
+                        lenSize);
     }
 
     private static ArrayChildWriteInfo getArrayChildWriteInfoWithoutDelete(
-            int parentStartIndex, int[] parentLengths, int lenSize) {
-        // the first element index which is to be written
-        int firstElementIndex = 0;
-        // batchRows of child column vector
+            int parentStartIndex, int[] parentLengths, int[] parentOffsets, int lenSize) {
         int childBatchRows = 0;
-        for (int i = 0; i < lenSize; i++) {
-            if (i < parentStartIndex) {
-                firstElementIndex += parentLengths[i];
-            } else {
-                childBatchRows += parentLengths[i];
+        for (int i = parentStartIndex; i < lenSize; i++) {
+            childBatchRows += parentLengths[i];
+        }
+        if (childBatchRows == 0) {
+            return new ArrayChildWriteInfo(null, 0, 0);
+        }
+
+        // The first element index which is to be written, and whether the children of the written
+        // parents are placed contiguously in the child column vector. Null / empty parents take a
+        // placeholder slot in some readers, so the physical offsets are only reliable when all
+        // offsets can be read and are contiguous.
+        int firstElementIndex = -1;
+        int expectedOffset = -1;
+        boolean contiguous = true;
+        for (int i = parentStartIndex; i < lenSize; i++) {
+            int length = parentLengths[i];
+            if (length == 0) {
+                continue;
+            }
+            int offset = parentOffsets[i];
+            if (offset < 0) {
+                return ArrayChildWriteInfo.rowByRow(childBatchRows);
+            }
+            if (firstElementIndex < 0) {
+                firstElementIndex = offset;
+                expectedOffset = offset;
+            } else if (offset != expectedOffset) {
+                contiguous = false;
+            }
+            expectedOffset += length;
+        }
+
+        if (contiguous) {
+            return new ArrayChildWriteInfo(null, firstElementIndex, childBatchRows);
+        }
+
+        // The children are not contiguous, collect the physical indexes to be written.
+        int[] childPicked = new int[childBatchRows];
+        int childIndex = 0;
+        for (int i = parentStartIndex; i < lenSize; i++) {
+            int length = parentLengths[i];
+            int offset = parentOffsets[i];
+            for (int j = 0; j < length; j++) {
+                childPicked[childIndex++] = offset + j;
             }
         }
-        return new ArrayChildWriteInfo(null, firstElementIndex, childBatchRows);
+        return new ArrayChildWriteInfo(childPicked, 0, childBatchRows);
     }
 
     private static ArrayChildWriteInfo getArrayChildWriteInfoWithDelete(
-            int[] pickedInParentColumn, int parentStartIndex, int[] parentLengths, int lenSize) {
-        // the first element index which is to be written
-        int firstElementIndex = 0;
-        // objects to calculate child pickedInColumn
-        IntArrayList childPicked = new IntArrayList(1024);
-        int offset = 0;
+            int[] pickedInParentColumn,
+            int parentStartIndex,
+            int[] parentLengths,
+            int[] parentOffsets,
+            int lenSize) {
+        // count the children of the picked parents first
+        int childBatchRows = 0;
+        boolean offsetsKnown = true;
         int currentParentPickedIndex = parentStartIndex;
         for (int i = 0; i < lenSize; i++) {
-            if (i < pickedInParentColumn[parentStartIndex]) {
-                firstElementIndex += parentLengths[i];
-                offset = firstElementIndex;
-            } else {
-                if (i == pickedInParentColumn[currentParentPickedIndex]) {
-                    for (int pick = 0; pick < parentLengths[i]; pick++) {
-                        childPicked.add(pick + offset);
-                    }
-                    currentParentPickedIndex += 1;
+            if (i == pickedInParentColumn[currentParentPickedIndex]) {
+                int length = parentLengths[i];
+                if (length > 0 && parentOffsets[i] < 0) {
+                    offsetsKnown = false;
                 }
-                offset += parentLengths[i];
+                childBatchRows += length;
+                currentParentPickedIndex += 1;
+            }
+        }
+        if (!offsetsKnown) {
+            return ArrayChildWriteInfo.rowByRow(childBatchRows);
+        }
+
+        // objects to calculate child pickedInColumn
+        IntArrayList childPicked = new IntArrayList(1024);
+        currentParentPickedIndex = parentStartIndex;
+        for (int i = 0; i < lenSize; i++) {
+            if (i == pickedInParentColumn[currentParentPickedIndex]) {
+                int offset = parentOffsets[i];
+                for (int pick = 0; pick < parentLengths[i]; pick++) {
+                    childPicked.add(pick + offset);
+                }
+                currentParentPickedIndex += 1;
             }
         }
         return new ArrayChildWriteInfo(childPicked.toArray(), 0, childPicked.size());
