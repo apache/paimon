@@ -57,6 +57,7 @@ under the License.
         <module>paimon-codegen-loader</module>
         <module>paimon-common</module>
         <module>paimon-core</module>
+        <module>paimon-zookeeper</module>
         <module>paimon-flink</module>
         <module>paimon-docs</module>
         <module>paimon-e2e-tests</module>

@@ -18,10 +18,11 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
@@ -45,8 +47,8 @@ class CatalogLockConfigurationTest {
     @Test
     void abstractCatalogDoesNotInterpretBackendLockOptions() throws Exception {
         Options options = new Options();
-        options.set(JdbcCatalogOptions.LOCK_ENABLED, true);
-        options.set(JdbcCatalogOptions.LOCK_TYPE, "not-installed");
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        options.set(CatalogOptions.LOCK_TYPE, "not-installed");
         AbstractCatalog catalog =
                 mock(
                         AbstractCatalog.class,
@@ -62,10 +64,10 @@ class CatalogLockConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void filesystemDoesNotInterpretBackendLockOptions(boolean objectStore) throws Exception {
+    void disabledFilesystemLockIgnoresItsType(boolean objectStore) throws Exception {
         Options options = new Options();
-        options.set(JdbcCatalogOptions.LOCK_ENABLED, true);
-        options.set(JdbcCatalogOptions.LOCK_TYPE, "not-installed");
+        options.set(CatalogOptions.LOCK_ENABLED, false);
+        options.set(CatalogOptions.LOCK_TYPE, "not-installed");
         FileIO fileIO = mock(FileIO.class);
         when(fileIO.isObjectStore()).thenReturn(objectStore);
         FileSystemCatalog catalog =
@@ -76,6 +78,46 @@ class CatalogLockConfigurationTest {
             assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
         }
         assertThat(catalog.runWithLock(identifier, () -> "created")).isEqualTo("created");
+    }
+
+    @Test
+    void filesystemRejectsZooKeeperLockWithoutOptionalModule() throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        options.set(CatalogOptions.LOCK_TYPE, "zookeeper");
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(
+                        mock(FileIO.class),
+                        new Path("file:/warehouse"),
+                        CatalogContext.create(options))) {
+            assertThatThrownBy(catalog::lockFactory)
+                    .isInstanceOf(FactoryException.class)
+                    .hasMessageContaining("Could not find any factory for identifier 'zookeeper'");
+        }
+    }
+
+    @Test
+    void filesystemResolvesConfiguredLockAfterCatalogReconstruction() throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        options.set(CatalogOptions.LOCK_TYPE, TestCatalogLockFactory.IDENTIFIER);
+        FileSystemCatalog catalog =
+                new FileSystemCatalog(
+                        mock(FileIO.class),
+                        new Path("file:/warehouse"),
+                        CatalogContext.create(options));
+        Identifier identifier = Identifier.create("db", "table");
+
+        Catalog reconstructed = catalog.catalogLoader().load();
+        try (Lock lock =
+                reconstructed.createLock(identifier, "table-id", "writer", new Options())) {
+            assertThat(lock.runWithLock(() -> options.get("test.lock.held"))).isEqualTo("true");
+        }
+
+        assertThat(options.get("test.lock.database")).isEqualTo("db");
+        assertThat(options.get("test.lock.table")).isEqualTo("table");
+        assertThat(options.get("test.lock.held")).isEqualTo("false");
+        assertThat(options.get("test.lock.closed")).isEqualTo("true");
     }
 
     @Test
