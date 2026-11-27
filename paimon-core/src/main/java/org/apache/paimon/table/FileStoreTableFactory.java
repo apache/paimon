@@ -27,7 +27,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.ChainTableUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +36,7 @@ import java.io.UncheckedIOException;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.catalog.Identifier.isBlankBranch;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
@@ -109,7 +109,7 @@ public class FileStoreTableFactory {
         String primaryBranch = options.get(CoreOptions.SCAN_PRIMARY_BRANCH);
         if (ChainTableUtils.isChainTable(options.toMap())) {
             table = createChainTable(table, fileIO, tablePath, dynamicOptions, catalogEnvironment);
-        } else if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
+        } else if (!isBlankBranch(fallbackBranch)) {
             FileStoreTable otherTable =
                     createOtherBranchTable(fileIO, tablePath, fallbackBranch, catalogEnvironment);
             if (otherTable != null) {
@@ -119,7 +119,7 @@ public class FileStoreTableFactory {
             } else {
                 LOG.error("Fallback branch {} not found for table {}", fallbackBranch, tablePath);
             }
-        } else if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+        } else if (!isBlankBranch(primaryBranch)) {
             FileStoreTable otherTable =
                     createOtherBranchTable(fileIO, tablePath, primaryBranch, catalogEnvironment);
             if (otherTable != null) {

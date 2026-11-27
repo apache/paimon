@@ -40,7 +40,9 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -66,7 +68,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -273,6 +277,61 @@ class FileSystemBranchManagerTest {
         assertThatThrownBy(() -> branchManager.renameBranch("valid_branch", ""))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("blank");
+    }
+
+    @Test
+    void testU180EBranchIsNotBlankOnAnyJvm() {
+        // Java 8 takes U+180E for whitespace, later JVMs and PyPaimon do not.
+        String branchName = "\u180E";
+        assertThat(BranchManager.normalizeBranch(branchName)).isEqualTo(branchName);
+        branchManager.createBranch(branchName);
+        assertThat(branchManager.branchExists(branchName)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"scan.fallback-branch", "scan.primary-branch"})
+    void testU180EBranchIsReadAndProtectedAsFallbackOrPrimary(String option) throws Exception {
+        // Java 8 took U+180E for whitespace here, so the option was ignored.
+        String branchName = "\u180E";
+        branchManager.createBranch(branchName);
+        schemaManager.commitChanges(SchemaChange.setOption(option, branchName));
+
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath);
+        assertThat(table).isInstanceOf(FallbackReadFileStoreTable.class);
+        assertThatThrownBy(() -> table.deleteBranch(branchName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("because it is configured as '" + option + "'");
+        assertThat(branchManager.branchExists(branchName)).isTrue();
+
+        Map<String, String> options = new HashMap<>(table.schema().options());
+        options.put(
+                option.equals("scan.fallback-branch")
+                        ? "scan.primary-branch"
+                        : "scan.fallback-branch",
+                "other");
+        assertThatThrownBy(
+                        () ->
+                                SchemaValidation.validateFallbackBranch(
+                                        schemaManager, table.schema().copy(options)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at the same time");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MAIN", "Main", "ma\u0131n", "ma\u0130n"})
+    void testRejectsDefaultBranchVariants(String branchName) {
+        String message = "Branch name 'main' is the default branch and cannot be used.";
+        assertThatThrownBy(() -> branchManager.createBranch(branchName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+        assertThatThrownBy(() -> branchManager.createBranch(branchName, "missing_tag"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+
+        branchManager.createBranch("valid_branch");
+        assertThatThrownBy(() -> branchManager.renameBranch("valid_branch", branchName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
     }
 
     @Test

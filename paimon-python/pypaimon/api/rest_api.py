@@ -64,6 +64,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.java_string import is_null_or_whitespace_only
 from pypaimon.management.list_permissions_request import \
     ListPermissionsRequest
 from pypaimon.management.list_policies_request import ListPoliciesRequest
@@ -296,7 +297,7 @@ class RESTApi:
         return PagedList(tables, response.get_next_page_token())
 
     def create_table(self, identifier: Identifier, schema: Schema) -> None:
-        database_name, _ = self.__validate_identifier(identifier)
+        database_name, _ = self.__validate_table_identifier(identifier)
         if not schema:
             raise ValueError("Schema cannot be None")
 
@@ -307,7 +308,7 @@ class RESTApi:
             self.rest_auth_function)
 
     def get_table(self, identifier: Identifier) -> GetTableResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
 
         return self.client.get(
             self.resource_paths.table(
@@ -328,7 +329,7 @@ class RESTApi:
         )
 
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
 
         return self.client.delete(
             self.resource_paths.table(
@@ -342,8 +343,8 @@ class RESTApi:
             raise ValueError("Source identifier cannot be None")
         if not target_identifier:
             raise ValueError("Target identifier cannot be None")
-        self.__validate_identifier(source_identifier)
-        self.__validate_identifier(target_identifier)
+        self.__validate_table_identifier(source_identifier)
+        self.__validate_table_identifier(target_identifier)
 
         request = RenameTableRequest(source_identifier, target_identifier)
         return self.client.post(
@@ -352,7 +353,7 @@ class RESTApi:
             self.rest_auth_function)
 
     def alter_table(self, identifier: Identifier, changes: List):
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
         if not changes:
             raise ValueError("Changes cannot be empty")
 
@@ -363,7 +364,7 @@ class RESTApi:
             self.rest_auth_function)
 
     def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
 
         return self.client.get(
             self.resource_paths.table_token(
@@ -398,7 +399,7 @@ class RESTApi:
             NoSuchResourceException: Exception thrown on HTTP 404 means the table not exists
             ForbiddenException: Exception thrown on HTTP 403 means don't have the permission for this table
         """
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
         if not snapshot:
             raise ValueError("Snapshot cannot be None")
         if statistics is None:
@@ -468,7 +469,7 @@ class RESTApi:
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
     ) -> PagedList[Partition]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
 
         response = self.client.get_with_params(
             self.resource_paths.partitions(database_name, table_name),
@@ -490,7 +491,7 @@ class RESTApi:
             partitions: List[Dict[str, str]],
             ignore_if_exists: bool = True,
     ) -> CreatePartitionsResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
         request = CreatePartitionsRequest(
             partition_specs=partitions,
             ignore_if_exists=ignore_if_exists,
@@ -561,7 +562,16 @@ class RESTApi:
     # Branch CRUD wrappers — mirror Java RESTApi branch methods.
     @staticmethod
     def _validate_resource_path(identifier, resource_name=None):
-        database_name, table_name = RESTApi.__validate_identifier(identifier)
+        database_name, table_name = RESTApi.__validate_table_identifier(identifier)
+        return RESTApi._validate_path_components(database_name, table_name, resource_name)
+
+    @staticmethod
+    def _validate_model_path(identifier):
+        database_name, model_name = RESTApi.__validate_identifier(identifier)
+        return RESTApi._validate_path_components(database_name, model_name, None)
+
+    @staticmethod
+    def _validate_path_components(database_name, table_name, resource_name):
         components = [(database_name, 'Database name'), (table_name, 'Table name')]
         if resource_name is not None:
             components.append((resource_name, 'Resource name'))
@@ -571,7 +581,7 @@ class RESTApi:
 
     @staticmethod
     def _validate_resource_path_component(value, label):
-        if not value or not value.strip() or value in ('.', '..'):
+        if is_null_or_whitespace_only(value) or value in ('.', '..'):
             raise ValueError('{} must be a non-empty resource path component'.format(label))
 
     def create_branch(
@@ -581,7 +591,7 @@ class RESTApi:
             tag_name: Optional[str] = None,
     ) -> None:
         database_name, table_name = self._validate_resource_path(identifier)
-        if not branch_name or not branch_name.strip():
+        if is_null_or_whitespace_only(branch_name):
             raise ValueError("Branch name cannot be empty")
         request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
         self.client.post(
@@ -794,7 +804,7 @@ class RESTApi:
         )
 
     def get_model(self, identifier: Identifier) -> GetModelResponse:
-        database_name, model_name = self._validate_resource_path(identifier)
+        database_name, model_name = self._validate_model_path(identifier)
         return self.client.get(
             self.resource_paths.model(database_name, model_name),
             GetModelResponse,
@@ -804,7 +814,7 @@ class RESTApi:
     def create_model(
             self, identifier: Identifier, request: CreateModelRequest
     ) -> GetModelResponse:
-        database_name, model_name = self._validate_resource_path(identifier)
+        database_name, model_name = self._validate_model_path(identifier)
         if request.name != model_name:
             raise ValueError("Model request name must match the identifier")
         return self.client.post_with_response_type(
@@ -815,14 +825,14 @@ class RESTApi:
         )
 
     def drop_model(self, identifier: Identifier) -> None:
-        database_name, model_name = self._validate_resource_path(identifier)
+        database_name, model_name = self._validate_model_path(identifier)
         self.client.delete(
             self.resource_paths.model(database_name, model_name),
             self.rest_auth_function,
         )
 
     def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> AuthTableQueryResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self.__validate_table_identifier(identifier)
         request = AuthTableQueryRequest(select=select)
         return self.client.post_with_response_type(
             self.resource_paths.auth_table(database_name, table_name),
@@ -922,6 +932,14 @@ class RESTApi:
             raise ValueError("Table name cannot be None")
 
         # Validation must not rename a resource, including a branch suffix.
+        return database_name, table_name
+
+    @staticmethod
+    def __validate_table_identifier(identifier: Identifier):
+        database_name, table_name = RESTApi.__validate_identifier(identifier)
+        # Parsing rejects an invalid table name, such as t$branch_. Other objects, such as
+        # models, are not table names, so '$' stays part of their names.
+        identifier.get_table_name()
         return database_name, table_name
 
 

@@ -69,7 +69,6 @@ import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -95,6 +94,7 @@ import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
+import static org.apache.paimon.catalog.Identifier.isBlankBranch;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -901,8 +901,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void deleteBranch(String branchName) {
         String fallbackBranch =
                 coreOptions().toConfiguration().get(CoreOptions.SCAN_FALLBACK_BRANCH);
-        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)
-                && branchName.equals(fallbackBranch)) {
+        if (!isBlankBranch(fallbackBranch) && branchName.equals(fallbackBranch)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot delete branch '%s' because it is configured as"
@@ -911,8 +910,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         String primaryBranch = coreOptions().toConfiguration().get(CoreOptions.SCAN_PRIMARY_BRANCH);
-        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)
-                && branchName.equals(primaryBranch)) {
+        if (!isBlankBranch(primaryBranch) && branchName.equals(primaryBranch)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot delete branch '%s' because it is configured as"

@@ -17,6 +17,7 @@
 import json
 import threading
 import unittest
+from urllib.parse import quote
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import Mock
 
@@ -376,6 +377,34 @@ class ModelTest(unittest.TestCase):
         api.client.get_with_params.assert_not_called()
         api.client.post_with_response_type.assert_not_called()
         api.client.delete.assert_not_called()
+
+    def test_model_names_are_not_parsed_as_table_names(self):
+        api = RESTApi(
+            {
+                "uri": "http://127.0.0.1:1",
+                "token.provider": "bear",
+                "token": "test",
+                "prefix": "catalog",
+            },
+            False,
+        )
+        api.client = Mock()
+
+        # '$' is part of a model name, so these are valid models rather than system tables
+        # or blank branches of a table.
+        for name in ("aaa$4$bits", "aaa$branch_"):
+            identifier = Identifier.create("quality", name)
+            with self.subTest(name=name):
+                api.create_model(identifier, CreateModelRequest(name, _definition()))
+                api.get_model(identifier)
+                api.drop_model(identifier)
+                model_path = "/v1/catalog/databases/quality/models/" + quote(name, safe="")
+                self.assertEqual(model_path, api.client.get.call_args[0][0])
+                self.assertEqual(model_path, api.client.delete.call_args[0][0])
+
+        self.assertEqual(2, api.client.post_with_response_type.call_count)
+        self.assertEqual(2, api.client.get.call_count)
+        self.assertEqual(2, api.client.delete.call_count)
 
     def test_list_models_follows_cursor_after_empty_page(self):
         api = RESTApi(

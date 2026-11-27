@@ -106,6 +106,7 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
+import static org.apache.paimon.catalog.Identifier.isBlankBranch;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
@@ -521,8 +522,7 @@ public class SchemaValidation {
         String fallbackBranch = schema.options().get(CoreOptions.SCAN_FALLBACK_BRANCH.key());
         String primaryBranch = schema.options().get(CoreOptions.SCAN_PRIMARY_BRANCH.key());
 
-        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)
-                && !StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+        if (!isBlankBranch(fallbackBranch) && !isBlankBranch(primaryBranch)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot set both '%s' and '%s' at the same time.",
@@ -530,7 +530,7 @@ public class SchemaValidation {
                             CoreOptions.SCAN_PRIMARY_BRANCH.key()));
         }
 
-        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
+        if (!isBlankBranch(fallbackBranch)) {
             checkArgument(
                     schemaManager.copyWithBranch(fallbackBranch).latest().isPresent(),
                     "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
@@ -539,7 +539,7 @@ public class SchemaValidation {
                     fallbackBranch);
         }
 
-        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+        if (!isBlankBranch(primaryBranch)) {
             checkArgument(
                     schemaManager.copyWithBranch(primaryBranch).latest().isPresent(),
                     "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
