@@ -56,7 +56,7 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * Coordinator for a table, to use a single point to obtain the list of initialization files
  * required for write operators.
  */
-public class TableWriteCoordinator {
+public class TableWriteCoordinator implements AutoCloseable {
 
     private final FileStoreTable table;
     private final Map<String, Long> latestCommittedIdentifiers;
@@ -242,6 +242,13 @@ public class TableWriteCoordinator {
         refresh();
         // refresh latest committed identifiers for all users
         latestCommittedIdentifiers.clear();
+    }
+
+    @Override
+    public void close() {
+        if (scanMetrics != null) {
+            scanMetrics.close();
+        }
     }
 
     private static class CoordinationKey {

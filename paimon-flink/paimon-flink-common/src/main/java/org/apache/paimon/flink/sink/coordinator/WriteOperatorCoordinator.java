@@ -106,6 +106,10 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
             executor.shutdownNow();
             executor = null;
         }
+        if (coordinator != null) {
+            coordinator.close();
+            coordinator = null;
+        }
     }
 
     @Override

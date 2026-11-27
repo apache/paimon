@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -137,6 +138,40 @@ class WriteOperatorCoordinatorTest extends TableTestBase {
             assertThat(scan(coordinator).snapshot().id()).isEqualTo(3L);
             assertThat(duration.getCount()).isEqualTo(prefetch ? 4 : 2);
             assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(3L);
+        }
+    }
+
+    @Test
+    void testScanMetricsAreRecreatedAfterCoordinatorClose() throws Exception {
+        FileStoreTable table = createTable(1024 * 1024);
+        commit(table, 1, GenericRow.of(1L, 3));
+
+        MetricListener metrics = new MetricListener();
+        FlinkMetricRegistry registry = new FlinkMetricRegistry(metrics.getMetricGroup());
+        Histogram firstDuration;
+        try (WriteOperatorCoordinator coordinator = new WriteOperatorCoordinator(table, registry)) {
+            coordinator.start();
+            assertThat(scan(coordinator).snapshot().id()).isEqualTo(1L);
+            scan(coordinator);
+            assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(1L);
+            firstDuration =
+                    metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                            .orElseThrow(AssertionError::new);
+            assertThat(firstDuration.getCount()).isEqualTo(2L);
+        }
+
+        commit(table, 2, GenericRow.of(2L, 4));
+
+        // Rescaling creates a replacement coordinator under the same JobManager metric group.
+        try (WriteOperatorCoordinator coordinator = new WriteOperatorCoordinator(table, registry)) {
+            coordinator.start();
+            assertThat(scan(coordinator).snapshot().id()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(2L);
+            Histogram duration =
+                    metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                            .orElseThrow(AssertionError::new);
+            assertThat(duration).isNotSameAs(firstDuration);
+            assertThat(duration.getCount()).isEqualTo(1L);
         }
     }
 
