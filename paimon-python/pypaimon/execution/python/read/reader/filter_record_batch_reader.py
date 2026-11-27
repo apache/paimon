@@ -31,8 +31,25 @@ from pypaimon.read.reader.iface.record_batch_reader import (
     _polars_arrow_table,
 )
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.utils.arrow_utils import row_kind_column_index
 
 logger = logging.getLogger(__name__)
+
+
+def _record_batch_from_table(result):
+    """Return every filtered row, including when the scanner emits several batches."""
+    batches = result.to_batches()
+    if not batches:
+        return None
+    if len(batches) == 1:
+        return batches[0]
+    concat_batches = getattr(pa, "concat_batches", None)
+    if concat_batches is not None:
+        return concat_batches(batches)
+    return pa.RecordBatch.from_arrays(
+        [result.column(i).combine_chunks() for i in range(result.num_columns)],
+        schema=result.schema,
+    )
 
 
 def _comparison_fields(predicate):
@@ -142,18 +159,7 @@ class FilterRecordBatchReader(RecordBatchReader):
         ).to_table()
         if result.num_rows == 0:
             return None
-        batches = result.to_batches()
-        if not batches:
-            return None
-        if len(batches) == 1:
-            return batches[0]
-        concat_batches = getattr(pa, "concat_batches", None)
-        if concat_batches is not None:
-            return concat_batches(batches)
-        return pa.RecordBatch.from_arrays(
-            [result.column(i) for i in range(result.num_columns)],
-            schema=result.schema,
-        )
+        return _record_batch_from_table(result)
 
     def _coerce_comparison_types(self, view, batch):
         # Cast columns a mask retyped, for the filter only; the output is unchanged.
@@ -177,7 +183,8 @@ class FilterRecordBatchReader(RecordBatchReader):
         # may prepend _row_kind, which is metadata rather than an operand.
         columns = (self.field_names if self.field_names is not None else
                    [field.name for field in self.schema_fields] if self.schema_fields is not None else
-                   [name for name in filter_batch.schema.names if name != "_row_kind"])
+                   [name for index, name in enumerate(filter_batch.schema.names)
+                    if index != row_kind_column_index(filter_batch.schema)])
         df = polars.from_arrow(_polars_arrow_table(filter_batch).select(columns))
         iterator = InternalRowWrapperIterator(
             self._iter_df_rows(df),
@@ -187,6 +194,7 @@ class FilterRecordBatchReader(RecordBatchReader):
             self.vector_field_indices,
             self.descriptor_field_indices,
             self.blob_view_lookup,
+            resolved_blob_field_indices=self.resolved_blob_field_indices,
         )
         selected = []
         pos = 0

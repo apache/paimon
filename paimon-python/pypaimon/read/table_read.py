@@ -37,6 +37,15 @@ if TYPE_CHECKING:
     from pypaimon.table.file_store_table import FileStoreTable
 
 
+def _projection_needs_typed_field_indices(fields: List[DataField]) -> bool:
+    """BLOB and VECTOR accessors need projection to carry column positions."""
+    from pypaimon.schema.data_types import VectorType, is_blob_file_field
+
+    return any(
+        is_blob_file_field(field) or isinstance(field.type, VectorType)
+        for field in fields)
+
+
 class TableRead:
     """Public read facade selecting the configured execution backend."""
 
@@ -68,9 +77,13 @@ class TableRead:
             plain_adapter = reader_adapter(read_type, self._table_read_fields())
             # A pruned ROW or selected MAP can still need a flat adapter.
             # Elide only when the reader already supplies the complete output.
+            # Primary-key BLOB and VECTOR rows get their typed field positions
+            # from that projection. Dropping it leaves get_blob/get_vector
+            # without a column index.
             if (not output_projection.named
                     and output_projection.columns == [(field.name, [field.name]) for field in read_type]
-                    and plain_adapter == adapter):
+                    and plain_adapter == adapter
+                    and not _projection_needs_typed_field_indices(read_type)):
                 self.output_projection = None
             else:
                 adapter = self._reader_adapter(plain_adapter)

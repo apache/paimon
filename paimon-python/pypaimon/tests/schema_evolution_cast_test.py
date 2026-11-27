@@ -25,9 +25,11 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.casting.schema_evolution import (
+    _cast_nested_container, _offsets_from_buffer, cast_array_for_schema_evolution)
 from pypaimon.schema.arrow_schema import read_arrow_schema
-from pypaimon.execution.python.casting.schema_evolution import cast_array_for_schema_evolution
-from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType, PyarrowFieldParser, RowType
+from pypaimon.schema.data_types import (
+    ArrayType, AtomicType, DataField, MapType, PyarrowFieldParser, RowType)
 
 
 @pytest.mark.parametrize('chunked', [False, True])
@@ -518,3 +520,31 @@ def test_wide_ltz_casts_keep_java_dst_when_platform_localtime_cannot(
     # Golden values from real Java CastExecutors, including a local midnight
     # whose DATE changes if a standard offset replaces the correct DST offset.
     assert result.to_pylist() == expected
+
+
+def test_map_binary_values_rebuild_when_container_cast_is_missing():
+    # PyArrow 6 rejects map<string, binary> -> map<string, large_binary>.
+    keys = pa.array(['k', 'n'])
+    items = pa.array([b'python-map', None], type=pa.binary())
+    source = pa.MapArray.from_arrays(
+        pa.array([0, 2, 2], type=pa.int32()), keys, items,
+        mask=pa.array([False, True]))
+    target = pa.map_(pa.string(), pa.large_binary())
+    rebuilt = _cast_nested_container(source, target)
+    assert rebuilt.type == target
+    assert rebuilt.to_pylist() == [[('k', b'python-map'), ('n', None)], None]
+
+    elements = pa.array([b'python-item', None], type=pa.binary())
+    listed = pa.ListArray.from_arrays(pa.array([0, 2], type=pa.int32()), elements)
+    rebuilt_list = _cast_nested_container(listed, pa.list_(pa.large_binary()))
+    assert rebuilt_list.to_pylist() == [[b'python-item', None]]
+
+    wider = pa.MapArray.from_arrays(
+        pa.array([0, 1, 1, 3], type=pa.int32()),
+        pa.array(['k', 'm', 'n']),
+        pa.array([b'a', b'b', b'c'], type=pa.binary()),
+        mask=pa.array([False, True, False]))
+    sliced = wider.slice(1, 2)
+    assert _offsets_from_buffer(sliced).to_pylist() == [1, 1, 3]
+    rebuilt_slice = _cast_nested_container(sliced, target)
+    assert rebuilt_slice.to_pylist() == [None, [('m', b'b'), ('n', b'c')]]
