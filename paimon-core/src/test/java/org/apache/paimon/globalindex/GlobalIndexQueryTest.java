@@ -235,6 +235,41 @@ class GlobalIndexQueryTest {
         }
     }
 
+    @Test
+    void testRoutesOverlappingGroupsWithoutDuplicatesOrReordering() throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT());
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 1);
+        IndexFileMeta tail = indexFile("btree", "tail", 80, 120, 0, null);
+        IndexFileMeta nested = indexFile("btree", "nested", 80, 99, 0, null);
+        IndexFileMeta longGroup = indexFile("btree", "long", 0, 110, 0, null);
+        IndexFileMeta unrelated = indexFile("btree", "unrelated", 30, 40, 0, null);
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        Options options = new Options();
+        GlobalIndexQuery query =
+                GlobalIndexQuery.create(
+                        rowType,
+                        predicate,
+                        Arrays.asList(tail, nested, longGroup, unrelated),
+                        paths,
+                        options);
+        GlobalIndexQuery selected =
+                query.forRanges(
+                        Arrays.asList(
+                                new Range(115, 115), new Range(100, 100), new Range(110, 110)));
+        GlobalIndexQuery expected =
+                GlobalIndexQuery.create(
+                        rowType, predicate, Arrays.asList(tail, longGroup), paths, options);
+        DataOutputSerializer actualBytes = new DataOutputSerializer(256);
+        DataOutputSerializer expectedBytes = new DataOutputSerializer(256);
+        selected.serialize(actualBytes);
+        expected.serialize(expectedBytes);
+        assertThat(actualBytes.getCopyOfBuffer()).isEqualTo(expectedBytes.getCopyOfBuffer());
+    }
+
     @ParameterizedTest
     @CsvSource({"false,false", "true,true"})
     void testBoundedRangeUsesSingleScan(boolean lowerInclusive, boolean upperInclusive)

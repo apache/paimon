@@ -54,6 +54,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,6 +93,8 @@ class GlobalIndexQuery {
 
     /** A query's index groups; empty when none overlap this data split. */
     private final List<IndexGroup> groups;
+
+    @Nullable private volatile GroupRangeLookup rangeLookup;
 
     private GlobalIndexQuery(
             @Nullable Predicate predicate,
@@ -414,18 +417,29 @@ class GlobalIndexQuery {
 
     /** Keep original row-ID offsets while removing groups unrelated to this data split. */
     GlobalIndexQuery forRanges(List<Range> ranges) {
-        List<IndexGroup> selected = new ArrayList<>();
-        for (IndexGroup group : groups) {
-            if (ranges.stream()
-                    .anyMatch(
-                            range ->
-                                    Range.intersect(
-                                            group.range.from,
-                                            group.range.to,
-                                            range.from,
-                                            range.to))) {
-                selected.add(group);
+        List<IndexGroup> selected;
+        if (ranges.isEmpty() || groups.isEmpty()) {
+            selected = Collections.emptyList();
+        } else if (groups.size() == 1) {
+            Range group = groups.get(0).range;
+            selected =
+                    ranges.stream()
+                                    .anyMatch(
+                                            range ->
+                                                    Range.intersect(
+                                                            group.from,
+                                                            group.to,
+                                                            range.from,
+                                                            range.to))
+                            ? groups
+                            : Collections.emptyList();
+        } else {
+            GroupRangeLookup lookup = rangeLookup;
+            if (lookup == null) {
+                lookup = new GroupRangeLookup(groups);
+                rangeLookup = lookup;
             }
+            selected = lookup.select(groups, ranges);
         }
         List<GlobalIndexQuery> selectedChildren = new ArrayList<>();
         for (GlobalIndexQuery child : children) {
@@ -433,6 +447,66 @@ class GlobalIndexQuery {
         }
         // Keep children without local groups so readers can retain their uncertain candidates.
         return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
+    }
+
+    /** Range routing keeps the original group order, including overlapping index definitions. */
+    private static final class GroupRangeLookup {
+
+        private final Integer[] ordered;
+        private final long[] maxEnds;
+
+        private GroupRangeLookup(List<IndexGroup> groups) {
+            ordered = new Integer[groups.size()];
+            for (int i = 0; i < groups.size(); i++) {
+                ordered[i] = i;
+            }
+            Arrays.sort(ordered, Comparator.comparingLong(i -> groups.get(i).range.from));
+            maxEnds = new long[ordered.length];
+            long max = Long.MIN_VALUE;
+            for (int i = 0; i < ordered.length; i++) {
+                max = Math.max(max, groups.get(ordered[i]).range.to);
+                maxEnds[i] = max;
+            }
+        }
+
+        private List<IndexGroup> select(List<IndexGroup> groups, List<Range> ranges) {
+            Set<Integer> matches = new HashSet<>();
+            for (Range range : ranges) {
+                for (int i = firstEndingAtOrAfter(range.from); i < ordered.length; i++) {
+                    int groupIndex = ordered[i];
+                    Range group = groups.get(groupIndex).range;
+                    if (group.from > range.to) {
+                        break;
+                    }
+                    if (group.to >= range.from) {
+                        matches.add(groupIndex);
+                    }
+                }
+            }
+            if (matches.isEmpty()) {
+                return Collections.emptyList();
+            }
+            if (matches.size() == groups.size()) {
+                return groups;
+            }
+            List<Integer> selected = new ArrayList<>(matches);
+            Collections.sort(selected);
+            return selected.stream().map(groups::get).collect(Collectors.toList());
+        }
+
+        private int firstEndingAtOrAfter(long rowId) {
+            int low = 0;
+            int high = maxEnds.length;
+            while (low < high) {
+                int mid = (low + high) >>> 1;
+                if (maxEnds[mid] < rowId) {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+            return low;
+        }
     }
 
     GlobalIndexResult evaluate(FileIO fileIO, Options options, List<Range> ranges)
