@@ -340,8 +340,9 @@ def _require_initial_snapshot(component, snapshot_id):
             "expected snapshot 1, found %d." % (component, snapshot_id))
 
 
-def _append_arrow(table, data, allow_empty=False):
-    return _append_arrow_tables(table, [data], allow_empty=allow_empty)
+def _append_arrow(table, data, allow_empty=False, commit_condition=None):
+    return _append_arrow_tables(table, [data], allow_empty=allow_empty,
+                                commit_condition=commit_condition)
 
 
 def _overwrite_arrow(table, data):
@@ -370,7 +371,7 @@ def _overwrite_arrow(table, data):
             table_commit.close()
 
 
-def _append_arrow_tables(table, tables, allow_empty=False):
+def _append_arrow_tables(table, tables, allow_empty=False, commit_condition=None):
     if allow_empty:
         table = table.copy({"snapshot.ignore-empty-commit": "false"})
     builder = table.new_batch_write_builder()
@@ -381,6 +382,8 @@ def _append_arrow_tables(table, tables, allow_empty=False):
     try:
         table_write = builder.new_write()
         table_commit = builder.new_commit()
+        if commit_condition is not None:
+            table_commit.with_commit_condition(commit_condition)
         table_commit.add_commit_callback(recorder)
         row_count = 0
         target_schema = _target_schema(table)
@@ -399,7 +402,10 @@ def _append_arrow_tables(table, tables, allow_empty=False):
             return None
         messages = table_write.prepare_commit()
         commit_started = True
-        table_commit.commit(messages)
+        committed = table_commit.commit(messages)
+        if committed is False:
+            latest = table.snapshot_manager().get_latest_snapshot()
+            return latest.id if latest is not None else None
         if recorder.snapshot_id is None:
             raise RuntimeError("LeRobot metadata commit has no snapshot id.")
         return recorder.snapshot_id
