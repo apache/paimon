@@ -319,8 +319,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             iterator = readManifestEntries(manifests, false);
         } else {
             RowRangeIndex retainedGroups =
-                    ManifestsReader.selectManifestGroups(manifests, candidates, mixedEntries);
-            manifests = ManifestsReader.pruneManifestGroups(manifests, retainedGroups);
+                    ManifestsReader.selectManifestGroupRanges(manifests, candidates, mixedEntries);
+            manifests = ManifestsReader.filterManifestsByRowRanges(manifests, retainedGroups);
             iterator =
                     readAndMergeFileEntries(
                             manifests, Function.identity(), false, mixedEntries, retainedGroups);
