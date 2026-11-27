@@ -1,0 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# ROW v2 written by Rust with shredded score and timestamp fields.
+28b52ffd20c0fd030072c7192390398d013bbcbbd3779b7332686f9bdaefdbbc3bdc604f005315a959c35f23726f2953fffa21ffe34ffc1f1406ca4fb5a0fd31442688557dc11cd2f49a2b00d654c1b3769a08a37d49f25f72a9c5894150d6d4007330b6079b6b448f597695839d46c1e0feea0800408618b201329218c3110a067a8bf078b9000a0290020280030100fa02000028b52ffd60fa01d50700824a2623104de6014643f4ff1d1f80c4f977ee5874a2680dd2b10a14d7e801362c200200001804d2ded2f6b6dc3c2d3a026b459e0294961c06ceb407040e63b12d3d873c610b175f9946f043f5104d83400dfb50a34598002830c2871c0a755246a04ec85fff7d8dad44241dbb15a618dc79c253179fabec2f04b6f88e3a0b06ea841a5ebfe7b65bcab8747c65da9d5fcaa563eb15eea2f44bf9220a25204002224ab71eac5200e4dee32cdb45ed855cdf88293843393ca0e5950352d48d98f0974378af8616f515c097013f004b183239b06f34f7120097a53e7d11869aaab2c3bfc5f10aef0a8b3eea96888b76a1e057f1a73d4c05af0ce1090400000000000000010000008800000000000000080000000200000053574f52

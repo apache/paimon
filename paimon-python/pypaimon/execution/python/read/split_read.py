@@ -96,7 +96,7 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
-KEY_PREFIX = "_KEY_"
+KEY_PREFIX = SpecialFields.KEY_PREFIX
 # Match Java's reserved key-field range without overlapping valid user IDs.
 KEY_FIELD_ID_START = SpecialFields.SYSTEM_FIELD_ID_START
 NULL_FIELD_INDEX = -1
@@ -730,22 +730,7 @@ class SplitRead(ABC):
             self._all_data_fields_from(file_schema.fields))
 
     def _create_key_value_fields(self, value_field: List[DataField]):
-        all_data_fields = []
-
-        # Merge keys must follow the same declared order as the sorted files.
-        for field in self.table.trimmed_primary_keys_fields:
-            key_field_name = f"{KEY_PREFIX}{field.name}"
-            key_field_id = field.id + KEY_FIELD_ID_START
-            key_field = DataField(key_field_id, key_field_name, field.type)
-            all_data_fields.append(key_field)
-
-        all_data_fields.append(SpecialFields.SEQUENCE_NUMBER)
-        all_data_fields.append(SpecialFields.VALUE_KIND)
-
-        for field in value_field:
-            all_data_fields.append(field)
-
-        return all_data_fields
+        return SpecialFields.key_value_fields(self.table.trimmed_primary_keys_fields, value_field)
 
     def create_index_mapping(self):
         if self._nested_path_by_name() is not None:

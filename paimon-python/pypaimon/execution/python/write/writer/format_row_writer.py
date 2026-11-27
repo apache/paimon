@@ -25,7 +25,7 @@ from typing import Any, List
 import pyarrow as pa
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
-from pypaimon.common.row_format import FOOTER_SIZE, MAGIC, VERSION_PLAIN, VERSION_WITH_SCHEMA
+from pypaimon.common.row_format import FOOTER_SIZE, MAGIC, VERSION_PLAIN, VERSION_WITH_SCHEMA, compress_row_schema
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, MultisetType, RowType, VectorType
 )
@@ -74,7 +74,9 @@ class FormatRowWriter:
         index_length = self._bytes_written - index_offset
 
         if self._write_physical_schema:
-            schema = json.dumps(RowType(True, self._fields).to_dict(), separators=(',', ':')).encode('utf-8')
+            raw_schema = json.dumps([field.to_dict() for field in self._fields],
+                                    separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+            schema = compress_row_schema(raw_schema, self._zstd_level)
             self._out.write(schema)
             self._bytes_written += len(schema)
         self._write_footer(index_offset, index_length)

@@ -19,6 +19,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
 from pypaimon.execution.python.write.format_file_writer import (
@@ -351,11 +352,30 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
-            write_row_file(self.file_io, file_path, physical_data, zstd_level=self.zstd_level,
-                           write_physical_schema=physical_data is not data)
+            shredded = physical_data is not data
+            fields = self._row_physical_fields(data.schema, physical_data.schema) if shredded else None
+            write_row_file(self.file_io, file_path, physical_data, fields=fields,
+                           zstd_level=self.zstd_level, write_physical_schema=shredded)
         else:
             raise ValueError(f"Unsupported file format: {file_format}")
         return {}, None
+
+    def _row_physical_fields(self, logical_schema: pa.Schema, physical_schema: pa.Schema):
+        fields = self.table.fields
+        if self.table.is_primary_key_table:
+            fields = SpecialFields.key_value_fields(self.trimmed_primary_keys_fields, fields)
+        fields_by_name = {field.name: field for field in fields}
+        for field in (SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER, SpecialFields.VALUE_KIND):
+            fields_by_name[field.name] = field
+
+        physical_fields = []
+        for logical, physical in zip(logical_schema, physical_schema):
+            field = fields_by_name[logical.name]
+            if logical.type != physical.type:
+                physical_type = PyarrowFieldParser.to_paimon_type(physical.type, field.type.nullable)
+                field = replace(field, type=physical_type)
+            physical_fields.append(field)
+        return physical_fields
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:

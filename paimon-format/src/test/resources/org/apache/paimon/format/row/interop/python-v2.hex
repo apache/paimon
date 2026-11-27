@@ -1,0 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# ROW v2 written by PyPaimon with shredded score and timestamp fields.
+28b52ffd20befd0300a2471a2390b71903f0ddddeb8c64d36548e0a16e746adc5df6bfef1eba1fcbdfccde7ac9963205fffa1bffe22ffc0f1006d257b520766b1e8ca62c81ed7e700a698a0f0a945717d0d68f3365c45e0efd135d7a7342049057777150ce17e583892832095b69f3e3189c64bf3a0700404618b20132448231800a223c5e18800202900202fc0201000c03000028b52ffd600c020d0800c20a2725208d380760e658d9fb6dea3e28347a015ee76c5f8d968b5c0c03891b2b61d2930206006644925a995aad80525274043725a501026a7513c020389e075938186f569e7127ee1c1d36464a9d499a25a5d900b9bada611a17a2d1488096f78016c8e231147c7be136530022ee13469e26675f78449595f1daca1168128d899e0383e85178d86e8dd53f887177aeae3e3b9ceece94a5ce12ee707a251227204082439976a241e22a05c8ee1e68b2dd1c5ed0e21b8a0b52350bc6ca1c0770ade42c3dbd0548f1c8c1bc5c4a5bb543e0cb8025000718b23830dd68660960cba24f518479574d77f05e2a5fe246115046dd23e2d22e16fc2cfeb88759f0ca809f0400000000000000010000008800000000000000080000000200000053574f52

@@ -26,12 +26,16 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.row_format import FOOTER_SIZE, VERSION_PLAIN, VERSION_WITH_SCHEMA, read_row_footer
+from pypaimon.common.row_format import (
+    FOOTER_SIZE, MAX_PHYSICAL_SCHEMA_SIZE, SCHEMA_HEADER_SIZE, VERSION_PLAIN, VERSION_WITH_SCHEMA,
+    decompress_row_schema, read_row_footer,
+)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     ArrayType, DataField, MapType, MultisetType, PyarrowFieldParser, RowType, VectorType, AtomicType
 )
 from pypaimon.table.special_fields import SpecialFields
+
 
 def _special_field(name: str):
     if name == SpecialFields.ROW_ID.name:
@@ -195,26 +199,30 @@ class FormatRowReader(RecordBatchReader):
         if version == VERSION_PLAIN:
             return index_length, 0
         schema_length = self._file_size - FOOTER_SIZE - index_offset - index_length
-        if not 0 < schema_length <= (1 << 31) - 1:
+        if not SCHEMA_HEADER_SIZE < schema_length <= SCHEMA_HEADER_SIZE + MAX_PHYSICAL_SCHEMA_SIZE:
             raise IOError(f"Invalid row file physical schema length: {schema_length}")
         return index_length, schema_length
 
     def _read_physical_schema(self, schema_bytes):
+        raw_schema = decompress_row_schema(schema_bytes)
         try:
-            schema = RowType.from_dict(json.loads(schema_bytes.decode('utf-8')))
+            schema = json.loads(raw_schema.decode('utf-8'))
+            if not isinstance(schema, list):
+                raise ValueError("Expected an array of data fields")
+            fields = [DataField.from_dict(field) for field in schema]
         except (TypeError, ValueError, AttributeError) as error:
             raise IOError("Invalid row file physical schema") from error
-        if not isinstance(schema, RowType) or [field.name for field in schema.fields] != [
+        if [field.name for field in fields] != [
                 field.name for field in self._all_fields]:
             raise IOError("Row file physical schema does not match the data fields")
 
         projected_names = {field.name for field in self._projected_fields}
-        for i, (logical, physical) in enumerate(zip(self._all_fields, schema.fields)):
+        for i, (logical, physical) in enumerate(zip(self._all_fields, fields)):
             if logical.name in projected_names:
                 converter = _variant_converter(logical.type, physical.type)
                 if converter is not None:
                     self._variant_converters[i] = converter
-        self._all_fields = schema.fields
+        self._all_fields = fields
 
     def _parse_block_index(self, index_data: bytes):
         pos = 0

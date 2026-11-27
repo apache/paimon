@@ -16,16 +16,20 @@
 # under the License.
 
 import datetime
+import json
 import os
 import struct
 import tempfile
 from decimal import Decimal
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 
 from pypaimon.execution.python.read.reader.format_row_reader import (FOOTER_SIZE, FormatRowReader)
+from pypaimon.common.row_format import decompress_row_schema
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, RowType
 )
@@ -65,6 +69,40 @@ def _read_row_file(path, fields, read_field_names=None, row_indices=None):
     if not batches:
         return pa.table({f.name: [] for f in fields})
     return pa.Table.from_batches(batches)
+
+
+@pytest.mark.parametrize('producer', ['java', 'python', 'rust'])
+def test_reads_row_v2_from_each_writer(producer, tmp_path):
+    resources = Path(__file__).resolve().parents[3] / 'paimon-format' / 'src' / 'test' / 'resources'
+    fixture = resources / 'org' / 'apache' / 'paimon' / 'format' / 'row' / 'interop' / f'{producer}-v2.hex'
+    fields = [
+        DataField(7, 'id', AtomicType('INT')),
+        DataField(11, 'tag', AtomicType('VARCHAR(17)')),
+        DataField(42, 'payload', AtomicType('VARIANT')),
+        DataField(85, 'context', RowType(True, [DataField(97, 'code', AtomicType('VARCHAR(9)'))])),
+    ]
+    lines = fixture.read_text(encoding='ascii').splitlines()
+    data = bytes.fromhex(' '.join(line for line in lines if not line.startswith('#')))
+    path = tmp_path / f'{producer}-v2.row'
+    path.write_bytes(data)
+    assert data[-8] == 2
+    index_offset, index_length = struct.unpack_from('<qi', data, len(data) - FOOTER_SIZE + 12)
+    physical = json.loads(decompress_row_schema(data[index_offset + index_length:-FOOTER_SIZE]))
+    assert DataField.from_dict(physical[1]) == fields[1]
+    assert physical[2]['id'] == 42
+    assert DataField.from_dict(physical[3]) == fields[3]
+
+    result = _read_row_file(str(path), fields)
+    assert result.column('id').to_pylist() == [3, 4, 5, 6]
+    assert result.column('tag').to_pylist() == ['tag-3', 'tag-4', 'tag-5', 'tag-6']
+    assert result.column('context').to_pylist() == [{'code': f'ctx-{i}'} for i in (3, 4, 5)] + [None]
+    payloads = result.column('payload').to_pylist()
+    assert payloads[3] is None
+    assert [GenericVariant.from_arrow_struct(row).to_python() for row in payloads[:3]] == [
+        {'score': 7, 'extra': 'mixed', 'ts': datetime.datetime(1970, 1, 1, 0, 0, 1, 234000)},
+        {'score': '8', 'extra': 'residual', 'ts': datetime.datetime(1970, 1, 1, 0, 0, 1, 234567)},
+        None,
+    ]
 
 
 class TestFormatRowReaderWriter:

@@ -22,6 +22,42 @@ FOOTER_SIZE = 32
 MAGIC = 0x524F5753
 VERSION_PLAIN = 1
 VERSION_WITH_SCHEMA = 2
+SCHEMA_HEADER_SIZE = 4
+MAX_PHYSICAL_SCHEMA_SIZE = 64 * 1024 * 1024
+
+
+def compress_row_schema(data, level):
+    import zstandard as zstd
+
+    if not 0 < len(data) <= MAX_PHYSICAL_SCHEMA_SIZE:
+        raise ValueError(f"Invalid row file physical schema length: {len(data)}")
+    compressed = zstd.ZstdCompressor(level=level).compress(data)
+    if len(compressed) > MAX_PHYSICAL_SCHEMA_SIZE:
+        raise ValueError(f"Compressed row file physical schema is too large: {len(compressed)}")
+    return struct.pack('<I', len(data)) + compressed
+
+
+def decompress_row_schema(block):
+    import zstandard as zstd
+
+    if not SCHEMA_HEADER_SIZE < len(block) <= SCHEMA_HEADER_SIZE + MAX_PHYSICAL_SCHEMA_SIZE:
+        raise IOError(f"Invalid row file physical schema length: {len(block)}")
+    raw_length = struct.unpack_from('<I', block)[0]
+    if not 0 < raw_length <= MAX_PHYSICAL_SCHEMA_SIZE:
+        raise IOError(f"Invalid row file uncompressed physical schema length: {raw_length}")
+    compressed = memoryview(block)[SCHEMA_HEADER_SIZE:]
+    try:
+        # zstandard ignores max_output_size when the frame declares its own size.
+        frame_size = zstd.get_frame_parameters(compressed).content_size
+        if frame_size not in (raw_length, zstd.CONTENTSIZE_UNKNOWN):
+            raise IOError("Row file physical schema length does not match its header")
+        data = zstd.ZstdDecompressor().decompress(
+            compressed, max_output_size=raw_length, allow_extra_data=False)
+    except zstd.ZstdError as error:
+        raise IOError("Invalid row file compressed physical schema") from error
+    if len(data) != raw_length:
+        raise IOError("Row file physical schema length does not match its header")
+    return data
 
 
 def read_row_footer(stream, file_size):

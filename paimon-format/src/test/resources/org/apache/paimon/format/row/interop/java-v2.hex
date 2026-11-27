@@ -1,0 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# ROW v2 written by Java with shredded score and timestamp fields.
+28b52ffd0048fd0300a2471a2390b71903f0ddddeb8c64d36548e0a16e746adc5df6bfef1eba1fcbdfccde7ac9963205fffa1bffe22ffc0f1006d257b520766b1e8ca62c81ed7e700a698a0f0a945717d0d68f3365c45e0efd135d7a7342049057777150ce17e583892832095b69f3e3189c64bf3a0700404618b20132448231800a223c5e18800202900202fc0201002303000028b52ffd0048b50800b24d2e25108baa0e80ff51baf3eee84eb08f4830b3ba6bc4c30740099474c33e413525080000001c07b13bf695c5b4d3e23ed05bd96980a06377ec2b010984e771d43c0e5f4cc73e43e751c310c62776ba1669520bbb0c6da0a4c3e367f0b8792486cf81de4392ee5ed97aad3a992e3adfde682440043b20226a18c2b8bc72ca4b2500eeb33e8bb85f93a275e1ed0a0e289396c2a4c508288a2501bd8302e83d18e45d16f7599fb53e43e7eed4c2eedb67bd3b95c8ea4de13eebb3482200d5a480c9b5e79ed8ee8d788169df1cada0d1b6f0e49261524c12006fd4974b4687b72585870c1ebb80d87090958384d904c57d4d0c539005dad58419ace8dab31d44620ae4aa70a0f45672afb00b28f8a9e28fda63a650650400000000000000010000008800000000000000080000000200000053574f52

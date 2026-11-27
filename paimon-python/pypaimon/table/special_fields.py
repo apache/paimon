@@ -28,6 +28,7 @@ class SpecialFields:
     SEQUENCE_NUMBER = DataField(2147483646, "_SEQUENCE_NUMBER", AtomicType("BIGINT", nullable=False))
     VALUE_KIND = DataField(2147483645, "_VALUE_KIND", AtomicType("TINYINT", nullable=False))
     ROW_ID = DataField(2147483642, "_ROW_ID", AtomicType("BIGINT", nullable=False))
+    KEY_PREFIX = "_KEY_"
 
     SYSTEM_FIELD_NAMES = {
         '_SEQUENCE_NUMBER',
@@ -36,6 +37,15 @@ class SpecialFields:
     }
 
     SYSTEM_FIELD_ID_START = SYSTEM_FIELD_ID_START
+
+    @staticmethod
+    def key_value_fields(key_fields: List[DataField], value_fields: List[DataField]) -> List[DataField]:
+        keys = [
+            DataField(field.id + SpecialFields.SYSTEM_FIELD_ID_START,
+                      SpecialFields.KEY_PREFIX + field.name, field.type)
+            for field in key_fields
+        ]
+        return keys + [SpecialFields.SEQUENCE_NUMBER, SpecialFields.VALUE_KIND] + list(value_fields)
 
     @staticmethod
     def is_system_field(field_name: str) -> bool:

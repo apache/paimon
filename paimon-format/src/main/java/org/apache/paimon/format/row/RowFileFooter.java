@@ -29,6 +29,7 @@ class RowFileFooter {
     static final int MAGIC = 0x524F5753; // "ROWS"
     static final byte VERSION = 1;
     static final byte VERSION_WITH_SCHEMA = 2;
+    static final int MAX_PHYSICAL_SCHEMA_SIZE = 64 * 1024 * 1024;
 
     final long totalRowCount;
     final int blockCount;
@@ -104,13 +105,13 @@ class RowFileFooter {
         }
     }
 
-    /** Returns the physical schema length after the index and before the footer. */
+    /** Returns the size of the length-prefixed Zstd schema block. */
     int physicalSchemaLength(long fileSize) throws IOException {
         if (version == VERSION) {
             return 0;
         }
         long length = fileSize - FOOTER_SIZE - indexOffset - indexLength;
-        if (length <= 0 || length > Integer.MAX_VALUE) {
+        if (length <= Integer.BYTES || length > MAX_PHYSICAL_SCHEMA_SIZE + Integer.BYTES) {
             throw new IOException("Invalid row file physical schema length: " + length);
         }
         return (int) length;

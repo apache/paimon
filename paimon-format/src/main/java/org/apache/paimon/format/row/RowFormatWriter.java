@@ -100,7 +100,7 @@ public class RowFormatWriter implements FormatWriter {
         int indexLength = (int) (out.getPos() - indexOffset);
 
         if (physicalSchema != null) {
-            out.write(JsonSerdeUtil.toFlatJson(physicalSchema).getBytes(UTF_8));
+            writePhysicalSchema(physicalSchema);
         }
         RowFileFooter footer =
                 new RowFileFooter(
@@ -114,6 +114,21 @@ public class RowFormatWriter implements FormatWriter {
         footer.writeTo(out);
 
         out.flush();
+    }
+
+    private void writePhysicalSchema(RowType schema) throws IOException {
+        byte[] json = JsonSerdeUtil.toFlatJson(schema.getFields()).getBytes(UTF_8);
+        if (json.length > RowFileFooter.MAX_PHYSICAL_SCHEMA_SIZE) {
+            throw new IOException("Row file physical schema is too large: " + json.length);
+        }
+        byte[] block = new byte[Integer.BYTES + compressor.getMaxCompressedSize(json.length)];
+        RowFileFooter.writeIntLE(block, 0, json.length);
+        int compressedLength = compressor.compress(json, 0, json.length, block, Integer.BYTES);
+        if (compressedLength > RowFileFooter.MAX_PHYSICAL_SCHEMA_SIZE) {
+            throw new IOException(
+                    "Compressed row file physical schema is too large: " + compressedLength);
+        }
+        out.write(block, 0, Integer.BYTES + compressedLength);
     }
 
     private void flushBlock() throws IOException {

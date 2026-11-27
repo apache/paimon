@@ -176,10 +176,18 @@ A well-formed index satisfies all of the following, and a reader rejects a file 
 
 ## Physical Schema
 
-Version 1 readers decode rows using the file's logical write schema. Version 2 stores a physical
-schema as an uncompressed, UTF-8 JSON-encoded Paimon `ROW` type. Its bytes start at
-`indexOffset + indexLength` and end 32 bytes before the end of the file. The schema describes every
-field in serialization order, including nested fields.
+Readers decode version 1 rows using the file's logical write schema. The version 2 schema block
+starts at `indexOffset + indexLength` and ends at the start of the 32-byte footer.
+
+| Part | Encoding |
+| --- | --- |
+| Uncompressed length | 4-byte little-endian unsigned integer |
+| Physical field list | One Zstd frame containing a UTF-8 JSON array of Paimon `DataField` entries |
+
+The compressed frame and uncompressed JSON each occupy at most 64 MiB. The uncompressed length
+must match the number of decoded bytes. The field list follows the serialization order of each row.
+Preserve the logical types and field IDs of ordinary fields. A shredded Variant keeps its logical
+field ID and uses its physical `ROW` type in the list.
 
 When a writer applies Variant shredding, it uses version 2 and replaces each affected logical
 `VARIANT` with a physical `ROW` containing `metadata`, overflow `value` bytes, and optional

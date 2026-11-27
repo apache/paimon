@@ -20,6 +20,7 @@
 import json
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -28,7 +29,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.row_format import FOOTER_SIZE, decompress_row_schema
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class RowFormatAppendOnlyTest(unittest.TestCase):
@@ -600,20 +603,34 @@ def test_row_table_preserves_variant_values(tmp_path, table_kind):
 
 
 @pytest.mark.execution_defaults
-def test_row_table_reads_plain_and_shredded_variants(tmp_path):
+@pytest.mark.parametrize('primary_key', [False, True])
+def test_row_table_reads_plain_and_shredded_variants(tmp_path, primary_key):
     values = [
         {'score': 1}, {'score': 2, 'overflow': {'nested': ['value']}},
         {'score': 'mismatch'}, None,
     ]
     payloads = GenericVariant.to_arrow_array(
         [GenericVariant.from_python(value) for value in values] + [None])
-    data = pa.table({'id': pa.array(range(5), type=pa.int32()), 'payload': payloads})
+    data = pa.table({
+        'id': pa.array(range(5), type=pa.int32()),
+        'tag': ['tag'] * 5,
+        'payload': payloads,
+    })
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
-    catalog.create_table('default.variants', Schema.from_pyarrow_schema(data.schema, options={
+    options = {
         'file.format': 'row', 'scan.native-plan.enabled': 'false',
         'write.native.enabled': 'false', 'commit.native.enabled': 'false',
-    }), False)
+    }
+    if primary_key:
+        options['bucket'] = '1'
+    fields = [
+        DataField(7, 'id', AtomicType('INT', not primary_key)),
+        DataField(11, 'tag', AtomicType('VARCHAR(17)')),
+        DataField(42, 'payload', AtomicType('VARIANT')),
+    ]
+    catalog.create_table(
+        'default.variants', Schema(fields, primary_keys=['id'] if primary_key else [], options=options), False)
     table = catalog.get_table('default.variants')
     shredding_schema = json.dumps({'type': 'ROW', 'fields': [{
         'name': 'payload', 'type': {'type': 'ROW', 'fields': [
@@ -622,8 +639,8 @@ def test_row_table_reads_plain_and_shredded_variants(tmp_path):
     }]})
 
     for write_table, batch, version in [
-        (table, data.slice(0, 1), b'\x01'),
-        (table.copy({'variant.shreddingSchema': shredding_schema}), data.slice(1), b'\x02'),
+        (table, data.slice(0, 1), 1),
+        (table.copy({'variant.shreddingSchema': shredding_schema}), data.slice(1), 2),
     ]:
         builder = write_table.new_batch_write_builder()
         writer, committer = builder.new_write(), builder.new_commit()
@@ -632,8 +649,16 @@ def test_row_table_reads_plain_and_shredded_variants(tmp_path):
             messages = writer.prepare_commit()
             file = messages[0].new_files[0]
             with table.file_io.new_input_stream(file.physical_path()) as stream:
-                stream.seek(file.file_size - 8)
-                assert stream.read(1) == version
+                encoded = stream.read()
+            assert encoded[-8] == version
+            if version == 2:
+                index, length = struct.unpack_from('<qi', encoded, len(encoded) - FOOTER_SIZE + 12)
+                stored = json.loads(decompress_row_schema(encoded[index + length:-FOOTER_SIZE]))
+                by_name = {field['name']: DataField.from_dict(field) for field in stored}
+                assert by_name['tag'] == fields[1]
+                assert by_name['payload'].id == 42
+                if primary_key:
+                    assert by_name['_KEY_id'].id == 1_073_741_830
             committer.commit(messages)
         finally:
             writer.close()

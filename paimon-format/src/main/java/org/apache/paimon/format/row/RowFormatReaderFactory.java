@@ -18,19 +18,23 @@
 
 package org.apache.paimon.format.row;
 
+import org.apache.paimon.compression.ZstdBlockDecompressor;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.NestedProjectedRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+
 import java.io.IOException;
+import java.util.List;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -116,27 +120,53 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
             int schemaLength)
             throws IOException {
         long schemaOffset = footer.indexOffset + footer.indexLength;
-        String schemaJson;
+        byte[] schemaBlock;
+        int blockOffset;
         if (schemaOffset >= tailOffset) {
-            schemaJson =
-                    new String(tailBuf, (int) (schemaOffset - tailOffset), schemaLength, UTF_8);
+            schemaBlock = tailBuf;
+            blockOffset = (int) (schemaOffset - tailOffset);
         } else {
             in.seek(schemaOffset);
-            byte[] schemaBytes = new byte[schemaLength];
-            IOUtils.readFully(in, schemaBytes);
-            schemaJson = new String(schemaBytes, UTF_8);
+            schemaBlock = new byte[schemaLength];
+            IOUtils.readFully(in, schemaBlock);
+            blockOffset = 0;
         }
 
-        DataType schema;
+        byte[] json = decompressSchema(schemaBlock, blockOffset, schemaLength);
+        RowType schema;
         try {
-            schema = JsonSerdeUtil.fromJson(schemaJson, DataType.class);
+            List<DataField> fields =
+                    JsonSerdeUtil.fromJson(
+                            new String(json, UTF_8), new TypeReference<List<DataField>>() {});
+            schema = rowType.copy(fields);
         } catch (RuntimeException e) {
             throw new IOException("Invalid row file physical schema", e);
         }
-        if (!(schema instanceof RowType)
-                || !((RowType) schema).getFieldNames().equals(rowType.getFieldNames())) {
+        if (!schema.getFieldNames().equals(rowType.getFieldNames())) {
             throw new IOException("Row file physical schema does not match the data fields");
         }
-        return (RowType) schema;
+        return schema;
+    }
+
+    static byte[] decompressSchema(byte[] block, int offset, int length) throws IOException {
+        int rawLength = RowFileFooter.readIntLE(block, offset);
+        if (rawLength <= 0 || rawLength > RowFileFooter.MAX_PHYSICAL_SCHEMA_SIZE) {
+            throw new IOException(
+                    "Invalid row file uncompressed physical schema length: " + rawLength);
+        }
+        byte[] json = new byte[rawLength];
+        int actualLength;
+        try {
+            actualLength =
+                    new ZstdBlockDecompressor()
+                            .decompress(
+                                    block, offset + Integer.BYTES, length - Integer.BYTES, json, 0);
+        } catch (RuntimeException e) {
+            throw new IOException("Invalid row file compressed physical schema", e);
+        }
+        if (actualLength != rawLength) {
+            throw new IOException("Row file physical schema length does not match its header");
+        }
+        return json;
     }
 }

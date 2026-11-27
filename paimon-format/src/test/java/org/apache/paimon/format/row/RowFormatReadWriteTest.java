@@ -29,6 +29,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.GenericVariantBuilder;
+import org.apache.paimon.data.variant.GenericVariantUtil;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormat;
@@ -60,13 +61,18 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
+
+import org.apache.paimon.shade.guava30.com.google.common.io.BaseEncoding;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -154,6 +160,69 @@ public class RowFormatReadWriteTest {
                 assertThat(batch.returnedPosition()).isEqualTo(3);
                 assertThat(batch.next()).isNull();
                 batch.releaseBatch();
+            }
+        }
+    }
+
+    @Test
+    public void testReadsRowV2FromJavaPythonAndRust() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(7, "id", DataTypes.INT()),
+                        DataTypes.FIELD(11, "tag", DataTypes.VARCHAR(17)),
+                        DataTypes.FIELD(42, "payload", DataTypes.VARIANT()),
+                        DataTypes.FIELD(
+                                85,
+                                "context",
+                                DataTypes.ROW(DataTypes.FIELD(97, "code", DataTypes.VARCHAR(9)))));
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+        for (String producer : Arrays.asList("java", "python", "rust")) {
+            String name = producer + "-v2.row";
+            java.nio.file.Path file = tempDir.resolve(name);
+            String resource = "interop/" + producer + "-v2.hex";
+            try (InputStream stream = getClass().getResourceAsStream(resource)) {
+                assertThat(stream).as("ROW v2 fixture from %s", producer).isNotNull();
+                String hex =
+                        new String(IOUtils.readFully(stream, false), UTF_8)
+                                .replaceAll("(?m)^#.*$", "")
+                                .replaceAll("\\s", "");
+                Files.write(file, BaseEncoding.base16().lowerCase().decode(hex));
+            }
+
+            List<DataField> fields =
+                    JsonSerdeUtil.fromJson(
+                            readPhysicalSchema(name), new TypeReference<List<DataField>>() {});
+            assertThat(fields.get(1)).isEqualTo(rowType.getFields().get(1));
+            assertThat(fields.get(2).id()).isEqualTo(42);
+            assertThat(fields.get(3)).isEqualTo(rowType.getFields().get(3));
+
+            List<InternalRow> rows = readAllRows(format, rowType, new Path(file.toUri()));
+            assertThat(rows).hasSize(4);
+            for (int i = 0; i < rows.size(); i++) {
+                InternalRow row = rows.get(i);
+                int id = i + 3;
+                assertThat(row.getInt(0)).isEqualTo(id);
+                assertThat(row.getString(1).toString()).isEqualTo("tag-" + id);
+                if (id == 6) {
+                    assertThat(row.isNullAt(2)).isTrue();
+                    assertThat(row.isNullAt(3)).isTrue();
+                    continue;
+                }
+                assertThat(row.getRow(3, 1).getString(0).toString()).isEqualTo("ctx-" + id);
+                Variant variant = row.getVariant(2);
+                GenericVariant payload =
+                        new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
+                if (id == 5) {
+                    assertThat(payload.getType()).isEqualTo(GenericVariantUtil.Type.NULL);
+                    continue;
+                }
+                assertThat(payload.getFieldByKey("score").toJson())
+                        .isEqualTo(id == 3 ? "7" : "\"8\"");
+                assertThat(payload.getFieldByKey("extra").getString())
+                        .isEqualTo(id == 3 ? "mixed" : "residual");
+                GenericVariant timestamp = payload.getFieldByKey("ts");
+                assertThat(timestamp.getType()).isEqualTo(GenericVariantUtil.Type.TIMESTAMP_NTZ);
+                assertThat(timestamp.getLong()).isEqualTo(id == 3 ? 1_234_000 : 1_234_567);
             }
         }
     }
@@ -1494,11 +1563,13 @@ public class RowFormatReadWriteTest {
         byte[] bytes = Files.readAllBytes(tempDir.resolve(name));
         RowFileFooter footer =
                 RowFileFooter.readFrom(bytes, bytes.length - RowFileFooter.FOOTER_SIZE);
-        return new String(
-                bytes,
-                (int) (footer.indexOffset + footer.indexLength),
-                footer.physicalSchemaLength(bytes.length),
-                UTF_8);
+        int length = footer.physicalSchemaLength(bytes.length);
+        return length == 0
+                ? ""
+                : new String(
+                        RowFormatReaderFactory.decompressSchema(
+                                bytes, (int) (footer.indexOffset + footer.indexLength), length),
+                        UTF_8);
     }
 
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)
