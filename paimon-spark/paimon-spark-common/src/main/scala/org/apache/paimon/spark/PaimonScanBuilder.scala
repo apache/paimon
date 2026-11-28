@@ -24,6 +24,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils.normalizeVectorSearchFilters
 import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions, VectorSearchResultUtils}
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
@@ -145,6 +146,9 @@ class PaimonScanBuilder(val table: InnerTable)
             (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
           case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
         }
+        val dataFilters = normalizeVectorSearchFilters(
+          pushedDataFilters.toSeq,
+          coreOptions.dataEvolutionEnabled() && (vectorSearch.isDefined || hybridSearch.isDefined))
 
         if (
           vectorSearch.isDefined &&
@@ -157,7 +161,7 @@ class PaimonScanBuilder(val table: InnerTable)
             actualTable,
             vectorSearch.get,
             pushedPartitionFilters,
-            pushedDataFilters)
+            dataFilters)
           return PaimonLocalScan(
             VectorSearchResultUtils.toRows(result, requiredSchema),
             requiredSchema,
@@ -174,7 +178,7 @@ class PaimonScanBuilder(val table: InnerTable)
           actualTable,
           requiredSchema,
           pushedPartitionFilters,
-          pushedDataFilters,
+          dataFilters,
           pushedLimit,
           pushedTopN,
           vectorSearch,

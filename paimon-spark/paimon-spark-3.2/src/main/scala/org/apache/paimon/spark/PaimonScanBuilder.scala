@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils.normalizeVectorSearchFilters
 import org.apache.paimon.spark.read.{PaimonLocalScan, VectorSearchResultUtils}
 import org.apache.paimon.table.InnerTable
 
@@ -35,6 +36,9 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
         (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
       case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
     }
+    val dataFilters = normalizeVectorSearchFilters(
+      pushedDataFilters.toSeq,
+      coreOptions.dataEvolutionEnabled() && (vectorSearch.isDefined || hybridSearch.isDefined))
     if (
       vectorSearch.isDefined &&
       VectorSearchResultUtils.isVectorSearchMetaOnly(requiredSchema.fieldNames.toSeq)
@@ -43,7 +47,7 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
         actualTable,
         vectorSearch.get,
         pushedPartitionFilters,
-        pushedDataFilters)
+        dataFilters)
       return PaimonLocalScan(
         VectorSearchResultUtils.toRows(result, requiredSchema),
         requiredSchema,
@@ -54,7 +58,7 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
       actualTable,
       requiredSchema,
       pushedPartitionFilters,
-      pushedDataFilters,
+      dataFilters,
       pushedLimit,
       pushedTopN,
       vectorSearch,

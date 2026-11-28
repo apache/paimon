@@ -221,9 +221,10 @@ CALL sys.create_global_index(
 );
 ```
 
-A vector search can use these Bitmaps for equality, `IN`, `IS NULL`, `IS NOT NULL`, and
-combinations of these predicates with `AND` or `OR`, including across columns. It applies the
-exact matches before ranking and skips opening the ANN file when no visible vector matches.
+Spark and Java vector searches can use these Bitmaps for `=`, `<>`, `IN`, `NOT IN`,
+`IS NULL`, `IS NOT NULL`, and combinations of these predicates with `AND` or `OR`,
+including across columns. They apply the exact matches before ranking and skip opening
+the ANN file when no visible vector matches.
 If any branch cannot be evaluated exactly by the field Bitmaps, the filter uses the existing
 scalar-filter path.
 
