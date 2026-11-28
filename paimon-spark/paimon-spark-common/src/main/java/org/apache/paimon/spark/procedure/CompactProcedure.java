@@ -554,7 +554,9 @@ public class CompactProcedure extends BaseProcedure {
                 getPartitionsToCompact(snapshotReader, partitionIdleTime);
         AppendCompactCoordinator coordinator =
                 new AppendCompactCoordinator(table, snapshot, partitionPredicate);
-        AppendCompactCommitState commitState = new AppendCompactCommitState(snapshot.id());
+        AppendCompactCommitState commitState =
+                new AppendCompactCommitState(
+                        snapshot.id(), createCommitUser(table.coreOptions().toConfiguration()));
         Throwable failure = null;
         try {
             do {
@@ -622,7 +624,13 @@ public class CompactProcedure extends BaseProcedure {
                 serializedTasks.size(),
                 table.fullName(),
                 readParallelism);
-        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
+        String commitUser =
+                commitState == null
+                        ? createCommitUser(table.coreOptions().toConfiguration())
+                        : commitState.commitUser;
+        // Allocate once per batch; retries inside the committer must reuse this identifier.
+        long commitIdentifier =
+                commitState == null ? COMMIT_IDENTIFIER : commitState.nextCommitIdentifier++;
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks, readParallelism)
@@ -668,13 +676,17 @@ public class CompactProcedure extends BaseProcedure {
                             messageSerializerser, serializedMessages);
             Throwable commitFailure = null;
             try {
-                commit.commit(messages);
+                if (commitState == null) {
+                    commit.commit(messages);
+                } else {
+                    commit.commitBatch(commitIdentifier, messages);
+                }
             } catch (RuntimeException | Error e) {
                 commitFailure = e;
                 throw e;
             } finally {
                 if (commitState != null) {
-                    commitState.confirmPublishedSnapshot(table, commitUser, commitFailure);
+                    commitState.confirmPublishedSnapshot(table, commitIdentifier, commitFailure);
                 }
             }
         } catch (Exception e) {
@@ -685,14 +697,17 @@ public class CompactProcedure extends BaseProcedure {
     private static class AppendCompactCommitState {
 
         private final long startingSnapshotId;
+        private final String commitUser;
+        private long nextCommitIdentifier;
         private boolean snapshotPublished;
 
-        private AppendCompactCommitState(long startingSnapshotId) {
+        private AppendCompactCommitState(long startingSnapshotId, String commitUser) {
             this.startingSnapshotId = startingSnapshotId;
+            this.commitUser = commitUser;
         }
 
         private void confirmPublishedSnapshot(
-                FileStoreTable table, String commitUser, @Nullable Throwable commitFailure) {
+                FileStoreTable table, long commitIdentifier, @Nullable Throwable commitFailure) {
             if (snapshotPublished) {
                 return;
             }
@@ -709,7 +724,7 @@ public class CompactProcedure extends BaseProcedure {
                                         snapshot ->
                                                 snapshot.commitKind() == Snapshot.CommitKind.COMPACT
                                                         && snapshot.commitIdentifier()
-                                                                == COMMIT_IDENTIFIER)
+                                                                == commitIdentifier)
                                 .isPresent();
             } catch (RuntimeException confirmationFailure) {
                 // An unconfirmed outcome must not trigger expiration or hide the commit failure.

@@ -426,6 +426,82 @@ public class AppendOnlyTableCompactionTest {
         assertThat(files.get(0).rowCount()).isEqualTo(2);
     }
 
+    @Test
+    public void testBatchKeepsCandidateAcrossNonAdjacentBatches() throws Exception {
+        // A partitioned table lets the two files of one partition be separated by files of
+        // other partitions in the scan order.
+        org.apache.paimon.fs.Path partitionedPath =
+                new org.apache.paimon.fs.Path(tempDir.resolve("nonadjacent").toString());
+        FileIO fileIO = LocalFileIO.create();
+        TableSchema partitionedTableSchema =
+                new FileSystemSchemaManager(fileIO, partitionedPath)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("pt", DataTypes.STRING())
+                                        .column("id", DataTypes.INT())
+                                        .partitionKeys("pt")
+                                        .option("bucket", "-1")
+                                        .option("compaction.min.file-num", "2")
+                                        .option("compaction.file-num-limit", "1")
+                                        .build());
+        FileStoreTable partitionedTable =
+                FileStoreTableFactory.create(fileIO, partitionedPath, partitionedTableSchema);
+
+        // One file in partition "a", twelve files in other partitions, then one more in "a".
+        // With file-num-limit=1 the two "a" files are scanned in nonadjacent batches, so the
+        // first candidate has to survive more than REMOVE_AGE intervening batches.
+        for (int i = 0; i < 14; i++) {
+            String partition = (i == 0 || i == 13) ? "a" : "p" + i;
+            writePartitionedCommit(partitionedTable, partition, i);
+        }
+
+        List<String> expectedPartitionAFiles =
+                partitionedTable.store().newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().getString(0).toString().equals("a"))
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(expectedPartitionAFiles).hasSize(2);
+
+        // Mirror CompactProcedure's multi-batch loop over a pinned snapshot.
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(
+                        partitionedTable,
+                        partitionedTable.snapshotManager().latestSnapshot(),
+                        null);
+        List<AppendCompactTask> tasks = new ArrayList<>();
+        while (true) {
+            try {
+                tasks.addAll(batchCoordinator.run());
+            } catch (EndOfScanException e) {
+                break;
+            }
+            if (!batchCoordinator.batchRemainFiles()) {
+                break;
+            }
+        }
+
+        // The two files of partition "a" must be compacted together even though no batch ever
+        // scanned them adjacently.
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .extracting(DataFileMeta::fileName)
+                .containsExactlyInAnyOrderElementsOf(expectedPartitionAFiles);
+    }
+
+    private void writePartitionedCommit(FileStoreTable table, String partition, int id)
+            throws Exception {
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        try {
+            writer.write(GenericRow.of(BinaryString.fromString(partition), id));
+            List<CommitMessage> messages = writer.prepareCommit(true, 0);
+            try (TableCommitImpl commit = table.newCommit(UUID.randomUUID().toString())) {
+                commit.commit(messages);
+            }
+        } finally {
+            writer.close();
+        }
+    }
+
     private AppendCompactCoordinator createBatchCoordinator(Map<String, String> extraOptions) {
         TableSchema schema = tableSchema.copy(extraOptions);
         FileStoreTable table =

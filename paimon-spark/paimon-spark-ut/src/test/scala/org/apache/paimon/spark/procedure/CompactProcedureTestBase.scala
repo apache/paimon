@@ -722,6 +722,98 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       }
   }
 
+  Seq(false, true).foreach {
+    multiBatch =>
+      test(
+        s"Paimon Procedure: compact unaware bucket append table in strict mode with multi-batch $multiBatch") {
+        withTable("T") {
+          spark.sql("""
+                      |CREATE TABLE T (id INT)
+                      |TBLPROPERTIES (
+                      |  'bucket'='-1',
+                      |  'write-only'='true',
+                      |  'compaction.min.file-num'='2')
+                      |""".stripMargin)
+
+          (0 until 6).foreach(id => spark.sql(s"INSERT INTO T VALUES ($id)"))
+          val table = loadTable("T")
+          val snapshotBefore = lastSnapshotId(table)
+          Assertions.assertThat(snapshotBefore).isEqualTo(6L)
+
+          spark.sql(
+            "CALL sys.compact(table => 'T', options => " +
+              s"'compaction.multi-batch.enabled=$multiBatch,compaction.file-num-limit=2," +
+              s"commit.strict-mode.enabled=true,commit.last-safe-snapshot=$snapshotBefore')")
+
+          val expectedCommits = if (multiBatch) 3 else 1
+          val snapshots = (snapshotBefore + 1 to lastSnapshotId(table))
+            .map(table.snapshotManager().snapshot(_))
+          Assertions.assertThat(snapshots.size).isEqualTo(expectedCommits)
+          Assertions.assertThat(snapshots.forall(_.commitKind() == CommitKind.COMPACT)).isTrue
+          Assertions.assertThat(snapshots.map(_.commitUser()).distinct.size).isEqualTo(1)
+          if (multiBatch) {
+            val identifiers = snapshots.map(_.commitIdentifier())
+            Assertions.assertThat(identifiers.distinct.size).isEqualTo(3)
+            Assertions.assertThat(identifiers).isEqualTo(identifiers.sorted)
+          } else {
+            Assertions.assertThat(snapshots.head.commitIdentifier()).isEqualTo(Long.MaxValue)
+          }
+          Assertions
+            .assertThat(
+              table.newSnapshotReader.read.dataSplits.asScala.flatMap(_.dataFiles.asScala).size)
+            .isEqualTo(6 - expectedCommits)
+          checkAnswer(spark.sql("SELECT * FROM T"), (0 until 6).map(Row(_)))
+        }
+      }
+  }
+
+  Seq(1, 100).foreach {
+    fileNumLimit =>
+      test(
+        s"Paimon Procedure: compact unaware bucket append table keeps nonadjacent candidates with limit $fileNumLimit") {
+        withTable("T") {
+          spark.sql("""
+                      |CREATE TABLE T (id INT, pt STRING)
+                      |TBLPROPERTIES (
+                      |  'bucket'='-1',
+                      |  'write-only'='true',
+                      |  'compaction.min.file-num'='2',
+                      |  'manifest.merge.skip-on-write-only'='true',
+                      |  'scan.manifest.parallelism'='1')
+                      |PARTITIONED BY (pt)
+                      |""".stripMargin)
+
+          val partitions = Seq("a") ++ (1 to 12).map(id => s"p$id") ++ Seq("a")
+          partitions.zipWithIndex.foreach {
+            case (partition, id) => spark.sql(s"INSERT INTO T VALUES ($id, '$partition')")
+          }
+          val table = loadTable("T")
+          val snapshotBefore = lastSnapshotId(table)
+          // Keep the two files in a separated by more than ten scan rounds when the limit is one.
+          val scannedPartitions = table.newSnapshotReader
+            .readFileIterator()
+            .asScala
+            .map(_.partition().getString(0).toString)
+            .toList
+          Assertions.assertThat(scannedPartitions).isEqualTo(partitions.toList)
+          Assertions.assertThat(partitionFileCounts(table)("a")).isEqualTo(2)
+
+          spark.sql(
+            "CALL sys.compact(table => 'T', options => " +
+              s"'compaction.multi-batch.enabled=true,compaction.file-num-limit=$fileNumLimit')")
+
+          val fileCounts = partitionFileCounts(table)
+          Assertions.assertThat(fileCounts.size).isEqualTo(13)
+          Assertions.assertThat(fileCounts("a")).isEqualTo(1)
+          Assertions.assertThat(fileCounts.values.forall(_ == 1)).isTrue
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 1)
+          checkAnswer(
+            spark.sql("SELECT * FROM T"),
+            partitions.zipWithIndex.map { case (partition, id) => Row(id, partition) })
+        }
+      }
+  }
+
   test(
     "Paimon Procedure: compact unaware bucket append table across batches defers partition expiration") {
     withTable("T") {

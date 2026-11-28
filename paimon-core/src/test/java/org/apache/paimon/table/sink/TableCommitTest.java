@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -58,6 +59,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
@@ -1320,6 +1322,49 @@ public class TableCommitTest {
         commit1.close();
         write2.close();
         commit2.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.ExpireExecutionMode.class)
+    public void testBatchCommitWithIdentifierPropagatesMaintenanceFailure(
+            CoreOptions.ExpireExecutionMode expireExecutionMode) throws Exception {
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                new FileSystemSchemaManager(LocalFileIO.create(), path)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .option("bucket", "-1")
+                                        .build());
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        String commitUser = UUID.randomUUID().toString();
+        RuntimeException maintenanceFailure = new RuntimeException("Maintenance failed");
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit =
+                        new TableCommitImpl(
+                                table.store().newCommit(commitUser, table),
+                                () -> {
+                                    throw maintenanceFailure;
+                                },
+                                null,
+                                null,
+                                null,
+                                new ConsumerManager(LocalFileIO.create(), path),
+                                expireExecutionMode,
+                                table.name(),
+                                false,
+                                table.coreOptions().fileOperationThreadNum())) {
+            write.write(GenericRow.of(1));
+            List<CommitMessage> messages = write.prepareCommit(true, 7L);
+            assertThatThrownBy(() -> commit.commitBatch(7L, messages)).isSameAs(maintenanceFailure);
+            Snapshot snapshot = table.snapshotManager().latestSnapshot();
+            assertThat(snapshot.commitIdentifier()).isEqualTo(7L);
+            assertThatThrownBy(() -> commit.commitBatch(8L, Collections.emptyList()))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
+        }
     }
 
     @Test

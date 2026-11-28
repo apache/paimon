@@ -225,8 +225,13 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void commit(List<CommitMessage> commitMessages) {
+        commitBatch(COMMIT_IDENTIFIER, commitMessages);
+    }
+
+    /** Commits once with a custom identifier and runs maintenance synchronously. */
+    public void commitBatch(long identifier, List<CommitMessage> commitMessages) {
         checkCommitted();
-        commit(COMMIT_IDENTIFIER, commitMessages);
+        commit(identifier, commitMessages);
     }
 
     @Override
