@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
+import org.apache.paimon.spark.procedure.DropGlobalIndexFieldsProcedure;
 import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.DropPolicyProcedure;
 import org.apache.paimon.spark.procedure.ExpireChangelogsProcedure;
@@ -120,6 +121,7 @@ public class SparkProcedures {
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("create_global_index", CreateGlobalIndexProcedure::builder);
         procedureBuilders.put("add_global_index_fields", AddGlobalIndexFieldsProcedure::builder);
+        procedureBuilders.put("drop_global_index_fields", DropGlobalIndexFieldsProcedure::builder);
         procedureBuilders.put("drop_global_index", DropGlobalIndexProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("rename_branch", RenameBranchProcedure::builder);
