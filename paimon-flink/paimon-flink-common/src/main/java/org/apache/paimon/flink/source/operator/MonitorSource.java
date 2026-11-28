@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.NoOpEnumState;
@@ -27,6 +28,7 @@ import org.apache.paimon.flink.source.PaimonDataStreamSource;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -133,7 +135,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     @Override
     public SourceReader<Split, SimpleSourceSplit> createReader(
             SourceReaderContext sourceReaderContext) throws Exception {
-        return new Reader();
+        return new Reader(new FlinkMetricRegistry(sourceReaderContext.metricGroup()));
     }
 
     private class Reader extends AbstractNonCoordinatedSourceReader<Split> {
@@ -155,6 +157,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         private final TreeMap<Long, Long> nextSnapshotPerCheckpoint = new TreeMap<>();
         private final Deque<Long> inFlightNextSnapshots = new ArrayDeque<>();
         private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
+
+        private Reader(MetricRegistry registry) {
+            TableScan activeScan = isBounded ? batchScan : scan;
+            activeScan.withMetricRegistry(registry);
+        }
 
         @Override
         public void notifyCheckpointComplete(long checkpointId) {

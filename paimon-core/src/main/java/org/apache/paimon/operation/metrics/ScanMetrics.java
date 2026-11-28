@@ -88,4 +88,8 @@ public class ScanMetrics {
     public CacheMetrics getDvMetaCacheMetrics() {
         return dvMetaCacheMetrics;
     }
+
+    public void close() {
+        metricGroup.close();
+    }
 }

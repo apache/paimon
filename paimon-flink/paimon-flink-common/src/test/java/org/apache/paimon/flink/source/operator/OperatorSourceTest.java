@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.metrics.MetricGroup;
@@ -140,7 +141,9 @@ public class OperatorSourceTest {
         TestingSourceOperator<Split> operator =
                 (TestingSourceOperator<Split>)
                         TestingSourceOperator.createTestOperator(
-                                source.createReader(null), WatermarkStrategy.noWatermarks(), false);
+                                source.createReader(new TestingReaderContext()),
+                                WatermarkStrategy.noWatermarks(),
+                                false);
         AbstractStreamOperatorTestHarness<Split> testHarness =
                 new AbstractStreamOperatorTestHarness<>(operator, 1, 1, 0);
         testHarness.open();
@@ -157,7 +160,7 @@ public class OperatorSourceTest {
             TestingSourceOperator<Split> operator =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
-                                    source.createReader(null),
+                                    source.createReader(new TestingReaderContext()),
                                     WatermarkStrategy.noWatermarks(),
                                     false);
             AbstractStreamOperatorTestHarness<Split> testHarness =
@@ -172,7 +175,7 @@ public class OperatorSourceTest {
             TestingSourceOperator<Split> operatorCopy1 =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
-                                    sourceCopy1.createReader(null),
+                                    sourceCopy1.createReader(new TestingReaderContext()),
                                     WatermarkStrategy.noWatermarks(),
                                     false);
             AbstractStreamOperatorTestHarness<Split> testHarnessCopy1 =
@@ -197,7 +200,7 @@ public class OperatorSourceTest {
             TestingSourceOperator<Split> operatorCopy2 =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
-                                    sourceCopy2.createReader(null),
+                                    sourceCopy2.createReader(new TestingReaderContext()),
                                     WatermarkStrategy.noWatermarks(),
                                     false);
             AbstractStreamOperatorTestHarness<Split> testHarnessCopy2 =
@@ -233,7 +236,7 @@ public class OperatorSourceTest {
         @SuppressWarnings("unchecked")
         SourceReader<Split, SimpleSourceSplit> reader =
                 (SourceReader<Split, SimpleSourceSplit>)
-                        sourceTransformation.getSource().createReader(null);
+                        sourceTransformation.getSource().createReader(new TestingReaderContext());
         TestingReaderOutput<Split> output = new TestingReaderOutput<>();
 
         writeToTable(1, 1, 1);
@@ -256,7 +259,8 @@ public class OperatorSourceTest {
     @Test
     public void testCheckpointBeforeSnapshotDoesNotReleaseSnapshotLimit() throws Exception {
         MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
-        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+        SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(new TestingReaderContext());
         TestingReaderOutput<Split> output = new TestingReaderOutput<>();
 
         reader.snapshotState(1L);
@@ -274,7 +278,8 @@ public class OperatorSourceTest {
     @Test
     public void testCompletedCheckpointReleasesCoveredSnapshotCredits() throws Exception {
         MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 2);
-        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+        SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(new TestingReaderContext());
         TestingReaderOutput<Split> output = new TestingReaderOutput<>();
 
         writeToTable(1, 1, 1);
@@ -296,7 +301,8 @@ public class OperatorSourceTest {
     @Test
     public void testMonitorSourceSnapshotLimitIsOpenAfterRestore() throws Exception {
         MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
-        SourceReader<Split, SimpleSourceSplit> reader = source.createReader(null);
+        SourceReader<Split, SimpleSourceSplit> reader =
+                source.createReader(new TestingReaderContext());
 
         writeToTable(1, 1, 1);
         assertThat(reader.pollNext(new TestingReaderOutput<>()))
@@ -305,7 +311,8 @@ public class OperatorSourceTest {
 
         MonitorSource restoredSource =
                 new MonitorSource(table.newReadBuilder(), 10, false, false, 1);
-        SourceReader<Split, SimpleSourceSplit> restoredReader = restoredSource.createReader(null);
+        SourceReader<Split, SimpleSourceSplit> restoredReader =
+                restoredSource.createReader(new TestingReaderContext());
         restoredReader.addSplits(checkpoint);
         assertThat(restoredReader.isAvailable()).isDone();
 

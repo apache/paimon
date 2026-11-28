@@ -19,19 +19,24 @@
 package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.TableWriteOperator;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SegmentsCache;
 
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 import org.apache.flink.runtime.operators.coordination.CoordinationRequestHandler;
 import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -51,6 +56,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class WriteOperatorCoordinator implements OperatorCoordinator, CoordinationRequestHandler {
 
     private final FileStoreTable table;
+    @Nullable private final MetricRegistry metricRegistry;
 
     private final AtomicLong recoveryGeneration = new AtomicLong();
 
@@ -61,14 +67,19 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     private TableWriteCoordinator coordinator;
 
     public WriteOperatorCoordinator(FileStoreTable table) {
+        this(table, null);
+    }
+
+    public WriteOperatorCoordinator(FileStoreTable table, @Nullable MetricRegistry metricRegistry) {
         this.table = table;
+        this.metricRegistry = metricRegistry;
     }
 
     @Override
     public void start() throws Exception {
         executor = createCachedThreadPool(1, "WriteCoordinator");
         table.setManifestCache(buildManifestCache(table.coreOptions().toConfiguration()));
-        coordinator = new TableWriteCoordinator(table);
+        coordinator = new TableWriteCoordinator(table, metricRegistry);
     }
 
     /**
@@ -94,6 +105,10 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         if (executor != null) {
             executor.shutdownNow();
             executor = null;
+        }
+        if (coordinator != null) {
+            coordinator.close();
+            coordinator = null;
         }
     }
 
@@ -184,7 +199,15 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
 
         @Override
         public OperatorCoordinator create(Context context) {
-            return new WriteOperatorCoordinator(table);
+            MetricGroup metricGroup;
+            try {
+                metricGroup = context.metricGroup();
+            } catch (NoSuchMethodError e) {
+                // OperatorCoordinator.Context only exposes metrics from Flink 1.18 onward.
+                return new WriteOperatorCoordinator(table);
+            }
+            return new WriteOperatorCoordinator(
+                    table, metricGroup == null ? null : new FlinkMetricRegistry(metricGroup));
         }
     }
 }

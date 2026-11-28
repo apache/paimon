@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
 import org.apache.paimon.metrics.MetricGroupImpl;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.BlobFetchMetrics;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.WriterBufferMetric;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -154,6 +155,7 @@ public class AbstractFileStoreWriteCloseTest {
     public void testKeyValueCloseRunsOuterCleanupAfterWriterFailure() throws Exception {
         KeyValueFileStoreWrite write = newKeyValueWrite();
         AtomicBoolean metricClosed = new AtomicBoolean();
+        AtomicBoolean scanMetricClosed = new AtomicBoolean();
         MetricRegistry metricRegistry =
                 (groupName, variables) ->
                         new MetricGroupImpl(groupName, variables) {
@@ -161,6 +163,9 @@ public class AbstractFileStoreWriteCloseTest {
                             public void close() {
                                 if (WriterBufferMetric.GROUP_NAME.equals(groupName)) {
                                     metricClosed.set(true);
+                                }
+                                if (ScanMetrics.GROUP_NAME.equals(groupName)) {
+                                    scanMetricClosed.set(true);
                                 }
                             }
                         };
@@ -204,6 +209,7 @@ public class AbstractFileStoreWriteCloseTest {
 
         assertThatThrownBy(write::close).hasMessage("writer close failed");
         assertThat(metricClosed).isTrue();
+        assertThat(scanMetricClosed).isTrue();
         assertThat(factoryClosed).isTrue();
     }
 

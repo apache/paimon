@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -73,6 +74,13 @@ public class FileSystemWriteRestore implements WriteRestore {
             if (this.scan != null) {
                 this.scan.dropStats();
             }
+        }
+    }
+
+    @Override
+    public void withMetrics(ScanMetrics scanMetrics) {
+        if (scan != null) {
+            scan.withMetrics(scanMetrics);
         }
     }
 

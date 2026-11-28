@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 
 import javax.annotation.Nullable;
 
@@ -28,6 +29,9 @@ import java.util.List;
 
 /** Restores data file metadata and indexes for write initialization. */
 public interface WriteRestore {
+
+    /** Attaches metrics to manifest scans performed by this restore. */
+    default void withMetrics(ScanMetrics scanMetrics) {}
 
     long latestCommittedIdentifier(String user);
 

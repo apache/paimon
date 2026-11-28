@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,14 +33,20 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.metrics.Histogram;
+import org.apache.flink.metrics.groups.OperatorCoordinatorMetricGroup;
+import org.apache.flink.metrics.testutils.MetricListener;
+import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
+import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -55,11 +63,117 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /** Tests for refreshing writer metadata after coordinator recovery. */
 @Timeout(60)
 class WriteOperatorCoordinatorTest extends TableTestBase {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testProviderWorksWithoutCoordinatorMetrics(boolean metricGroupMethodPresent)
+            throws Exception {
+        FileStoreTable table = createTable(1024 * 1024);
+        commit(table, 1, GenericRow.of(1L, 3));
+
+        OperatorCoordinator.Context context = mock(OperatorCoordinator.Context.class);
+        if (!metricGroupMethodPresent) {
+            when(context.metricGroup())
+                    .thenThrow(new NoSuchMethodError("OperatorCoordinator.Context.metricGroup()"));
+        }
+
+        try (WriteOperatorCoordinator coordinator =
+                (WriteOperatorCoordinator)
+                        new WriteOperatorCoordinator.Provider(new OperatorID(), table)
+                                .create(context)) {
+            coordinator.start();
+            assertThat(scan(coordinator).extractDataFiles()).hasSize(1);
+            assertThat(latestIdentifier(coordinator)).isEqualTo(1L);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testScanMetricsIncludePrefetchAndRecovery(boolean prefetch) throws Exception {
+        FileStoreTable table =
+                createTable(128)
+                        .copy(
+                                Collections.singletonMap(
+                                        FlinkConnectorOptions
+                                                .SINK_WRITER_COORDINATOR_PREFETCH_MANIFESTS
+                                                .key(),
+                                        Boolean.toString(prefetch)));
+        commit(table, 1, GenericRow.of(1L, 3));
+        commit(table, 2, GenericRow.of(2L, 4));
+
+        MetricListener metrics = new MetricListener();
+        OperatorCoordinatorMetricGroup group = mock(OperatorCoordinatorMetricGroup.class);
+        when(group.addGroup("paimon")).thenReturn(metrics.getMetricGroup().addGroup("paimon"));
+        OperatorCoordinator.Context context = mock(OperatorCoordinator.Context.class);
+        when(context.metricGroup()).thenReturn(group);
+
+        try (WriteOperatorCoordinator coordinator =
+                (WriteOperatorCoordinator)
+                        new WriteOperatorCoordinator.Provider(new OperatorID(), table)
+                                .create(context)) {
+            coordinator.start();
+            Histogram duration =
+                    metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                            .orElseThrow(AssertionError::new);
+            assertThat(duration.getCount()).isEqualTo(prefetch ? 1 : 0);
+            if (prefetch) {
+                assertThat(scanGauge(metrics, table, "lastScanResultedTableFiles")).isEqualTo(2L);
+            }
+
+            // A paged restore response still performs just one metadata scan.
+            assertThat(scan(coordinator).extractDataFiles()).hasSize(2);
+            assertThat(duration.getCount()).isEqualTo(prefetch ? 2 : 1);
+            assertThat(scanGauge(metrics, table, "lastScannedManifests")).isEqualTo(2L);
+            assertThat(scanGauge(metrics, table, "lastScanDuration")).isGreaterThanOrEqualTo(0L);
+
+            commit(table, 3, GenericRow.of(3L, 5));
+            coordinator.subtaskReset(0, 2);
+            assertThat(scan(coordinator).snapshot().id()).isEqualTo(3L);
+            assertThat(duration.getCount()).isEqualTo(prefetch ? 4 : 2);
+            assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(3L);
+        }
+    }
+
+    @Test
+    void testScanMetricsAreRecreatedAfterCoordinatorClose() throws Exception {
+        FileStoreTable table = createTable(1024 * 1024);
+        commit(table, 1, GenericRow.of(1L, 3));
+
+        MetricListener metrics = new MetricListener();
+        FlinkMetricRegistry registry = new FlinkMetricRegistry(metrics.getMetricGroup());
+        Histogram firstDuration;
+        try (WriteOperatorCoordinator coordinator = new WriteOperatorCoordinator(table, registry)) {
+            coordinator.start();
+            assertThat(scan(coordinator).snapshot().id()).isEqualTo(1L);
+            scan(coordinator);
+            assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(1L);
+            firstDuration =
+                    metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                            .orElseThrow(AssertionError::new);
+            assertThat(firstDuration.getCount()).isEqualTo(2L);
+        }
+
+        commit(table, 2, GenericRow.of(2L, 4));
+
+        // Rescaling creates a replacement coordinator under the same JobManager metric group.
+        try (WriteOperatorCoordinator coordinator = new WriteOperatorCoordinator(table, registry)) {
+            coordinator.start();
+            assertThat(scan(coordinator).snapshot().id()).isEqualTo(2L);
+            assertThat(scanGauge(metrics, table, "lastScannedSnapshotId")).isEqualTo(2L);
+            Histogram duration =
+                    metrics.getHistogram("paimon", "table", table.name(), "scan", "scanDuration")
+                            .orElseThrow(AssertionError::new);
+            assertThat(duration).isNotSameAs(firstDuration);
+            assertThat(duration.getCount()).isEqualTo(1L);
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
@@ -210,6 +324,12 @@ class WriteOperatorCoordinatorTest extends TableTestBase {
 
             assertThat(scan(coordinator).snapshot().id()).isEqualTo(3);
         }
+    }
+
+    private long scanGauge(MetricListener metrics, FileStoreTable table, String name) {
+        return metrics.<Long>getGauge("paimon", "table", table.name(), "scan", name)
+                .orElseThrow(AssertionError::new)
+                .getValue();
     }
 
     private FileStoreTable createTable(int pageSize) throws Exception {

@@ -37,6 +37,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -111,6 +112,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected final SnapshotManager snapshotManager;
     protected CompactionMetrics compactionMetrics = null;
+    @Nullable private ScanMetrics scanMetrics;
     protected final String tableName;
     private final boolean legacyPartitionName;
     private final CoreOptions options;
@@ -151,6 +153,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore) {
         this.restore = writeRestore;
+        if (scanMetrics != null) {
+            restore.withMetrics(scanMetrics);
+        }
         return this;
     }
 
@@ -400,6 +405,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
             if (compactionMetrics != null) {
                 compactionMetrics.close();
+            }
+            if (scanMetrics != null) {
+                scanMetrics.close();
             }
         }
     }
@@ -665,6 +673,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
         this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
+        this.scanMetrics = new ScanMetrics(metricRegistry, tableName);
+        restore.withMetrics(scanMetrics);
         return this;
     }
 
