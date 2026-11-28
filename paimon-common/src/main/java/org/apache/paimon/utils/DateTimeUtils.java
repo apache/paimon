@@ -668,7 +668,7 @@ public class DateTimeUtils {
     }
 
     public static Timestamp timeToTimestampWithLocalZone(int time, TimeZone tz) {
-        return Timestamp.fromInstant(toLocalDateTime(time).atZone(tz.toZoneId()).toInstant());
+        return timestampToTimestampWithLocalZone(Timestamp.fromEpochMillis(time), tz);
     }
 
     public static Timestamp truncate(Timestamp ts, int precision) {
