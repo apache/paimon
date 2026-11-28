@@ -91,6 +91,79 @@ def _rows(read, splits):
         iterator.close()
 
 
+@pytest.mark.parametrize('project_first', [False, True])
+def test_named_projection_filter_on_colliding_top_level_column(
+        tmp_path, project_first):
+    fields = pa.schema([
+        ('id', pa.int64()),
+        ('details_city', pa.string()),
+        ('details', pa.struct([
+            ('city', pa.string()),
+            ('origin', pa.string()),
+        ])),
+    ])
+
+    rows = pa.Table.from_pylist([
+        {'id': 1, 'details_city': 'east',
+         'details': {'city': 'Rome', 'origin': 'A'}},
+        {'id': 2, 'details_city': 'west',
+         'details': {'city': 'east', 'origin': 'B'}},
+        {'id': 3, 'details_city': 'east', 'details': None},
+    ], schema=fields)
+
+    options = {
+        'file.format': 'parquet',
+        'bucket': '-1',
+        'write-only': 'true',
+        'scan.native-plan.enabled': 'false',
+        'read.native.enabled': 'false',
+        'write.native.enabled': 'false',
+        'commit.native.enabled': 'false',
+    }
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('audit', False)
+    catalog.create_table(
+        'audit.users',
+        Schema.from_pyarrow_schema(fields, options=options),
+        False,
+    )
+
+    table = catalog.get_table('audit.users')
+    batch = table.new_batch_write_builder()
+    writer, commit = batch.new_write(), batch.new_commit()
+
+    try:
+        writer.write_arrow(rows)
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+
+    builder = table.new_read_builder()
+    projection = {
+        'id': 'id',
+        'picked_city': 'details.city',
+    }
+    where = "details_city = 'east'"
+
+    if not project_first:
+        builder.with_filter(where)
+
+    builder.with_projection(projection)
+
+    if project_first:
+        builder.with_filter(where)
+
+    splits = builder.new_scan().plan().splits()
+    result = builder.new_read().to_arrow(splits)
+
+    assert sorted(result.to_pylist(), key=lambda row: row['id']) == [
+        {'id': 1, 'picked_city': 'Rome'},
+        {'id': 3, 'picked_city': None},
+    ]
+
+
 @pytest.mark.parametrize('projection,positions', [
     ({'user_id': 'id'}, [0]),
     ({'city': 'profile.city'}, [1]),

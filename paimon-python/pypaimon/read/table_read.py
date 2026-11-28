@@ -234,8 +234,7 @@ class TableRead:
     def _reader_adapter(self, adapter=None):
         if adapter is None:
             adapter = reader_adapter(self.read_type, self._table_read_fields())
-        if (self.predicate is None or self.output_projection is None
-                or self.output_projection.named):
+        if self.predicate is None or self.output_projection is None:
             return adapter
         # Derive the flat working view for exact Python filtering, retaining
         # requested whole columns and the additional top-level filter inputs.
