@@ -56,6 +56,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.sql.Statement;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -715,10 +716,83 @@ public class JdbcCatalogTest extends CatalogTestBase {
         Identifier identifier = Identifier.create("test_db", "test_table");
         syncCatalog.createTable(identifier, schema, false);
 
-        // Verify no properties are stored when sync is disabled
-        Map<String, String> storedProps =
-                fetchTableProperties(syncCatalog, "test_db", "test_table");
-        assertThat(storedProps).isEmpty();
+        // Verify the table properties table is not created when sync is disabled
+        assertThat(tableExists(syncCatalog, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME)).isFalse();
+    }
+
+    @Test
+    public void testTablePropertiesTableCreatedOnlyWhenSyncEnabled() {
+        String uri =
+                "jdbc:sqlite:file:"
+                        + UUID.randomUUID().toString().replace("-", "")
+                        + "?mode=memory&cache=shared";
+        JdbcCatalog noSyncCatalog =
+                initCatalog(
+                        Collections.singletonMap(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false"),
+                        uri);
+        assertThat(tableExists(noSyncCatalog, JdbcUtils.CATALOG_TABLE_NAME)).isTrue();
+        assertThat(tableExists(noSyncCatalog, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME)).isFalse();
+
+        // Enabling the sync later creates the table on the same database.
+        JdbcCatalog syncCatalog =
+                initCatalog(
+                        Collections.singletonMap(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "true"),
+                        uri);
+        assertThat(tableExists(syncCatalog, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME)).isTrue();
+    }
+
+    @Test
+    public void testTablePropertiesTableCreationFailure() throws Exception {
+        String uri =
+                "jdbc:sqlite:file:"
+                        + UUID.randomUUID().toString().replace("-", "")
+                        + "?mode=memory&cache=shared";
+        JdbcCatalog noSyncCatalog =
+                initCatalog(
+                        Collections.singletonMap(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false"),
+                        uri);
+        // An index takes the name in SQLite, so creating the table fails, as it does on MySQL
+        // with utf8mb4 where the primary key is too long.
+        noSyncCatalog
+                .getConnections()
+                .run(
+                        conn -> {
+                            try (Statement statement = conn.createStatement()) {
+                                return statement.execute(
+                                        "CREATE INDEX "
+                                                + JdbcUtils.TABLE_PROPERTIES_TABLE_NAME
+                                                + " ON "
+                                                + JdbcUtils.CATALOG_TABLE_NAME
+                                                + "("
+                                                + JdbcUtils.TABLE_NAME
+                                                + ")");
+                            }
+                        });
+
+        assertThatThrownBy(
+                        () ->
+                                initCatalog(
+                                        Collections.singletonMap(
+                                                CatalogOptions.SYNC_ALL_PROPERTIES.key(), "true"),
+                                        uri))
+                .rootCause()
+                .isInstanceOf(SQLException.class);
+        assertThatThrownBy(
+                        () ->
+                                initCatalog(
+                                        Collections.singletonMap(
+                                                CatalogOptions.SYNC_ALL_PROPERTIES.key(), "true"),
+                                        uri))
+                .hasStackTraceContaining(JdbcUtils.TABLE_PROPERTIES_TABLE_NAME)
+                .hasStackTraceContaining(CatalogOptions.SYNC_ALL_PROPERTIES.key());
+
+        // With the sync disabled, the catalog still starts.
+        assertDoesNotThrow(
+                () ->
+                        initCatalog(
+                                Collections.singletonMap(
+                                        CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false"),
+                                uri));
     }
 
     @Test
