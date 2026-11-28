@@ -27,15 +27,20 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
-/** Re-enter Spark's native rewrite with fresh, aligned commands that are not marked analyzed. */
+/**
+ * Re-enter Spark's native rewrite with fresh, aligned commands that are not marked analyzed, and
+ * turn a metadata-only DELETE that Spark has rewritten back into Paimon's command.
+ */
 object Spark42RowLevelCommandRewrite
   extends Rule[LogicalPlan]
-  with PureAppendOnlyScope
+  with MetadataOnlyDeleteRestore
   with MergeSchemaEvolutionHelper {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
+        case RestoredMetadataOnlyDelete(command) => command
+
         case u: UpdateTable if u.resolved && u.rewritable && eligible(u.table) =>
           val assignments = PaimonAssignmentUtils.alignUpdateAssignments(
             u.table.output,
