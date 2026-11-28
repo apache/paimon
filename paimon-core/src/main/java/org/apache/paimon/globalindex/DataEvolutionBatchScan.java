@@ -396,8 +396,21 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Range> plannedRanges =
                 GlobalIndexBuilderUtils.calcRowRanges(fallbackPlan.dataSplits());
+        // A scope covering all candidates cannot reduce the already overflowing range count.
+        boolean coversAllCandidates = false;
+        if (plannedRanges.size() == 1) {
+            Range range = plannedRanges.get(0);
+            long lastCandidate = candidates.last();
+            coversAllCandidates =
+                    range.from >= 0
+                            && lastCandidate >= 0
+                            && lastCandidate <= range.to
+                            && range.from <= candidates.iterator().next();
+        }
         Optional<RowRangeIndex> ranges =
-                RowRangeIndex.tryFromBitmap(candidates, maxRanges, plannedRanges);
+                coversAllCandidates
+                        ? Optional.empty()
+                        : RowRangeIndex.tryFromBitmap(candidates, maxRanges, plannedRanges);
         if (ranges.isPresent()) {
             SnapshotReader.Plan indexedPlan =
                     fast ? pruneFileGroups(dataPlan, candidates) : fallbackPlan;
