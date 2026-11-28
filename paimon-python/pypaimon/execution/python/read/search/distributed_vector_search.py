@@ -259,17 +259,19 @@ def _search_batch_raw_split(context, split):
 
     table_read, column, queries, limit, metric = context
     scorer = BatchVectorSearchReadImpl(table_read.table, limit, column, queries)
+    prepared = [scorer._scoring_query(q, metric) for q in queries]
     reader, batches = table_read._new_arrow_batch_reader([split])
     with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-        return [_batch_scores(result) for result in scorer._score_raw_batch_queries(batch_reader, metric)]
+        return [_batch_scores(result) for result in scorer._score_raw_batch_queries(batch_reader, prepared)]
 
 
 def _search_batch_refine_split(context, split):
     table_read, column, queries, limit, metric, queries_by_row = context
     scorer = BatchVectorSearchReadImpl(table_read.table, limit, column, queries)
+    prepared = [scorer._scoring_query(q, metric) for q in queries]
     # Read the candidate union once, scoring each row only for its own queries.
     return [_batch_scores(result) for result in scorer._score_refine_splits(
-        table_read, [split], queries_by_row, queries, metric)]
+        table_read, [split], queries_by_row, prepared)]
 
 
 def _batch_scores(result):

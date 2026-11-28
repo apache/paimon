@@ -26,6 +26,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.search.vector_scoring import _PreparedQuery
 from pypaimon.execution.python.read.search import vector_search_read as search
 from pypaimon.multimodal.query import VectorQuery
 from pypaimon.read.split import Split
@@ -121,12 +122,12 @@ def test_ready_split_makes_progress_with_bounded_lookahead() -> None:
                 assert scored[i - 2].is_set(), "Read more than one batch ahead"
             yield batch(i, float(i))
 
-    def score(vectors: pa.Array, query: List[float], metric: str) -> Iterator[Optional[float]]:
+    def score(vectors: pa.Array, query: _PreparedQuery) -> Iterator[Optional[float]]:
         assert threading.get_ident() == caller
         value = int(vectors[0].as_py()[0])
         if value < len(scored):
             scored[value].set()
-        yield from original(vectors, query, metric)
+        yield from original(vectors, query)
 
     read = planned_read(slow(), fast())
     with mock.patch.object(search, "_iter_arrow_scores", score):

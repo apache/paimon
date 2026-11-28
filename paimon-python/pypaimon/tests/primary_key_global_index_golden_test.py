@@ -22,6 +22,7 @@ import tarfile
 
 import pytest
 
+from pypaimon.execution.python.read.search.vector_scoring import _PreparedQuery, _compute_score
 from pypaimon.catalog.catalog_factory import CatalogFactory
 
 
@@ -127,7 +128,6 @@ def test_java_primary_key_full_text_index(catalog):
 def test_java_primary_key_raw_only_uses_column_metric(catalog, metric, expected_id):
     from dataclasses import replace
     from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
-    from pypaimon.execution.python.read.search.vector_search_read import _compute_score
 
     table = catalog.get_table("default.test_pk_vector_golden")
     # Remove legacy aliases so only the documented PK column option is available.
@@ -147,7 +147,7 @@ def test_java_primary_key_raw_only_uses_column_metric(catalog, metric, expected_
     rows = _read_search_result(table, result)
     assert rows.column("id").to_pylist() == [expected_id]
     assert result.positions[0].score == _compute_score(
-        query, rows.column("embedding")[0].as_py(), metric)
+        _PreparedQuery(query, metric), rows.column("embedding")[0].as_py())
 
 
 def test_java_primary_key_vector_refinement_matches_scalar(catalog):

@@ -127,9 +127,9 @@ def test_python_search_dependency_reads_keep_real_rows_in_python(search_table, p
     with _forbid_native():
         if path == 'vector':
             reader = DataEvolutionVectorRead(table, 2, table.field_dict['embedding'], [0., 0.])
-            result = reader._read_raw_arrow([Range(0, 1)], include_filter=False)
-            assert result.column('_ROW_ID').to_pylist() == [0, 1]
-            assert result.column('embedding').to_pylist() == [[0., 0.], [1., 0.]]
+            result = reader._read_raw_search([Range(0, 1)], None, [0., 0.], include_filter=False)
+            assert result.results().to_list() == [0, 1]
+            assert [result.score_getter()(i) for i in (0, 1)] == [1.0, 0.5]
         elif path == 'batch-vector':
             reader = BatchVectorSearchReadImpl(table, 2, table.field_dict['embedding'], [[0., 0.]])
             result = reader._read_raw_batch_search([Range(0, 1)], None)[0]
