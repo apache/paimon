@@ -18,6 +18,9 @@
 import io
 import struct
 import weakref
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Barrier, Event
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -67,6 +70,96 @@ def test_container_reader_avoids_packet_scan_and_shares_mapping(mp4):
     finally:
         for decoder in readers:
             decoder.close()
+
+
+def test_parallel_video_readers_build_one_shared_index(mp4):
+    from pypaimon.multimodal import VideoMetadataCache
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+
+    cache = VideoMetadataCache()
+    waiters = Barrier(4)
+    release = Event()
+
+    class TrackedFuture(Future):
+        def result(self, timeout=None):
+            waiters.wait(timeout=5)
+            return super().result(timeout)
+
+    def build_index(*args):
+        assert release.wait(timeout=10)
+        return ContainerFrameIndex(*args)
+
+    def open_reader(unused):
+        stream = io.BytesIO(mp4)
+        stream.video_length = len(mp4)
+        stream.video_metadata_cache = cache
+        stream.video_metadata_key = 'same-video'
+        stream.video_read_ranges = lambda ranges: [mp4[o:o + n] for o, n in ranges]
+        return _open_video_decoder(stream, backend="pyav")
+
+    with patch('pypaimon.multimodal.video.Future', TrackedFuture), patch(
+            'pypaimon.multimodal.lerobot.dataset.ContainerFrameIndex',
+            side_effect=build_index) as build, ThreadPoolExecutor(max_workers=4) as workers:
+        jobs = [workers.submit(open_reader, i) for i in range(4)]
+        try:
+            waiters.wait(timeout=5)
+        finally:
+            release.set()
+        readers = [job.result(timeout=10) for job in jobs]
+        try:
+            assert build.call_count == 1
+            assert all(reader._keyframe_index is readers[0]._keyframe_index
+                       for reader in readers)
+        finally:
+            for reader in readers:
+                reader.close()
+
+
+def test_shared_video_cache_isolates_file_io(mp4):
+    import av
+    from pypaimon.multimodal import VideoFrameCollator, VideoMetadataCache
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder, _PyAVVideoDecoder
+    from pypaimon.table.row.blob import VideoFrameDescriptor
+
+    other = io.BytesIO()
+    with av.open(other, "w", format="mp4") as container:
+        stream = container.add_stream("mpeg4", rate=24)
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "yuv420p"
+        for ordinal in range(8):
+            frame = av.VideoFrame.from_ndarray(
+                np.full((48, 64, 3), 20 * ordinal, dtype=np.uint8), format="rgb24")
+            container.mux(stream.encode(frame))
+        container.mux(stream.encode(None))
+
+    payloads = (mp4, other.getvalue())
+    length = max(map(len, payloads)) + 8
+    row = {"video": VideoFrameDescriptor("s3://bucket/shared.video", 0, length, 5).serialize()}
+    cache = VideoMetadataCache()
+
+    def collator(payload):
+        free = length - len(payload)
+        data = payload + struct.pack(">I4s", free, b"free") + bytes(free - 8)
+        file_io = SimpleNamespace(new_input_stream=lambda _: io.BytesIO(data))
+        return VideoFrameCollator(
+            SimpleNamespace(file_io=file_io), video_column="video",
+            decoder_factory=lambda source: _open_video_decoder(source, backend="pyav"),
+            decode_fn=lambda decoder, ordinal, _: (
+                len(decoder._keyframe_index.pts), decoder[ordinal]),
+            metadata_cache=cache)
+
+    first, second = map(collator, payloads)
+    try:
+        with patch.object(_PyAVVideoDecoder, "_tensor",
+                          staticmethod(lambda frame: frame.to_ndarray(format="rgb24"))):
+            for reader, payload, count in zip((first, second), payloads, (60, 8)):
+                with av.open(io.BytesIO(payload)) as container:
+                    expected = list(container.decode(video=0))[5].to_ndarray(format="rgb24")
+                actual_count, actual = reader(row)["frame"]
+                assert actual_count == count
+                np.testing.assert_array_equal(actual, expected)
+    finally:
+        first.close()
+        second.close()
 
 
 def test_chunk_extent_is_checked_before_decode(mp4):
@@ -352,3 +445,63 @@ def test_chunk_count_is_checked_before_expansion():
     samples += box(b'stsc', struct.pack('>II3I', 0, 1, 1, 2**32 - 1, 1))
     with pytest.raises(ValueError, match='cover samples'):
         _sample_offsets(samples, 1, 100)
+
+
+def test_public_dataset_readers_share_index(mp4):
+    import av
+    import pyarrow as pa
+    torch = pytest.importorskip("torch")
+    from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset, VideoMetadataCache
+    from pypaimon.table.row.blob import VideoFrameDescriptor
+
+    metadata = {
+        "info": {
+            "codebase_version": "v3.0", "robot_type": "test", "fps": 30,
+            "total_frames": 60, "total_episodes": 1, "total_tasks": 1,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "camera": {"dtype": "video", "shape": [48, 64, 3],
+                           "names": ["height", "width", "channels"]},
+            },
+        },
+        "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                      "dataset_to_index": 60, "length": 60, "tasks": ["pick"]}],
+        "tasks": ["pick"],
+    }
+
+    class Reader(PaimonDatasetReader):
+        def read_indices(self, indices, columns):
+            return pa.Table.from_pylist([{
+                "index": i, "episode_index": 0, "frame_index": i,
+                "timestamp": i / 30, "task_index": 0,
+                "camera": VideoFrameDescriptor("file:///shared.video", 0, len(mp4), i).serialize(),
+            } for i in indices], schema=self.schema).select(columns)
+
+    cache = VideoMetadataCache()
+    file_io = SimpleNamespace(new_input_stream=lambda _: io.BytesIO(mp4))
+    readers = [Reader(metadata, file_io=file_io, video_backend="pyav",
+                      video_metadata_cache=cache, return_uint8=True) for _ in range(2)]
+    with av.open(io.BytesIO(mp4)) as container:
+        expected = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    builds = []
+
+    class CountingIndex(ContainerFrameIndex):
+        def __init__(self, *args):
+            super().__init__(*args)
+            builds.append(self)
+
+    try:
+        with patch('pypaimon.multimodal.lerobot.dataset.ContainerFrameIndex',
+                   CountingIndex):
+            for reader, ordinal in zip(readers, [5, 7]):
+                result = PaimonLeRobotDataset(reader)[ordinal]["camera"]
+                torch.testing.assert_close(result, torch.from_numpy(expected[ordinal]).permute(2, 0, 1))
+                reader.close()
+            assert len(builds) == 1
+    finally:
+        for reader in readers:
+            reader.close()

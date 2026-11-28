@@ -23,10 +23,11 @@ import sys
 import weakref
 from collections import OrderedDict, deque
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import ExitStack, contextmanager
 from fractions import Fraction
 from itertools import chain
+from threading import RLock
 
 try:
     from contextvars import copy_context
@@ -380,39 +381,120 @@ class _PrefetchedVideo(io.BytesIO):
                 super().close()
 
 
-class _VideoMetadataCache(weakref.WeakValueDictionary):
-    """Retain bounded container mappings across decoder eviction."""
+class VideoMetadataCache:
+    """Process-local cache for parsed video metadata.
+
+    Values must support weak references. Strong retention requires ``nbytes``
+    and is bounded by bytes and entry count. Create a new cache in each worker;
+    operations on an inherited cache fail without touching its objects or locks.
+    """
 
     def __init__(self, max_bytes=16 * 1024 * 1024, max_entries=64):
-        super().__init__()
-        self._retained = OrderedDict()
-        self._bytes = 0
         self._max_bytes = max_bytes
         self._max_entries = max_entries
+        self._values = weakref.WeakValueDictionary()
+        self._retained = OrderedDict()
+        self._bytes = 0
+        self._lock = RLock()
+        self._pending = {}
+        self._owner_pid = os.getpid()
+
+    def _ensure_process_local(self):
+        if self._owner_pid != os.getpid():
+            raise RuntimeError("Create a new VideoMetadataCache in the child process.")
 
     def get(self, key, default=None):
-        if key in self._retained:
-            self._retained.move_to_end(key)
-        return super().get(key, default)
+        self._ensure_process_local()
+        with self._lock:
+            if key in self._retained:
+                self._retained.move_to_end(key)
+            return self._values.get(key, default)
 
     def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-        previous = self._retained.pop(key, None)
-        if previous is not None:
-            self._bytes -= previous.nbytes
-        size = getattr(value, "nbytes", None)
-        if size is None or size > self._max_bytes:
-            return
-        self._retained[key] = value
-        self._bytes += size
-        while self._bytes > self._max_bytes or len(self._retained) > self._max_entries:
-            _, removed = self._retained.popitem(last=False)
-            self._bytes -= removed.nbytes
+        self._ensure_process_local()
+        with self._lock:
+            self._values[key] = value
+            previous = self._retained.pop(key, None)
+            if previous is not None:
+                self._bytes -= previous.nbytes
+            size = getattr(value, "nbytes", None)
+            if size is None or size > self._max_bytes:
+                return
+            self._retained[key] = value
+            self._bytes += size
+            while self._bytes > self._max_bytes or len(self._retained) > self._max_entries:
+                _, removed = self._retained.popitem(last=False)
+                self._bytes -= removed.nbytes
+
+    def __getitem__(self, key):
+        self._ensure_process_local()
+        with self._lock:
+            value = self._values[key]
+            if key in self._retained:
+                self._retained.move_to_end(key)
+            return value
+
+    def __delitem__(self, key):
+        self._ensure_process_local()
+        with self._lock:
+            del self._values[key]
+            previous = self._retained.pop(key, None)
+            if previous is not None:
+                self._bytes -= previous.nbytes
+
+    def __len__(self):
+        self._ensure_process_local()
+        with self._lock:
+            return len(self._values)
+
+    def get_or_load(self, key, loader):
+        """Return a cached value, sharing one in-flight load per key."""
+        self._ensure_process_local()
+        with self._lock:
+            value = self.get(key)
+            if value is not None:
+                return value
+            pending = self._pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = self._pending[key] = Future()
+        if not owner:
+            return pending.result()
+        try:
+            value = loader()
+            with self._lock:
+                self[key] = value
+                self._pending.pop(key)
+                pending.set_result(value)
+            return value
+        except BaseException as error:
+            with self._lock:
+                self._pending.pop(key)
+                pending.set_exception(error)
+            raise
 
     def clear(self):
-        self._retained.clear()
-        self._bytes = 0
-        super().clear()
+        self._ensure_process_local()
+        with self._lock:
+            self._retained.clear()
+            self._bytes = 0
+            self._values.clear()
+
+
+_VideoMetadataCache = VideoMetadataCache
+
+
+class _VideoStorageScope:
+    """Hash a FileIO by identity and keep it alive while its keys are cached."""
+
+    def __init__(self, file_io):
+        self._file_io = file_io
+
+    def __hash__(self):
+        return id(self._file_io)
+
+    def __eq__(self, other):
+        return isinstance(other, _VideoStorageScope) and self._file_io is other._file_io
 
 
 class _VideoFileHandle:
@@ -545,6 +627,8 @@ class VideoFrameCollator:
 
     The cache is process-local and keyed by physical video payload identity.
     The table option ``read.video.max-cached-files`` bounds pooled file handles.
+    Share a caller-owned ``metadata_cache`` to reuse parsed indexes across
+    collators using the same FileIO in one process.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
     """
@@ -562,7 +646,8 @@ class VideoFrameCollator:
             decode_batch_fn=None,
             range_parallelism=4,
             prefetch_max_bytes=0,
-            decode_parallelism=1):
+            decode_parallelism=1,
+            metadata_cache=None):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -596,6 +681,9 @@ class VideoFrameCollator:
                 or not isinstance(decode_parallelism, int)
                 or decode_parallelism <= 0):
             raise ValueError("decode_parallelism must be a positive int.")
+        if metadata_cache is not None and not isinstance(metadata_cache, VideoMetadataCache):
+            raise TypeError("metadata_cache must be a VideoMetadataCache.")
+
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
         if file_io is None:
@@ -614,10 +702,12 @@ class VideoFrameCollator:
         self.decode_parallelism = decode_parallelism
         self._decode_pool = _VideoDecodePool()
         self._decoders = OrderedDict()
-        self._video_metadata_cache = _VideoMetadataCache()
         self._max_cached_video_files = (options.read_video_max_cached_files()
                                         if isinstance(options, CoreOptions) else 0)
         self._video_file_pool = None
+        self._video_metadata_cache = (metadata_cache if metadata_cache is not None
+                                      else VideoMetadataCache())
+        self._metadata_cache_owned = metadata_cache is None
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -633,7 +723,8 @@ class VideoFrameCollator:
         self._decode_pool.close()
         resources = list(self._decoders.values())
         self._decoders.clear()
-        self._video_metadata_cache = _VideoMetadataCache()
+        if self._metadata_cache_owned:
+            self._video_metadata_cache = VideoMetadataCache()
         first_error = None
         for resource in resources:
             try:
@@ -660,6 +751,7 @@ class VideoFrameCollator:
         state["_decode_pool"] = _VideoDecodePool()
         state["_video_metadata_cache"] = None
         state["_video_file_pool"] = None
+        state["_metadata_cache_owned"] = True
         state["_owner_pid"] = None
         return state
 
@@ -818,7 +910,7 @@ class VideoFrameCollator:
                 del payload
             # Replica decoders share metadata, while their decode state stays separate.
             stream.video_metadata_cache = self._video_metadata_cache
-            stream.video_metadata_key = descriptor
+            stream.video_metadata_key = (_VideoStorageScope(self.file_io), descriptor)
             stream.video_length = descriptor.length
             stream.video_moov_range = (getattr(descriptor, "moov_offset", 0),
                                        getattr(descriptor, "moov_length", 0))
@@ -881,6 +973,9 @@ class VideoFrameCollator:
         return default_collate(rows)
 
     def _ensure_process_local_cache(self):
+        if not self._metadata_cache_owned:
+            # Check before cleanup or replacement can finalize inherited indexes.
+            self._video_metadata_cache._ensure_process_local()
         pid = os.getpid()
         if self._owner_pid == pid:
             return
@@ -889,6 +984,8 @@ class VideoFrameCollator:
         try:
             self.close()
         finally:
+            self._video_metadata_cache = VideoMetadataCache()
+            self._metadata_cache_owned = True
             self._owner_pid = pid
 
     @staticmethod

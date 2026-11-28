@@ -119,6 +119,7 @@ class PaimonDatasetReader(ABC):
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
+            video_metadata_cache=None,
             return_uint8=False,
             _resolved_meta=False):
         _require_dataset_python()
@@ -144,7 +145,7 @@ class PaimonDatasetReader(ABC):
                 schema, info, self._validate_physical_metadata())
         rows = self._open_frame_rows(projection)
         self._set_frame_rows(
-            rows, projection, validation_context, subtasks)
+            rows, projection, validation_context, subtasks, video_metadata_cache)
 
     @abstractmethod
     def read_indices(self, indices, columns):
@@ -279,7 +280,7 @@ class PaimonDatasetReader(ABC):
             raise ValueError("delta_timestamps requires episode metadata.")
 
     def _set_frame_rows(
-            self, rows, projection, validation_context, subtasks):
+            self, rows, projection, validation_context, subtasks, video_metadata_cache=None):
         self._frame_rows = rows
         access = rows if rows is not None else self
         self._snapshot_id = getattr(access, "snapshot_id", None)
@@ -330,6 +331,7 @@ class PaimonDatasetReader(ABC):
                 output_column=key,
                 collate_fn=_identity,
                 range_parallelism=self.blob_parallelism,
+                metadata_cache=video_metadata_cache,
                 max_open_videos=cache_size,
                 prefetch_max_bytes=prefetch_max_bytes,
             )
@@ -680,6 +682,7 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
+            video_metadata_cache=None,
             return_uint8=False):
         self._frames_table, meta = _load_dataset(table, tag_name)
         if dataset_index is not None:
@@ -704,6 +707,7 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             tolerance_s=tolerance_s,
             blob_parallelism=blob_parallelism,
             video_backend=video_backend,
+            video_metadata_cache=video_metadata_cache,
             return_uint8=return_uint8,
             _resolved_meta=True,
         )
@@ -842,6 +846,7 @@ class PaimonLeRobotDataset:
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
+            video_metadata_cache=None,
             return_uint8=False):
         _require_dataset_python()
         if isinstance(table, PaimonDatasetReader):
@@ -854,6 +859,7 @@ class PaimonLeRobotDataset:
                 or tolerance_s != 1e-4
                 or blob_parallelism != 16
                 or video_backend is not None
+                or video_metadata_cache is not None
                 or return_uint8
             ):
                 raise ValueError(
@@ -870,6 +876,7 @@ class PaimonLeRobotDataset:
                 tolerance_s=tolerance_s,
                 blob_parallelism=blob_parallelism,
                 video_backend=video_backend,
+                video_metadata_cache=video_metadata_cache,
                 return_uint8=return_uint8,
             )
 
@@ -2270,8 +2277,8 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
     if keyframe_index is None and isinstance(getattr(stream, "video_length", None), int):
         cache = getattr(stream, "video_metadata_cache", None)
         key = ("container", getattr(stream, "video_metadata_key", None))
-        keyframe_index = cache.get(key) if cache is not None else None
-        if keyframe_index is None:
+
+        def load_index():
             try:
                 source = stream
                 hint = getattr(stream, "video_moov_range", (0, 0))
@@ -2286,16 +2293,23 @@ def _open_video_decoder(stream, backend=None, codec_threads=0):
                         head = min(256 * 1024, hint[0] + hint[1] + 128 * 1024)
                     source.prefetch([(0, min(head, stream.video_length)), hint])
                     stream.video_bootstrap = source
-                keyframe_index = ContainerFrameIndex(source, stream.video_length)
-            except (ValueError, OSError, RuntimeError, EOFError, OverflowError, IndexError, struct.error):
-                bootstrap = getattr(stream, "video_bootstrap", None)
-                if bootstrap is not None:
-                    bootstrap.close()
-                    stream.video_bootstrap = None
+                return ContainerFrameIndex(source, stream.video_length)
             finally:
                 stream.seek(0)
-            if keyframe_index is not None and cache is not None:
-                cache[key] = keyframe_index
+        try:
+            if callable(getattr(cache, "get_or_load", None)):
+                keyframe_index = cache.get_or_load(key, load_index)
+            else:
+                keyframe_index = cache.get(key) if cache is not None else None
+                if keyframe_index is None:
+                    keyframe_index = load_index()
+                    if cache is not None:
+                        cache[key] = keyframe_index
+        except (ValueError, OSError, RuntimeError, EOFError, OverflowError, IndexError, struct.error):
+            bootstrap = getattr(stream, "video_bootstrap", None)
+            if bootstrap is not None:
+                bootstrap.close()
+                stream.video_bootstrap = None
         stream.video_keyframe_index = keyframe_index
     if backend is None and keyframe_index is not None:
         try:

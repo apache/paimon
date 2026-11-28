@@ -249,6 +249,31 @@ in each DataLoader worker. `decoder_factory(stream)` opens any codec library;
 
 Set `read.video.max-cached-files` on the table to reuse Arrow S3/OSS input
 handles across MP4 payloads in a `.video` file (per collator, default: 0).
+Collators in one process can share parsed MP4 indexes when they use the same
+FileIO and `metadata_cache` instance with a cache-aware decoder. The sequential
+decoder below opens its own MP4 container.
+
+For the built-in indexed reader, pass one cache to LeRobot datasets using the
+same table/FileIO. This also applies to `PaimonDatasetReader` and its temporal
+windows through `video_metadata_cache`:
+
+```python
+import pypaimon.multimodal as pm
+
+cache = pm.VideoMetadataCache()
+first = pm.PaimonLeRobotDataset(table, video_backend="pyav", video_metadata_cache=cache)
+second = pm.PaimonLeRobotDataset(table, video_backend="pyav", video_metadata_cache=cache)
+try:
+    a = first[0]
+    b = second[0]  # Reuses the first reader's parsed MP4 index.
+finally:
+    first.close()
+    second.close()
+```
+
+Caches are process-local. Create shared caches inside each worker; using a cache
+inherited through fork raises an error, including through an inherited collator.
+Create the collators and their shared cache inside the worker.
 
 ```python
 import av
