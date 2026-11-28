@@ -486,6 +486,28 @@ when the commit contains existing-row BLOB or VECTOR staged files. It does
 not suppress logical concurrent-update conflicts. If recovery is unavailable,
 re-plan the operation against the latest snapshot.
 
+## Batch Incremental DIFF Reads
+
+With `incremental-between-scan-mode=diff`, Data Evolution compares the live file
+identities in the two snapshots, including their RowID metadata. It returns the
+visible end-snapshot rows in the RowID ranges of file entries absent from the
+starting snapshot. Files shared with the starting snapshot
+still supply unchanged columns and the end-snapshot deletion-vector anchor.
+Projecting only unchanged columns does not remove the corresponding updates.
+
+This is a file incremental read, not a row-level changelog. A range can contain
+rows whose values did not change, and compaction can cause rows to be returned
+again. A deletion without newly added data files produces no rows; deleted rows
+are excluded when a new column file covers their range. Tag-to-tag DIFF reads
+use the same semantics. DIFF planning still materializes snapshot metadata.
+Requested RowID ranges further restrict the selected ranges. Automatic global-index
+pruning is disabled for incremental scans until the index and data plan can be bound
+to the same historical endpoint. DIFF rejects unbound external global-index
+results. Use `withRowRanges` to select explicit RowIDs in DIFF. DELTA, including
+AUTO when it selects DELTA, accepts caller-supplied RowIDs and scores from
+an external global-index result. Ordinary snapshot reads retain their index
+optimizations.
+
 ## Compaction and Row-ID Lifetime
 
 Repeated updates add column files. Ordinary compaction consolidates them while

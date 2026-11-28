@@ -37,6 +37,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -143,6 +144,40 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return this;
     }
 
+    /** Reads complete file identities and dependencies before computing a snapshot difference. */
+    public Plan planForIncrementalDiff() {
+        Predicate savedFilter = inputFilter;
+        RowType savedReadType = readType;
+        Long savedLimit = limit;
+        Filter<ManifestEntry> savedManifestEntryFilter = manifestEntryFilter;
+        Filter<String> savedFileNameFilter = fileNameFilter;
+        boolean savedDropStats = dropStats;
+        try {
+            withFilter(null);
+            readType = null;
+            limit = null;
+            manifestEntryFilter = null;
+            fileNameFilter = null;
+            if (savedManifestEntryFilter != null) {
+                dropStats = false;
+            }
+            return plan();
+        } finally {
+            withFilter(savedFilter);
+            readType = savedReadType;
+            limit = savedLimit;
+            manifestEntryFilter = savedManifestEntryFilter;
+            fileNameFilter = savedFileNameFilter;
+            dropStats = savedDropStats;
+        }
+    }
+
+    /** Applies the caller's physical selectors to a changed file, before pruning dependencies. */
+    public boolean matchesIncrementalDiffFile(ManifestEntry entry) {
+        return (fileNameFilter == null || fileNameFilter.test(entry.fileName()))
+                && (manifestEntryFilter == null || manifestEntryFilter.test(entry));
+    }
+
     @Override
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFiles, boolean useSequential) {
@@ -215,6 +250,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
         return inputFilter.test(
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+    }
+
+    /** Prunes a complete dependency group after identifying the changed RowIDs. */
+    public List<ManifestEntry> pruneIncrementalDiffDependencies(List<ManifestEntry> group) {
+        List<ManifestEntry> dependencies =
+                readType != null && readType.containsField(SpecialFields.SEQUENCE_NUMBER.name())
+                        // The newest file can supply the sequence number without projected columns.
+                        ? group
+                        : pruneByReadType(group);
+        return dropStats && manifestEntryFilter != null
+                ? dependencies.stream().map(this::dropStats).collect(Collectors.toList())
+                : dependencies;
     }
 
     /**

@@ -290,11 +290,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return this;
     }
 
-    /** Applies a row-ID selection against the snapshot on which it was evaluated. */
+    /** Applies a single-snapshot search result, pinning its source snapshot when available. */
     public DataEvolutionBatchScan withGlobalIndexResult(
-            GlobalIndexResult globalIndexResult, Snapshot snapshot) {
+            GlobalIndexResult globalIndexResult, @Nullable Snapshot snapshot) {
+        Preconditions.checkArgument(
+                table.coreOptions().startupMode() != CoreOptions.StartupMode.INCREMENTAL,
+                "A single-snapshot global-index result cannot replace an incremental scan.");
         withGlobalIndexResult(globalIndexResult);
-        batchScan.withStartingSnapshot(snapshot);
+        if (snapshot != null) {
+            batchScan.withStartingSnapshot(snapshot);
+        }
         return this;
     }
 
@@ -631,6 +636,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
+        CoreOptions options = table.coreOptions();
+        boolean incremental = options.startupMode() == CoreOptions.StartupMode.INCREMENTAL;
+        if (incremental && globalIndexResult != null) {
+            Preconditions.checkArgument(
+                    !batchScan.usesSnapshotDiff(),
+                    "Unbound global-index results are not supported for incremental DIFF reads; "
+                            + "use withRowRanges for explicit row-id selections.");
+        }
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
         // can hand in one that was computed off the raw values.
@@ -643,7 +656,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (filter == null) {
             return Optional.empty();
         }
-        CoreOptions options = table.coreOptions();
         if (!options.globalIndexEnabled()) {
             return Optional.empty();
         }

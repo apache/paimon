@@ -449,6 +449,13 @@ case class LateralVectorSearchExec(
   private def createSearchContext(
       rightProjection: UnsafeProjection,
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
+    val metaColumnsOnly =
+      VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name))
+    val coreOptions = CoreOptions.fromMap(innerTable.options())
+    // Metadata-only results return directly, without the row scan's snapshot validation.
+    if (metaColumnsOnly) {
+      PaimonBaseScan.requireSingleSnapshotForIndexSearch(coreOptions)
+    }
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(
@@ -489,8 +496,7 @@ case class LateralVectorSearchExec(
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()
-    val batchSize =
-      Math.max(1, new CoreOptions(innerTable.options()).vectorSearchLateralJoinBatchSize())
+    val batchSize = Math.max(1, coreOptions.vectorSearchLateralJoinBatchSize())
 
     LateralVectorSearchContext(
       readBuilder,
@@ -500,8 +506,7 @@ case class LateralVectorSearchExec(
       scoreMetadataColumns,
       sparkRow,
       rowIdOrdinal = resultRowType.getFieldIndex(SpecialFields.ROW_ID.name()),
-      metaColumnsOnly =
-        VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name)),
+      metaColumnsOnly = metaColumnsOnly,
       projectionInputOrdinals = vectorSearchOutput.map {
         attr =>
           if (attr.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN) {

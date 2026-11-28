@@ -80,6 +80,10 @@ public class IndexedSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
+        if (split.deletionFiles().isPresent()
+                && split.deletionFiles().get().stream().anyMatch(Objects::nonNull)) {
+            return OptionalLong.empty();
+        }
         return OptionalLong.of(rowCount());
     }
 

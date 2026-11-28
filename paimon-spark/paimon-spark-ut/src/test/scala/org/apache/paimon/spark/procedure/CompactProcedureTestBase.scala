@@ -28,7 +28,7 @@ import org.apache.paimon.fs.{Path, SeekableInputStream}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta}
-import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.manifest.{FileKind, FileSource}
 import org.apache.paimon.operation.LocalOrphanFilesClean
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
 import org.apache.paimon.partition.PartitionPredicate
@@ -40,7 +40,7 @@ import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable}
 import org.apache.paimon.table.BucketMode.UNAWARE_BUCKET
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, TableCommitImpl}
-import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
+import org.apache.paimon.table.source.{DataSplit, ScanMode}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
 
@@ -3326,7 +3326,6 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   }
 
   private def partialUpdate(table: FileStoreTable, sourceQuery: String): DataFileMeta = {
-    val beforeMerge = table.latestSnapshot().get()
     sql(sourceQuery).createOrReplaceTempView("merge_source")
     try {
       sql("""
@@ -3338,16 +3337,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     } finally {
       spark.catalog.dropTempView("merge_source")
     }
-    table
-      .newSnapshotReader()
-      .withSnapshot(table.latestSnapshot().get())
-      .readIncrementalDiff(beforeMerge)
-      .splits()
-      .asScala
-      .collect { case split: IncrementalSplit => split }
-      .flatMap(_.afterFiles().asScala)
-      .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
-      .get
+    latestNormalDataFile(table)
   }
 
   /** Like [[partialUpdate]] but with an explicit SET list, so sub-field targets can be used. */
@@ -3355,7 +3345,6 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       table: FileStoreTable,
       setList: String,
       sourceQuery: String): DataFileMeta = {
-    val beforeMerge = table.latestSnapshot().get()
     sql(sourceQuery).createOrReplaceTempView("merge_source")
     try {
       sql(s"""
@@ -3367,14 +3356,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     } finally {
       spark.catalog.dropTempView("merge_source")
     }
+    latestNormalDataFile(table)
+  }
+
+  private def latestNormalDataFile(table: FileStoreTable): DataFileMeta = {
     table
-      .newSnapshotReader()
+      .store()
+      .newScan()
       .withSnapshot(table.latestSnapshot().get())
-      .readIncrementalDiff(beforeMerge)
-      .splits()
+      .withKind(ScanMode.DELTA)
+      .plan()
+      .files(FileKind.ADD)
       .asScala
-      .collect { case split: IncrementalSplit => split }
-      .flatMap(_.afterFiles().asScala)
+      .map(_.file())
       .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
       .get
   }
