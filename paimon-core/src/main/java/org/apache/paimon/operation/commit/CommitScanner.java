@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.ThrowingConsumer;
 
 import javax.annotation.Nullable;
 
@@ -254,6 +255,43 @@ public class CommitScanner {
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read requested data file entries.", e);
         }
+    }
+
+    /** Streams the same scoped base entries without retaining the complete scan result. */
+    public void forEachEntryFromChangedRowRanges(
+            Snapshot snapshot,
+            List<BinaryRow> changedPartitions,
+            List<Range> changedRowRanges,
+            ThrowingConsumer<SimpleFileEntry, Exception> consumer)
+            throws Exception {
+        freshBaseScan(snapshot, changedPartitions)
+                .withRowRanges(changedRowRanges)
+                .forEachSimpleEntry(consumer);
+    }
+
+    /** Streams every matching physical identity, including duplicate ADDs. */
+    public void forEachEntryFromDataFiles(
+            Snapshot snapshot,
+            List<BinaryRow> changedPartitions,
+            Set<String> dataFiles,
+            ThrowingConsumer<SimpleFileEntry, Exception> consumer)
+            throws Exception {
+        if (!dataFiles.isEmpty()) {
+            freshBaseScan(snapshot, changedPartitions)
+                    .withDataFileNameFilter(dataFiles::contains)
+                    .forEachSimpleEntry(consumer);
+        }
+    }
+
+    private FileStoreScan freshBaseScan(Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        FileStoreScan freshScan = scanSupplier.get();
+        if (dropStats) {
+            freshScan.dropStats();
+        }
+        return freshScan
+                .withSnapshot(snapshot)
+                .withKind(ScanMode.ALL)
+                .withPartitionFilter(changedPartitions);
     }
 
     public Map<BinaryRow, Integer> readTotalBuckets(

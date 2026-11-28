@@ -20,7 +20,6 @@ package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 
@@ -64,51 +63,25 @@ public class CommitStats {
             int generatedSnapshots,
             int attempts,
             long lastCommittedSnapshotId) {
-        List<ManifestEntry> addedTableFiles =
-                appendTableFiles.stream()
-                        .filter(f -> FileKind.ADD.equals(f.kind()))
-                        .collect(Collectors.toList());
-        List<ManifestEntry> deletedTableFiles =
-                appendTableFiles.stream()
-                        .filter(f -> FileKind.DELETE.equals(f.kind()))
-                        .collect(Collectors.toList());
-
-        List<ManifestEntry> compactAfterFiles =
-                compactTableFiles.stream()
-                        .filter(f -> FileKind.ADD.equals(f.kind()))
-                        .collect(Collectors.toList());
-        addedTableFiles.addAll(compactAfterFiles);
-
-        List<ManifestEntry> compactionInputFiles =
-                compactTableFiles.stream()
-                        .filter(f -> FileKind.DELETE.equals(f.kind()))
-                        .collect(Collectors.toList());
-        deletedTableFiles.addAll(compactionInputFiles);
-
-        this.compactionInputFileSize =
-                compactionInputFiles.stream()
-                        .map(ManifestEntry::file)
-                        .map(DataFileMeta::fileSize)
-                        .reduce(Long::sum)
-                        .orElse(0L);
-        this.compactionOutputFileSize =
-                compactAfterFiles.stream()
-                        .map(ManifestEntry::file)
-                        .map(DataFileMeta::fileSize)
-                        .reduce(Long::sum)
-                        .orElse(0L);
-        this.tableFilesAppended = appendTableFiles.size();
-        this.tableFilesAdded = addedTableFiles.size();
-        this.tableFilesDeleted = deletedTableFiles.size();
-        this.tableFilesCompacted = compactTableFiles.size();
-        this.changelogFilesAppended = appendChangelogFiles.size();
-        this.changelogFilesCompacted = compactChangelogFiles.size();
-        this.numPartitionsWritten = numChangedPartitions(appendTableFiles, compactTableFiles);
-        this.numBucketsWritten = numChangedBuckets(appendTableFiles, compactTableFiles);
-        this.changelogRecordsCompacted = getRowCounts(compactChangelogFiles);
-        this.deltaRecordsCompacted = getRowCounts(compactTableFiles);
-        this.changelogRecordsAppended = getRowCounts(appendChangelogFiles);
-        this.deltaRecordsAppended = getRowCounts(appendTableFiles);
+        Map<BinaryRow, Set<Integer>> buckets = new LinkedHashMap<>();
+        ChangeStats append = summarize(appendTableFiles, buckets);
+        ChangeStats compact = summarize(compactTableFiles, buckets);
+        ChangeStats appendLog = summarize(appendChangelogFiles, null);
+        ChangeStats compactLog = summarize(compactChangelogFiles, null);
+        this.compactionInputFileSize = compact.deletedBytes;
+        this.compactionOutputFileSize = compact.addedBytes;
+        this.tableFilesAppended = append.files;
+        this.tableFilesAdded = append.added + compact.added;
+        this.tableFilesDeleted = append.deleted + compact.deleted;
+        this.tableFilesCompacted = compact.files;
+        this.changelogFilesAppended = appendLog.files;
+        this.changelogFilesCompacted = compactLog.files;
+        this.numPartitionsWritten = buckets.size();
+        this.numBucketsWritten = buckets.values().stream().mapToLong(Set::size).sum();
+        this.changelogRecordsCompacted = compactLog.rows;
+        this.deltaRecordsCompacted = compact.rows;
+        this.changelogRecordsAppended = appendLog.rows;
+        this.deltaRecordsAppended = append.rows;
         this.duration = commitDuration;
         this.generatedSnapshots = generatedSnapshots;
         this.attempts = attempts;
@@ -153,8 +126,34 @@ public class CommitStats {
         return changedPartBuckets;
     }
 
-    private long getRowCounts(List<ManifestEntry> files) {
-        return files.stream().mapToLong(file -> file.file().rowCount()).sum();
+    private static ChangeStats summarize(
+            List<ManifestEntry> files, Map<BinaryRow, Set<Integer>> buckets) {
+        ChangeStats stats = new ChangeStats();
+        for (ManifestEntry entry : files) {
+            stats.files++;
+            stats.rows += entry.file().rowCount();
+            if (entry.kind() == FileKind.ADD) {
+                stats.added++;
+                stats.addedBytes += entry.file().fileSize();
+            } else if (entry.kind() == FileKind.DELETE) {
+                stats.deleted++;
+                stats.deletedBytes += entry.file().fileSize();
+            }
+            if (buckets != null) {
+                buckets.computeIfAbsent(entry.partition(), k -> new LinkedHashSet<>())
+                        .add(entry.bucket());
+            }
+        }
+        return stats;
+    }
+
+    private static class ChangeStats {
+        private long files;
+        private long rows;
+        private long added;
+        private long deleted;
+        private long addedBytes;
+        private long deletedBytes;
     }
 
     @VisibleForTesting

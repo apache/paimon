@@ -27,7 +27,7 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.operation.AbstractFileStoreWrite
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, TableWriteImpl}
 import org.apache.paimon.types.{DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.RecordWriter
@@ -56,6 +56,12 @@ case class DataEvolutionTableDataWrite(
   private val rowIdIndex = writeType.getFieldCount
   private val firstRowIdIndex = rowIdIndex + 1
   private val commitMessages = ListBuffer[CommitMessageImpl]()
+  private var streamingWrite = false
+  private var pendingMessage: CommitMessageImpl = _
+  private var bytesWritten = 0L
+  private var recordsWritten = 0L
+  private var streamingInputClosed = false
+  private var streamingResourcesClosed = false
 
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, uriReaderFactory)
@@ -105,6 +111,7 @@ case class DataEvolutionTableDataWrite(
   }
 
   def write(row: Row): Unit = {
+    if (streamingInputClosed) throw new IllegalStateException("Partial writer is closed.")
     val firstRowId = row.getLong(firstRowIdIndex)
     val rowId = row.getLong(rowIdIndex)
 
@@ -161,7 +168,18 @@ case class DataEvolutionTableDataWrite(
 
   private def finishCurrentWriter(): Unit = {
     if (currentWriter != null) {
-      commitMessages ++= currentWriter.finish()
+      val message = currentWriter.finish()
+      if (streamingWrite) {
+        if (pendingMessage != null) {
+          throw new IllegalStateException("The previous file message has not been consumed.")
+        }
+        pendingMessage = message
+        message.newFilesIncrement().newFiles().asScala.foreach {
+          file =>
+            bytesWritten += file.fileSize()
+            recordsWritten += file.rowCount()
+        }
+      } else commitMessages += message
     }
     currentWriter = null
   }
@@ -172,12 +190,92 @@ case class DataEvolutionTableDataWrite(
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
+    if (streamingWrite) {
+      throw new IllegalStateException(
+        "Streaming partial writes must consume their result iterator.")
+    }
     finishCurrentWriter()
     commitMessages.toSeq
   }
 
+  /** Consumes contiguous row-ID ranges only as Spark requests each file's commit message. */
+  private[spark] def writeAndCommitRows(rows: Iterator[Row]): Iterator[Array[Byte]] = {
+    if (streamingWrite || currentWriter != null || commitMessages.nonEmpty) {
+      throw new IllegalStateException("Streaming partial writes must start before writing rows.")
+    }
+    streamingWrite = true
+    val serializer = new CommitMessageSerializer()
+    new Iterator[Array[Byte]] {
+      private var inputFinished = false
+
+      override def hasNext: Boolean = {
+        if (streamingInputClosed) return false
+        try {
+          while (pendingMessage == null && !inputFinished) {
+            if (rows.hasNext) {
+              // Write the boundary row before advancing a possibly reusable input Row.
+              write(rows.next())
+            } else {
+              inputFinished = true
+              preCommit()
+              finishCurrentWriter()
+              reportOutputMetrics(bytesWritten, recordsWritten)
+            }
+          }
+          if (pendingMessage == null) DataEvolutionTableDataWrite.this.close()
+          pendingMessage != null
+        } catch {
+          case failure: Throwable =>
+            closeAfterFailure(failure)
+            throw failure
+        }
+      }
+
+      override def next(): Array[Byte] = {
+        if (!hasNext) throw new NoSuchElementException()
+        val message = pendingMessage
+        pendingMessage = null
+        try serializer.serialize(message)
+        catch {
+          case failure: Throwable =>
+            closeAfterFailure(failure)
+            throw failure
+        }
+      }
+    }
+  }
+
+  private def closeAfterFailure(failure: Throwable): Unit = {
+    try close()
+    catch {
+      case cleanupFailure: Throwable =>
+        if (cleanupFailure ne failure) failure.addSuppressed(cleanupFailure)
+    }
+  }
+
   override def close(): Unit = {
-    ioManager.close()
+    if (!streamingWrite) {
+      ioManager.close()
+      return
+    }
+    streamingInputClosed = true
+    pendingMessage = null
+    if (streamingResourcesClosed) return
+    var failure: Throwable = null
+    def attempt(action: => Unit): Unit = {
+      try action
+      catch {
+        case error: Throwable =>
+          if (failure == null) failure = error
+          else if (error ne failure) failure.addSuppressed(error)
+      }
+    }
+    // Cleanup must never finish a writer or produce new commit messages.
+    if (currentWriter != null) attempt(currentWriter.closeRecordWriter())
+    attempt(ioManager.close())
+    if (failure != null) throw failure
+    currentWriter = null
+    streamingResourcesClosed = true
   }
 
   private case class PerFileWriter(
@@ -189,6 +287,14 @@ case class DataEvolutionTableDataWrite(
     private var numWritten = 0L
     private var fillerRows = 0L
     private var fillerRow: InternalRow = _
+    private var writerClosed = false
+
+    def closeRecordWriter(): Unit = {
+      if (!writerClosed) {
+        recordWriter.close()
+        writerClosed = true
+      }
+    }
 
     def matchFirstRowId(firstRowId: Long): Boolean = {
       this.firstRowId == firstRowId
@@ -210,7 +316,7 @@ case class DataEvolutionTableDataWrite(
       recordWriter.write(row)
     }
 
-    def finish(): Seq[CommitMessageImpl] = {
+    def finish(): CommitMessageImpl = {
       try {
         fillGapUntil(firstRowId + numRecords)
 
@@ -226,19 +332,14 @@ case class DataEvolutionTableDataWrite(
         val result = recordWriter.prepareCommit(false)
         val dataFiles = result.newFilesIncrement().newFiles()
         val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
-        Seq(
-          new CommitMessageImpl(
-            partition,
-            0,
-            null,
-            new DataIncrement(
-              dataFileMetas.asJava,
-              Collections.emptyList(),
-              Collections.emptyList()),
-            CompactIncrement.emptyIncrement()
-          ))
+        new CommitMessageImpl(
+          partition,
+          0,
+          null,
+          new DataIncrement(dataFileMetas.asJava, Collections.emptyList(), Collections.emptyList()),
+          CompactIncrement.emptyIncrement())
       } finally {
-        recordWriter.close()
+        closeRecordWriter()
       }
     }
 

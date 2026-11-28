@@ -25,8 +25,9 @@ import org.apache.paimon.io.{DataFileMeta, DataIncrement}
 import org.apache.paimon.operation.commit.RowIdExistenceConflictException
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.util.ScanPlanHelper
+import org.apache.paimon.spark.write.CommitMessageSeq
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
-import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, CommitMessageList, CommitMessageSerializer}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.{DataEvolutionUtils, ExceptionUtils, Range, RetryWaiter}
@@ -61,6 +62,10 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
       commitMessages: Seq[CommitMessage]): Option[RewriteResult] = {
     if (table.coreOptions().deletionVectorsEnabled()) {
       return None
+    }
+
+    if (table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled()) {
+      return rewriteIncrementally(sparkSession, latestSnapshot, commitMessages)
     }
 
     val messageImpls = commitMessages.collect { case message: CommitMessageImpl => message }
@@ -123,6 +128,76 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     val remainingMessages =
       messageImpls.flatMap(message => withoutCandidates(message, candidateKeys))
     Some(RewriteResult(remainingMessages ++ rewrittenMessages, candidates.size))
+  }
+
+  private def rewriteIncrementally(
+      sparkSession: SparkSession,
+      latestSnapshot: Snapshot,
+      commitMessages: Seq[CommitMessage]): Option[RewriteResult] = {
+    val nextRowId = Option(latestSnapshot.nextRowId()).map(_.longValue()).getOrElse(return None)
+    var unsupported = false
+    var dedicated = false
+    // Inspect one decoded message at a time; a harmless snapshot advance must not retain them all.
+    commitMessages.iterator.foreach {
+      case message: CommitMessageImpl =>
+        message.newFilesIncrement().newFiles().asScala.foreach {
+          file =>
+            if (
+              isDedicatedFile(file) && file.firstRowId() != null && file.firstRowId() < nextRowId
+            ) {
+              dedicated = true
+            }
+        }
+      case _ => unsupported = true
+    }
+    if (unsupported || dedicated) return None
+
+    def stagedFiles: Iterator[StagedFile] = commitMessages.iterator.flatMap {
+      message =>
+        val impl = message.asInstanceOf[CommitMessageImpl]
+        impl.newFilesIncrement().newFiles().asScala.iterator.map(file => StagedFile(impl, file))
+    }
+    if (!stagedFiles.exists(staged => isRewriteCandidate(staged.file, nextRowId))) return None
+
+    val currentSplits = table
+      .newSnapshotReader()
+      .withSnapshot(latestSnapshot)
+      .read()
+      .splits()
+      .asScala
+      .collect { case split: DataSplit => split }
+      .toSeq
+    def currentFiles: Iterator[CurrentFile] = currentSplits.iterator.flatMap {
+      split =>
+        split
+          .dataFiles()
+          .asScala
+          .iterator
+          .filter(isNormalRowIdFile)
+          .map(file => CurrentFile(split, file))
+    }
+    val exactRanges = currentFiles.map(current => rangeKey(current.split, current.file)).toSet
+    val candidates = stagedFiles
+      .filter(
+        staged =>
+          isRewriteCandidate(staged.file, nextRowId) &&
+            !exactRanges.contains(rangeKey(staged.message, staged.file)))
+      .toVector
+    if (candidates.isEmpty || !rangesAreStillCovered(currentFiles.toVector, candidates)) return None
+
+    val rewritten = candidates.groupBy(staged => partialFileWriteCols(staged.file).get).toSeq.map {
+      case (columnNames, files) => rewriteFiles(sparkSession, columnNames, files, currentSplits)
+    }
+    val candidateKeys =
+      candidates.iterator.map(staged => fileKey(staged.message, staged.file)).toSet
+    // Re-encode survivors once so successive retries do not retain every previous source directory.
+    val serializer = new CommitMessageSerializer()
+    val remainingBytes = commitMessages.iterator
+      .flatMap(message => withoutCandidates(message.asInstanceOf[CommitMessageImpl], candidateKeys))
+      .map(serializer.serialize)
+      .toArray
+    val remaining = new CommitMessageSeq(CommitMessageList.fromBytes(remainingBytes.toSeq.asJava))
+    Some(RewriteResult(CommitMessageSeq.concat(Seq(remaining) ++ rewritten), candidates.size))
   }
 
   private def rewriteFiles(
@@ -268,6 +343,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     )
     if (remaining.isEmpty) None else Some(remaining)
   }
+
 }
 
 private[spark] object DataEvolutionRowIdConflictRewriter {
@@ -370,12 +446,20 @@ private[spark] object DataEvolutionRowIdConflictCommitter {
 
     while (true) {
       try {
-        val messages = currentUpdateMessages ++ otherMessages
-        writer.commit(
-          if (readSnapshotId < 0) messages
-          else
-            messages.map(_.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(readSnapshotId)),
-          operation)
+        val messages =
+          if (options.dataEvolutionMetadataMemoryOptimizationEnabled()) {
+            val combined = CommitMessageSeq.concat(Seq(currentUpdateMessages, otherMessages))
+            if (readSnapshotId < 0) combined
+            else
+              CommitMessageSeq.map(combined)(
+                _.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(readSnapshotId))
+          } else {
+            val combined = currentUpdateMessages ++ otherMessages
+            if (readSnapshotId < 0) combined
+            else
+              combined.map(_.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(readSnapshotId))
+          }
+        writer.commit(messages, operation)
         return
       } catch {
         case conflict: RuntimeException if isRowIdExistenceConflict(conflict) =>

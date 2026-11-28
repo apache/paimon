@@ -53,6 +53,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
+import org.apache.paimon.operation.commit.DataEvolutionConflictDetection;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.operation.commit.DiscardingCompactChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
@@ -80,6 +81,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessageList;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.tag.TagPeriodHandler;
 import org.apache.paimon.types.RowType;
@@ -103,7 +105,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -131,6 +132,7 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.groupByPartition;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -332,6 +334,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
+        if (!commitCallbacks.isEmpty()) {
+            committables =
+                    committables.stream()
+                            .map(this::materializeForCallbacks)
+                            .collect(Collectors.toList());
+        }
         // nothing to filter, fast exit
         if (committables.isEmpty()) {
             return committables;
@@ -374,6 +382,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public int commit(ManifestCommittable committable, boolean checkAppendFiles) {
+        committable = materializeForCallbacks(committable);
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
@@ -393,8 +402,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> committedCompactFiles = changes.compactTableFiles;
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
-            List<SimpleFileEntry> appendSimpleEntries =
-                    SimpleFileEntry.from(changes.appendTableFiles);
             if (!ignoreEmptyCommit
                     || !changes.appendTableFiles.isEmpty()
                     || !changes.appendChangelog.isEmpty()
@@ -406,7 +413,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 boolean allowRollback = false;
                 if (conflictDetection.shouldBeOverwriteCommit(
-                        appendSimpleEntries, changes.appendIndexFiles)) {
+                        SimpleFileEntry.from(changes.appendTableFiles), changes.appendIndexFiles)) {
                     commitKind = CommitKind.OVERWRITE;
                     checkAppendFiles = true;
                     allowRollback = true;
@@ -911,10 +918,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private ManifestEntryChanges collectChanges(List<CommitMessage> commitMessages) {
-        ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
-        commitMessages.forEach(changes::collect);
+        ManifestEntryChanges changes;
+        if (options.dataEvolutionMetadataMemoryOptimizationEnabled()
+                && commitMessages instanceof CommitMessageList
+                && commitPreCallbacks.isEmpty()
+                && commitCallbacks.isEmpty()) {
+            changes = ManifestEntryChanges.lazyChanges(options.bucket(), commitMessages);
+        } else {
+            // Extensions may retain or mutate entries. Preserve their stable, mutable lists.
+            changes = new ManifestEntryChanges(options.bucket());
+            commitMessages.forEach(changes::collect);
+        }
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
+    }
+
+    private ManifestCommittable materializeForCallbacks(ManifestCommittable committable) {
+        if ((!commitPreCallbacks.isEmpty() || !commitCallbacks.isEmpty())
+                && committable.fileCommittables() instanceof CommitMessageList) {
+            return new ManifestCommittable(
+                    committable.identifier(),
+                    committable.watermark(),
+                    ((CommitMessageList) committable.fileCommittables()).materialize(),
+                    committable.properties());
+        }
+        return committable;
     }
 
     private Map<Pair<BinaryRow, Integer>, Long> prepareConflictChecks(
@@ -1439,48 +1467,54 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
-            baseDataFiles =
-                    conflictDetection.scanBaseDataFiles(
-                            latestSnapshot,
-                            changedPartitions,
-                            deltaFiles,
-                            indexFiles,
-                            commitKind,
-                            commitFailRetry,
-                            hasOverwriteSinceLastAttempt);
-            if (discardDuplicate) {
-                Set<FileEntry.Identifier> baseIdentifiers =
-                        baseDataFiles.stream()
-                                .map(FileEntry::identifier)
-                                .collect(Collectors.toSet());
-                deltaFiles =
-                        deltaFiles.stream()
-                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
-                                .collect(Collectors.toList());
-            }
-            RowIdConflictChecker rowIdConflictChecker =
-                    conflictDetection.createRowIdConflictChecker(
-                            schemaManager, deltaFiles, commitKind);
-            Optional<RuntimeException> exception =
-                    conflictDetection.checkConflicts(
-                            latestSnapshot,
-                            baseDataFiles,
-                            SimpleFileEntry.from(deltaFiles),
-                            indexFiles,
-                            rowIdConflictChecker,
-                            commitKind);
-            while (exception.isPresent()
-                    && exception.get() instanceof DataEvolutionRowRangeConflictException
-                    && changesProvider instanceof DiscardingCompactChangesProvider
-                    && ((DiscardingCompactChangesProvider) changesProvider)
-                            .discard(
-                                    ((DataEvolutionRowRangeConflictException) exception.get())
-                                            .conflictingFiles())) {
-                LOG.warn(
-                        "Discarding conflicting compaction tasks for table {}: {}",
-                        tableName,
-                        exception.get().getMessage());
-                deltaFiles = changesProvider.provide(latestSnapshot).tableFiles;
+            Optional<RuntimeException> exception;
+            boolean streamConflicts =
+                    options.dataEvolutionMetadataStreamingEnabled()
+                            && conflictDetection instanceof DataEvolutionConflictDetection
+                            && ((DataEvolutionConflictDetection) conflictDetection)
+                                    .supportsStreamingConflicts()
+                            && !discardDuplicate
+                            && commitPreCallbacks.isEmpty()
+                            && commitCallbacks.isEmpty()
+                            && !(changesProvider instanceof DiscardingCompactChangesProvider);
+            if (streamConflicts) {
+                RowIdConflictChecker rowIdConflictChecker =
+                        conflictDetection.createRowIdConflictChecker(
+                                schemaManager, deltaFiles, commitKind);
+                exception =
+                        ((DataEvolutionConflictDetection) conflictDetection)
+                                .checkConflictsStreaming(
+                                        options,
+                                        ioManager,
+                                        latestSnapshot,
+                                        changedPartitions,
+                                        deltaFiles,
+                                        indexFiles,
+                                        rowIdConflictChecker,
+                                        commitKind);
+            } else {
+                baseDataFiles =
+                        conflictDetection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                deltaFiles,
+                                indexFiles,
+                                commitKind,
+                                commitFailRetry,
+                                hasOverwriteSinceLastAttempt);
+                if (discardDuplicate) {
+                    Set<FileEntry.Identifier> baseIdentifiers =
+                            baseDataFiles.stream()
+                                    .map(FileEntry::identifier)
+                                    .collect(Collectors.toSet());
+                    deltaFiles =
+                            deltaFiles.stream()
+                                    .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                    .collect(Collectors.toList());
+                }
+                RowIdConflictChecker rowIdConflictChecker =
+                        conflictDetection.createRowIdConflictChecker(
+                                schemaManager, deltaFiles, commitKind);
                 exception =
                         conflictDetection.checkConflicts(
                                 latestSnapshot,
@@ -1489,6 +1523,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 indexFiles,
                                 rowIdConflictChecker,
                                 commitKind);
+                while (exception.isPresent()
+                        && exception.get() instanceof DataEvolutionRowRangeConflictException
+                        && changesProvider instanceof DiscardingCompactChangesProvider
+                        && ((DiscardingCompactChangesProvider) changesProvider)
+                                .discard(
+                                        ((DataEvolutionRowRangeConflictException) exception.get())
+                                                .conflictingFiles())) {
+                    LOG.warn(
+                            "Discarding conflicting compaction tasks for table {}: {}",
+                            tableName,
+                            exception.get().getMessage());
+                    deltaFiles = changesProvider.provide(latestSnapshot).tableFiles;
+                    exception =
+                            conflictDetection.checkConflicts(
+                                    latestSnapshot,
+                                    baseDataFiles,
+                                    SimpleFileEntry.from(deltaFiles),
+                                    indexFiles,
+                                    rowIdConflictChecker,
+                                    commitKind);
+                }
             }
             if (exception.isPresent()) {
                 if (allowRollback
@@ -1578,13 +1633,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             if (options.rowTrackingEnabled()) {
                 if (options.rowTrackingPartitionGroupOnCommit()) {
-                    Map<BinaryRow, List<ManifestEntry>> deltaFilesByPart =
-                            deltaFiles.stream()
-                                    .collect(Collectors.groupingBy(ManifestEntry::partition));
-                    deltaFiles =
-                            deltaFilesByPart.values().stream()
-                                    .flatMap(Collection::stream)
-                                    .collect(Collectors.toList());
+                    deltaFiles = groupByPartition(deltaFiles);
                 }
                 RowTrackingAssigned assigned =
                         assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
@@ -1597,7 +1646,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            long deltaRecordCount;
+            if (options.dataEvolutionMetadataMemoryOptimizationEnabled()) {
+                long addedRecords = 0L;
+                long deletedRecords = 0L;
+                for (ManifestEntry entry : deltaFiles) {
+                    if (entry.kind() == FileKind.ADD) {
+                        addedRecords += entry.file().rowCount();
+                    } else if (entry.kind() == FileKind.DELETE) {
+                        deletedRecords += entry.file().rowCount();
+                    }
+                }
+                deltaRecordCount = addedRecords - deletedRecords;
+            } else {
+                deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            }
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files

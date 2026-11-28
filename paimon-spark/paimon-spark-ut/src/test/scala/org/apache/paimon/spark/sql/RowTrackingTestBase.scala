@@ -56,6 +56,61 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   private val MaxRetryAttempts = 20
   private val RetryIntervalMillis = 10L
 
+  Seq("off", "lightweight").foreach {
+    metadataMemoryMode =>
+      test(
+        s"Data Evolution: merge prunes versioned column groups before dropping preparation stats (metadata memory: $metadataMemoryMode)") {
+        withTable("t", "s") {
+          sql(s"""
+                 |CREATE TABLE t (id INT, p INT, b INT, c INT) PARTITIONED BY (p)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '-1',
+                 |  'row-tracking.enabled' = 'true',
+                 |  'data-evolution.enabled' = 'true',
+                 |  'write-only' = 'true',
+                 |  'data-evolution.metadata-memory-optimization.mode' = '$metadataMemoryMode')
+                 |""".stripMargin)
+          sql("INSERT INTO t VALUES (1, 1, 10, 100)")
+          sql("INSERT INTO t VALUES (2, 1, 20, 200)")
+          sql("INSERT INTO t VALUES (3, 2, 30, 300)")
+          val originalRowIds = sql("SELECT id, _ROW_ID FROM t ORDER BY id").collect().toSeq
+          sql("""
+                |MERGE INTO t USING (SELECT 1 AS id, 11 AS b UNION ALL SELECT 3, 31) u
+                |ON t.id = u.id
+                |WHEN MATCHED THEN UPDATE SET b = u.b
+                |""".stripMargin)
+          checkAnswer(
+            sql("SELECT id, b, c FROM t"),
+            Seq(Row(1, 11, 100), Row(2, 20, 200), Row(3, 31, 300)))
+          sql("CREATE TABLE s (id INT, p INT, b INT, c INT)")
+          sql(
+            "INSERT INTO s VALUES (1, 1, 111, 1111), (2, 1, 222, 2222), (3, 2, 333, 3333), (4, 1, 444, 4444)")
+          sql("""
+                |MERGE INTO t USING s
+                |ON t.id = s.id AND t.p = s.p AND t.p = 1 AND t.b >= 11
+                |WHEN MATCHED THEN UPDATE SET b = s.b
+                |WHEN NOT MATCHED THEN INSERT (id, p, b, c) VALUES (s.id, s.p, s.b, s.c)
+                |""".stripMargin)
+          checkAnswer(
+            sql("SELECT id, p, b, c FROM t"),
+            Seq(
+              Row(1, 1, 111, 100),
+              Row(2, 1, 222, 200),
+              Row(3, 2, 31, 300),
+              Row(3, 2, 333, 3333),
+              Row(4, 1, 444, 4444)))
+          checkAnswer(sql("SELECT id, _ROW_ID FROM t WHERE c < 1000"), originalRowIds)
+          checkAnswer(
+            sql("SELECT * FROM s"),
+            Seq(
+              Row(1, 1, 111, 1111),
+              Row(2, 1, 222, 2222),
+              Row(3, 2, 333, 3333),
+              Row(4, 1, 444, 4444)))
+        }
+      }
+  }
+
   private def doWithRetry(doAction: () => Unit, retryableMessages: String*): Unit = {
     var attempts = 0
     while (true) {
@@ -255,60 +310,68 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
-  test("Data Evolution: rebase rejects same-column update after concurrent compact") {
-    withTable("t") {
-      sql(s"""
-             |CREATE TABLE t (id INT, b INT) TBLPROPERTIES (
-             |  'row-tracking.enabled' = 'true',
-             |  'compaction.min.file-num' = '2',
-             |  'commit.max-retries' = '0',
-             |  'data-evolution.enabled' = 'true')
-             |""".stripMargin)
-      sql("INSERT INTO t VALUES (1, 10)")
-      sql("INSERT INTO t VALUES (2, 20)")
+  Seq("off", "lightweight").foreach {
+    metadataMemoryMode =>
+      test(
+        s"Data Evolution: rebase rejects same-column update after concurrent compact (metadata memory: $metadataMemoryMode)") {
+        withTable("t") {
+          sql(s"""
+                 |CREATE TABLE t (id INT, b INT) TBLPROPERTIES (
+                 |  'row-tracking.enabled' = 'true',
+                 |  'compaction.min.file-num' = '2',
+                 |  'commit.max-retries' = '0',
+                 |  'data-evolution.metadata-memory-optimization.mode' = '$metadataMemoryMode',
+                 |  'data-evolution.enabled' = 'true')
+                 |""".stripMargin)
+          sql("INSERT INTO t VALUES (1, 10)")
+          sql("INSERT INTO t VALUES (2, 20)")
 
-      val table = loadTable("t")
-      val readSnapshot = table.latestSnapshot().get()
-      val dataSplits = table
-        .newSnapshotReader()
-        .withSnapshot(readSnapshot)
-        .read()
-        .splits()
-        .asScala
-        .collect { case split: DataSplit => split }
-        .toSeq
-      val firstRowIds = dataSplits
-        .flatMap(_.dataFiles().asScala)
-        .map(_.firstRowId().longValue())
-        .sorted
-      val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
-      val stagedRows = sql("SELECT b + 1 AS b, _ROW_ID FROM t WHERE id = 1")
-        .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
-        .select("b", "_FIRST_ROW_ID", "_ROW_ID")
-      val stagedUpdates =
-        DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("b"))
+          val table = loadTable("t")
+          assert(
+            table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled() ==
+              (metadataMemoryMode != "off"))
+          val readSnapshot = table.latestSnapshot().get()
+          val dataSplits = table
+            .newSnapshotReader()
+            .withSnapshot(readSnapshot)
+            .read()
+            .splits()
+            .asScala
+            .collect { case split: DataSplit => split }
+            .toSeq
+          val firstRowIds = dataSplits
+            .flatMap(_.dataFiles().asScala)
+            .map(_.firstRowId().longValue())
+            .sorted
+          val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+          val stagedRows = sql("SELECT b + 1 AS b, _ROW_ID FROM t WHERE id = 1")
+            .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+            .select("b", "_FIRST_ROW_ID", "_ROW_ID")
+          val stagedUpdates =
+            DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("b"))
 
-      sql("CALL sys.compact(table => 't')").collect()
-      sql("UPDATE t SET b = 99 WHERE id = 1").collect()
+          sql("CALL sys.compact(table => 't')").collect()
+          sql("UPDATE t SET b = 99 WHERE id = 1").collect()
 
-      val writer = PaimonSparkWriter(table)
-      val targetRelation =
-        PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
-      val exception = intercept[RuntimeException] {
-        DataEvolutionRowIdConflictCommitter.commit(
-          spark,
-          table,
-          targetRelation,
-          writer,
-          stagedUpdates,
-          Nil,
-          readSnapshot.id(),
-          Operation.MERGE)
+          val writer = PaimonSparkWriter(table)
+          val targetRelation =
+            PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
+          val exception = intercept[RuntimeException] {
+            DataEvolutionRowIdConflictCommitter.commit(
+              spark,
+              table,
+              targetRelation,
+              writer,
+              stagedUpdates,
+              Nil,
+              readSnapshot.id(),
+              Operation.MERGE)
+          }
+
+          assert(hasMessage(exception, ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE))
+          checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 99), Row(2, 20)))
+        }
       }
-
-      assert(hasMessage(exception, ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE))
-      checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 99), Row(2, 20)))
-    }
   }
 
   test("Data Evolution: concurrent merge and merge") {
@@ -440,66 +503,76 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
-  test("Data Evolution: rebasing a staged sub-field update keeps a NULL struct null") {
-    withTable("t") {
-      sql(s"""
-             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
-             |  'row-tracking.enabled' = 'true',
-             |  'compaction.min.file-num' = '2',
-             |  'commit.max-retries' = '0',
-             |  'data-evolution.row-id-conflict-rewrite.max-size' = '0 B',
-             |  'data-evolution.enabled' = 'true',
-             |  'data-evolution.nested-field.enabled' = 'true')
-             |""".stripMargin)
-      sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
-      // a row whose whole struct is NULL, which the rebase has to carry through untouched
-      sql("INSERT INTO t VALUES (2, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+  Seq("off", "lightweight").foreach {
+    metadataMemoryMode =>
+      test(
+        s"Data Evolution: rebasing a staged sub-field update keeps a NULL struct null (metadata memory: $metadataMemoryMode)") {
+        withTable("t") {
+          sql(s"""
+                 |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+                 |  'row-tracking.enabled' = 'true',
+                 |  'compaction.min.file-num' = '2',
+                 |  'commit.max-retries' = '0',
+                 |  'data-evolution.row-id-conflict-rewrite.max-size' = '0 B',
+                 |  'data-evolution.metadata-memory-optimization.mode' = '$metadataMemoryMode',
+                 |  'data-evolution.enabled' = 'true',
+                 |  'data-evolution.nested-field.enabled' = 'true')
+                 |""".stripMargin)
+          sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
+          // a row whose whole struct is NULL, which the rebase has to carry through untouched
+          sql("INSERT INTO t VALUES (2, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
 
-      val table = loadTable("t")
-      val readSnapshot = table.latestSnapshot().get()
-      val dataSplits = table
-        .newSnapshotReader()
-        .withSnapshot(readSnapshot)
-        .read()
-        .splits()
-        .asScala
-        .collect { case split: DataSplit => split }
-        .toSeq
-      val firstRowIds = dataSplits
-        .flatMap(_.dataFiles().asScala)
-        .map(_.firstRowId().longValue())
-        .sorted
-      val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
-      // the staged update only covers id = 1; id = 2 is pulled in by the rebase because the
-      // compacted row-id range covers it
-      val stagedRows =
-        sql("SELECT named_struct('a', nest.a + 1) AS nest, _ROW_ID FROM t WHERE id = 1")
-          .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
-          .select("nest", "_FIRST_ROW_ID", "_ROW_ID")
-      val stagedUpdates =
-        DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("nest.a"))
+          val table = loadTable("t")
+          assert(
+            table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled() ==
+              (metadataMemoryMode != "off"))
+          val readSnapshot = table.latestSnapshot().get()
+          val dataSplits = table
+            .newSnapshotReader()
+            .withSnapshot(readSnapshot)
+            .read()
+            .splits()
+            .asScala
+            .collect { case split: DataSplit => split }
+            .toSeq
+          val firstRowIds = dataSplits
+            .flatMap(_.dataFiles().asScala)
+            .map(_.firstRowId().longValue())
+            .sorted
+          val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+          // the staged update only covers id = 1; id = 2 is pulled in by the rebase because the
+          // compacted row-id range covers it
+          val stagedRows =
+            sql("SELECT named_struct('a', nest.a + 1) AS nest, _ROW_ID FROM t WHERE id = 1")
+              .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+              .select("nest", "_FIRST_ROW_ID", "_ROW_ID")
+          val stagedUpdates =
+            DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(
+              stagedRows,
+              Seq("nest.a"))
 
-      sql("CALL sys.compact(table => 't')").collect()
+          sql("CALL sys.compact(table => 't')").collect()
 
-      val writer = PaimonSparkWriter(table)
-      val targetRelation =
-        PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
-      DataEvolutionRowIdConflictCommitter.commit(
-        spark,
-        table,
-        targetRelation,
-        writer,
-        stagedUpdates,
-        Nil,
-        readSnapshot.id(),
-        Operation.MERGE)
+          val writer = PaimonSparkWriter(table)
+          val targetRelation =
+            PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
+          DataEvolutionRowIdConflictCommitter.commit(
+            spark,
+            table,
+            targetRelation,
+            writer,
+            stagedUpdates,
+            Nil,
+            readSnapshot.id(),
+            Operation.MERGE)
 
-      checkAnswer(
-        sql("SELECT id, nest.a, nest.b FROM t ORDER BY id"),
-        Seq(Row(1, 11, "x"), Row(2, null, null)))
-      // the NULL struct must not have been resurrected as a struct of NULL children
-      checkAnswer(sql("SELECT id FROM t WHERE nest IS NULL"), Seq(Row(2)))
-    }
+          checkAnswer(
+            sql("SELECT id, nest.a, nest.b FROM t ORDER BY id"),
+            Seq(Row(1, 11, "x"), Row(2, null, null)))
+          // the NULL struct must not have been resurrected as a struct of NULL children
+          checkAnswer(sql("SELECT id FROM t WHERE nest IS NULL"), Seq(Row(2)))
+        }
+      }
   }
 
   test("Data Evolution: concurrent merge and small files compact") {
@@ -2462,37 +2535,47 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     )
   }
 
-  test("Data Evolution: V1 update retries concurrent update conflicts") {
-    withSparkSQLConf(
-      "spark.paimon.write.use-v2-write" -> "false",
-      "spark.paimon.write.data-evolution.update-conflict-retry.max-attempts" -> "50",
-      "spark.paimon.write.data-evolution.update-conflict-retry.wait-ms" -> "10"
-    ) {
-      withTable("t") {
-        sql(
-          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql("INSERT INTO t VALUES (1, 0, 0)")
+  Seq("off", "lightweight").foreach {
+    metadataMemoryMode =>
+      test(
+        s"Data Evolution: V1 update retries concurrent update conflicts (metadata memory: $metadataMemoryMode)") {
+        withSparkSQLConf(
+          "spark.paimon.write.use-v2-write" -> "false",
+          "spark.paimon.write.data-evolution.update-conflict-retry.max-attempts" -> "50",
+          "spark.paimon.write.data-evolution.update-conflict-retry.wait-ms" -> "10"
+        ) {
+          withTable("t") {
+            sql(s"""CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                   |  'row-tracking.enabled' = 'true',
+                   |  'data-evolution.metadata-memory-optimization.mode' = '$metadataMemoryMode',
+                   |  'data-evolution.enabled' = 'true')
+                   |""".stripMargin)
+            assert(
+              loadTable("t").coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled() ==
+                (metadataMemoryMode != "off"))
+            sql("INSERT INTO t VALUES (1, 0, 0)")
 
-        val ready = new CountDownLatch(4)
-        val start = new CountDownLatch(1)
-        val updates = (1 to 4).map {
-          _ =>
-            Future {
-              ready.countDown()
-              assert(start.await(30, TimeUnit.SECONDS))
-              for (_ <- 1 to 5) {
-                sql("UPDATE t SET b = b + 1 WHERE id = 1").collect()
-              }
+            val ready = new CountDownLatch(4)
+            val start = new CountDownLatch(1)
+            val updates = (1 to 4).map {
+              _ =>
+                Future {
+                  ready.countDown()
+                  assert(start.await(30, TimeUnit.SECONDS))
+                  for (_ <- 1 to 5) {
+                    sql("UPDATE t SET b = b + 1 WHERE id = 1").collect()
+                  }
+                }
             }
+
+            assert(ready.await(30, TimeUnit.SECONDS))
+            start.countDown()
+            updates.foreach(Await.result(_, 120.seconds))
+
+            checkAnswer(sql("SELECT b FROM t"), Seq(Row(20)))
+          }
         }
-
-        assert(ready.await(30, TimeUnit.SECONDS))
-        start.countDown()
-        updates.foreach(Await.result(_, 120.seconds))
-
-        checkAnswer(sql("SELECT b FROM t"), Seq(Row(20)))
       }
-    }
   }
 
   test("Data Evolution: V1 update partition column throws exception") {

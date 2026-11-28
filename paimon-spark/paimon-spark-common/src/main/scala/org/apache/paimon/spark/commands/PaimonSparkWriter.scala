@@ -37,7 +37,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
+import org.apache.paimon.spark.write.{CommitMessageSeq, PaimonDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
@@ -482,7 +482,13 @@ case class PaimonSparkWriter(
       tableCommit.withOperation(operation)
     }
     try {
-      tableCommit.commit(commitMessages.toList.asJava)
+      val messages =
+        if (table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled()) {
+          CommitMessageSeq.asJava(commitMessages)
+        } else {
+          commitMessages.toList.asJava
+        }
+      tableCommit.commit(messages)
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {

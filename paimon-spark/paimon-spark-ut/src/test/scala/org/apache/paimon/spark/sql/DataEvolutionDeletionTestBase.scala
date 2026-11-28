@@ -296,49 +296,57 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution deletion: merge matched update and delete keeps first-match semantics") {
-    withTable("s", "t") {
-      sql("CREATE TABLE s (id INT, new_b INT, op STRING)")
-      sql("""
-            |INSERT INTO s VALUES
-            |  (1, 100, 'update'),
-            |  (2, 200, 'delete'),
-            |  (6, 600, 'update'),
-            |  (11, 1100, 'delete')
-            |""".stripMargin)
+  Seq("off", "lightweight").foreach {
+    metadataMemoryMode =>
+      test(
+        s"Data Evolution deletion: merge matched update and delete keeps first-match semantics (metadata memory: $metadataMemoryMode)") {
+        withTable("s", "t") {
+          sql("CREATE TABLE s (id INT, new_b INT, op STRING)")
+          sql("""
+                |INSERT INTO s VALUES
+                |  (1, 100, 'update'),
+                |  (2, 200, 'delete'),
+                |  (6, 600, 'update'),
+                |  (11, 1100, 'delete')
+                |""".stripMargin)
 
-      sql("""
-            |CREATE TABLE t (id INT, b INT, c INT)
-            |TBLPROPERTIES (
-            |  'row-tracking.enabled' = 'true',
-            |  'data-evolution.enabled' = 'true',
-            |  'deletion-vectors.enabled' = 'true')
-            |""".stripMargin)
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+          sql(s"""
+                 |CREATE TABLE t (id INT, b INT, c INT)
+                 |TBLPROPERTIES (
+                 |  'row-tracking.enabled' = 'true',
+                 |  'data-evolution.metadata-memory-optimization.mode' = '$metadataMemoryMode',
+                 |  'data-evolution.enabled' = 'true',
+                 |  'deletion-vectors.enabled' = 'true')
+                 |""".stripMargin)
+          assert(
+            loadTable("t").coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled() ==
+              (metadataMemoryMode != "off"))
+          sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+          sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
 
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED AND s.op = 'delete' THEN DELETE
-            |WHEN MATCHED AND s.id IN (1, 2, 6) THEN UPDATE SET t.b = s.new_b
-            |""".stripMargin)
+          sql("""
+                |MERGE INTO t
+                |USING s
+                |ON t.id = s.id
+                |WHEN MATCHED AND s.op = 'delete' THEN DELETE
+                |WHEN MATCHED AND s.id IN (1, 2, 6) THEN UPDATE SET t.b = s.new_b
+                |""".stripMargin)
 
-      checkAnswer(
-        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
-        Seq(
-          Row(0, 0, 0, 0L),
-          Row(1, 100, 1, 1L),
-          Row(3, 3, 3, 3L),
-          Row(4, 4, 4, 4L),
-          Row(5, 5, 5, 5L),
-          Row(6, 600, 6, 6L),
-          Row(7, 7, 7, 7L),
-          Row(8, 8, 8, 8L),
-          Row(9, 9, 9, 9L))
-      )
-    }
+          checkAnswer(
+            sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
+            Seq(
+              Row(0, 0, 0, 0L),
+              Row(1, 100, 1, 1L),
+              Row(3, 3, 3, 3L),
+              Row(4, 4, 4, 4L),
+              Row(5, 5, 5, 5L),
+              Row(6, 600, 6, 6L),
+              Row(7, 7, 7, 7L),
+              Row(8, 8, 8, 8L),
+              Row(9, 9, 9, 9L))
+          )
+        }
+      }
   }
 
   test("Data Evolution deletion: merge not matched by source delete") {

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -30,6 +31,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.source.DataFileMetaStore;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -145,6 +147,23 @@ public interface SnapshotReader {
 
     /** Get splits plan from snapshot. */
     Plan read();
+
+    /**
+     * Configures one batch {@link #read()} to use fresh caller-owned resources, preserving the
+     * surrounding table scan lifecycle. Register the store with its owner before planning: auth can
+     * fail before this reader is called. The owner must outlive all uses of the returned plan.
+     */
+    default SnapshotReader withIncrementalPlanning(DataFileMetaStore store, IOManager ioManager) {
+        throw new UnsupportedOperationException("This snapshot reader cannot plan incrementally.");
+    }
+
+    /**
+     * Plans a DE batch read into a fresh caller-owned metadata store. The caller must retain the
+     * sealed store through every use and serialization of the resulting splits, then close it.
+     */
+    default Plan readIncrementally(DataFileMetaStore store, IOManager ioManager) throws Exception {
+        throw new UnsupportedOperationException("This snapshot reader cannot plan incrementally.");
+    }
 
     /** Get splits plan from file changes. */
     Plan readChanges();

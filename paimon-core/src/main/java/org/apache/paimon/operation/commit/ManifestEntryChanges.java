@@ -19,6 +19,7 @@
 package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
@@ -27,10 +28,14 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
@@ -54,6 +59,134 @@ public class ManifestEntryChanges {
         this.compactTableFiles = new ArrayList<>();
         this.compactChangelog = new ArrayList<>();
         this.compactIndexFiles = new ArrayList<>();
+    }
+
+    /** Expands one decoded message at a time; the input must be stable and replayable. */
+    public static ManifestEntryChanges lazyChanges(
+            int defaultNumBucket, List<CommitMessage> messages) {
+        int[] sizes = new int[6];
+        for (CommitMessage message : messages) {
+            CommitMessageImpl m = (CommitMessageImpl) message;
+            sizes[0] =
+                    Math.addExact(
+                            sizes[0],
+                            Math.addExact(
+                                    m.newFilesIncrement().newFiles().size(),
+                                    m.newFilesIncrement().deletedFiles().size()));
+            sizes[1] = Math.addExact(sizes[1], m.newFilesIncrement().changelogFiles().size());
+            sizes[2] =
+                    Math.addExact(
+                            sizes[2],
+                            Math.addExact(
+                                    m.newFilesIncrement().deletedIndexFiles().size(),
+                                    m.newFilesIncrement().newIndexFiles().size()));
+            sizes[3] =
+                    Math.addExact(
+                            sizes[3],
+                            Math.addExact(
+                                    m.compactIncrement().compactBefore().size(),
+                                    m.compactIncrement().compactAfter().size()));
+            sizes[4] = Math.addExact(sizes[4], m.compactIncrement().changelogFiles().size());
+            sizes[5] =
+                    Math.addExact(
+                            sizes[5],
+                            Math.addExact(
+                                    m.compactIncrement().deletedIndexFiles().size(),
+                                    m.compactIncrement().newIndexFiles().size()));
+        }
+        ManifestEntryChanges changes = new ManifestEntryChanges(defaultNumBucket);
+        changes.appendTableFiles =
+                flatten(
+                        messages,
+                        sizes[0],
+                        m ->
+                                Iterators.concat(
+                                        changes.files(
+                                                m, FileKind.ADD, m.newFilesIncrement().newFiles()),
+                                        changes.files(
+                                                m,
+                                                FileKind.DELETE,
+                                                m.newFilesIncrement().deletedFiles())));
+        changes.appendChangelog =
+                flatten(
+                        messages,
+                        sizes[1],
+                        m ->
+                                changes.files(
+                                        m, FileKind.ADD, m.newFilesIncrement().changelogFiles()));
+        changes.appendIndexFiles =
+                flatten(
+                        messages,
+                        sizes[2],
+                        m ->
+                                Iterators.concat(
+                                        indexes(
+                                                m,
+                                                FileKind.DELETE,
+                                                m.newFilesIncrement().deletedIndexFiles()),
+                                        indexes(
+                                                m,
+                                                FileKind.ADD,
+                                                m.newFilesIncrement().newIndexFiles())));
+        changes.compactTableFiles =
+                flatten(
+                        messages,
+                        sizes[3],
+                        m ->
+                                Iterators.concat(
+                                        changes.files(
+                                                m,
+                                                FileKind.DELETE,
+                                                m.compactIncrement().compactBefore()),
+                                        changes.files(
+                                                m,
+                                                FileKind.ADD,
+                                                m.compactIncrement().compactAfter())));
+        changes.compactChangelog =
+                flatten(
+                        messages,
+                        sizes[4],
+                        m -> changes.files(m, FileKind.ADD, m.compactIncrement().changelogFiles()));
+        changes.compactIndexFiles =
+                flatten(
+                        messages,
+                        sizes[5],
+                        m ->
+                                Iterators.concat(
+                                        indexes(
+                                                m,
+                                                FileKind.DELETE,
+                                                m.compactIncrement().deletedIndexFiles()),
+                                        indexes(
+                                                m,
+                                                FileKind.ADD,
+                                                m.compactIncrement().newIndexFiles())));
+        return changes;
+    }
+
+    private Iterator<ManifestEntry> files(
+            CommitMessageImpl message, FileKind kind, List<DataFileMeta> files) {
+        return Iterators.transform(files.iterator(), file -> makeEntry(kind, message, file));
+    }
+
+    private static Iterator<IndexManifestEntry> indexes(
+            CommitMessageImpl message, FileKind kind, List<IndexFileMeta> files) {
+        return Iterators.transform(
+                files.iterator(),
+                file -> new IndexManifestEntry(kind, message.partition(), message.bucket(), file));
+    }
+
+    private static <T> List<T> flatten(
+            List<CommitMessage> messages,
+            int size,
+            Function<CommitMessageImpl, Iterator<T>> entries) {
+        return new ReplayableList<>(
+                size,
+                () ->
+                        Iterators.concat(
+                                Iterators.transform(
+                                        messages.iterator(),
+                                        message -> entries.apply((CommitMessageImpl) message))));
     }
 
     public void collect(CommitMessage message) {

@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -36,6 +37,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.CacheMetrics;
@@ -46,6 +48,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
+import org.apache.paimon.table.source.DataFileMetaStore;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
@@ -62,11 +66,13 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -90,6 +96,8 @@ import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredi
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
 
+    private static final int INCREMENTAL_PENDING_FILE_LIMIT = 1024;
+
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final CoreOptions options;
@@ -109,6 +117,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private boolean hasNonPartitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
+    @Nullable private DataFileMetaStore incrementalStore;
+    @Nullable private IOManager incrementalIoManager;
+    private boolean incrementalRead;
 
     public SnapshotReaderImpl(
             FileStoreScan scan,
@@ -402,6 +413,23 @@ public class SnapshotReaderImpl implements SnapshotReader {
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {
+        if (incrementalStore != null) {
+            if (incrementalRead) {
+                throw new IllegalStateException("Incremental metadata planning is single use.");
+            }
+            incrementalRead = true;
+            try {
+                return readIncrementally(incrementalStore, incrementalIoManager);
+            } catch (RuntimeException failure) {
+                throw failure;
+            } catch (Exception failure) {
+                throw new RuntimeException(failure);
+            }
+        }
+        return readPlan();
+    }
+
+    private Plan readPlan() {
         FileStoreScan.Plan plan = scan.plan();
         @Nullable Snapshot snapshot = plan.snapshot();
 
@@ -418,6 +446,199 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
         return new PlanImpl(
                 plan.watermark(), snapshot == null ? null : snapshot.id(), snapshot, (List) splits);
+    }
+
+    @Override
+    public SnapshotReader withIncrementalPlanning(DataFileMetaStore store, IOManager ioManager) {
+        if (incrementalStore != null) {
+            throw new IllegalStateException("Incremental metadata resources are already bound.");
+        }
+        Objects.requireNonNull(store, "Metadata store");
+        Objects.requireNonNull(ioManager, "IO manager");
+        incrementalStore = store;
+        incrementalIoManager = ioManager;
+        return this;
+    }
+
+    @Override
+    public Plan readIncrementally(DataFileMetaStore store, IOManager ioManager) throws Exception {
+        try {
+            if (!(scan instanceof DataEvolutionFileStoreScan)
+                    || !(splitGenerator instanceof DataEvolutionSplitGenerator)
+                    || scanMode != ScanMode.ALL) {
+                throw new UnsupportedOperationException(
+                        "Incremental metadata planning requires a DE batch ALL scan.");
+            }
+            // The external sorter needs three pages; smaller valid budgets keep ordinary planning.
+            if (options.sortSpillBufferSize() / options.pageSize() < 3) {
+                Plan plan = readPlan();
+                store.seal();
+                return plan;
+            }
+            IncrementalSplitPlanner planner = new IncrementalSplitPlanner(store);
+            Snapshot snapshot =
+                    ((DataEvolutionFileStoreScan) scan)
+                            .forEachFileGroup(ioManager, planner::accept);
+            planner.finish();
+            store.seal();
+            if (options.scanPlanSortPartition()) {
+                planner.splits.sort(
+                        (left, right) ->
+                                partitionComparator()
+                                        .compare(left.bucket.partition, right.bucket.partition));
+            }
+            Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
+            for (SpilledSplit split : planner.splits) {
+                buckets.add(Pair.of(split.bucket.partition, split.bucket.bucket));
+            }
+            Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletions =
+                    deletionVectors ? scanDvIndex(snapshot, buckets) : Collections.emptyMap();
+            List<Split> splits = new ArrayList<>();
+            for (SpilledSplit split : planner.splits) {
+                List<DataFileMeta> files = store.slice(split.start, split.start + split.count);
+                IncrementalBucket bucket = split.bucket;
+                DataSplit.Builder builder =
+                        DataSplit.builder()
+                                .withSnapshot(
+                                        snapshot == null ? FIRST_SNAPSHOT_ID - 1 : snapshot.id())
+                                .withPartition(bucket.partition)
+                                .withBucket(bucket.bucket)
+                                .withTotalBuckets(bucket.totalBuckets)
+                                .withBucketPath(bucket.path)
+                                .withDataFiles(files)
+                                .rawConvertible(split.rawConvertible);
+                if (deletionVectors) {
+                    builder.withDataDeletionFiles(
+                            getDeletionFiles(
+                                    files,
+                                    deletions.getOrDefault(
+                                            Pair.of(bucket.partition, bucket.bucket),
+                                            Collections.emptyMap())));
+                }
+                splits.add(builder.build());
+            }
+            return new PlanImpl(
+                    snapshot == null ? null : snapshot.watermark(),
+                    snapshot == null ? null : snapshot.id(),
+                    snapshot,
+                    splits);
+        } catch (Exception | Error failure) {
+            try {
+                store.close();
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private final class IncrementalSplitPlanner {
+        private final DataFileMetaStore store;
+        private final List<SpilledSplit> splits = new ArrayList<>();
+        private final Map<Pair<BinaryRow, Integer>, IncrementalBucket> pending =
+                new LinkedHashMap<>(16, 0.75f, true);
+        private long pendingFiles;
+        private int nextFile;
+
+        private IncrementalSplitPlanner(DataFileMetaStore store) {
+            this.store = store;
+        }
+
+        private void accept(List<ManifestEntry> group) throws IOException {
+            // Partition only after the complete global group has been filtered. Providers from
+            // one partition may be interleaved with another partition in the group's source order.
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> partitions = groupByPartFiles(group);
+            for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> partition :
+                    partitions.entrySet()) {
+                for (Map.Entry<Integer, List<ManifestEntry>> bucket :
+                        partition.getValue().entrySet()) {
+                    Pair<BinaryRow, Integer> key = Pair.of(partition.getKey(), bucket.getKey());
+                    IncrementalBucket target = pending.get(key);
+                    if (target == null) {
+                        target =
+                                new IncrementalBucket(
+                                        partition.getKey(),
+                                        bucket.getKey(),
+                                        bucket.getValue().get(0).totalBuckets(),
+                                        pathFactory
+                                                .bucketPath(partition.getKey(), bucket.getKey())
+                                                .toString());
+                        IncrementalBucket spillBucket = target;
+                        target.packer =
+                                ((DataEvolutionSplitGenerator) splitGenerator)
+                                        .newBatchPacker(
+                                                INCREMENTAL_PENDING_FILE_LIMIT,
+                                                split -> spill(spillBucket, split));
+                        pending.put(key, target);
+                    }
+                    List<DataFileMeta> files =
+                            bucket.getValue().stream()
+                                    .map(ManifestEntry::file)
+                                    .collect(Collectors.toList());
+                    RangeHelper<DataFileMeta> ranges =
+                            new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+                    for (List<DataFileMeta> range : ranges.mergeOverlappingRanges(files)) {
+                        pendingFiles += range.size();
+                        target.packer.addRangeGroup(range);
+                    }
+                    // Bound all partitions together, but only evict complete RowID groups.
+                    while (pendingFiles > INCREMENTAL_PENDING_FILE_LIMIT) {
+                        Iterator<IncrementalBucket> oldest = pending.values().iterator();
+                        IncrementalBucket evicted = oldest.next();
+                        oldest.remove();
+                        evicted.packer.finish();
+                    }
+                }
+            }
+        }
+
+        private void spill(IncrementalBucket bucket, SplitGenerator.SplitGroup group)
+                throws IOException {
+            pendingFiles -= group.files.size();
+            int start = nextFile;
+            for (DataFileMeta file : group.files) {
+                store.append(file);
+                nextFile++;
+            }
+            splits.add(new SpilledSplit(bucket, start, nextFile - start, group.rawConvertible));
+        }
+
+        private void finish() throws IOException {
+            for (IncrementalBucket bucket : pending.values()) {
+                bucket.packer.finish();
+            }
+            pending.clear();
+        }
+    }
+
+    private static final class IncrementalBucket {
+        private final BinaryRow partition;
+        private final int bucket;
+        private final int totalBuckets;
+        private final String path;
+        private DataEvolutionSplitGenerator.BatchPacker<IOException> packer;
+
+        private IncrementalBucket(BinaryRow partition, int bucket, int totalBuckets, String path) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
+            this.path = path;
+        }
+    }
+
+    private static final class SpilledSplit {
+        private final IncrementalBucket bucket;
+        private final int start;
+        private final int count;
+        private final boolean rawConvertible;
+
+        private SpilledSplit(
+                IncrementalBucket bucket, int start, int count, boolean rawConvertible) {
+            this.bucket = bucket;
+            this.start = start;
+            this.count = count;
+            this.rawConvertible = rawConvertible;
+        }
     }
 
     private List<DataSplit> generateSplits(
@@ -517,8 +738,28 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return scan.readFileIterator();
     }
 
+    private void requireMaterializedChanges() {
+        if (incrementalStore == null) {
+            return;
+        }
+        UnsupportedOperationException failure =
+                new UnsupportedOperationException(
+                        "Incremental metadata planning requires a DE batch ALL scan.");
+        // Reject a new operation without invalidating a previously returned plan.
+        if (!incrementalRead) {
+            incrementalRead = true;
+            try {
+                incrementalStore.close();
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+        throw failure;
+    }
+
     @Override
     public Plan readChanges() {
+        requireMaterializedChanges();
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
 
@@ -647,6 +888,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public Plan readIncrementalDiff(Snapshot before) {
+        requireMaterializedChanges();
         withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =

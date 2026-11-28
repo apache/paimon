@@ -69,6 +69,8 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessageList;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.IncrementalSplit;
@@ -2440,6 +2442,60 @@ public class FileStoreCommitTest {
         }
         assertThat(acquisitions.get()).isEqualTo(1);
         assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testByteBackedMessagesPreserveCallbackMutationAndRetention() throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable eager = prepareLockRetryCommittable(store);
+        CommitMessageList messages =
+                CommitMessageList.fromBytes(
+                        CommitMessageSerializer.serializeAll(eager.fileCommittables()));
+        ManifestCommittable prepared =
+                new ManifestCommittable(
+                        eager.identifier(), eager.watermark(), messages, eager.properties());
+        AtomicReference<CommitCallback.Context> retained = new AtomicReference<>();
+        AtomicReference<CommitMessage> retried = new AtomicReference<>();
+        CommitCallback callback = mock(CommitCallback.class);
+        doAnswer(
+                        invocation -> {
+                            CommitCallback.Context context = invocation.getArgument(0);
+                            retained.set(context);
+                            ManifestEntry entry = context.deltaFiles.get(0);
+                            assertThat(context.deltaFiles.get(0)).isSameAs(entry);
+                            context.deltaFiles.set(0, entry);
+                            context.deltaFiles.add(context.deltaFiles.remove(0));
+                            return null;
+                        })
+                .when(callback)
+                .call(any());
+        doAnswer(
+                        invocation -> {
+                            ManifestCommittable committable = invocation.getArgument(0);
+                            CommitMessage message = committable.fileCommittables().get(0);
+                            retried.compareAndSet(null, message);
+                            assertThat(message).isSameAs(retried.get());
+                            committable.fileCommittables().set(0, message);
+                            return null;
+                        })
+                .when(callback)
+                .retry(any());
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.options(),
+                        false,
+                        Collections.singletonList(callback))) {
+            commit.commit(prepared, false);
+            commit.filterCommitted(Collections.singletonList(prepared));
+            commit.filterCommitted(Collections.singletonList(prepared));
+        }
+        assertThat(retained.get().deltaFiles).hasSize(1);
+        assertThat(messages.get(0)).isSameAs(retried.get());
+        assertThat(store.readKvsFromSnapshot(1)).hasSize(1);
+        verify(callback, times(2)).retry(any());
     }
 
     @Test

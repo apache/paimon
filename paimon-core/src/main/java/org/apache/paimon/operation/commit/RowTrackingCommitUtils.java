@@ -23,11 +23,15 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -38,17 +42,45 @@ public class RowTrackingCommitUtils {
 
     public static RowTrackingAssigned assignRowTracking(
             long newSnapshotId, long firstRowIdStart, List<ManifestEntry> deltaFiles) {
-        // assigned snapshot id to delta files
-        List<ManifestEntry> snapshotAssigned = new ArrayList<>();
-        assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
-        // assign row id for new files
-        List<ManifestEntry> rowIdAssigned = new ArrayList<>();
-        long nextRowIdStart =
-                assignRowTrackingMeta(
-                        Math.max(firstRowIdStart, rowIdEnd(deltaFiles)),
-                        snapshotAssigned,
-                        rowIdAssigned);
-        return new RowTrackingAssigned(nextRowIdStart, rowIdAssigned);
+        long start = Math.max(firstRowIdStart, rowIdEnd(deltaFiles));
+        RowTrackingAssigner assigner = new RowTrackingAssigner(start);
+        boolean replay = deltaFiles instanceof ReplayableList;
+        List<ManifestEntry> assigned = replay ? null : new ArrayList<>(deltaFiles.size());
+        // Validate and compute the final row-id frontier before publishing any manifests.
+        for (ManifestEntry entry : deltaFiles) {
+            ManifestEntry result = assigner.assign(assignSnapshotId(newSnapshotId, entry));
+            if (!replay) {
+                assigned.add(result);
+            }
+        }
+        if (replay) {
+            assigned =
+                    new ReplayableList<>(
+                            deltaFiles.size(),
+                            () -> {
+                                RowTrackingAssigner replayAssigner = new RowTrackingAssigner(start);
+                                return Iterators.transform(
+                                        deltaFiles.iterator(),
+                                        entry ->
+                                                replayAssigner.assign(
+                                                        assignSnapshotId(newSnapshotId, entry)));
+                            });
+        }
+        return new RowTrackingAssigned(assigner.start, assigned);
+    }
+
+    /** Preserves the existing partition grouping, without copying a single-partition replay. */
+    public static List<ManifestEntry> groupByPartition(List<ManifestEntry> files) {
+        if (files instanceof ReplayableList
+                && files.stream().map(ManifestEntry::partition).distinct().limit(2).count() <= 1) {
+            return files;
+        }
+        return files.stream()
+                .collect(Collectors.groupingBy(ManifestEntry::partition))
+                .values()
+                .stream()
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -68,41 +100,30 @@ public class RowTrackingCommitUtils {
         return end;
     }
 
-    private static void assignSnapshotId(
-            long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
-        for (ManifestEntry entry : deltaFiles) {
-            long minSeqNumber = entry.file().minSequenceNumber();
-            long maxSeqNumber = entry.file().maxSequenceNumber();
-            if (minSeqNumber == 0L) {
-                // Case 1: New file (e.g., from INSERT)
-                // All records in this file get the current snapshot ID as sequence number
-                snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
-            } else if (maxSeqNumber == 0L) {
-                // Case 2: File with some modified records
-                // - min: Preserve original sequence number (from unmodified records)
-                // - max: Assign current snapshot ID
-                snapshotAssigned.add(entry.assignSequenceNumber(minSeqNumber, snapshotId));
-            } else {
-                // Case 3: Pure compact file (no modified records)
-                // Preserve original min/max sequence numbers from source files
-                snapshotAssigned.add(entry);
-            }
+    private static ManifestEntry assignSnapshotId(long snapshotId, ManifestEntry entry) {
+        long min = entry.file().minSequenceNumber();
+        long max = entry.file().maxSequenceNumber();
+        if (min == 0L) {
+            return entry.assignSequenceNumber(snapshotId, snapshotId);
+        } else if (max == 0L) {
+            return entry.assignSequenceNumber(min, snapshotId);
         }
+        return entry;
     }
 
-    private static long assignRowTrackingMeta(
-            long firstRowIdStart,
-            List<ManifestEntry> deltaFiles,
-            List<ManifestEntry> rowIdAssigned) {
-        if (deltaFiles.isEmpty()) {
-            return firstRowIdStart;
+    private static class RowTrackingAssigner {
+        private long start;
+        private long blobStartDefault;
+        private final Map<String, Long> blobStarts = new HashMap<>();
+        private long vectorStoreStart;
+
+        private RowTrackingAssigner(long start) {
+            this.start = start;
+            this.blobStartDefault = start;
+            this.vectorStoreStart = start;
         }
-        // assign row id for new files
-        long start = firstRowIdStart;
-        long blobStartDefault = firstRowIdStart;
-        Map<String, Long> blobStarts = new HashMap<>();
-        long vectorStoreStart = firstRowIdStart;
-        for (ManifestEntry entry : deltaFiles) {
+
+        private ManifestEntry assign(ManifestEntry entry) {
             Optional<FileSource> fileSource = entry.file().fileSource();
             checkArgument(
                     fileSource.isPresent(),
@@ -123,8 +144,8 @@ public class RowTrackingCommitUtils {
                                         "This is a bug, blobStart %d should be less than start %d when assigning a blob entry file.",
                                         blobStart, start));
                     }
-                    rowIdAssigned.add(entry.assignFirstRowId(blobStart));
                     blobStarts.put(blobFieldName, blobStart + rowCount);
+                    return entry.assignFirstRowId(blobStart);
                 } else if (isVectorStoreFile(entry.file().fileName())) {
                     if (vectorStoreStart >= start) {
                         throw new IllegalStateException(
@@ -132,22 +153,21 @@ public class RowTrackingCommitUtils {
                                         "This is a bug, vectorStoreStart %d should be less than start %d when assigning a vector-store entry file.",
                                         vectorStoreStart, start));
                     }
-                    rowIdAssigned.add(entry.assignFirstRowId(vectorStoreStart));
+                    long first = vectorStoreStart;
                     vectorStoreStart += rowCount;
+                    return entry.assignFirstRowId(first);
                 } else {
-                    rowIdAssigned.add(entry.assignFirstRowId(start));
+                    long first = start;
                     blobStartDefault = start;
                     blobStarts.clear();
                     // Skip the rows of normal files written without vector-store files.
                     vectorStoreStart = Math.max(vectorStoreStart, start);
                     start += rowCount;
+                    return entry.assignFirstRowId(first);
                 }
-            } else {
-                // for compact file, do not assign first row id.
-                rowIdAssigned.add(entry);
             }
+            return entry;
         }
-        return start;
     }
 
     /** Assigned results. */

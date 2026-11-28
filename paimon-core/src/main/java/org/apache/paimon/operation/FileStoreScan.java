@@ -35,6 +35,7 @@ import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
+import org.apache.paimon.utils.ThrowingConsumer;
 import org.apache.paimon.utils.TriFilter;
 
 import javax.annotation.Nullable;
@@ -116,6 +117,17 @@ public interface FileStoreScan {
      * cannot perform filtering based on statistical information.
      */
     List<SimpleFileEntry> readSimpleEntries();
+
+    /**
+     * Consumes independent simple entries without collecting the complete result. ALL scans remove
+     * globally deleted identities, retaining duplicate ADDs for conflict detection. Other scan
+     * modes retain the manifest entry kinds and order. Implementations must not emulate streaming
+     * by first calling {@link #readSimpleEntries()}.
+     */
+    default void forEachSimpleEntry(ThrowingConsumer<SimpleFileEntry, Exception> consumer)
+            throws Exception {
+        throw new UnsupportedOperationException("Streaming simple entry scan is not supported.");
+    }
 
     List<PartitionEntry> readPartitionEntries();
 

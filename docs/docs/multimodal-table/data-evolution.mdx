@@ -501,6 +501,106 @@ Persisted row-ID references must be coordinated with this maintenance.
 See [Data Evolution Maintenance](./data-evolution-maintenance) for commands,
 large-file splitting, limitations, and the row-ID lifetime table.
 
+## Spark File Metadata Memory
+
+Tables with many files can require substantial heap for the metadata returned
+by scans and write tasks, and processed during commit. Select a metadata mode
+manually for Spark Data Evolution operations:
+
+```sql
+ALTER TABLE target_table SET TBLPROPERTIES (
+    'data-evolution.metadata-memory-optimization.mode' = 'lightweight'
+);
+```
+
+The mode defaults to `off` and takes effect only for Data Evolution tables:
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | Uses the ordinary metadata path. |
+| `lightweight` | Reduces unnecessary metadata copies, decoded objects and their lifetime. |
+| `streaming` | Also plans complete row-ID dependency groups incrementally and replays file metadata from Driver-local disk. |
+
+For scans that request discarded statistics, `lightweight` mode releases value
+statistics before collecting file metadata when no pushed data predicate needs
+them. Filtered scans retain statistics until row-ID groups have been evaluated.
+In `streaming` mode, statistics remain in the external sort and dependency-group
+filtering input. Unneeded statistics are discarded before selected file metadata
+is encoded into replay files.
+Explicitly retained statistics, including supported statistics-based Top-N
+planning, follow the original retention policy.
+Scans also share repeated column-name strings from the current schema while
+keeping each file's column list independent. Historical names absent from the
+current schema retain their original representation.
+
+For writes, it keeps commit messages encoded until needed, avoids some eager
+copies of expanded file metadata, and completes MERGE preparation and requests
+cache cleanup before entering commit.
+
+In `streaming` mode, metadata is filtered in complete Data Evolution dependency
+groups before splits are produced. Completed file lists are encoded into two
+local replay files per store. MERGE preparation keeps numeric row-ID summaries
+and re-encodes pruned lists, preserving file order and aligned deletion vectors.
+Partial-write Tasks consume contiguous row-ID ranges as Spark requests results.
+Each completed range produces its original commit-message payload directly,
+without retaining all decoded messages or writing a Task-local message replay file.
+The original Snapshot, authorization, filtering and read-protection rules still
+apply. This path supports batch ALL planning with one physical snapshot reader.
+Spark fallback/chain, audit-log and incremental reads, including `latest-delta`,
+keep their existing planner and its metadata memory boundaries. Internal batch
+scan modes also keep the existing planner.
+
+For LIMIT reads without data predicates, RowID filters or deletion vectors,
+replay keeps only the required complete dependency groups. Candidate metadata
+is still scanned and externally sorted before selecting that prefix; the
+largest-group and sorting memory boundaries still apply.
+
+Streaming scan planning requires at least three sort-buffer pages. Smaller
+buffers remain valid and use ordinary scan planning with its original metadata
+memory boundary.
+
+Streaming commit conflict checking requires at least six sort-buffer pages for
+its two sorters. Smaller buffers remain valid and use ordinary conflict checking,
+which retains its original metadata memory boundary instead of increasing the
+configured buffer budget.
+
+Tasks receive the normal serialized metadata, so Executors do not need access
+to the Driver's replay-file paths. MERGE closes its preparation stores after
+its internal jobs finish. Ordinary query plans keep replay files available
+while their splits remain reachable; backup cleanup has no timing guarantee.
+Partial-write resources are closed when their output is consumed or the Task
+completes, including failed Tasks. Input processing can overlap Spark's growing
+Task-result buffer; that buffer and the complete encoded results collected by
+the Driver remain memory boundaries.
+
+`data-evolution.metadata-memory-optimization.max-disk-size` limits encoded
+data and offset-index bytes per replay store, defaulting to `1 gb`. It does not
+include external-sort spill, filesystem allocation overhead or other stores.
+Multiple planning stores can coexist. Repeated decoding, sorting and disk I/O add
+work; compare complete SQL time and resource use on a representative workload.
+
+These modes do not make the entire Spark execution constant-memory. Complete
+dependency groups, final task arrays, row-ID summaries, deletion/conflict state,
+all returned message bytes and the largest individual message still require
+heap. Multi-partition commit grouping
+may materialize file metadata. Commit extensions that need stable, mutable
+messages retain the materialized compatibility path.
+
+Streaming conflict checks retain compact row-ID summaries and use external
+sorting for file identity reconciliation. These summaries still grow with the
+number of files. Potential conflicts are replayed through the original checker
+to preserve diagnostics, retaining its original memory limit. Compatibility
+paths, including commits with deletion vectors or callbacks, also retain the
+original conflict checker.
+
+To use streaming mode, set the mode to `streaming`. To disable metadata optimization:
+
+```sql
+ALTER TABLE target_table SET TBLPROPERTIES (
+    'data-evolution.metadata-memory-optimization.mode' = 'off'
+);
+```
+
 ## File Sizing and Metadata Compatibility
 
 <span id="compact-write-column-metadata" />

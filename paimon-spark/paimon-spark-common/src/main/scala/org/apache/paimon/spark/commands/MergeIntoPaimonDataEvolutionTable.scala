@@ -29,12 +29,13 @@ import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
+import org.apache.paimon.spark.write.CommitMessageSeq
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
@@ -314,58 +315,113 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
+    val optimized = table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled()
+    val (updates, otherMessages, readSnapshotId) = prepareMergeInto(sparkSession, optimized)
+    if (optimized) commitPrepared(sparkSession, updates, otherMessages, readSnapshotId)
+  }
+
+  private def commitPrepared(
+      sparkSession: SparkSession,
+      updates: Seq[CommitMessage],
+      otherMessages: Seq[CommitMessage],
+      readSnapshotId: Long): Unit = {
+    DataEvolutionRowIdConflictCommitter.commit(
+      sparkSession,
+      table,
+      targetRelation,
+      writer,
+      updates,
+      otherMessages,
+      readSnapshotId,
+      Snapshot.Operation.MERGE)
+  }
+
+  // All preparation jobs have completed when this returns. Keep their plans and cached outputs
+  // out of the commit frame, while retaining the messages needed for conflict retries.
+  private def prepareMergeInto(
+      sparkSession: SparkSession,
+      optimized: Boolean): (Seq[CommitMessage], Seq[CommitMessage], Long) = {
+    if (!table.coreOptions().dataEvolutionMetadataStreamingEnabled()) {
+      return prepareMergeJobs(sparkSession, optimized, None)
+    }
+    val maxDiskBytes = table.coreOptions().dataEvolutionMetadataMaxDiskSize()
+    val metadata = new DataEvolutionMergeMetadata(SparkUtils.createIOManager(), maxDiskBytes)
+    try {
+      val prepared = prepareMergeJobs(sparkSession, optimized, Some(metadata))
+      metadata.close()
+      prepared
+    } catch {
+      case failure: Throwable =>
+        try metadata.close()
+        catch {
+          case cleanupFailure: Throwable =>
+            if (cleanupFailure ne failure) failure.addSuppressed(cleanupFailure)
+        }
+        throw failure
+    }
+  }
+
+  private def prepareMergeJobs(
+      sparkSession: SparkSession,
+      optimized: Boolean,
+      metadataOwner: Option[DataEvolutionMergeMetadata])
+      : (Seq[CommitMessage], Seq[CommitMessage], Long) = {
     val readSnapshot = TimeTravelUtil.tryTravelOrLatest(table)
     val snapshotReader = table.newSnapshotReader()
     if (readSnapshot != null) {
       snapshotReader.withSnapshot(readSnapshot)
     }
     pushDownMergeFilters(snapshotReader)
-    val plan = snapshotReader.read()
+    if (optimized) {
+      // Preparation only needs file identity and row-id ranges after pruning.
+      snapshotReader.dropStats()
+    }
+    val plan = metadataOwner match {
+      case Some(owner) => owner.read(snapshotReader)
+      case None => snapshotReader.read()
+    }
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
       .toSeq
 
-    val normalDataFiles: Seq[DataFileMeta] = tableSplits
-      .flatMap(_.dataFiles().asScala)
-      .filter {
-        file =>
-          file.firstRowId() != null &&
-          !isBlobFile(file.fileName()) &&
-          !isVectorStoreFile(file.fileName())
+    val (firstRowIds, rowIdRangeEnds, firstRowIdToBlobFirstRowIds) =
+      if (metadataOwner.isDefined) {
+        val summary = DataEvolutionMergeMetadata.summarize(tableSplits)
+        (summary.firstRowIds, summary.rowIdRangeEnds, summary.firstRowIdToBlobFirstRowIds)
+      } else {
+        val normalDataFiles: Seq[DataFileMeta] = tableSplits
+          .flatMap(_.dataFiles().asScala)
+          .filter {
+            file =>
+              file.firstRowId() != null &&
+              !isBlobFile(file.fileName()) &&
+              !isVectorStoreFile(file.fileName())
+          }
+        val starts: immutable.IndexedSeq[Long] = normalDataFiles
+          .map(file => file.firstRowId().asInstanceOf[Long])
+          .distinct
+          .sorted
+          .toIndexedSeq
+        val rangeEnds = normalDataFiles
+          .groupBy(_.firstRowId().longValue())
+          .map { case (first, files) => first -> files.map(file => first + file.rowCount()).max }
+        val ends: immutable.IndexedSeq[Long] = starts.map(rangeEnds)
+        val mapping = new mutable.HashMap[Long, List[Long]]()
+        val files = tableSplits
+          .flatMap(_.dataFiles().asScala)
+          .filter(file => isBlobFile(file.fileName()))
+          .sortBy(f => f.firstRowId())
+        for (file <- files) {
+          val firstRowId = file.firstRowId().asInstanceOf[Long]
+          val firstIdInNormalFile = floorBinarySearch(starts, firstRowId)
+          mapping.update(
+            firstIdInNormalFile,
+            mapping.getOrElseUpdate(firstIdInNormalFile, List.empty[Long]) :+ firstRowId)
+        }
+        (starts, ends, mapping.toMap)
       }
-    val firstRowIds: immutable.IndexedSeq[Long] = normalDataFiles
-      .map(file => file.firstRowId().asInstanceOf[Long])
-      .distinct
-      .sorted
-      .toIndexedSeq
-    // Exclusive end of the row-id range starting at each entry of `firstRowIds`. Files sharing a
-    // first row id are column groups of one range and end at the same row id.
-    val rowIdRangeEnds: immutable.IndexedSeq[Long] = {
-      val ends = normalDataFiles
-        .groupBy(_.firstRowId().longValue())
-        .map { case (first, files) => first -> files.map(file => first + file.rowCount()).max }
-      firstRowIds.map(ends)
-    }
-
-    val firstRowIdToBlobFirstRowIds: Map[Long, List[Long]] = {
-      val map = new mutable.HashMap[Long, List[Long]]()
-      val files = tableSplits
-        .flatMap(_.dataFiles().asScala)
-        .filter(file => isBlobFile(file.fileName()))
-        .sortBy(f => f.firstRowId())
-
-      for (file <- files) {
-        val firstRowId = file.firstRowId().asInstanceOf[Long]
-        val firstIdInNormalFile = floorBinarySearch(firstRowIds, firstRowId)
-        map.update(
-          firstIdInNormalFile,
-          map.getOrElseUpdate(firstIdInNormalFile, List.empty[Long]) :+ firstRowId
-        )
-      }
-      map.toMap
-    }
 
     val persistSourceDss: Option[Dataset[Row]] =
       if (
@@ -389,7 +445,8 @@ case class MergeIntoPaimonDataEvolutionTable(
         firstRowIds,
         rowIdRangeEnds,
         firstRowIdToBlobFirstRowIds,
-        persistSourceDss)
+        persistSourceDss,
+        metadataOwner)
       lazy val touchedFileTargetRelation =
         createNewScanPlan(matchedOrInsertDataSplits, targetRelation)
 
@@ -415,7 +472,11 @@ case class MergeIntoPaimonDataEvolutionTable(
         }
       val notMatchedBySourceDvs =
         if (notMatchedBySourceActions.nonEmpty) {
-          notMatchedBySourceDeletionVectors(sparkSession, readSnapshot, persistSourceDss)
+          notMatchedBySourceDeletionVectors(
+            sparkSession,
+            readSnapshot,
+            persistSourceDss,
+            metadataOwner)
         } else None
 
       // Merge deletion vectors generated from NMBS and matched conditions
@@ -434,16 +495,17 @@ case class MergeIntoPaimonDataEvolutionTable(
             sharedMatches)
         else Nil
 
-      DataEvolutionRowIdConflictCommitter.commit(
-        sparkSession,
-        table,
-        targetRelation,
-        writer,
-        matchedResult.commitMessages,
-        deleteCommit ++ insertCommit,
-        if (readSnapshot == null) -1L else readSnapshot.id(),
-        Snapshot.Operation.MERGE
-      )
+      val updates = matchedResult.commitMessages
+      val otherMessages =
+        if (optimized) CommitMessageSeq.concat(Seq(deleteCommit, insertCommit))
+        else deleteCommit ++ insertCommit
+      val readSnapshotId = if (readSnapshot == null) -1L else readSnapshot.id()
+      if (optimized) {
+        (updates, otherMessages, readSnapshotId)
+      } else {
+        commitPrepared(sparkSession, updates, otherMessages, readSnapshotId)
+        (Nil, Nil, -1L)
+      }
     } finally {
       try {
         targetActionCleanup()
@@ -612,7 +674,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       firstRowIds: immutable.IndexedSeq[Long],
       rowIdRangeEnds: immutable.IndexedSeq[Long],
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
-      persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
+      persistSourceDss: Option[Dataset[Row]],
+      metadataOwner: Option[DataEvolutionMergeMetadata]): Seq[DataSplit] = {
     // Self-Merge shortcut:
     // Snapshot-level merge filters have already removed unrelated splits. MergeRows preserves
     // rows in the remaining splits which do not satisfy any matched action condition.
@@ -651,6 +714,13 @@ case class MergeIntoPaimonDataEvolutionTable(
           firstRowIdToBlobFirstRowIds,
           "_left." + ROW_ID_NAME
         ).toSet
+    }
+
+    if (metadataOwner.isDefined) {
+      if (firstRowIdsTouched.isEmpty) return Nil
+      return metadataOwner.get.prune(
+        tableSplits,
+        file => file.firstRowId() != null && firstRowIdsTouched.contains(file.firstRowId()))
     }
 
     tableSplits
@@ -1117,7 +1187,8 @@ case class MergeIntoPaimonDataEvolutionTable(
   private def notMatchedBySourceDeletionVectors(
       sparkSession: SparkSession,
       readSnapshot: Snapshot,
-      persistSourceDss: Option[Dataset[Row]]): Option[Dataset[SparkDeletionVector]] = {
+      persistSourceDss: Option[Dataset[Row]],
+      metadataOwner: Option[DataEvolutionMergeMetadata]): Option[Dataset[SparkDeletionVector]] = {
     // Do not reuse tableSplits here because they may have been pruned by the MERGE ON
     // partition filter. NOT MATCHED BY SOURCE must scan target rows independently.
     val snapshotReader = table.newSnapshotReader()
@@ -1127,8 +1198,11 @@ case class MergeIntoPaimonDataEvolutionTable(
     if (table.coreOptions().manifestDeleteFileDropStats()) {
       snapshotReader.dropStats()
     }
-    val dataSplits =
-      snapshotReader.read().splits().asScala.collect { case split: DataSplit => split }.toSeq
+    val plan = metadataOwner match {
+      case Some(owner) => owner.read(snapshotReader)
+      case None => snapshotReader.read()
+    }
+    val dataSplits = plan.splits().asScala.collect { case split: DataSplit => split }.toSeq
     if (dataSplits.isEmpty) {
       return None
     }
@@ -1306,7 +1380,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       return updateCommit
     }
 
-    val affectedParts: Set[BinaryRow] = updateCommit.map(_.partition()).toSet
+    val affectedParts: Set[BinaryRow] = updateCommit.iterator.map(_.partition()).toSet
     val rowType = table.rowType()
 
     // find all global index files of affected partitions and updated columns
@@ -1359,7 +1433,11 @@ case class MergeIntoPaimonDataEvolutionTable(
                 DataIncrement.deleteIndexIncrement(entries.map(_.indexFile()).asJava),
                 CompactIncrement.emptyIncrement())
           }
-          updateCommit ++ deleteCommitMessages
+          if (table.coreOptions().dataEvolutionMetadataMemoryOptimizationEnabled()) {
+            CommitMessageSeq.concat(Seq(updateCommit, deleteCommitMessages.toSeq))
+          } else {
+            updateCommit ++ deleteCommitMessages
+          }
       }
     }
   }

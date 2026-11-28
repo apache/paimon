@@ -356,6 +356,32 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public PojoDataFileMeta withWriteCols(@Nullable List<String> writeCols) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                writeColsSequences);
+    }
+
+    @Override
     public PojoDataFileMeta withWriteColsSequences(long[] writeColsSequences) {
         return new PojoDataFileMeta(
                 fileName,

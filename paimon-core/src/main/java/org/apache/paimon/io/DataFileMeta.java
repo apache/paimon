@@ -389,6 +389,32 @@ public interface DataFileMeta {
 
     DataFileMeta assignFileSource(FileSource fileSource);
 
+    /** Returns a standard metadata value copy with only the physical column names replaced. */
+    default DataFileMeta withWriteCols(@Nullable List<String> writeCols) {
+        return create(
+                fileName(),
+                fileSize(),
+                rowCount(),
+                minKey(),
+                maxKey(),
+                keyStats(),
+                valueStats(),
+                minSequenceNumber(),
+                maxSequenceNumber(),
+                schemaId(),
+                level(),
+                extraFiles(),
+                creationTime(),
+                deleteRowCount().orElse(null),
+                embeddedIndex(),
+                fileSource().orElse(null),
+                valueStatsCols(),
+                externalPath().orElse(null),
+                firstRowId(),
+                writeCols,
+                writeColsSequences());
+    }
+
     DataFileMeta withWriteColsSequences(long[] writeColsSequences);
 
     DataFileMeta assignFirstRowId(long firstRowId);

@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -199,8 +200,21 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
+        return configureBatchScan(table.newScan());
+    }
+
+    @Override
+    public TableScan newScan(FileStoreTable.SnapshotReaderFactory snapshotReaderFactory) {
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    "Custom snapshot readers require a file store table.");
+        }
+        return configureBatchScan(((FileStoreTable) table).newScan(snapshotReaderFactory));
+    }
+
+    private TableScan configureBatchScan(InnerTableScan scan) {
         Long limit = effectiveLimit();
-        InnerTableScan tableScan = configureScan(table.newScan());
+        InnerTableScan tableScan = configureScan(scan);
         if (limit != null) {
             tableScan.withLimit(limit);
         }

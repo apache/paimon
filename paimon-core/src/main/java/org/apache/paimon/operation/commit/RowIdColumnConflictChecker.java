@@ -24,7 +24,6 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RangeHelper;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,34 +70,48 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
     }
 
     private List<WriteRange> buildWriteRanges(List<DataFileMeta> deltaFiles) {
-        List<DataFileMeta> rowIdFiles =
-                deltaFiles.stream()
-                        .filter(file -> file.firstRowId() != null)
-                        .collect(Collectors.toList());
-
-        if (rowIdFiles.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // 1. merge overlapping ranges and calculate [Range, Set<FieldId>] tuples.
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<WriteRange> writeRanges = new ArrayList<>();
-        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(rowIdFiles)) {
-            Range range = mergeRange(group);
-            Set<Integer> fieldIds = new HashSet<>();
-            for (DataFileMeta file : group) {
-                addWriteFieldIds(fieldIds, file);
+        // Only row ranges and resolved field ids survive this pass, not file statistics.
+        Map<Set<Integer>, Set<Integer>> fieldSets = new HashMap<>();
+        List<WriteRange> ranges = new ArrayList<>();
+        for (DataFileMeta file : deltaFiles) {
+            if (file.firstRowId() == null) {
+                continue;
             }
-
-            writeRanges.add(new WriteRange(range, fieldIds));
+            Set<Integer> fields = new HashSet<>();
+            addWriteFieldIds(fields, file);
+            Set<Integer> sharedFields = fieldSets.get(fields);
+            if (sharedFields == null) {
+                sharedFields = Collections.unmodifiableSet(fields);
+                fieldSets.put(sharedFields, sharedFields);
+            }
+            ranges.add(new WriteRange(file.nonNullRowIdRange(), sharedFields));
         }
-
-        // 2. sort by range for binary search
-        writeRanges.sort(
-                Comparator.comparingLong((WriteRange writeRange) -> writeRange.range.from)
-                        .thenComparingLong(writeRange -> writeRange.range.to));
-
-        return writeRanges;
+        ranges.sort(
+                Comparator.comparingLong((WriteRange r) -> r.range.from)
+                        .thenComparingLong(r -> r.range.to));
+        // Match RangeHelper's transitive overlap rule; adjacent ranges stay separate.
+        int size = 0;
+        for (WriteRange current : ranges) {
+            if (size > 0 && current.range.from <= ranges.get(size - 1).range.to) {
+                WriteRange previous = ranges.get(size - 1);
+                Set<Integer> fields = previous.fieldIds;
+                if (!fields.containsAll(current.fieldIds)) {
+                    fields = new HashSet<>(fields);
+                    fields.addAll(current.fieldIds);
+                }
+                ranges.set(
+                        size - 1,
+                        new WriteRange(
+                                new Range(
+                                        previous.range.from,
+                                        Math.max(previous.range.to, current.range.to)),
+                                fields));
+            } else {
+                ranges.set(size++, current);
+            }
+        }
+        ranges.subList(size, ranges.size()).clear();
+        return ranges;
     }
 
     private void addWriteFieldIds(Set<Integer> fieldIds, DataFileMeta file) {
@@ -111,17 +124,6 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
         for (String writeCol : writeCols) {
             fieldIds.addAll(writeFieldIds(file.schemaId(), writeCol));
         }
-    }
-
-    private static Range mergeRange(List<DataFileMeta> files) {
-        long from = Long.MAX_VALUE;
-        long to = Long.MIN_VALUE;
-        for (DataFileMeta file : files) {
-            Range range = file.nonNullRowIdRange();
-            from = Math.min(from, range.from);
-            to = Math.max(to, range.to);
-        }
-        return new Range(from, to);
     }
 
     @Override

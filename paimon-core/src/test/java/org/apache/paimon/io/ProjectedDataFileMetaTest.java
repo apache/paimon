@@ -106,6 +106,9 @@ public class ProjectedDataFileMetaTest {
         assertUnsupported(
                 () -> actual.withWriteColsSequences(new long[] {2L}),
                 "withWriteColsSequences(long[])");
+        assertUnsupported(
+                () -> actual.withWriteCols(Collections.singletonList("other")),
+                "withWriteCols(List)");
         assertUnsupported(() -> actual.assignFirstRowId(20L), "assignFirstRowId(long)");
         assertUnsupported(() -> actual.newFirstRowId(20L), "newFirstRowId(Long)");
         assertUnsupported(() -> actual.copy(Collections.emptyList()), "copy(List)");

@@ -18,14 +18,21 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.DataEvolutionArray;
@@ -34,6 +41,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -41,6 +49,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.ThrowingConsumer;
 
 import javax.annotation.Nullable;
 
@@ -48,9 +57,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -72,6 +83,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private boolean dropStats = false;
     @Nullable private RowType readType;
     private final boolean deletionVectorsEnabled;
+    private final boolean metadataMemoryOptimizationEnabled;
+    private final Map<String, String> sharedWriteColumnNames;
 
     // Cache file's physical field id set per (schemaId, writeCols) to avoid recomputing during
     // per-file column pruning in postFilterManifestEntries.
@@ -103,21 +116,31 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 true,
                 tableName);
         this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.metadataMemoryOptimizationEnabled =
+                new CoreOptions(schema.options()).dataEvolutionMetadataMemoryOptimizationEnabled();
+        if (metadataMemoryOptimizationEnabled) {
+            // Reuse schema-owned names; this lookup cannot grow with the number of files.
+            Map<String, String> names = new HashMap<>();
+            for (String name : schema.fieldNames()) {
+                names.put(name, name);
+            }
+            this.sharedWriteColumnNames = Collections.unmodifiableMap(names);
+        } else {
+            this.sharedWriteColumnNames = Collections.emptyMap();
+        }
     }
 
     @Override
     public FileStoreScan dropStats() {
-        // overwrite to keep stats here
-        // TODO refactor this hacky
         this.dropStats = true;
+        updateBaseDropStats();
         return this;
     }
 
     @Override
     public FileStoreScan keepStats() {
-        // overwrite to keep stats here
-        // TODO refactor this hacky
         this.dropStats = false;
+        updateBaseDropStats();
         return this;
     }
 
@@ -126,7 +149,64 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         // overwrite to keep all filter here
         // TODO refactor this hacky
         this.inputFilter = predicate;
+        updateBaseDropStats();
         return this;
+    }
+
+    private void updateBaseDropStats() {
+        // Predicates need statistics until the complete row-id group has been filtered.
+        if (metadataMemoryOptimizationEnabled && dropStats && inputFilter == null) {
+            super.dropStats();
+        } else {
+            super.keepStats();
+        }
+    }
+
+    @Override
+    protected <T> Function<ManifestEntry, T> createManifestEntryConverter(
+            Function<ManifestEntry, T> converter) {
+        return super.createManifestEntryConverter(
+                metadataMemoryOptimizationEnabled
+                        ? entry -> converter.apply(shareWriteColumnNames(entry))
+                        : converter);
+    }
+
+    private ManifestEntry shareWriteColumnNames(ManifestEntry entry) {
+        List<String> columns = entry.file().writeCols();
+        if (columns == null || columns.isEmpty()) {
+            return entry;
+        }
+        List<String> shared = null;
+        for (int i = 0; i < columns.size(); i++) {
+            String name = columns.get(i);
+            String canonical = sharedWriteColumnNames.getOrDefault(name, name);
+            if (canonical != name) {
+                if (shared == null) {
+                    // File-owned lists remain independent; only immutable names are shared.
+                    shared = new ArrayList<>(columns);
+                }
+                shared.set(i, canonical);
+            }
+        }
+        return shared == null
+                ? entry
+                : ManifestEntry.create(
+                        entry.kind(),
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.file().withWriteCols(shared));
+    }
+
+    @Override
+    protected ManifestEntry dropStats(ManifestEntry entry) {
+        DataFileMeta file = entry.file();
+        if (metadataMemoryOptimizationEnabled
+                && file.valueStats() == SimpleStats.EMPTY_STATS
+                && Collections.emptyList().equals(file.valueStatsCols())) {
+            return entry;
+        }
+        return super.dropStats(entry);
     }
 
     @Override
@@ -183,6 +263,90 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             }
         }
         return filtered.iterator();
+    }
+
+    /**
+     * Streams complete, filtered RowID groups from one pinned batch snapshot.
+     *
+     * <p>The consumer should encode each group before requesting the next. Sort buffers are
+     * bounded, but DELETE identities and the largest connected group still grow with their input.
+     * The caller owns the supplied IO manager; this method only closes its own sorting channels.
+     */
+    @Nullable
+    public Snapshot forEachFileGroup(
+            IOManager ioManager, ThrowingConsumer<List<ManifestEntry>, Exception> consumer)
+            throws Exception {
+        if (scanMode != ScanMode.ALL) {
+            throw new UnsupportedOperationException(
+                    "Incremental DE group planning only supports batch ALL scans.");
+        }
+        long started = System.nanoTime();
+        ManifestsReader.Result manifests = readManifests();
+        long[] resultedFiles = {0};
+        Long rowLimit =
+                limit != null
+                                && limit > 0
+                                && inputFilter == null
+                                && rowRangeIndex == null
+                                && !deletionVectorsEnabled
+                        ? limit
+                        : null;
+        long[] remainingRows = {rowLimit == null ? 0 : rowLimit};
+        CompactFileIdentifierSet deleted = new CompactFileIdentifierSet();
+        ReusableIdentifier identifier = new ReusableIdentifier();
+        Function<ManifestEntry, ManifestEntry> converter =
+                createManifestEntryConverter(Function.identity());
+        try (DataEvolutionManifestEntryProducer producer =
+                new DataEvolutionManifestEntryProducer(
+                        ManifestEntryExternalSort.ExternalSortConfig.from(
+                                new CoreOptions(schema.options()), ioManager))) {
+            for (ManifestFileMeta manifest : manifests.filteredManifests) {
+                if (manifest.numDeletedFiles() > 0) {
+                    forEachManifestEntry(manifest, FileKind.DELETE, null, deleted::add);
+                }
+            }
+            for (ManifestFileMeta manifest : manifests.filteredManifests) {
+                if (manifest.numAddedFiles() > 0) {
+                    forEachManifestEntry(
+                            manifest,
+                            FileKind.ADD,
+                            entry ->
+                                    !deleted.contains(
+                                            identifier.replaceWithPartition(
+                                                    (ProjectedManifestEntry) entry)),
+                            producer::write);
+                }
+            }
+            producer.forEachGroup(
+                    group -> {
+                        List<ManifestEntry> converted = new ArrayList<>(group.size());
+                        for (ManifestEntry entry : group) {
+                            converted.add(converter.apply(entry));
+                        }
+                        List<ManifestEntry> filtered = postFilterManifestEntries(converted);
+                        if (!filtered.isEmpty()) {
+                            int count = filtered.size();
+                            consumer.accept(filtered);
+                            resultedFiles[0] += count;
+                            if (rowLimit != null) {
+                                // Providers can cover the same rows; summing them would stop early.
+                                long rows =
+                                        filtered.stream()
+                                                .mapToLong(entry -> entry.file().rowCount())
+                                                .max()
+                                                .orElse(0L);
+                                remainingRows[0] -= Math.min(remainingRows[0], rows);
+                            }
+                        }
+                    },
+                    () -> rowLimit == null || remainingRows[0] > 0);
+        } finally {
+            deleted.release();
+            identifier.release();
+        }
+        // This scan timing includes synchronous consumer work; it is not whole-SQL elapsed time.
+        reportScan(manifests, started, resultedFiles[0]);
+        return manifests.snapshot;
     }
 
     @Override
