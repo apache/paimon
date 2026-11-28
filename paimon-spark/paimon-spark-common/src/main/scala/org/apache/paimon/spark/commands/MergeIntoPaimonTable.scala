@@ -102,7 +102,8 @@ case class MergeIntoPaimonTable(
       constructChangedRows(
         sparkSession,
         createDataset(sparkSession, filteredTargetPlan),
-        remainDeletedRow = true))
+        remainDeletedRow = true,
+        pruneJoinColumns = true))
   }
 
   private def performMergeForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
@@ -246,12 +247,27 @@ case class MergeIntoPaimonTable(
       remainDeletedRow: Boolean = false,
       deletionVectorEnabled: Boolean = false,
       extraMetadataCols: Seq[PaimonMetadataColumn] = Seq.empty,
-      writeRowTracking: Boolean = false): Dataset[Row] = {
+      writeRowTracking: Boolean = false,
+      pruneJoinColumns: Boolean = false): Dataset[Row] = {
     val targetPlan = targetDataset.queryExecution.analyzed
+    val (targetJoinOutput, sourceJoinOutput) =
+      if (pruneJoinColumns) {
+        pruneJoinColumnsForMerge(
+          mergeCondition,
+          matchedActions,
+          notMatchedActions,
+          notMatchedBySourceActions,
+          targetPlan.output,
+          sourceTable.output,
+          remainDeletedRow || deletionVectorEnabled
+        )
+      } else {
+        (targetPlan.output, sourceTable.output)
+      }
     val targetProject =
-      Project(targetPlan.output :+ Alias(Literal(true), TARGET_ROW_COL)(), targetPlan)
+      Project(targetJoinOutput :+ Alias(Literal(true), TARGET_ROW_COL)(), targetPlan)
     val sourceProject =
-      Project(sourceTable.output :+ Alias(Literal(true), SOURCE_ROW_COL)(), sourceTable)
+      Project(sourceJoinOutput :+ Alias(Literal(true), SOURCE_ROW_COL)(), sourceTable)
     val joinNode =
       Join(sourceProject, targetProject, FullOuter, Some(mergeCondition), JoinHint.NONE)
     val joinedDS = createDataset(sparkSession, joinNode)
@@ -277,8 +293,15 @@ case class MergeIntoPaimonTable(
       (null, null)
     }
 
-    val targetOutput = if (writeRowTracking) {
+    val targetOutput: Seq[Expression] = if (writeRowTracking) {
       filteredTargetPlan.output ++ Seq(rowIdAttr, sequenceNumberAttr)
+    } else if (pruneJoinColumns) {
+      // Templates span the full output schema; NULL-filled slots belong only to rows the processor
+      // drops, or to DELETE rows, which force unpruned columns.
+      val keptExprIds = targetJoinOutput.map(_.exprId).toSet
+      targetPlan.output.map {
+        attr => if (keptExprIds.contains(attr.exprId)) attr else Literal(null, attr.dataType)
+      }
     } else {
       filteredTargetPlan.output
     }
@@ -374,6 +397,44 @@ object MergeIntoPaimonTable {
   // +I, +U, -U, -D
   private val ROW_KIND_COL: String = SparkSystemColumns.ROW_KIND_COL
   private val NOOP_ROW_KIND_VALUE: Byte = "-1".toByte
+
+  /**
+   * Computes the target/source columns that must survive the merge join: the references of the
+   * merge condition plus every action's condition and assignment values, in the original output
+   * order. A DELETE clause materializes `-D` records carrying the full target row (its value is
+   * consumed by the merge engines), so with deleted rows the target side is not pruned.
+   */
+  private[commands] def pruneJoinColumnsForMerge(
+      mergeCondition: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction],
+      targetOutput: Seq[Attribute],
+      sourceOutput: Seq[Attribute],
+      remainDeletedRow: Boolean): (Seq[Attribute], Seq[Attribute]) = {
+    val actionExpressions =
+      (matchedActions ++ notMatchedActions ++ notMatchedBySourceActions).flatMap {
+        case PaimonUpdateAction(condition, assignments) =>
+          condition.toSeq ++ assignments.map(_.value)
+        case InsertAction(condition, assignments) =>
+          condition.toSeq ++ assignments.map(_.value)
+        case DeleteAction(condition) => condition.toSeq
+        case _ => Seq.empty[Expression]
+      }
+    val referencedExprIds =
+      (mergeCondition +: actionExpressions).flatMap(_.references).map(_.exprId).toSet
+    val keepFullTargetRows =
+      remainDeletedRow &&
+        (matchedActions ++ notMatchedBySourceActions).exists(_.isInstanceOf[DeleteAction])
+    val neededTarget =
+      if (keepFullTargetRows) {
+        targetOutput
+      } else {
+        targetOutput.filter(attr => referencedExprIds.contains(attr.exprId))
+      }
+    val neededSource = sourceOutput.filter(attr => referencedExprIds.contains(attr.exprId))
+    (neededTarget, neededSource)
+  }
 
   private case class MergeIntoProcessor(
       joinedAttributes: Seq[Attribute],
