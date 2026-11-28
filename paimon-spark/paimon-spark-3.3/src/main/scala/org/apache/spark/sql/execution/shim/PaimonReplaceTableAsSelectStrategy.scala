@@ -25,7 +25,7 @@ import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedDBObjectName
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTableAsSelect, TableSpec}
 import org.apache.spark.sql.connector.catalog.CatalogV2Util
-import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.supportsCatalog
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper.{canAtomicReplace, checkNonAtomicSelfReference, supportsCatalog}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Strategy, PaimonTableAsSelectWriteExec}
 
@@ -41,7 +41,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
       case ReplaceTableAsSelect(
             ResolvedDBObjectName(catalog: SparkBaseCatalog, ident),
             parts,
-            _,
+            query,
             tableSpec: TableSpec,
             _,
             _) if supportsCatalog(catalog, tableSpec.provider.orNull) =>
@@ -54,6 +54,10 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strat
               parts.nonEmpty,
               properties.asJava)
           case _ =>
+        }
+        // A replace that cannot happen in place drops the old table before the query reads it.
+        if (!canAtomicReplace(catalog, ident.asIdentifier, tableSpec.provider, properties, parts)) {
+          checkNonAtomicSelfReference(catalog, ident.asIdentifier, query)
         }
         return new DataSourceV2Strategy(spark)
           .apply(plan)
