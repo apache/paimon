@@ -19,6 +19,8 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const Ajv = require('ajv/dist/2020');
+const addFormats = require('ajv-formats');
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'trace']);
 
@@ -223,6 +225,57 @@ function requireExactEnum(contract, schemaName, expectedValues) {
   );
 }
 
+function validateStartupAlterTableRequest(contract) {
+  contract.requireSchemaReference('SchemaChange', 'anyOf', 'CheckSchemaVersion');
+  contract.checkSpec(
+    contract.schema('BaseSchemaChange').discriminator.mapping.checkSchemaVersion ===
+      '#/components/schemas/CheckSchemaVersion',
+    'BaseSchemaChange discriminator is missing checkSchemaVersion',
+  );
+  contract.requireRequiredProperties('CheckSchemaVersion', ['schemaId']);
+  contract.requireTypedIntegerProperties('CheckSchemaVersion', ['schemaId']);
+  const properties = contract.requireProperties('CheckSchemaVersion', ['action']);
+  contract.checkSpec(
+    properties.action.const === 'checkSchemaVersion',
+    'Schema CheckSchemaVersion.action must be checkSchemaVersion',
+  );
+
+  const ajv = new Ajv({strict: false, allErrors: true});
+  addFormats(ajv);
+  const requestSchema =
+    contract.requireOperation('alterTable').requestBody.content['application/json'].schema;
+  const validate = ajv.compile({
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    ...requestSchema,
+    components: contract.spec.components,
+  });
+  const columnChanges = [
+    {action: 'addColumn', fieldNames: ['score'], dataType: 'INT'},
+    {
+      action: 'updateColumnType',
+      fieldNames: ['name'],
+      newDataType: 'VARCHAR(128)',
+      keepNullability: true,
+    },
+  ];
+  contract.checkSpec(
+    validate({changes: [{action: 'checkSchemaVersion', schemaId: 42}, ...columnChanges]}),
+    `alterTable must accept a version check followed by column changes: ${ajv.errorsText(validate.errors)}`,
+  );
+  [
+    {action: 'checkSchemaVersion'},
+    {action: 'checkSchemaVersion', schemaId: '42'},
+    {action: 'checkSchemaVersion', schemaId: 42.5},
+    {action: 'checkSchemaVersion', schemaId: null},
+    {action: 'unknownAction', schemaId: 42},
+  ].forEach((versionCheck) => {
+    contract.checkSpec(
+      !validate({changes: [versionCheck, ...columnChanges]}),
+      `alterTable must reject an invalid version check: ${JSON.stringify(versionCheck)}`,
+    );
+  });
+}
+
 function validateCatalogOpenApi() {
   const contract = validateCommon('rest-catalog-open-api.yaml');
   [
@@ -287,6 +340,7 @@ function validateCatalogOpenApi() {
   contract.requireProperties('AlterDatabaseRequest', ['removals', 'updates']);
   contract.requireProperties('CreateTableRequest', ['identifier', 'schema']);
   contract.requireProperties('AlterTableRequest', ['changes']);
+  validateStartupAlterTableRequest(contract);
   contract.requireProperties('Identifier', ['database', 'object']);
   contract.requireProperties('Schema', [
     'fields',

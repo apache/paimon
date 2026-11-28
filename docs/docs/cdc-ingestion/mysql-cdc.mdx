@@ -68,6 +68,8 @@ If a later table fails, schema changes already committed to earlier tables are r
 The commit checks the schema version used for validation.
 Concurrent schema changes trigger a reload and validation, with up to two commit retries.
 REST Catalog services must support the `checkSchemaVersion` schema change for this option.
+For a stale schema version, the service returns HTTP 409 with `resourceType` set to `SCHEMA`
+so the action can reload the schema and retry.
 An incompatible change such as `STRING` to `INT` fails schema validation.
 In database synchronization, `--ignore_incompatible` still controls whether incompatible tables
 are skipped.

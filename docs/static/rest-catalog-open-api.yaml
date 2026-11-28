@@ -615,7 +615,24 @@ paths:
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "409":
-          $ref: '#/components/responses/TableAlreadyExistErrorResponse'
+          description: A column already exists or the expected schema version is stale.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                columnAlreadyExists:
+                  value:
+                    message: Column already exists
+                    resourceType: COLUMN
+                    resourceName: score
+                    code: 409
+                schemaVersionConflict:
+                  value:
+                    message: Expected schema version 12, but found 13.
+                    resourceType: SCHEMA
+                    resourceName: db.account
+                    code: 409
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     delete:
@@ -3264,7 +3281,7 @@ components:
           type: string
         resourceType:
           type: [ string, "null" ]
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "SCHEMA", "BRANCH", "TAG", "VIEW", "SEMANTIC_VIEW", "DIALECT", "FUNCTION", "MODEL", "DEFINITION", "UNKNOWN", null ]
         resourceName:
           type: [ string, "null" ]
         code:
@@ -3696,6 +3713,7 @@ components:
           type: string
     SchemaChange:
       anyOf:
+        - $ref: '#/components/schemas/CheckSchemaVersion'
         - $ref: '#/components/schemas/SetOption'
         - $ref: '#/components/schemas/RemoveOption'
         - $ref: '#/components/schemas/UpdateComment'
@@ -3712,6 +3730,7 @@ components:
       discriminator:
         propertyName: action
         mapping:
+          checkSchemaVersion: '#/components/schemas/CheckSchemaVersion'
           setOption: '#/components/schemas/SetOption'
           removeOption: '#/components/schemas/RemoveOption'
           updateComment: '#/components/schemas/UpdateComment'
@@ -3730,6 +3749,19 @@ components:
       properties:
         action:
           type: string
+    CheckSchemaVersion:
+      allOf:
+        - $ref: '#/components/schemas/BaseSchemaChange'
+      description: Place this change first to require the expected version before applying other changes.
+      required:
+        - schemaId
+      properties:
+        action:
+          type: string
+          const: "checkSchemaVersion"
+        schemaId:
+          type: integer
+          format: int64
     SetOption:
       allOf:
         - $ref: '#/components/schemas/BaseSchemaChange'

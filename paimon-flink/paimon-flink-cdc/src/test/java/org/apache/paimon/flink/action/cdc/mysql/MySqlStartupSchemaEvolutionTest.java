@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.FileSystemCatalog;
@@ -27,7 +28,15 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlStartupSchemaEvolution.IncompatibleSchemaException;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalog;
+import org.apache.paimon.rest.RESTCatalogInternalOptions;
+import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -411,6 +420,78 @@ class MySqlStartupSchemaEvolutionTest {
                     .extracting(DataField::id)
                     .doesNotHaveDuplicates();
             assertThat(schemaCompatible(repaired.schema(), source.fields())).isTrue();
+        }
+    }
+
+    @Test
+    void testRestSchemaVersionConflictReloadsAndRetries() throws Exception {
+        String warehousePath = warehouse.resolve("rest").toUri().toString();
+        String token = "test-token";
+        ConfigResponse config =
+                new ConfigResponse(
+                        Collections.singletonMap(RESTCatalogInternalOptions.PREFIX.key(), "paimon"),
+                        Collections.emptyMap());
+        RESTCatalogServer server =
+                new RESTCatalogServer(
+                        warehousePath, new BearTokenAuthProvider(token), config, warehousePath);
+        server.start();
+        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE, warehousePath);
+        options.set(RESTCatalogOptions.URI, server.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, token);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+
+        try (Catalog writer = new RESTCatalog(CatalogContext.create(options));
+                Catalog cached =
+                        new CachingCatalog(
+                                new RESTCatalog(CatalogContext.create(options)), options)) {
+            writer.createDatabase(IDENTIFIER.getDatabaseName(), false);
+            writer.createTable(IDENTIFIER, baseSchema().build(), false);
+            FileStoreTable original = (FileStoreTable) cached.getTable(IDENTIFIER);
+            writer.alterTable(IDENTIFIER, SchemaChange.addColumn("added", DataTypes.INT()), false);
+            assertThatThrownBy(
+                            () ->
+                                    writer.alterTable(
+                                            IDENTIFIER,
+                                            Arrays.asList(
+                                                    SchemaChange.checkSchemaVersion(
+                                                            original.schema().id()),
+                                                    SchemaChange.addColumn(
+                                                            "remaining", DataTypes.STRING())),
+                                            false))
+                    .isInstanceOf(ConcurrentModificationException.class);
+
+            Schema source =
+                    baseSchema()
+                            .column("added", DataTypes.INT())
+                            .column("remaining", DataTypes.STRING())
+                            .build();
+            FileStoreTable repaired =
+                    MySqlStartupSchemaEvolution.addMissingColumns(
+                            cached,
+                            IDENTIFIER,
+                            original,
+                            source,
+                            source,
+                            true,
+                            Collections.emptyMap(),
+                            TypeMapping.defaultMapping());
+
+            assertThat(repaired.schema().fieldNames())
+                    .containsExactly("id", "value", "added", "remaining");
+            assertThat(repaired.schema().id()).isEqualTo(original.schema().id() + 2);
+            FileStoreTable persisted = (FileStoreTable) writer.getTable(IDENTIFIER);
+            assertThat(persisted.schema().id()).isEqualTo(repaired.schema().id());
+            assertThat(persisted.schema().fields()).isEqualTo(repaired.schema().fields());
+            assertThatThrownBy(
+                            () ->
+                                    writer.alterTable(
+                                            IDENTIFIER,
+                                            SchemaChange.addColumn("added", DataTypes.INT()),
+                                            false))
+                    .isInstanceOf(Catalog.ColumnAlreadyExistException.class);
+        } finally {
+            server.shutdown();
         }
     }
 
