@@ -95,8 +95,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected ScanMode scanMode = ScanMode.ALL;
     private Integer specifiedLevel = null;
     private Filter<Integer> levelFilter = null;
-    private Filter<ManifestEntry> manifestEntryFilter = null;
-    private Filter<String> fileNameFilter = null;
+    protected Filter<ManifestEntry> manifestEntryFilter = null;
+    protected Filter<String> fileNameFilter = null;
 
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;

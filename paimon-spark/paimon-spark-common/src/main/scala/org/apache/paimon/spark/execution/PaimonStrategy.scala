@@ -453,11 +453,9 @@ case class LateralVectorSearchExec(
       VectorSearchResultUtils.isVectorSearchMetaOnly(vectorSearchOutput.map(_.name))
     val coreOptions = CoreOptions.fromMap(innerTable.options())
     // Metadata-only results return directly, without the row scan's snapshot validation.
-    require(
-      !metaColumnsOnly || !coreOptions.dataEvolutionEnabled() ||
-        coreOptions.startupMode() != CoreOptions.StartupMode.INCREMENTAL,
-      "Spark index search requires a single snapshot for Data Evolution tables."
-    )
+    if (metaColumnsOnly) {
+      PaimonBaseScan.requireSingleSnapshotForIndexSearch(coreOptions)
+    }
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(

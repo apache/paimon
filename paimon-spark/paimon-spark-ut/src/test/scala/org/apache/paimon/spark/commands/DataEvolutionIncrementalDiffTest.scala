@@ -27,6 +27,49 @@ import scala.collection.JavaConverters._
 
 class DataEvolutionIncrementalDiffTest extends PaimonSparkTestBase {
 
+  test("DE incremental DIFF rejects metadata-only vector search") {
+    withTable("t_vector_diff") {
+      sql("""CREATE TABLE t_vector_diff (id INT, v ARRAY<FLOAT>) TBLPROPERTIES (
+            |'bucket'='-1','row-tracking.enabled'='true',
+            |'data-evolution.enabled'='true','write-only'='true')""".stripMargin)
+      sql("INSERT INTO t_vector_diff VALUES (10, array(0f, 1f))")
+      val start = loadTable("t_vector_diff").snapshotManager().latestSnapshot().id()
+      sql("INSERT INTO t_vector_diff VALUES (20, array(-1f, 0f))")
+      val end = loadTable("t_vector_diff").snapshotManager().latestSnapshot().id()
+      sql("INSERT INTO t_vector_diff VALUES (30, array(1f, 0f))")
+      sql("CALL sys.create_global_index(table => 'test.t_vector_diff', index_column => 'v', " +
+        "index_type => 'ivf-flat', options => 'ivf-flat.dimension=2,ivf-flat.nlist=1,ivf-flat.metric=cosine')")
+      val search = "vector_search('t_vector_diff', 'v', array(1f, 0f), 1)"
+      checkAnswer(sql(s"SELECT id, __paimon_search_score FROM $search"), Row(30, 1.0f) :: Nil)
+      checkAnswer(sql(s"SELECT __paimon_search_score FROM $search"), Row(1.0f) :: Nil)
+      val indexed = loadTable("t_vector_diff").snapshotManager().latestSnapshot().id()
+      sql("INSERT INTO t_vector_diff VALUES (40, array(0f, -1f))")
+      sql(s"ALTER TABLE t_vector_diff SET TBLPROPERTIES ('scan.snapshot-id'='$indexed')")
+      checkAnswer(sql(s"SELECT __paimon_search_score FROM $search"), Row(1.0f) :: Nil)
+      sql("ALTER TABLE t_vector_diff UNSET TBLPROPERTIES ('scan.snapshot-id')")
+      checkAnswer(
+        spark.read
+          .option("incremental-between", s"$start,$end")
+          .option("incremental-between-scan-mode", "diff")
+          .table("t_vector_diff")
+          .select("id"),
+        Row(20) :: Nil
+      )
+      sql(
+        s"ALTER TABLE t_vector_diff SET TBLPROPERTIES ('incremental-between'='$start,$end', " +
+          "'incremental-between-scan-mode'='diff')")
+      Seq("diff", "delta").foreach {
+        mode =>
+          sql(
+            s"ALTER TABLE t_vector_diff SET TBLPROPERTIES ('incremental-between-scan-mode'='$mode')")
+          val error = intercept[Exception] {
+            sql(s"SELECT __paimon_search_score FROM $search").collect()
+          }
+          assert(error.toString.contains("requires a single snapshot"))
+      }
+    }
+  }
+
   test("DE diff preserves file path and physical row index through deletion and filtering") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT) TBLPROPERTIES (

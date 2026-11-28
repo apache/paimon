@@ -702,7 +702,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 for (List<ManifestEntry> group : ranges.mergeOverlappingRanges(bucket.getValue())) {
                     boolean changed = false;
                     for (ManifestEntry entry : group) {
-                        if (!oldFiles.contains(entry)) {
+                        if (!oldFiles.contains(entry)
+                                && evolutionScan.matchesIncrementalDiffFile(entry)) {
                             addedRanges.add(entry.file().nonNullRowIdRange());
                             changed = true;
                         }

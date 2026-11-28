@@ -221,11 +221,20 @@ object PaimonBaseScan {
     case _ => scan.withGlobalIndexResult(result)
   }
 
+  private[spark] def requireSingleSnapshotForIndexSearch(options: CoreOptions): Unit = {
+    require(
+      !options
+        .dataEvolutionEnabled() || options.startupMode() != CoreOptions.StartupMode.INCREMENTAL,
+      "Spark index search requires a single snapshot for Data Evolution tables."
+    )
+  }
+
   private[spark] def evalVectorSearch(
       table: InnerTable,
       vectorSearch: VectorSearch,
       pushedPartitionFilters: Seq[PartitionPredicate],
       pushedDataFilters: Seq[Predicate]): GlobalIndexResult = {
+    requireSingleSnapshotForIndexSearch(CoreOptions.fromMap(table.options()))
     evalVectorSearchWithSnapshot(
       table,
       vectorSearch,

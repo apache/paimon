@@ -61,6 +61,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
@@ -196,6 +197,42 @@ class DataEvolutionIncrementalDiffTest extends DataEvolutionTestBase {
                                                         "f0",
                                                         SpecialFields.SEQUENCE_NUMBER.name()))));
         assertThat(projected).containsExactly(GenericRow.of(0, 3L), GenericRow.of(1, 3L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testPhysicalSelectorAppliesToChangesOnly(boolean manifestSelector) throws Exception {
+        FileStoreTable table = create();
+        write(table, row(0, "a0", "old"), row(1, "a1", "old"), row(2, "a2", "old"));
+        Snapshot start = table.latestSnapshot().get();
+        update(
+                table,
+                new String[] {"f2"},
+                0,
+                GenericRow.of(text("b0")),
+                GenericRow.of(text("b1")),
+                GenericRow.of(text("b2")));
+        String changedFile =
+                table.store().newScan().withKind(ScanMode.DELTA).plan().files().get(0).fileName();
+        write(table, row(3, "a3", "b3"));
+        deleteRows(table, 1);
+        Snapshot end = table.latestSnapshot().get();
+
+        SnapshotReader reader = table.newSnapshotReader();
+        if (manifestSelector) {
+            reader.withManifestEntryFilter(entry -> changedFile.equals(entry.fileName()));
+        } else {
+            reader.withDataFileNameFilter(changedFile::equals);
+        }
+        assertThat(
+                        collect(
+                                table.newReadBuilder(),
+                                reader.withSnapshot(end).readIncrementalDiff(start).splits()))
+                .containsExactly(row(0, "a0", "b0"), row(2, "a2", "b2"));
+        assertThat(reader.withSnapshot(end).read().dataSplits())
+                .flatExtracting(DataSplit::dataFiles)
+                .extracting(DataFileMeta::fileName)
+                .containsExactly(changedFile);
     }
 
     @Test
