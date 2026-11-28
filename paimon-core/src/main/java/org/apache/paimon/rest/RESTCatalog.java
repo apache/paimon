@@ -91,6 +91,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -734,6 +735,9 @@ public class RESTCatalog implements Catalog {
                 }
             }
         } catch (AlreadyExistsException e) {
+            if (ErrorResponse.RESOURCE_TYPE_SCHEMA.equals(e.resourceType())) {
+                throw new ConcurrentModificationException(e.getMessage(), e);
+            }
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);

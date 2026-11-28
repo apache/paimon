@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
+import org.apache.paimon.schema.SchemaChange.CheckSchemaVersion;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
 import org.apache.paimon.schema.SchemaChange.RenameColumn;
@@ -62,6 +63,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -141,7 +143,15 @@ final class SchemaManagerUtils {
         String newComment = oldTableSchema.comment();
         List<String> newPrimaryKeys = oldTableSchema.primaryKeys();
         for (SchemaChange change : changes) {
-            if (change instanceof SetOption) {
+            if (change instanceof CheckSchemaVersion) {
+                long expectedSchemaId = ((CheckSchemaVersion) change).schemaId();
+                if (oldTableSchema.id() != expectedSchemaId) {
+                    throw new ConcurrentModificationException(
+                            String.format(
+                                    "Expected schema version %s, but found %s.",
+                                    expectedSchemaId, oldTableSchema.id()));
+                }
+            } else if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
                 String oldValue = oldOptions.get(setOption.key());
                 String newValue = setOption.value();

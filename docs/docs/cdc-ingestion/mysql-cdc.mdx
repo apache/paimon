@@ -45,6 +45,39 @@ All source tables selected by the table action must have primary keys, including
 `--primary_keys` for the target. Schemas must be compatible when merging multiple source tables.
 The partitioned examples below assume each source table has `id` and `create_time` fields.
 
+## Schema Evolution at Startup
+
+Set `--add_missing_columns_on_startup true` on `mysql_sync_table` or `mysql_sync_database` to
+append missing MySQL columns and widen compatible existing source column types during job submission.
+This can recover a job after a shadow table was renamed into place and its schema change did not reach Paimon. The
+option defaults to `false`.
+
+The action reads the current MySQL schema through JDBC, applies the configured type mappings, and
+checks for incompatibilities before altering each Paimon table. It appends only source columns
+that are outside the primary, partition, and bucket keys. The new columns are nullable in Paimon.
+Historical rows read as `NULL` for those columns, including when the MySQL definition has a default.
+MySQL-generated default values carried in row events are synchronized as ordinary values.
+
+Existing ordinary columns can widen according to the CDC conversion rules, such as
+`VARCHAR(32)` to `VARCHAR(128)` or `INT` to `BIGINT`. The target keeps its existing nullability.
+A target type that already accommodates the source remains usable. Decimal widening preserves
+both the fractional precision and the integer range, and respects `decimal-no-change`.
+Each table's additions and type updates are checked together using Paimon's schema evolution
+validation and committed as one batch. `mysql_sync_database` updates tables sequentially.
+If a later table fails, schema changes already committed to earlier tables are retained.
+The commit checks the schema version used for validation.
+Concurrent schema changes trigger a reload and validation, with up to two commit retries.
+REST Catalog services must support the `checkSchemaVersion` schema change for this option.
+For a stale schema version, the service returns HTTP 409 with `resourceType` set to `SCHEMA`
+so the action can reload the schema and retry.
+An incompatible change such as `STRING` to `INT` fails schema validation.
+In database synchronization, `--ignore_incompatible` still controls whether incompatible tables
+are skipped.
+
+Startup evolution runs when the action builds a job, including submissions that restore from a
+checkpoint or savepoint. Flink CDC still uses its restored source state to decode MySQL binlog
+records. A TaskManager restart that restores the existing job graph resumes the running job.
+
 ## Synchronizing Tables
 
 By using [MySqlSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
@@ -119,6 +152,7 @@ Command syntax (square brackets indicate optional arguments):
     --table <table-name> \
     [--partition_keys <partition_keys>] \
     [--primary_keys <primary-keys>] \
+    [--add_missing_columns_on_startup <true/false>] \
     [--type_mapping <option1,option2...>] \
     [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
     [--metadata_column <metadata-column>] \
@@ -294,6 +328,7 @@ Command syntax (square brackets indicate optional arguments):
     [--excluding_tables <mysql-table-name|name-regular-expr>] \
     [--mode <sync-mode>] \
     [--metadata_column <metadata-column>] \
+    [--add_missing_columns_on_startup <true/false>] \
     [--type_mapping <option1,option2...>] \
     [--partition_keys <partition_keys>] \
     [--primary_keys <primary-keys>] \

@@ -162,6 +162,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -2049,8 +2050,18 @@ public class RESTCatalogServer {
                 return mockResponse(response, 200);
             case "POST":
                 AlterTableRequest requestBody = parseRequest(data, AlterTableRequest.class);
-                alterTableImpl(identifier, requestBody.getChanges());
-                return new MockResponse().setResponseCode(200);
+                try {
+                    alterTableImpl(identifier, requestBody.getChanges());
+                    return new MockResponse().setResponseCode(200);
+                } catch (ConcurrentModificationException e) {
+                    return mockResponse(
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_SCHEMA,
+                                    identifier.getFullName(),
+                                    e.getMessage(),
+                                    409),
+                            409);
+                }
             case "DELETE":
                 synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
                     tableMetadata = tableMetadataStore.get(identifier.getFullName());

@@ -32,11 +32,14 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import javax.annotation.Nullable;
 
@@ -312,6 +315,264 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             List<String> primaryKeys2 = Arrays.asList("k1", "k2");
             List<String> expected = Arrays.asList("+I[2, two, 20, 200]", "+I[4, four, 40, 400]");
             waitForResult(expected, table, rowType, primaryKeys2);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(MultiTablesSinkMode.class)
+    @Timeout(60)
+    public void testAddMissingColumnsOnStartup(MultiTablesSinkMode mode) throws Exception {
+        String sourceDatabase = "startup_schema_" + mode.configString();
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", sourceDatabase);
+        try (Statement statement = getStatement()) {
+            statement.execute("CREATE DATABASE " + sourceDatabase);
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE orders (id INT PRIMARY KEY)");
+            statement.execute("INSERT INTO orders VALUES (1)");
+        }
+
+        buildStartupSchemaAction(startupSchemaAction(mySqlConfig, mode, "orders"));
+        long originalSchemaId = getFileStoreTable("orders").schema().id();
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE orders_shadow LIKE orders");
+            statement.execute("ALTER TABLE orders_shadow ADD COLUMN score INT NOT NULL DEFAULT 0");
+            statement.execute("INSERT INTO orders_shadow (id, score) SELECT id, 42 FROM orders");
+            statement.execute("RENAME TABLE orders TO orders_old, orders_shadow TO orders");
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                buildStartupSchemaAction(
+                                        startupSchemaAction(mySqlConfig, mode, "orders")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Incompatible schema");
+        assertThat(getFileStoreTable("orders").schema().id()).isEqualTo(originalSchemaId);
+
+        JobClient client =
+                runActionWithDefaultEnv(
+                        startupSchemaAction(
+                                mySqlConfig,
+                                mode,
+                                "orders",
+                                "--add_missing_columns_on_startup",
+                                "true"));
+        try {
+            FileStoreTable table = getFileStoreTable("orders");
+            assertThat(table.schema().fieldNames()).containsExactly("id", "score");
+            assertThat(table.schema().fields().get(1).type()).isEqualTo(DataTypes.INT());
+            assertThat(table.schema().id()).isEqualTo(originalSchemaId + 1);
+            waitForResult(
+                    client,
+                    Collections.singletonList("+I[1, 42]"),
+                    table,
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.INT()},
+                            new String[] {"id", "score"}),
+                    Collections.singletonList("id"));
+        } finally {
+            if (!client.getJobStatus().get().isGloballyTerminalState()) {
+                client.cancel().get();
+            }
+        }
+
+        buildStartupSchemaAction(
+                startupSchemaAction(
+                        mySqlConfig, mode, "orders", "--add_missing_columns_on_startup", "true"));
+        assertThat(getFileStoreTable("orders").schema().id()).isEqualTo(originalSchemaId + 1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(MultiTablesSinkMode.class)
+    @Timeout(60)
+    public void testWidenColumnsOnStartup(MultiTablesSinkMode mode) throws Exception {
+        String sourceDatabase = "startup_widen_" + mode.configString();
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", sourceDatabase);
+        try (Statement statement = getStatement()) {
+            statement.execute("CREATE DATABASE " + sourceDatabase);
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE payments (id INT PRIMARY KEY, amount INT)");
+        }
+
+        buildStartupSchemaAction(startupSchemaAction(mySqlConfig, mode, "payments"));
+        long originalSchemaId = getFileStoreTable("payments").schema().id();
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE payments_shadow LIKE payments");
+            statement.execute(
+                    "ALTER TABLE payments_shadow MODIFY COLUMN amount BIGINT, ADD COLUMN fee INT");
+            statement.execute("INSERT INTO payments_shadow VALUES (1, 2147483648, 10)");
+            statement.execute("RENAME TABLE payments TO payments_old, payments_shadow TO payments");
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                buildStartupSchemaAction(
+                                        startupSchemaAction(mySqlConfig, mode, "payments")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Incompatible schema");
+        assertThat(getFileStoreTable("payments").schema().id()).isEqualTo(originalSchemaId);
+
+        JobClient client =
+                runActionWithDefaultEnv(
+                        startupSchemaAction(
+                                mySqlConfig,
+                                mode,
+                                "payments",
+                                "--add_missing_columns_on_startup",
+                                "true"));
+        try {
+            FileStoreTable table = getFileStoreTable("payments");
+            assertThat(table.schema().fieldNames()).containsExactly("id", "amount", "fee");
+            assertThat(table.schema().fields().get(1).type()).isEqualTo(DataTypes.BIGINT());
+            assertThat(table.schema().id()).isEqualTo(originalSchemaId + 1);
+            waitForResult(
+                    client,
+                    Collections.singletonList("+I[1, 2147483648, 10]"),
+                    table,
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.BIGINT(), DataTypes.INT()
+                            },
+                            new String[] {"id", "amount", "fee"}),
+                    Collections.singletonList("id"));
+        } finally {
+            if (!client.getJobStatus().get().isGloballyTerminalState()) {
+                client.cancel().get();
+            }
+        }
+
+        buildStartupSchemaAction(
+                startupSchemaAction(
+                        mySqlConfig, mode, "payments", "--add_missing_columns_on_startup", "true"));
+        assertThat(getFileStoreTable("payments").schema().id()).isEqualTo(originalSchemaId + 1);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStartupRepairKeepsWiderTargetType() throws Exception {
+        String sourceDatabase = "startup_wider_target";
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", sourceDatabase);
+        try (Statement statement = getStatement()) {
+            statement.execute("CREATE DATABASE " + sourceDatabase);
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE payments (id INT PRIMARY KEY, amount BIGINT)");
+        }
+
+        buildStartupSchemaAction(startupSchemaAction(mySqlConfig, COMBINED, "payments"));
+        long originalSchemaId = getFileStoreTable("payments").schema().id();
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("ALTER TABLE payments MODIFY COLUMN amount INT, ADD COLUMN fee INT");
+        }
+
+        buildStartupSchemaAction(
+                startupSchemaAction(
+                        mySqlConfig,
+                        COMBINED,
+                        "payments",
+                        "--add_missing_columns_on_startup",
+                        "true"));
+        FileStoreTable table = getFileStoreTable("payments");
+        assertThat(table.schema().fieldNames()).containsExactly("id", "amount", "fee");
+        assertThat(table.schema().fields().get(1).type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(table.schema().id()).isEqualTo(originalSchemaId + 1);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStartupRepairIgnoresIncompatibleTable() throws Exception {
+        String sourceDatabase = "startup_schema_ignore_incompatible";
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", sourceDatabase);
+        try (Statement statement = getStatement()) {
+            statement.execute("CREATE DATABASE " + sourceDatabase);
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("CREATE TABLE repairable (id INT PRIMARY KEY)");
+            statement.execute("CREATE TABLE incompatible (id INT PRIMARY KEY, value VARCHAR(10))");
+        }
+
+        String includingTables = "repairable|incompatible";
+        buildStartupSchemaAction(startupSchemaAction(mySqlConfig, COMBINED, includingTables));
+        long incompatibleSchemaId = getFileStoreTable("incompatible").schema().id();
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + sourceDatabase);
+            statement.execute("ALTER TABLE repairable ADD COLUMN new_col INT");
+            statement.execute(
+                    "ALTER TABLE incompatible MODIFY COLUMN value INT, ADD COLUMN new_col INT");
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                buildStartupSchemaAction(
+                                        startupSchemaAction(
+                                                mySqlConfig,
+                                                COMBINED,
+                                                "incompatible",
+                                                "--add_missing_columns_on_startup",
+                                                "true")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Incompatible schema");
+        assertThat(getFileStoreTable("incompatible").schema().id()).isEqualTo(incompatibleSchemaId);
+
+        MySqlSyncDatabaseAction action =
+                startupSchemaAction(
+                        mySqlConfig,
+                        COMBINED,
+                        includingTables,
+                        "--add_missing_columns_on_startup",
+                        "true",
+                        "--ignore_incompatible",
+                        "true");
+        buildStartupSchemaAction(action);
+
+        assertThat(action.monitoredTables())
+                .containsExactly(Identifier.create(sourceDatabase, "repairable"));
+        assertThat(action.excludedTables())
+                .contains(Identifier.create(sourceDatabase, "incompatible"));
+        assertThat(getFileStoreTable("repairable").schema().fieldNames())
+                .containsExactly("id", "new_col");
+        FileStoreTable incompatible = getFileStoreTable("incompatible");
+        assertThat(incompatible.schema().id()).isEqualTo(incompatibleSchemaId);
+        assertThat(incompatible.schema().fieldNames()).containsExactly("id", "value");
+        assertThat(incompatible.schema().fields().get(1).type()).isEqualTo(DataTypes.VARCHAR(10));
+    }
+
+    private MySqlSyncDatabaseAction startupSchemaAction(
+            Map<String, String> mySqlConfig,
+            MultiTablesSinkMode mode,
+            String includingTables,
+            String... options) {
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "mysql_sync_database",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--mode",
+                                mode.configString(),
+                                "--including_tables",
+                                includingTables,
+                                "--table_conf",
+                                "bucket=1"));
+        args.addAll(mapToArgs("--mysql_conf", mySqlConfig));
+        Collections.addAll(args, options);
+        return createAction(MySqlSyncDatabaseAction.class, args);
+    }
+
+    private void buildStartupSchemaAction(MySqlSyncDatabaseAction action) throws Exception {
+        try (StreamExecutionEnvironment executionEnv =
+                streamExecutionEnvironmentBuilder().streamingMode().parallelism(2).build()) {
+            action.withStreamExecutionEnvironment(executionEnv).build();
         }
     }
 
