@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.data.BinaryString
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkTable}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{FallbackReadFileStoreTable, FileStoreTable}
@@ -442,6 +443,74 @@ class DataEvolutionMergeNarrowSourceTest extends PaimonSparkTestBase with Adapti
               .collect()
               .toSet == oldPairs)
           assert(loadTable("target").snapshotManager().latestSnapshotId() == snapshot + 1)
+        }
+      }
+    }
+  }
+
+  for (cachedInput <- Seq("table", "child", "projection")) {
+    test(s"narrow source preserves Spark cached input after an external append: $cachedInput") {
+      for (narrow <- Seq(false, true)) {
+        withTables() {
+          sql(
+            s"""ALTER TABLE target SET TBLPROPERTIES (
+               |'data-evolution.merge-into.join-reuse.narrow-source.enabled'='$narrow')""".stripMargin)
+          sql("INSERT INTO target VALUES (1,10,'old')")
+          sql("INSERT INTO source VALUES (1,100,'unused'),(4,400,'cached')")
+          val projection = "SELECT id AS merge_id,value,insert_payload FROM source"
+          val cachedProjection = if (cachedInput == "projection") {
+            val cached = sql(projection).cache()
+            cached.collect()
+            Some(cached)
+          } else {
+            sql("CACHE TABLE source")
+            None
+          }
+          try {
+            val source = loadTable("source")
+            val snapshot = source.snapshotManager().latestSnapshotId()
+            // Commit through Paimon without invalidating Spark's materialized cache.
+            val builder = source.newBatchWriteBuilder()
+            val writer = builder.newWrite()
+            try {
+              writer.write(GenericRow.of(5, 500, BinaryString.fromString("external")))
+              val commit = builder.newCommit()
+              try {
+                commit.commit(writer.prepareCommit())
+              } finally {
+                commit.close()
+              }
+            } finally {
+              writer.close()
+            }
+            assert(source.snapshotManager().latestSnapshotId() == snapshot + 1)
+            val visibleKeys =
+              if (cachedProjection.isDefined) sql(projection).select("merge_id")
+              else sql("SELECT id FROM source")
+            checkAnswer(visibleKeys, Seq(Row(1), Row(4)))
+
+            val (input, key) =
+              if (cachedInput != "table") {
+                (s"($projection)", "merge_id")
+              } else {
+                ("source", "id")
+              }
+            withNarrowPlan(expectNarrow = false) {
+              sql(s"""MERGE INTO target t USING $input s ON t.id=s.$key
+                     |WHEN MATCHED THEN UPDATE SET value=s.value
+                     |WHEN NOT MATCHED THEN INSERT (id,value,payload)
+                     |VALUES (s.$key,s.value,s.insert_payload)""".stripMargin)
+              checkAnswer(
+                sql("SELECT * FROM target"),
+                Seq(Row(1, 100, "old"), Row(4, 400, "cached")))
+            }
+          } finally {
+            cachedProjection match {
+              case Some(cached) => cached.unpersist()
+              case None => sql("UNCACHE TABLE source")
+            }
+          }
+          checkAnswer(sql("SELECT id FROM source"), Seq(Row(1), Row(4), Row(5)))
         }
       }
     }

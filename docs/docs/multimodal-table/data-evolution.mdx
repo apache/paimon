@@ -252,7 +252,9 @@ statements using `data-evolution.merge-into.source-persist` keep the original
 execution path. Schema-only changes newer than the data snapshot and retained
 tags without a numbered snapshot file also use the original path.
 Composite fallback/primary-branch sources also keep the original execution path.
-This can reduce shuffle and disk cache size for wide sources,
+If Spark can serve the source query or part of it from its cache, MERGE keeps the
+original shared result to preserve the rows visible through that cache.
+Narrowing can reduce shuffle and disk cache size for wide sources,
 but the extra scan and membership join can increase elapsed time. Compare
 complete SQL execution time for the expected UPDATE/INSERT mix before enabling
 it. This option does not perform positional source reads.

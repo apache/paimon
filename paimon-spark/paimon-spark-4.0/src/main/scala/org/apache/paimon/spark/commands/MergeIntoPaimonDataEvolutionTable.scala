@@ -55,6 +55,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Attribu
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{FullOuter, LeftAnti, LeftOuter, LeftSemi}
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -319,7 +320,13 @@ case class MergeIntoPaimonDataEvolutionTable(
             allSharedDependencies.contains(attr.exprId) &&
               !updateSharedDependencies.contains(attr.exprId))
       ) {
-        pinNarrowSource(sourceTable, originalTargetRelation)
+        // Pinning replaces the scan and can bypass Spark's cache for the source or a child.
+        val cachedPlan = createDataset(sparkSession, sourceTable).queryExecution.withCachedData
+        if (cachedPlan.exists(_.isInstanceOf[InMemoryRelation])) {
+          None
+        } else {
+          pinNarrowSource(sourceTable, originalTargetRelation)
+        }
       } else {
         None
       }
