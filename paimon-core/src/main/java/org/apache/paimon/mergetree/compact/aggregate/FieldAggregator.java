@@ -20,6 +20,8 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.types.DataType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 
 /** abstract class of aggregating a field of a row. */
@@ -43,6 +45,25 @@ public abstract class FieldAggregator implements Serializable {
 
     /** reset the aggregator to a clean start state. */
     public void reset() {}
+
+    /**
+     * Returns the accumulator before any input is aggregated, or null if the aggregator does not
+     * define one. It is used when a non-nullable field must be initialized from a retraction.
+     */
+    @Nullable
+    public Object emptyAccumulator() {
+        return null;
+    }
+
+    /**
+     * Converts an accumulator that only received retractions into the value of the emitted retract
+     * record. A later merge retracts this value again, so the result must undo the accumulated
+     * retractions.
+     */
+    @Nullable
+    public Object retractionResult(@Nullable Object accumulator) {
+        return accumulator;
+    }
 
     public Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(

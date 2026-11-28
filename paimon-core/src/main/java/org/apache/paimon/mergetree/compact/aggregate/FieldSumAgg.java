@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.DecimalUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 /** Sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {
@@ -32,6 +33,16 @@ public class FieldSumAgg extends FieldAggregator {
     public FieldSumAgg(String name, DataType dataType, boolean failOnOverflow) {
         super(name, dataType);
         this.failOnOverflow = failOnOverflow;
+    }
+
+    @Override
+    public Object emptyAccumulator() {
+        return TypeUtils.castFromString("0", fieldType);
+    }
+
+    @Override
+    public Object retractionResult(Object accumulator) {
+        return negative(accumulator);
     }
 
     @Override

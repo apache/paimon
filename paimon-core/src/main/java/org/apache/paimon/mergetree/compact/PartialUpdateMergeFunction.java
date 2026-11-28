@@ -133,6 +133,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final List<WrapperWithFieldIndex<FieldAggregator>> fieldAggregators;
+    private final Map<Integer, Object> emptyAccumulators;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
@@ -165,6 +166,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = getKeySortedListFromMap(fieldSeqComparators);
         this.fieldAggregators = getKeySortedListFromMap(fieldAggregators);
+        this.emptyAccumulators = new HashMap<>();
+        fieldAggregators.forEach(
+                (i, aggregator) -> {
+                    Object emptyAccumulator = aggregator.emptyAccumulator();
+                    if (!nullables[i] && emptyAccumulator != null) {
+                        emptyAccumulators.put(i, emptyAccumulator);
+                    }
+                });
         this.fieldSequenceEnabled = fieldSequenceEnabled;
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
@@ -198,7 +207,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (kv.valueKind().isRetract()) {
 
             if (!notNullColumnFilled) {
-                initRow(row, kv.value());
+                if (fieldSequenceEnabled && !ignoreDelete) {
+                    initRetractRow(row, kv.value());
+                } else {
+                    initRow(row, kv.value());
+                }
                 notNullColumnFilled = true;
             }
 
@@ -236,6 +249,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             throw new IllegalArgumentException(msg);
         }
 
+        if (ignoreDelete && fieldSequenceEnabled && notNullColumnFilled && !meetInsert) {
+            // The first ignored retract supplied the payload for a possible DELETE result.
+            // Start the first positive record with an empty accumulator.
+            row = new GenericRow(getters.length);
+        }
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
             currentDeleteRow = false;
@@ -419,6 +437,27 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
+    private void initRetractRow(GenericRow row, InternalRow value) {
+        // A required aggregate starts empty even if its sequence group skips every record.
+        for (int i = 0; i < getters.length; i++) {
+            if (!nullables[i]) {
+                Object field = getters[i].getFieldOrNull(value);
+                if (field == null) {
+                    throw new IllegalArgumentException("Field " + i + " can not be null");
+                }
+                row.setField(i, emptyAccumulators.getOrDefault(i, field));
+            }
+        }
+    }
+
+    private GenericRow copyRow(GenericRow row) {
+        GenericRow copy = new GenericRow(row.getRowKind(), row.getFieldCount());
+        for (int i = 0; i < row.getFieldCount(); i++) {
+            copy.setField(i, row.getField(i));
+        }
+        return copy;
+    }
+
     private void initRow(GenericRow row, InternalRow value) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(value);
@@ -436,7 +475,23 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
 
         RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
-        return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
+        GenericRow result = row;
+        if (fieldSequenceEnabled && !meetInsert && !currentDeleteRow && !ignoreDelete) {
+            // A later merge retracts the DELETE payload again. Let each aggregator convert its
+            // retraction-only accumulator, and keep the accumulator for subsequent calls to add().
+            for (WrapperWithFieldIndex<FieldAggregator> field : fieldAggregators) {
+                int i = field.fieldIndex;
+                Object accumulator = row.getField(i);
+                Object retraction = field.getValue().retractionResult(accumulator);
+                if (retraction != accumulator) {
+                    if (result == row) {
+                        result = copyRow(row);
+                    }
+                    result.setField(i, retraction);
+                }
+            }
+        }
+        return reused.replace(currentKey, latestSequenceNumber, rowKind, result);
     }
 
     @Override

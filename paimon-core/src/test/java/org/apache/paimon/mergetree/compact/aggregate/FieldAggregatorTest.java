@@ -633,6 +633,9 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
         assertThat(fieldSumAgg.retract(null, 5)).isEqualTo(-5);
+        assertThat(fieldSumAgg.emptyAccumulator()).isEqualTo(0);
+        assertThat(fieldSumAgg.retractionResult(-5)).isEqualTo(5);
+        assertThat(fieldSumAgg.retractionResult(null)).isNull();
     }
 
     @Test
@@ -642,6 +645,8 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
         assertThat(fieldProductAgg.retract(null, 5)).isNull();
+        assertThat(fieldProductAgg.emptyAccumulator()).isNull();
+        assertThat(fieldProductAgg.retractionResult(2)).isEqualTo(2);
     }
 
     @Test
