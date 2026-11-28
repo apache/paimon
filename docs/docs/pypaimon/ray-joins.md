@@ -27,6 +27,65 @@ under the License.
 
 Join Paimon tables or merge a distributed source into a data-evolution table. Install Ray as described in [Ray Data](./ray-data). The examples use existing tables with the stated bucket, key, and schema requirements.
 
+## Indexed Lookup Join
+
+`indexed_lookup_join` uses batches of keys from a Ray Dataset to query a scalar
+global index on a Paimon data-evolution table. It avoids scanning and shuffling
+the whole lookup table when the source selects few rows. This is an explicit
+API; ordinary `Dataset.join()` does not automatically select this path.
+
+This API requires Ray 2.50 or later so that composing the result remains lazy.
+Arrow-backed and pandas-backed Ray Datasets are accepted; pandas batches are
+converted to Arrow before checking key types. Schema inference may read source
+batches, but lookup execution starts only when the returned Dataset is consumed.
+Empty pandas sources need explicit key dtypes, such as `pd.Series(dtype="Int64")`;
+an empty `object` column does not establish an integer or string key type.
+All-null payload fields are normalized to a compatible Arrow payload type,
+including when the all-null block comes first. Join-key types must still match
+exactly, and incompatible non-null payload types are rejected.
+
+```python
+from pypaimon.ray import indexed_lookup_join
+
+joined = indexed_lookup_join(
+    source=incoming,  # a Ray Dataset with column col00
+    lookup_table="database_name.A",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    source_on="col00",
+    lookup_on="col0",
+    lookup_projection=["col0", "description"],
+    batch_size=1024,
+    concurrency=2,
+)
+```
+
+Only a single integer or string key and inner joins are supported. The key
+types must match exactly. The output retains the source key and the lookup
+table's non-key columns; other column names must not collide. Duplicate rows
+on either side retain their usual many-to-many join semantics. NULL keys do
+not match.
+
+The lookup table must have data evolution and row tracking enabled, and a
+single-column BTree or Bitmap global index covering all current data. Missing,
+disabled, stale, or incomplete indexes raise before scheduling lookup work; use an
+ordinary Ray join instead. This avoids repeatedly scanning unindexed data for
+each source batch. `lookup_filter` accepts a Paimon `Predicate` and is combined
+with the key filter. `lookup_projection` must include the lookup key.
+Tables with query authorization enabled are not supported by this API.
+
+One lookup snapshot is fixed when the API is called, including across batches
+and task retries. Concurrent commits become visible on the next call. Keep its
+files available until execution finishes. Actor workers reuse the table and
+FileIO, deduplicate lookup requests within each batch, and join the matches
+back to the original source rows. Workers cache index metadata and scan at most
+16 index files at a time, closing their readers before opening the next group.
+Each actor reuses a 32 MiB LRU cache of 64 KiB index blocks across groups and
+batches, so closing a reader does not discard cached footer or index data.
+`batch_size` bounds source rows per lookup;
+`output_batch_size` (default 4096) bounds emitted batches. A hot key can still
+require many matching lookup rows in memory, so choose this path for selective
+lookups. Results are unordered.
+
 ## Bucket Join
 
 `bucket_join` joins two **co-bucketed** tables (same bucket count and the same
