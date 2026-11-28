@@ -20,17 +20,21 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static org.apache.paimon.utils.PartitionPathUtils.mightMatch;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -200,5 +204,60 @@ class PartitionPathUtilsTest {
         // A name that is absent or empty is not a hidden one.
         assertThat(PartitionPathUtils.isHiddenName(null)).isFalse();
         assertThat(PartitionPathUtils.isHiddenName("")).isFalse();
+    }
+
+    @Test
+    void testValueOnlyEscapedDefaultPartitionIsListed(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // The default partition directory is written with the escaped default name. It must not
+        // be skipped as hidden, while other directories starting with '_' still are.
+        String defaultName = "__NULL/VALUE__";
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path root = new Path(tempDir.toUri());
+        for (String dir : new String[] {"__NULL%2FVALUE__", "a", "_hidden"}) {
+            fileIO.mkdirs(new Path(root, dir));
+        }
+
+        List<Pair<LinkedHashMap<String, String>, Path>> parts =
+                PartitionPathUtils.searchPartSpecAndPaths(
+                        fileIO,
+                        root,
+                        1,
+                        Collections.singletonList("pt"),
+                        true,
+                        (Predicate) null,
+                        (RowType) null,
+                        defaultName);
+
+        assertThat(parts)
+                .extracting(part -> part.getLeft().get("pt"))
+                .containsExactlyInAnyOrder(defaultName, "a");
+    }
+
+    @Test
+    void testValueOnlyEmptyDefaultPartitionNameNamesNoDirectory(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // An empty default name names no directory, so no hidden directory is exempted and the
+        // other partitions are listed as before.
+        assertThat(PartitionPathUtils.defaultPartitionDirName("")).isNull();
+        assertThat(PartitionPathUtils.defaultPartitionDirName(null)).isNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path root = new Path(tempDir.toUri());
+        for (String dir : new String[] {"a", "_hidden"}) {
+            fileIO.mkdirs(new Path(root, dir));
+        }
+
+        List<Pair<LinkedHashMap<String, String>, Path>> parts =
+                PartitionPathUtils.searchPartSpecAndPaths(
+                        fileIO,
+                        root,
+                        1,
+                        Collections.singletonList("pt"),
+                        true,
+                        (Predicate) null,
+                        (RowType) null,
+                        "");
+
+        assertThat(parts).extracting(part -> part.getLeft().get("pt")).containsExactly("a");
     }
 }
