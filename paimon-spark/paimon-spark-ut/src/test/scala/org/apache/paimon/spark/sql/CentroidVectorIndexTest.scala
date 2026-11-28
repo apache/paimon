@@ -18,13 +18,15 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner
 import org.apache.paimon.globalindex.{CentroidIndexFile, CentroidIndexMeta}
-import org.apache.paimon.index.IndexFileMeta
+import org.apache.paimon.index.{DataEvolutionIndexSourceMeta, IndexFileMeta}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.globalindex.CentroidBitmapFieldAppender
+import org.apache.paimon.spark.globalindex.{CentroidBitmapFieldAppender, CentroidBitmapFields}
+import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.sink.CommitCallback
 import org.apache.paimon.table.source.{RawVectorSearchSplit, VectorSearchBuilderImpl}
 import org.apache.paimon.vector.index.VectorTrainingModelIO
@@ -399,6 +401,194 @@ class CentroidVectorIndexTest extends PaimonSparkTestBase {
       addFields()
       assert(table.snapshotManager().latestSnapshotId() == addedSnapshot)
       assert(filesByPartition == after)
+    }
+  }
+
+  test("drop_global_index_fields removes only the selected centroid Bitmaps") {
+    withTable("T") {
+      runSql(
+        """CREATE TABLE T (id INT, v ARRAY<FLOAT>, tenant STRING, region STRING, p INT)
+          |PARTITIONED BY (p) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+          |'write-only'='true', 'vector-index.post-filter.candidates-factor'='1')""".stripMargin)
+      runSql("""INSERT INTO T VALUES
+               |(10, array(0.0f, 0.0f), 'bulk', 'us', 1),
+               |(11, array(10.0f, 0.0f), 'rare', 'apac', 1)""".stripMargin)
+      runSql("INSERT INTO T VALUES (1, array(0.0f, 0.0f), 'rare', 'apac', 0)")
+      runSql("INSERT INTO T VALUES (12, NULL, 'rare', 'apac', 1)")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"tenant":"bitmap","region":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.metric=l2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1')""".stripMargin)
+      runSql("ALTER TABLE T ADD COLUMNS (note STRING)")
+      runSql("INSERT INTO T VALUES (2, NULL, 'rare', 'apac', 0, NULL)")
+      runSql("CALL sys.expire_snapshots(table=>'test.T', retain_min=>1, retain_max=>1)")
+
+      val table = loadTable("T")
+      val snapshots = table.snapshotManager()
+      val handler = table.store().newIndexFileHandler()
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      val tenantId = table.rowType().getField("tenant").id()
+      val regionId = table.rowType().getField("region").id()
+      def filesByPartition(snapshot: Snapshot): Map[Int, Set[IndexFileMeta]] =
+        handler.scan(snapshot, "ivf-flat").asScala.groupBy(_.partition().getInt(0)).map {
+          case (partition, entries) => partition -> entries.map(_.indexFile()).toSet
+        }
+
+      def dryRunDrop(column: String): Long =
+        runSql(s"""CALL sys.drop_global_index(table=>'test.T', index_column=>'$column',
+                  |index_type=>'ivf-flat', partitions=>'p=1', dry_run=>true)""".stripMargin).head
+          .getLong(1)
+
+      def nearest(predicate: String): Seq[Int] =
+        runSql(s"""SELECT id FROM vector_search('T','v',array(0.0f,0.0f),1,
+                  |map('centroid.nprobe','1','ivf.nprobe','1'))
+                  |WHERE p = 1 AND $predicate""".stripMargin).map(_.getInt(0))
+
+      val beforeSnapshot = snapshots.latestSnapshot()
+      val before = filesByPartition(beforeSnapshot)
+      val removed = before(1).filter {
+        file =>
+          CentroidIndexMeta.isScalarIndex(file) &&
+          CentroidIndexMeta.file(file, paths).asInstanceOf[CentroidIndexFile].fieldId() == regionId
+      }
+      assert(removed.size == 1)
+      assert(before(1).exists(CentroidIndexMeta.isEmptyRouter))
+      val originalSource = DataEvolutionIndexSourceMeta.fromIndexFile(removed.head)
+      assert(!snapshots.snapshotExists(originalSource.scanSnapshotId() + 1))
+      assert(originalSource.sourceSchemaId() != table.schema().id())
+      assert(dryRunDrop("v") == before(1).size)
+      assert(dryRunDrop("region") == 0)
+      assert(nearest("region = 'apac'") == Seq(11))
+
+      val drop =
+        """CALL sys.drop_global_index_fields(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}', partitions=>'p=1')""".stripMargin
+      assert(runSql(drop).head.getBoolean(0))
+      val afterSnapshot = snapshots.latestSnapshot()
+      val after = filesByPartition(afterSnapshot)
+      assert(afterSnapshot.id() == beforeSnapshot.id() + 1)
+      assert(after(0) == before(0))
+      assert(after(1).map(paths.toPath) == (before(1) -- removed).map(paths.toPath))
+      assert(after(1).forall(_.globalIndexMeta().extraFieldIds().toSeq == Seq(tenantId)))
+      assert(after(1).exists(CentroidIndexMeta.isEmptyRouter))
+      assert(after(1).forall {
+        file =>
+          val source = DataEvolutionIndexSourceMeta.fromIndexFile(file)
+          source.scanSnapshotId() == beforeSnapshot.id() &&
+          source.sourceSchemaId() == originalSource.sourceSchemaId()
+      })
+      assert(filesByPartition(beforeSnapshot) == before)
+      assert(removed.forall(file => table.fileIO().exists(paths.toPath(file))))
+      assert(nearest("region = 'apac'").isEmpty)
+      assert(nearest("tenant = 'rare' AND region = 'apac'").isEmpty)
+      assert(nearest("tenant = 'rare'") == Seq(11))
+      assert(runSql(drop).head.getBoolean(0))
+      assert(snapshots.latestSnapshot().id() == afterSnapshot.id())
+
+      runSql("UPDATE T SET region = 'emea' WHERE p = 1 AND id = 11")
+      assert(filesByPartition(snapshots.latestSnapshot()) == after)
+      runSql(
+        """CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}', partitions=>'p=1')""".stripMargin)
+      assert(nearest("region = 'emea'") == Seq(11))
+    }
+  }
+
+  test("drop_global_index_fields rejects a last field or a stale generation") {
+    withTable("T") {
+      runSql(
+        """CREATE TABLE T (v ARRAY<FLOAT>, tenant STRING, region STRING, tier INT, p INT)
+          |PARTITIONED BY (p) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      runSql("""INSERT INTO T VALUES
+               |(array(0.0f, 0.0f), 'a', 'us', 1, 0),
+               |(array(1.0f, 0.0f), 'b', 'us', 2, 1)""".stripMargin)
+      def build(partition: Int, fields: String): Unit = {
+        runSql(
+          s"""CALL sys.create_global_index(table=>'test.T', index_column=>'v',
+             |index_type=>'ivf-flat', partitions=>'p=$partition', extra_fields=>'$fields',
+             |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1,ivf-flat.nlist=1')""".stripMargin)
+      }
+      build(0, """{"tenant":"bitmap","region":"bitmap"}""")
+      build(1, """{"region":"bitmap"}""")
+
+      val table = loadTable("T")
+      val snapshots = table.snapshotManager()
+      val handler = table.store().newIndexFileHandler()
+      val before = snapshots.latestSnapshot()
+      val drop = """CALL sys.drop_global_index_fields(table=>'test.T', index_column=>'v',
+                   |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}'""".stripMargin
+      val last = intercept[Exception](runSql(s"$drop)"))
+      assert(Iterator.iterate[Throwable](last)(_.getCause).takeWhile(_ != null).exists {
+        e => Option(e.getMessage).exists(_.contains("At least one Bitmap field must remain"))
+      })
+      assert(snapshots.latestSnapshot().id() == before.id())
+
+      val partition = SparkProcedureUtils.convertPartitionsToPartitionPredicate("p=0", table, spark)
+      val rowType = table.rowType()
+      val stale = CentroidBitmapFields.drop(
+        table,
+        "ivf-flat",
+        rowType.getField("v"),
+        Seq(rowType.getField("region")).asJava,
+        partition)
+      runSql(
+        """CALL sys.add_global_index_fields(table=>'test.T', index_column=>'v',
+          |index_type=>'ivf-flat', extra_fields=>'{"tier":"bitmap"}', partitions=>'p=0')""".stripMargin)
+      val added = snapshots.latestSnapshot()
+      val files = handler.scan(added, "ivf-flat").asScala.map(_.indexFile()).toSet
+      val commit = table.newCommit("stale-bitmap-drop")
+      try {
+        val conflict = intercept[Exception](commit.commit(stale))
+        assert(Iterator.iterate[Throwable](conflict)(_.getCause).takeWhile(_ != null).exists {
+          e => Option(e.getMessage).exists(_.contains("metadata does not match the current entry"))
+        })
+      } finally {
+        commit.close()
+      }
+      assert(snapshots.latestSnapshot().id() == added.id())
+      val paths = table.store().pathFactory().globalIndexFileFactory()
+      assert(files.forall(file => table.fileIO().exists(paths.toPath(file))))
+      assert(runSql(s"$drop, partitions=>'p=0')").head.getBoolean(0))
+      val remainingIds = Seq("tenant", "tier").map(rowType.getField(_).id())
+      val remaining = handler
+        .scan(snapshots.latestSnapshot(), "ivf-flat")
+        .asScala
+        .filter(_.partition().getInt(0) == 0)
+      assert(remaining.nonEmpty)
+      assert(
+        remaining.forall(_.indexFile().globalIndexMeta().extraFieldIds().toSeq == remainingIds))
+    }
+  }
+
+  test("drop_global_index_fields rejects a retained Bitmap for a dropped column") {
+    withTable("T") {
+      runSql(
+        """CREATE TABLE T (v ARRAY<FLOAT>, tenant STRING, region STRING) TBLPROPERTIES (
+          |'bucket'='-1', 'row-tracking.enabled'='true', 'data-evolution.enabled'='true')""".stripMargin)
+      runSql("INSERT INTO T VALUES (array(0.0f, 0.0f), 'tenant', 'us')")
+      runSql(
+        """CALL sys.create_global_index(table=>'test.T', index_column=>'v', index_type=>'ivf-flat',
+          |extra_fields=>'{"tenant":"bitmap","region":"bitmap"}',
+          |options=>'ivf-flat.sharding=centroid,ivf-flat.dimension=2,ivf-flat.centroid.nlist=1')""".stripMargin)
+      val tenantId = loadTable("T").rowType().getField("tenant").id()
+      runSql("ALTER TABLE T DROP COLUMN tenant")
+
+      val table = loadTable("T")
+      assert(!table.rowType().containsField(tenantId))
+      val snapshots = table.snapshotManager()
+      val before = snapshots.latestSnapshot().id()
+      val failure = intercept[Exception] {
+        runSql("""CALL sys.drop_global_index_fields(table=>'test.T', index_column=>'v',
+                 |index_type=>'ivf-flat', extra_fields=>'{"region":"bitmap"}')""".stripMargin)
+      }
+      val message =
+        s"Retained Bitmap field ID $tenantId is missing from the table schema. Rebuild the centroid index."
+      assert(Iterator.iterate[Throwable](failure)(_.getCause).takeWhile(_ != null).exists {
+        e => Option(e.getMessage).contains(message)
+      })
+      assert(snapshots.latestSnapshot().id() == before)
     }
   }
 

@@ -37,8 +37,6 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -48,14 +46,12 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.InstantiationUtil;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
@@ -77,6 +73,7 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -91,6 +88,9 @@ import java.util.stream.IntStream;
 
 import scala.Tuple2;
 
+import static org.apache.paimon.spark.globalindex.CentroidBitmapFields.commitMessage;
+import static org.apache.paimon.spark.globalindex.CentroidBitmapFields.scanGroups;
+import static org.apache.paimon.spark.globalindex.CentroidBitmapFields.withExtraFields;
 import static org.apache.paimon.spark.globalindex.CentroidGlobalIndexTopoBuilder.closeOnTaskCompletion;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -115,38 +115,8 @@ public final class CentroidBitmapFieldAppender {
         requestedFields.forEach(field -> KeySerializer.create(field.type()));
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        List<IndexManifestEntry> entries =
-                snapshot == null
-                        ? Collections.emptyList()
-                        : table.store()
-                                .newIndexFileHandler()
-                                .scan(
-                                        snapshot,
-                                        entry -> {
-                                            IndexFileMeta file = entry.indexFile();
-                                            GlobalIndexMeta meta = file.globalIndexMeta();
-                                            return indexType.equals(file.indexType())
-                                                    && meta != null
-                                                    && meta.indexFieldId() == vectorField.id()
-                                                    && CentroidIndexMeta.hasBitmapFields(meta)
-                                                    && (partitionFilter == null
-                                                            || partitionFilter.test(
-                                                                    entry.partition()));
-                                        });
-        Map<Pair<BinaryRow, Range>, List<IndexManifestEntry>> groups = new HashMap<>();
-        for (IndexManifestEntry entry : entries) {
-            groups.computeIfAbsent(
-                            Pair.of(
-                                    entry.partition(),
-                                    entry.indexFile().globalIndexMeta().rowRange()),
-                            ignored -> new ArrayList<>())
-                    .add(entry);
-        }
-        checkArgument(
-                !groups.isEmpty(),
-                "No centroid %s index with Bitmap fields on column '%s' in the selected partitions.",
-                indexType,
-                vectorField.name());
+        Collection<List<IndexManifestEntry>> groups =
+                scanGroups(table, snapshot, indexType, vectorField, partitionFilter);
 
         List<CommitMessage> messages = new ArrayList<>();
         List<BitmapRange> ranges = new ArrayList<>();
@@ -162,7 +132,7 @@ public final class CentroidBitmapFieldAppender {
         byte[] sourceMeta =
                 new DataEvolutionIndexSourceMeta(snapshotId, table.schema().id()).serialize();
         IndexPathFactory paths = table.store().pathFactory().globalIndexFileFactory();
-        for (List<IndexManifestEntry> group : groups.values()) {
+        for (List<IndexManifestEntry> group : groups) {
             GlobalIndexMeta meta = group.get(0).indexFile().globalIndexMeta();
             int[] oldFieldIds = meta.extraFieldIds();
             List<DataField> addedFields =
@@ -238,20 +208,7 @@ public final class CentroidBitmapFieldAppender {
                 } else {
                     vectorCount = Math.addExact(vectorCount, file.rowCount());
                 }
-                retained.add(
-                        new IndexFileMeta(
-                                file.indexType(),
-                                file.fileName(),
-                                file.fileSize(),
-                                file.rowCount(),
-                                new GlobalIndexMeta(
-                                        current.rowRangeStart(),
-                                        current.rowRangeEnd(),
-                                        current.indexFieldId(),
-                                        extraFieldIds,
-                                        current.indexMeta(),
-                                        sourceMeta),
-                                file.externalPath()));
+                retained.add(withExtraFields(file, extraFieldIds, sourceMeta));
             }
             IndexManifestEntry first = group.get(0);
             checkState(nlist >= 0, "Missing centroid routing model.");
@@ -278,7 +235,8 @@ public final class CentroidBitmapFieldAppender {
                 projectedFields.addAll(addedFields);
             }
             messages.add(
-                    message(first.partition(), first.bucket(), retained, replaced, snapshotId));
+                    commitMessage(
+                            first.partition(), first.bucket(), retained, replaced, snapshotId));
         }
 
         if (!ranges.isEmpty()) {
@@ -472,26 +430,6 @@ public final class CentroidBitmapFieldAppender {
                         }));
     }
 
-    private static CommitMessage message(
-            BinaryRow partition,
-            int bucket,
-            List<IndexFileMeta> added,
-            List<IndexFileMeta> deleted,
-            long snapshotId) {
-        return new CommitMessageImpl(
-                        partition,
-                        bucket,
-                        null,
-                        new DataIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                added,
-                                deleted),
-                        CompactIncrement.emptyIncrement())
-                .withCheckFromSnapshot(snapshotId);
-    }
-
     private static GlobalIndexFileReadWrite indexFiles(FileStoreTable table) {
         return new GlobalIndexFileReadWrite(
                 table.fileIO(), table.store().pathFactory().globalIndexFileFactory());
@@ -617,7 +555,8 @@ public final class CentroidBitmapFieldAppender {
                             sourceMeta);
             return new CommitMessageSerializer()
                     .serialize(
-                            message(partition, bucket, added, Collections.emptyList(), snapshotId));
+                            commitMessage(
+                                    partition, bucket, added, Collections.emptyList(), snapshotId));
         }
     }
 

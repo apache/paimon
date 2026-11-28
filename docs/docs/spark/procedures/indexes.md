@@ -122,6 +122,30 @@ CALL sys.add_global_index_fields(
 );
 ```
 
+## drop_global_index_fields
+
+Remove scalar Bitmap fields from existing [Centroid Vector indexes](../../multimodal-table/global-index/centroid-vector)
+on a Data Evolution table. Each affected row-ID range must retain at least one Bitmap field.
+Rebuild the centroid index if the current table schema no longer contains a retained Bitmap field.
+The procedure commits the changes together and reuses the router, vector shard, and retained Bitmap files.
+
+Use the same arguments as `add_global_index_fields`. At least one selected range must have a
+centroid index with Bitmap fields. The procedure returns `true` on success, including when the
+requested fields are already absent from all selected ranges.
+
+Queries that relied on a removed Bitmap may fall back to filtering ANN candidates. This can reduce
+recall and return fewer than `top_k` rows even when enough rows in the table match the filter.
+
+```sql
+CALL sys.drop_global_index_fields(
+  table => 'db.model_embeddings',
+  index_column => 'embedding',
+  index_type => 'ivf-pq',
+  extra_fields => '{"region":"bitmap"}',
+  partitions => 'dt="2026-11-17"'
+);
+```
+
 ## drop_global_index
 
 Drop global index files for a given column.
