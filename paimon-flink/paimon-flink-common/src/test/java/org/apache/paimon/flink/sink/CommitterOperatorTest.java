@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
@@ -30,12 +32,19 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.ThrowingConsumer;
 
@@ -131,6 +140,94 @@ public class CommitterOperatorTest extends CommitterTestBase {
         testHarness.open();
         assertResults(table, "1, 10", "2, 20");
         testHarness.close();
+    }
+
+    @Test
+    public void testRestoreDroppedCompactionRecoveryDoesNotFailAgain() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
+                .createTable(
+                        new Schema(
+                                RowType.of(
+                                                new DataType[] {
+                                                    DataTypes.INT(), DataTypes.BIGINT()
+                                                },
+                                                new String[] {"a", "b"})
+                                        .getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("a"),
+                                conf.toMap(),
+                                ""));
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), conf);
+
+        List<CommitMessage> pendingMessages;
+        List<CommitMessage> concurrentMessages;
+        try (IOManager ioManager = new IOManagerImpl(tempDir.toString())) {
+            try (StreamTableWrite seedWrite = table.newWrite("seed").withIOManager(ioManager);
+                    StreamTableCommit seedCommit = table.newCommit("seed")) {
+                seedWrite.write(GenericRow.of(1, 10L));
+                seedWrite.write(GenericRow.of(4, 40L));
+                seedCommit.commit(1, seedWrite.prepareCommit(true, 1));
+            }
+            try (StreamTableWrite writer =
+                            table.newWrite(initialCommitUser).withIOManager(ioManager);
+                    StreamTableWrite otherWriter =
+                            table.newWrite("other").withIOManager(ioManager)) {
+                writer.write(GenericRow.of(2, 20L));
+                pendingMessages = writer.prepareCommit(true, 2);
+                otherWriter.write(GenericRow.of(3, 30L));
+                concurrentMessages = otherWriter.prepareCommit(true, 1);
+            }
+        }
+
+        // Checkpoint 2 holds both the APPEND and the COMPACT phase, but is not notified.
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        long timestamp = 1;
+        for (CommitMessage message : pendingMessages) {
+            testHarness.processElement(new Committable(2, message), timestamp++);
+        }
+        OperatorSubtaskState snapshot = testHarness.snapshot(2, timestamp++);
+        testHarness.close();
+
+        // Only the APPEND phase of checkpoint 2 was published before the failure.
+        List<CommitMessage> appendOnly = new ArrayList<>();
+        for (CommitMessage message : pendingMessages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            appendOnly.add(
+                    new CommitMessageImpl(
+                            impl.partition(),
+                            impl.bucket(),
+                            impl.totalBuckets(),
+                            impl.newFilesIncrement(),
+                            CompactIncrement.emptyIncrement(),
+                            impl.checkFromSnapshot()));
+        }
+        try (StreamTableCommit commit = table.newCommit(initialCommitUser)) {
+            commit.commit(2, appendOnly);
+        }
+        // Another writer compacts the same bucket, so the recovered compaction is stale.
+        try (StreamTableCommit otherCommit = table.newCommit("other")) {
+            otherCommit.commit(1, concurrentMessages);
+        }
+        long latest = table.snapshotManager().latestSnapshotId();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        // The stale compaction is dropped without publishing a snapshot, so restoring the same
+        // checkpoint must not fail intentionally again and again.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            testHarness = createRecoverableTestHarness(table);
+            testHarness.initializeState(snapshot);
+            testHarness.open();
+            testHarness.close();
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(latest);
+        }
     }
 
     @Test
