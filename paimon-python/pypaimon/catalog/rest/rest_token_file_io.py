@@ -22,19 +22,24 @@ import time
 import weakref
 from datetime import timedelta
 from typing import Optional, Union
+from urllib.parse import urlparse
 
 from cachetools import TTLCache
 
 from pypaimon.api.auth.bearer import BearTokenAuthProvider
 from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.io_cache_file_io import (IoCacheRoutingFileIO,
+                                                  table_view_spec)
+from pypaimon.filesystem.io_cache_routing import (IoCacheRouting,
+                                                  effective_options,
+                                                  schema_file_prefixes,
+                                                  with_catalog_overrides)
 
 
 class RESTTokenFileIO(FileIO):
@@ -65,6 +70,10 @@ class RESTTokenFileIO(FileIO):
                       "fds": None, "next_scan": 0.0}
     _SHORT_TOKEN_STATS = {"count": 0, "next_log": 0.0}
 
+    # The table view each FileIO is built for, see FileIO.origin_only and for_table.
+    _origin_only = False
+    _table: Optional[tuple] = None
+
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
         self.identifier = identifier
@@ -78,6 +87,8 @@ class RESTTokenFileIO(FileIO):
             self.catalog_options = catalog_options
         self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
+        # The token as the REST server vended it, without this catalog's overrides.
+        self._vended_token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
@@ -126,8 +137,42 @@ class RESTTokenFileIO(FileIO):
         for file_io in list(cls._INSTANCES):
             file_io._token_lock = threading.Lock()
 
+    def origin_only(self) -> FileIO:
+        return self if self._origin_only else self._with_view(True, None)
+
+    def for_table(self, table_path: str, file_prefixes, branch: str) -> FileIO:
+        if self._origin_only:
+            return self
+        table = table_view_spec(self._table, table_path, file_prefixes, branch)
+        return self if table == self._table else self._with_view(False, table)
+
+    def _with_view(self, origin_only: bool, table) -> 'RESTTokenFileIO':
+        # Same token and caches; each FileIO it returns is the view of the cached one.
+        view = RESTTokenFileIO.__new__(RESTTokenFileIO)
+        view.__setstate__(self.__getstate__())
+        view.api_instance = self.api_instance
+        view._origin_only = origin_only
+        view._table = table
+        return view
+
+    def _table_view(self, file_io: FileIO) -> FileIO:
+        if self._origin_only:
+            return file_io.origin_only()
+        if self._table is None or not isinstance(file_io, IoCacheRoutingFileIO):
+            return file_io
+        return file_io.table_view(self._table, self._catalog_schema_prefixes)
+
+    def _catalog_schema_prefixes(self, branch: str):
+        # A REST catalog may keep a branch's schema without a schema directory in storage.
+        if self.api_instance is None:
+            self.api_instance = RESTApi(self.properties, False)
+        identifier = Identifier.create(self.identifier.get_database_name(), self.identifier.get_table_name(),
+                                       branch=None if branch == "main" else branch)
+        schema = self.api_instance.get_table(identifier).schema
+        return schema_file_prefixes(schema.options) if schema is not None else []
+
     def file_io(self) -> FileIO:
-        return self._file_io_with_token()[0]
+        return self._table_view(self._file_io_with_token()[0])
 
     def _file_io_with_token(self, minimum_validity_millis: int = 0):
         with self._token_lock:
@@ -151,7 +196,7 @@ class RESTTokenFileIO(FileIO):
                 cache = self._FILE_IO_CACHE
                 file_io = cache.get(cache_key)
                 if file_io is None:
-                    file_io = FileIO.get(self.path, self._merged_options(token))
+                    file_io = self._create_file_io(self._merged_options(token))
                     self._log_file_io_created(cache)
                 # Re-inserting on every access expires idle entries only, like expireAfterAccess.
                 cache[cache_key] = file_io
@@ -199,24 +244,32 @@ class RESTTokenFileIO(FileIO):
         return self._file_io_scope
 
     def _merged_options(self, token: RESTToken) -> Options:
-        merged_properties = RESTUtil.merge(
-            self.catalog_options.to_map() if self.catalog_options else {},
-            token.token
-        )
-        if self.catalog_options:
-            dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-        return Options(merged_properties)
+        return Options(effective_options(self._catalog_map(), token.token))
+
+    def _catalog_map(self) -> dict:
+        return self.catalog_options.to_map() if self.catalog_options else {}
+
+    def _create_file_io(self, options: Options) -> FileIO:
+        properties = options.to_map()
+        routing = IoCacheRouting.create(properties, root=self.path)
+        if routing is None or urlparse(self.path).scheme != "oss":
+            return FileIO.get(self.path, options)
+        self.log.info(
+            "io-cache routing enabled for [%s], targets %s, origin endpoint %s",
+            self.identifier, routing.targets(), routing.origin_endpoint())
+        origin = FileIO.get(self.path, Options(routing.origin_options(properties)))
+        return IoCacheRoutingFileIO(
+            routing, origin,
+            lambda name: FileIO.get(self.path, Options(routing.target_options(properties, name))))
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
-        merged_token = dict(token)
-        if self.catalog_options:
-            dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-        return merged_token
+        return with_catalog_overrides(token, self._catalog_map())
+
+    def _adopt(self, vended: RESTToken):
+        # The shared token cache keeps the vended token; this instance applies its own catalog's overrides.
+        self._vended_token = vended
+        self.token = RESTToken(self._merge_token_with_catalog_options(vended.token), vended.expire_at_millis)
 
     def new_input_stream(self, path: str):
         return self.file_io().new_input_stream(path)
@@ -328,7 +381,7 @@ class RESTTokenFileIO(FileIO):
 
         cached_token = self._get_cached_token(identifier_str)
         if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
-            self.token = cached_token
+            self._adopt(cached_token)
             return
 
         global_lock = self._get_global_token_lock(identifier_str)
@@ -336,13 +389,13 @@ class RESTTokenFileIO(FileIO):
         with global_lock:
             cached_token = self._get_cached_token(identifier_str)
             if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
-                self.token = cached_token
+                self._adopt(cached_token)
                 return
 
             token_to_check = cached_token if cached_token else self.token
             if token_to_check is None or self._is_token_expired(token_to_check, minimum_validity_millis):
                 self.refresh_token()
-                self._set_cached_token(identifier_str, self.token)
+                self._set_cached_token(identifier_str, self._vended_token)
 
     def _get_cached_token(self, identifier_str: str) -> Optional[RESTToken]:
         with self._TOKEN_LOCKS_LOCK:
@@ -413,11 +466,9 @@ class RESTTokenFileIO(FileIO):
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
 
-        merged_token_dict = self._merge_token_with_catalog_options(response.token)
-        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
-        self.token = new_token
-        if self._is_token_expired(new_token):
-            self._log_short_token(new_token)
+        self._adopt(RESTToken(response.token, response.expires_at_millis))
+        if self._is_token_expired(self.token):
+            self._log_short_token(self.token)
 
     def _log_short_token(self, token: RESTToken):
         with self._TOKEN_LOCKS_LOCK:

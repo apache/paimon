@@ -40,7 +40,8 @@ class IcebergTable(Table):
         comment: Optional[str] = None,
         uuid: Optional[str] = None,
     ):
-        self.file_io = file_io
+        # Iceberg writers own these files.
+        self.file_io = file_io.origin_only()
         self.identifier = identifier
         self._table_schema = table_schema
         self._location = location.rstrip("/")

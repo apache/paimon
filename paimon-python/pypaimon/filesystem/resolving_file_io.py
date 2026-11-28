@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import copy
 from collections import defaultdict
 from typing import Dict, List
 from urllib.parse import urlparse
@@ -33,6 +34,12 @@ class ResolvingFileIO(FileIO):
     This is the Python equivalent of Java's ``ResolvingFileIO``.
     """
 
+    # Views applied to each resolved FileIO, see origin_only and for_table.
+    _views: tuple = ()
+    # False on an io-cache target, for the PyArrowFileIOs it resolves.
+    creates_parent_dirs = True
+    cleans_up_failed_writes = True
+
     def __init__(self, catalog_options: Options):
         opts_map = dict(catalog_options.to_map())
         opts_map.pop(CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(), None)
@@ -49,8 +56,26 @@ class ResolvingFileIO(FileIO):
         fileio = self._fileio_cache.get(cache_key)
         if fileio is None:
             fileio = FileIO.get(path, self._options)
+            from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+            if isinstance(fileio, PyArrowFileIO):
+                fileio.creates_parent_dirs = self.creates_parent_dirs
+                fileio.cleans_up_failed_writes = self.cleans_up_failed_writes
             self._fileio_cache[cache_key] = fileio
+        for view in self._views:
+            fileio = fileio.origin_only() if view[0] == "origin" else fileio.for_table(*view[1:])
         return fileio
+
+    def origin_only(self) -> FileIO:
+        return self._with_view(("origin",))
+
+    def for_table(self, table_path: str, file_prefixes, branch: str) -> FileIO:
+        return self._with_view(("table", table_path, tuple(file_prefixes), branch))
+
+    def _with_view(self, view) -> 'ResolvingFileIO':
+        # A view shares the resolved FileIOs and applies itself to each of them.
+        resolving = copy.copy(self)
+        resolving._views = self._views + (view,)
+        return resolving
 
     @property
     def properties(self):
@@ -70,6 +95,9 @@ class ResolvingFileIO(FileIO):
 
     def new_output_stream(self, path: str):
         return self._get_fileio(path).new_output_stream(path)
+
+    def create_parent_dirs(self, path: str):
+        return self._get_fileio(path).create_parent_dirs(path)
 
     def get_file_status(self, path: str):
         return self._get_fileio(path).get_file_status(path)
@@ -134,6 +162,9 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_mosaic(path, data, **kwargs)
 
     def close(self):
+        if self._views:
+            # A view shares the FileIOs of the ResolvingFileIO it was made from, which closes them.
+            return
         first_error = None
         try:
             self.uri_reader_factory.close()
