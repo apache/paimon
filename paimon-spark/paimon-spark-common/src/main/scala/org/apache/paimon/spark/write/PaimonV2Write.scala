@@ -24,7 +24,8 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.commands.SchemaEvolutionHelper
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
+import org.apache.paimon.spark.util.OptionUtils.writeParallelism
+import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -59,6 +60,14 @@ class PaimonV2Write(
     }
     logInfo(s"Requesting $distribution as write distribution for table ${table.name()}")
     distribution
+  }
+
+  override def requiredNumPartitions(): Int = {
+    if (!PaimonWriteRequirement.requiresQueryPreparation && table.bucketMode() == HASH_FIXED) {
+      writeParallelism(coreOptions).getOrElse(0)
+    } else {
+      0
+    }
   }
 
   override def requiredOrdering(): Array[SortOrder] = {

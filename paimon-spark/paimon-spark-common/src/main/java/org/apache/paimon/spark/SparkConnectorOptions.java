@@ -88,6 +88,15 @@ public class SparkConnectorOptions {
                                     + "If true, also allow lossy type changes between compatible types "
                                     + "(e.g. BIGINT -> INT, STRING -> DATE).");
 
+    public static final ConfigOption<Integer> WRITE_PARALLELISM =
+            key("write.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "For fixed-bucket tables, a positive value sets the number of shuffle partitions for the write. "
+                                    + "If the option is unset, zero, or negative, Spark determines the write shuffle "
+                                    + "parallelism for each statement using its usual planning rules.");
+
     public static final ConfigOption<Boolean> USE_V2_WRITE =
             key("write.use-v2-write")
                     .booleanType()

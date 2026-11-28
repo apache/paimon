@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.PartitionSinkStrategy
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.spark.commands.FixedBucketExpression
+import org.apache.paimon.spark.util.OptionUtils.writeParallelism
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.table.BucketMode._
 
@@ -68,8 +69,16 @@ object PaimonWriteRequirement extends SQLConfHelper {
 
     apply(table).distribution match {
       case clustered: ClusteredDistribution =>
+        val numPartitions = if (table.bucketMode() == HASH_FIXED) {
+          writeParallelism(table.coreOptions())
+        } else {
+          None
+        }
         // Leave the count unspecified so AQE can coalesce the bucket shuffle on Spark 3.2/3.3.
-        Compatibility.repartitionByExpression(clustered.clustering().map(bind).toSeq, query)
+        Compatibility.repartitionByExpression(
+          clustered.clustering().map(bind).toSeq,
+          query,
+          numPartitions)
       case _ => query
     }
   }
