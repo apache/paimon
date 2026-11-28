@@ -1500,11 +1500,17 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
-        SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
+        boolean isMainBranch = DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault());
+        FileSystemSchemaManager schemaManager =
+                schemaManager(identifier, getTableLocation(identifier));
         TableSchema schema;
         try {
             // first commit changes to underlying files
-            schema = runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            // Main-branch ALTERs need separate versions: a failed HMS update may delete this
+            // call's version after a concurrent ALTER has already completed successfully.
+            schema =
+                    runWithLock(
+                            identifier, () -> schemaManager.commitChanges(changes, !isMainBranch));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
@@ -1515,7 +1521,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         // currently only changes to main branch affects metastore
-        if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
+        if (!isMainBranch) {
             return;
         }
 
@@ -2014,7 +2020,7 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private SchemaManager schemaManager(Identifier identifier, Path location) {
+    private FileSystemSchemaManager schemaManager(Identifier identifier, Path location) {
         return new FileSystemSchemaManager(
                 fileIO(location), location, identifier.getBranchNameOrDefault());
     }

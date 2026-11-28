@@ -73,6 +73,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -309,6 +314,166 @@ public class HiveCatalogTest extends CatalogTestBase {
             assertThat(tableProperties).containsEntry("table.create_time", "2024-01-22");
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
+        }
+    }
+
+    @ParameterizedTest(name = "unchanged = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testAlterTableFailurePreservesExistingSchema(boolean unchanged) throws Exception {
+        String databaseName = "test_db";
+        Identifier identifier = Identifier.create(databaseName, "new_table");
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder().column("id", DataTypes.INT()).option("key", "value").build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = table.schemaManager();
+        TableSchema original = table.schema();
+
+        Field clientField = HiveCatalog.class.getDeclaredField("clients");
+        clientField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ClientPool<IMetaStoreClient, TException> clients =
+                (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+        TException failure = new TException("Metastore update failed");
+        ClientPool<IMetaStoreClient, TException> failingClients =
+                new ClientPool<IMetaStoreClient, TException>() {
+                    @Override
+                    public <R> R run(Action<R, IMetaStoreClient, TException> action)
+                            throws TException, InterruptedException {
+                        return clients.run(action);
+                    }
+
+                    @Override
+                    public void execute(ExecuteAction<IMetaStoreClient, TException> action)
+                            throws TException {
+                        throw failure;
+                    }
+                };
+
+        clientField.set(catalog, failingClients);
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier,
+                                            SchemaChange.setOption(
+                                                    "key", unchanged ? "value" : "changed"),
+                                            false))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasCause(failure);
+        } finally {
+            clientField.set(catalog, clients);
+        }
+
+        assertThat(schemaManager.listAllIds())
+                .as("The existing schema must survive a failed metastore update")
+                .containsExactly(original.id());
+        assertThat(((FileStoreTable) catalog.getTable(identifier)).schema().toString())
+                .isEqualTo(original.toString());
+    }
+
+    @ParameterizedTest(name = "main branch = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testUnchangedAlterSchemaReuse(boolean mainBranch) throws Exception {
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder().column("id", DataTypes.INT()).option("key", "value").build(),
+                false);
+        if (!mainBranch) {
+            ((FileStoreTable) catalog.getTable(identifier)).createBranch("dev");
+            identifier =
+                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), "dev");
+        }
+        SchemaManager schemaManager =
+                ((FileStoreTable) catalog.getTable(identifier)).schemaManager();
+        TableSchema original = schemaManager.latest().get();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("key", "value"), false);
+
+        TableSchema result = schemaManager.latest().get();
+        assertThat(result.id()).isEqualTo(original.id() + (mainBranch ? 1 : 0));
+        assertThat(result.fields()).isEqualTo(original.fields());
+        assertThat(result.options()).isEqualTo(original.options());
+        assertThat(schemaManager.listAllIds()).hasSize(mainBranch ? 2 : 1);
+    }
+
+    @Test
+    public void testConcurrentAlterSurvivesMetastoreFailure() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("payload", DataTypes.INT()).build(), false);
+        SchemaManager schemaManager =
+                ((FileStoreTable) catalog.getTable(identifier)).schemaManager();
+
+        Field clientField = HiveCatalog.class.getDeclaredField("clients");
+        clientField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ClientPool<IMetaStoreClient, TException> clients =
+                (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+        CountDownLatch firstAtMetastore = new CountDownLatch(1);
+        CountDownLatch secondCompleted = new CountDownLatch(1);
+        AtomicBoolean firstUpdate = new AtomicBoolean(true);
+        TException failure = new TException("First metastore update failed");
+        clientField.set(
+                catalog,
+                new ClientPool<IMetaStoreClient, TException>() {
+                    @Override
+                    public <R> R run(Action<R, IMetaStoreClient, TException> action)
+                            throws TException, InterruptedException {
+                        return clients.run(action);
+                    }
+
+                    @Override
+                    public void execute(ExecuteAction<IMetaStoreClient, TException> action)
+                            throws TException, InterruptedException {
+                        if (firstUpdate.getAndSet(false)) {
+                            firstAtMetastore.countDown();
+                            assertThat(secondCompleted.await(30, TimeUnit.SECONDS)).isTrue();
+                            throw failure;
+                        }
+                        clients.execute(action);
+                    }
+                });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        SchemaChange change = SchemaChange.updateColumnType("payload", DataTypes.BIGINT());
+        try {
+            Future<?> first =
+                    executor.submit(
+                            () ->
+                                    assertThatThrownBy(
+                                                    () ->
+                                                            catalog.alterTable(
+                                                                    identifier, change, false))
+                                            .isInstanceOf(RuntimeException.class)
+                                            .hasCause(failure));
+            assertThat(firstAtMetastore.await(30, TimeUnit.SECONDS)).isTrue();
+
+            catalog.alterTable(identifier, change, false);
+            secondCompleted.countDown();
+            first.get(30, TimeUnit.SECONDS);
+
+            assertThat(schemaManager.latest().get().fields().get(0).type())
+                    .isEqualTo(DataTypes.BIGINT());
+            Table hmsTable =
+                    clients.run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
+            assertThat(hmsTable.getSd().getCols().get(0).getType()).isEqualTo("bigint");
+        } finally {
+            secondCompleted.countDown();
+            executor.shutdownNow();
+            try {
+                assertThat(executor.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                clientField.set(catalog, clients);
+            }
         }
     }
 

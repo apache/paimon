@@ -202,6 +202,19 @@ public class FileSystemSchemaManager implements SchemaManager {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
+        return commitChanges(changes, true);
+    }
+
+    /**
+     * Update {@link SchemaChange}s, optionally reusing the latest schema if it is unchanged.
+     *
+     * @param allowSchemaReuse whether an unchanged result can reuse the latest schema version.
+     *     Callers that may roll back their schema commit must disable reuse so that each ALTER has
+     *     its own version to delete.
+     */
+    public TableSchema commitChanges(List<SchemaChange> changes, boolean allowSchemaReuse)
+            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+                    Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager =
                 new SnapshotManager(fileIO, tableRoot, branch, null, null);
         LazyField<Boolean> hasSnapshots =
@@ -222,6 +235,19 @@ public class FileSystemSchemaManager implements SchemaManager {
             TableSchema newTableSchema =
                     SchemaManager.generateTableSchema(
                             oldTableSchema, changes, hasSnapshots, lazyIdentifier);
+            // Ignore the revision ID and timestamp without normalizing the persisted content.
+            if (allowSchemaReuse
+                    && oldTableSchema.version() == newTableSchema.version()
+                    && oldTableSchema.highestFieldId() == newTableSchema.highestFieldId()
+                    && oldTableSchema.fields().equals(newTableSchema.fields())
+                    && oldTableSchema.partitionKeys().equals(newTableSchema.partitionKeys())
+                    && oldTableSchema.primaryKeys().equals(newTableSchema.primaryKeys())
+                    && oldTableSchema.options().equals(newTableSchema.options())
+                    && Objects.equals(oldTableSchema.comment(), newTableSchema.comment())) {
+                // Branch existence can change even when the schema is unchanged.
+                SchemaValidation.validateFallbackBranch(this, newTableSchema);
+                return oldTableSchema;
+            }
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
