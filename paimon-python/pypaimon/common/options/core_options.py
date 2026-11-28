@@ -165,6 +165,7 @@ class CoreOptions:
     NESTED_KEY = "nested-key"
     NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
     NESTED_SEQUENCE_FIELD = "nested-sequence-field"
+    NESTED_SEQUENCE_OVERWRITE_ON_EQUAL = "nested-sequence-overwrite-on-equal"
     COUNT_LIMIT = "count-limit"
     MERGE_MAP_TS_FIELD = "ts-field"
     MERGE_MAP_OVERWRITE_ON_EQUAL_TS = "overwrite-on-equal-ts"
@@ -2195,6 +2196,17 @@ class CoreOptions:
         if not key_string:
             return []
         return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_sequence_overwrite_on_equal(
+            self, field_name: str) -> bool:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.'
+                f'{CoreOptions.NESTED_SEQUENCE_OVERWRITE_ON_EQUAL}'
+            )
+            .boolean_type()
+            .default_value(True)
+        )
 
     def field_nested_update_agg_nested_key_null_strategy(self, field_name: str) -> NestedKeyNullStrategy:
         return self.options.get(

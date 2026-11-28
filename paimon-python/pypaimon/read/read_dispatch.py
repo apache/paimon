@@ -81,6 +81,10 @@ def _native_read_execution(read):
     """Select Native before importing its reader; disabled reads stay Python."""
     if not read.table.options.native_read_enabled():
         return native_read_fallback(read, 'read.native.enabled is false')
+    from pypaimon.common.native_compatibility import require_native_compatible
+    reason = require_native_compatible(read.table.options, allow_python_fallback=True)
+    if reason is not None:
+        return native_read_fallback(read, reason)
     from pypaimon.execution.native.read.table_read import NativeTableRead
     return NativeTableRead(read)
 
@@ -426,6 +430,15 @@ def native_read_fallback(read, reason, error=None, log=False):
     """Validate features that cannot fall back before importing either executor."""
     from pypaimon.read.variant_read_type import has_variant_extractions
     if has_variant_extractions(read.read_type):
+        # Prefer the nested-update policy reason when Native was refused for it:
+        # do not continue with an unsupported Native equal-sequence policy.
+        from pypaimon.common.native_compatibility import (
+            nested_update_overwrite_on_equal_false_reason)
+        policy = nested_update_overwrite_on_equal_false_reason(read.table.options)
+        if policy is not None:
+            raise RuntimeError(
+                "Variant extraction requires a compatible native reader, but %s"
+                % policy) from error
         raise RuntimeError(
             "Variant extraction requires a compatible native reader: %s" % reason) from error
     if log:

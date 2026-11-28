@@ -97,6 +97,11 @@ def _prepare_write(table, commit_user, static_partition, stream,
     from pypaimon.read.merge_engine_support import check_sequence_field_supported
     check_sequence_field_supported(table)
     if table.options.native_write_enabled():
+        from pypaimon.common.native_compatibility import require_native_compatible
+        # nested-sequence-overwrite-on-equal=false must not enter Native write.
+        if require_native_compatible(table.options, allow_python_fallback=True) is not None:
+            return None
+
         def prepare():
             from pypaimon.execution.native.write.native_write import create_native_write
             return create_native_write(
@@ -253,6 +258,9 @@ def prepare_native_commit(owner, messages, *, batch=False):
 
 def prepare_native_write_operation(operation, table, commit_user, *args, **kwargs):
     if not table.options.native_write_enabled():
+        return None
+    from pypaimon.common.native_compatibility import require_native_compatible
+    if require_native_compatible(table.options, allow_python_fallback=True) is not None:
         return None
     names = {
         'update': 'create_native_update',

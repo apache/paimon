@@ -269,6 +269,12 @@ count of distinct event IDs.
    - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
 
   Use `fields.<field-name>.nested-sequence-field=seq0,seq1,...` to control the update sequence of a nested table, you must configure `fields.<field-name>.nested-key` when using it.
+  Multi-field sequences are compared lexicographically in configuration order (nulls first). A nested ROW is overwritten when its sequence is greater
+  than the accumulated one; when sequences are equal, overwrite behavior is controlled by
+  `fields.<field-name>.nested-sequence-overwrite-on-equal` (default `true`). Set it to `false` for first-wins conflict resolution when different
+  payloads share an equal nested sequence (only a strictly greater sequence overwrites). This does not by itself suppress changelog emission for
+  identical record replays; that still depends on existing lookup row deduplication. This option requires
+  `fields.<field-name>.nested-sequence-field` to be configured.
 
   Use `fields.<field-name>.count-limit=<Integer>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
   sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
