@@ -353,7 +353,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       val map = new mutable.HashMap[Long, List[Long]]()
       val files = tableSplits
         .flatMap(_.dataFiles().asScala)
-        .filter(file => isBlobFile(file.fileName()))
+        // Blob and vector-store files roll on their own size, so a range may hold several of
+        // them, starting at row ids that are not the first row id of any normal file.
+        .filter(file => isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName()))
         .sortBy(f => f.firstRowId())
 
       for (file <- files) {
@@ -1382,14 +1384,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       .filter(col(FIRST_ROW_ID_NAME).isNotNull)
       .distinct()
       .as[Long]
-      .flatMap(
-        f => {
-          if (firstRowIdToBlobFirstRowIds.contains(f)) {
-            firstRowIdToBlobFirstRowIds(f)
-          } else {
-            Seq(f)
-          }
-        })
+      // Keep the range start too: the writer looks the range up by it, and the range's blob or
+      // vector-store files may all start at later row ids.
+      .flatMap(f => f :: firstRowIdToBlobFirstRowIds.getOrElse(f, Nil))
       .collect()
   }
 

@@ -60,6 +60,7 @@ class DataEvolutionVectorReadPlanner {
         boolean vectorOnly = files.stream().allMatch(file -> isVectorStoreFile(file.fileName()));
         Map<Integer, VectorStoreBunchKey> fieldGroups = new HashMap<>();
         Set<Integer> vectorReadIds = new HashSet<>();
+        Map<VectorStoreBunchKey, List<DataFileMeta>> filesByKey = new HashMap<>();
         List<Candidate> candidates = new ArrayList<>();
         boolean overlappingGroups = false;
         Range logicalRange = null;
@@ -82,6 +83,7 @@ class DataEvolutionVectorReadPlanner {
                             DataFilePathFactory.formatIdentifier(file.fileName()),
                             file.writeCols(),
                             rowType);
+            filesByKey.computeIfAbsent(key, ignored -> new ArrayList<>()).add(file);
             Set<Integer> fieldIds = new HashSet<>();
             for (DataField field : rowType.getFields()) {
                 // Match historical fields by id: a rename must not create a different provider.
@@ -116,6 +118,16 @@ class DataEvolutionVectorReadPlanner {
             if (!readsSequentially(fieldFiles, logicalRange, rowRanges)) {
                 partialVector = true;
                 break;
+            }
+        }
+        if (vectorOnly && !partialVector) {
+            // When every file is a vector-store file, the sequential path keeps a bunch for every
+            // vector column group, read or not, so each group must cover the range as well.
+            for (List<DataFileMeta> keyFiles : filesByKey.values()) {
+                if (!readsSequentially(keyFiles, logicalRange, rowRanges)) {
+                    partialVector = true;
+                    break;
+                }
             }
         }
 

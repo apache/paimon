@@ -44,18 +44,22 @@ import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DataEvolutionFileStoreScan}. */
 public class DataEvolutionFileStoreScanTest {
@@ -122,6 +126,7 @@ public class DataEvolutionFileStoreScanTest {
                         readType,
                         Collections.emptySet(),
                         false,
+                        false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
         assertThat(pruned)
@@ -168,6 +173,7 @@ public class DataEvolutionFileStoreScanTest {
                         Arrays.asList(anchorFile, blob),
                         readType,
                         Collections.emptySet(),
+                        false,
                         false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
@@ -227,6 +233,7 @@ public class DataEvolutionFileStoreScanTest {
                         readType,
                         Collections.emptySet(),
                         false,
+                        false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
         assertThat(pruned)
@@ -279,6 +286,7 @@ public class DataEvolutionFileStoreScanTest {
                         Arrays.asList(anchorFile, blob0, blob5),
                         readType,
                         Collections.emptySet(),
+                        false,
                         false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
@@ -337,6 +345,7 @@ public class DataEvolutionFileStoreScanTest {
                         readType,
                         Collections.emptySet(),
                         false,
+                        false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
         assertThat(pruned)
@@ -384,11 +393,85 @@ public class DataEvolutionFileStoreScanTest {
                         readType,
                         Collections.emptySet(),
                         false,
+                        false,
                         entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
 
         assertThat(pruned)
                 .extracting(e -> e.file().fileName())
                 .containsExactlyInAnyOrder("data-b1-0.blob", "data-b2-0.blob");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testReadTypePruningKeepsVectorOnlyGroupWithoutReadField(
+            boolean deletionVectorsEnabled) {
+        // A group of only vector-store files, none holding v. With no normal file to stand for
+        // the rows, pruning keeps the whole group.
+        Schema schema = createSchema("v", "e1", "e2");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry e1 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-e1-0.vector.avro",
+                        0L,
+                        new String[] {"e1"},
+                        new String[] {"e1"},
+                        null,
+                        5L,
+                        0L,
+                        4L);
+        ManifestEntry e2 =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-e2-2.vector.avro",
+                        0L,
+                        new String[] {"e2"},
+                        new String[] {"e2"},
+                        null,
+                        6L,
+                        2L,
+                        2L);
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.INT()));
+        List<ManifestEntry> group = Arrays.asList(e1, e2);
+        Function<ManifestEntry, Set<Integer>> fieldIds =
+                entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file());
+
+        assertThat(
+                        DataEvolutionFileStoreScan.pruneByReadType(
+                                group,
+                                readType,
+                                Collections.emptySet(),
+                                deletionVectorsEnabled,
+                                true,
+                                fieldIds))
+                .extracting(e -> e.file().fileName())
+                .containsExactlyInAnyOrder("data-e1-0.vector.avro", "data-e2-2.vector.avro");
+
+        // With deletion vectors, splits of other scans carry deletion files, which are looked up
+        // by the anchor. Without them, other scans prune like a delta scan.
+        if (deletionVectorsEnabled) {
+            assertThatThrownBy(
+                            () ->
+                                    DataEvolutionFileStoreScan.pruneByReadType(
+                                            group,
+                                            readType,
+                                            Collections.emptySet(),
+                                            true,
+                                            false,
+                                            fieldIds))
+                    .hasMessageContaining("must contain a normal");
+        } else {
+            assertThat(
+                            DataEvolutionFileStoreScan.pruneByReadType(
+                                    group,
+                                    readType,
+                                    Collections.emptySet(),
+                                    false,
+                                    false,
+                                    fieldIds))
+                    .extracting(e -> e.file().fileName())
+                    .containsExactlyInAnyOrder("data-e1-0.vector.avro", "data-e2-2.vector.avro");
+        }
     }
 
     @Test
