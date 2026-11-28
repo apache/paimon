@@ -21,11 +21,119 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.commands.PaimonCreateTableLikeCommand
 
+import org.apache.spark.SparkConf
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.connector.catalog.InMemoryTableCatalog
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.JavaConverters._
 
 class CatalogQualifiedCreateTableLikeTest extends PaimonSparkTestBase {
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set("spark.sql.catalog.external", classOf[InMemoryTableCatalog].getName)
+
+  test("Create table like keeps the nested namespace of a source in another catalog") {
+    assume(gteqSpark3_4)
+    withTable(
+      "external.outer.inner.source",
+      "external.`outer.inner`.source",
+      s"paimon.$dbName0.target_tbl") {
+      sql("CREATE TABLE external.outer.inner.source (intended INT)")
+      sql("CREATE TABLE external.`outer.inner`.source (wrong STRING)")
+
+      sql(s"CREATE TABLE paimon.$dbName0.target_tbl LIKE external.outer.inner.source USING paimon")
+
+      Assertions.assertEquals(
+        Seq("intended"),
+        spark.table(s"paimon.$dbName0.target_tbl").schema.fieldNames.toSeq)
+    }
+  }
+
+  test("Create table like rejects a temporary view source for a Paimon target") {
+    assume(gteqSpark3_4)
+    withTable("shadowed", "target_tbl") {
+      sql("CREATE TABLE shadowed (from_table STRING)")
+      withTempView("shadowed") {
+        sql("CREATE TEMPORARY VIEW shadowed AS SELECT 1 AS from_view")
+
+        val e = intercept[UnsupportedOperationException] {
+          sql("CREATE TABLE target_tbl LIKE shadowed")
+        }
+
+        Assertions.assertTrue(e.getMessage.contains("temporary view"), e.getMessage)
+        Assertions.assertFalse(spark.catalog.tableExists(s"paimon.$dbName0.target_tbl"))
+      }
+    }
+  }
+
+  test("Create table like never puts a target of another catalog into the session catalog") {
+    assume(gteqSpark3_4)
+    withTable(
+      "spark_catalog.default.src",
+      "spark_catalog.default.t_external",
+      "external.default.t_external") {
+      sql("CREATE NAMESPACE IF NOT EXISTS external.default")
+      sql("CREATE TABLE spark_catalog.default.src (a INT) USING parquet")
+
+      val statement = "CREATE TABLE external.default.t_external LIKE spark_catalog.default.src"
+      if (sparkVersion >= "4.2") {
+        // Spark 4.2 parses the statement itself and creates the table in `external`.
+        sql(statement)
+        Assertions.assertEquals(
+          Seq("a"),
+          spark.table("external.default.t_external").schema.fieldNames.toSeq)
+      } else {
+        val e = intercept[UnsupportedOperationException](sql(statement))
+        Assertions.assertTrue(e.getMessage.contains("session catalog"), e.getMessage)
+      }
+
+      Assertions.assertFalse(
+        spark.sessionState.catalog.tableExists(TableIdentifier("t_external", Some("default"))))
+    }
+  }
+
+  test("Create table like rejects a source of another catalog for a session catalog target") {
+    // Spark 4.2 parses this statement itself and Paimon leaves this non-Paimon target to it, so
+    // only earlier versions reach the check in `sessionCatalogCommand`.
+    assume(gteqSpark3_4 && sparkVersion < "4.2")
+    withTable("spark_catalog.default.src2", "spark_catalog.default.t2", "external.default.src2") {
+      sql("CREATE NAMESPACE IF NOT EXISTS external.default")
+      sql("CREATE TABLE external.default.src2 (from_external INT)")
+      sql("CREATE TABLE spark_catalog.default.src2 (from_session STRING) USING parquet")
+
+      val e = intercept[UnsupportedOperationException] {
+        sql("CREATE TABLE spark_catalog.default.t2 LIKE external.default.src2")
+      }
+
+      Assertions.assertTrue(e.getMessage.contains("session catalog"), e.getMessage)
+      Assertions.assertFalse(
+        spark.sessionState.catalog.tableExists(TableIdentifier("t2", Some("default"))))
+    }
+  }
+
+  test("Create table like keeps Spark's command for tables in the session catalog") {
+    assume(gteqSpark3_4)
+    withTable(
+      "spark_catalog.default.src3",
+      "spark_catalog.default.t3",
+      "spark_catalog.default.t4") {
+      sql("CREATE TABLE spark_catalog.default.src3 (a INT) USING parquet")
+
+      sql("CREATE TABLE spark_catalog.default.t3 LIKE spark_catalog.default.src3")
+      Assertions.assertEquals(
+        Seq("a"),
+        spark.table("spark_catalog.default.t3").schema.fieldNames.toSeq)
+
+      withTempView("v") {
+        sql("CREATE TEMPORARY VIEW v AS SELECT 1 AS from_view")
+        sql("CREATE TABLE spark_catalog.default.t4 LIKE v USING parquet")
+        Assertions.assertEquals(
+          Seq("from_view"),
+          spark.table("spark_catalog.default.t4").schema.fieldNames.toSeq)
+      }
+    }
+  }
 
   test("Create table like with catalog-qualified identifiers") {
     assume(gteqSpark3_4)

@@ -757,6 +757,23 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: create table like rejects a temporary view source") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withTable("view_like") {
+      withTempView("v") {
+        spark.sql("CREATE TEMPORARY VIEW v AS SELECT 1 AS from_view")
+
+        val e = intercept[UnsupportedOperationException] {
+          spark.sql("CREATE TABLE view_like LIKE v USING paimon")
+        }
+
+        Assertions.assertTrue(e.getMessage.contains("temporary view"), e.getMessage)
+        Assertions.assertFalse(spark.catalog.tableExists("view_like"))
+      }
+    }
+  }
+
   test("Paimon DDL with hive catalog: SparkGenericCatalog explicit Paimon replace") {
     assume(gteqSpark3_4)
     spark.sql(s"USE $sparkCatalogName")
