@@ -1519,7 +1519,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testRemoveRecordOnDeleteIgnoresUpdateBeforeUntilInsert() {
+    public void testRemoveRecordOnDeleteStaysDeletedOnUpdateBeforeUntilInsert() {
         Options options = new Options();
         options.set("partial-update.remove-record-on-delete", "true");
         MergeFunction<KeyValue> function =
@@ -1537,6 +1537,81 @@ public class PartialUpdateMergeFunctionTest {
         add(function, RowKind.INSERT, 1, 20);
         assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
         validate(function, 1, 20);
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithTrailingUpdateBefore() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> function =
+                PartialUpdateMergeFunction.factory(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT()),
+                                ImmutableList.of("f0"))
+                        .create();
+        function.reset();
+        add(function, 1, 10, null);
+        add(function, 1, null, 20);
+
+        // a filter in front of the sink drops the +U, so the lone -U is the last message of the
+        // key and the row must be removed instead of keeping the stale value
+        add(function, RowKind.UPDATE_BEFORE, 1, 10, null);
+        // the result stays -U, so a later merge of this result does not re-initialize the row
+        // like a DELETE and drop the columns of other writers in older files
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+        // unlike DELETE, -U does not re-initialize the row, so the -U result keeps the merged row
+        validate(function, 1, 10, 20);
+
+        // a following +U still updates the merged row, so f2 written by another writer is kept
+        add(function, RowKind.UPDATE_AFTER, 1, 11, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+        validate(function, 1, 11, 20);
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithUpdateBeforeAfterDeleteAndInsert() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> function =
+                PartialUpdateMergeFunction.factory(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT()),
+                                ImmutableList.of("f0"))
+                        .create();
+        function.reset();
+
+        // The INSERT result of a write buffer does not re-initialize the row of older files, so
+        // the +I overrides the -D, and the result stays INSERT as when the +I is merged alone.
+        add(function, RowKind.DELETE, 1, 5, null);
+        add(function, 1, 10, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+
+        // The lone -U after them gives -U as in a write buffer that was flushed after the +I,
+        // and not a DELETE that would drop the columns of other writers in older files.
+        add(function, RowKind.UPDATE_BEFORE, 1, 10, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+        validate(function, 1, 10, null);
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithOnlyUpdateBefore() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> function =
+                PartialUpdateMergeFunction.factory(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT()),
+                                ImmutableList.of("f0"))
+                        .create();
+        function.reset();
+
+        // a key with only -U records and no INSERT is still removed, but the result is -U
+        // instead of the DELETE that !meetInsert gives, so merging it with older files later
+        // keeps their columns, as when each -U is merged with the older files on its own
+        add(function, RowKind.UPDATE_BEFORE, 1, 10, null);
+        add(function, RowKind.UPDATE_BEFORE, 1, 11, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+        validate(function, 1, 11, null);
     }
 
     @ParameterizedTest
