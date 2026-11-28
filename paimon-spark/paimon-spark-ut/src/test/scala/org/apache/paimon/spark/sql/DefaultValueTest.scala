@@ -24,6 +24,47 @@ import org.apache.spark.sql.Row
 
 class DefaultValueTest extends PaimonSparkTestBase {
 
+  test("Default Value: NULL elements in an array") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, a ARRAY<INT> DEFAULT ARRAY(1, NULL))")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(Seq(1, null))))
+    }
+  }
+
+  test("Default Value: NULL map value") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, m MAP<INT, INT> DEFAULT MAP(1, NULL))")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT m FROM t"), Seq(Row(Map(1 -> null))))
+    }
+  }
+
+  test("Default Value: NULL field in a struct") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, r STRUCT<a: INT, b: INT> DEFAULT STRUCT(1, NULL))")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT r FROM t"), Seq(Row(Row(1, null))))
+    }
+  }
+
+  test("Default Value: NULL element set by ALTER COLUMN") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, a ARRAY<STRING>)")
+      sql("ALTER TABLE t ALTER COLUMN a SET DEFAULT ARRAY(\"x\", NULL)")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT a FROM t"), Seq(Row(Seq("x", null))))
+    }
+  }
+
+  test("Default Value: NULL array and struct") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, a ARRAY<INT> DEFAULT NULL, r STRUCT<b: INT> DEFAULT NULL)")
+      sql("INSERT INTO t (id) VALUES (1)")
+      checkAnswer(sql("SELECT a, r FROM t"), Seq(Row(null, null)))
+    }
+  }
+
   test("Default Value: MAP TYPE") {
     withTable("t") {
       spark.sql("""CREATE TABLE IF NOT EXISTS t (

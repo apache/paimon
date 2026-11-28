@@ -71,6 +71,9 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             BinaryString value, CastExecutor<BinaryString, Object> elementCastExecutor) {
         try {
             String str = value.toString().trim();
+            if ("NULL".equalsIgnoreCase(str)) {
+                return null;
+            }
             if ("[]".equals(str) || "ARRAY()".equalsIgnoreCase(str)) {
                 return new GenericArray(new Object[0]);
             }

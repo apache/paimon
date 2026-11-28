@@ -38,6 +38,8 @@ import org.apache.spark.sql.types.IntegerType;
 import org.apache.spark.sql.types.LongType;
 import org.apache.spark.sql.types.ShortType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -279,6 +281,53 @@ public class CatalogUtils {
     public static SchemaChange toUpdateColumnDefaultValue(TableChange tableChange) {
         TableChange.UpdateColumnDefaultValue update =
                 (TableChange.UpdateColumnDefaultValue) tableChange;
-        return SchemaChange.updateColumnDefaultValue(update.fieldNames(), update.newDefaultValue());
+        return SchemaChange.updateColumnDefaultValue(
+                update.fieldNames(), toPaimonDefaultValue(update.newDefaultValue()));
+    }
+
+    /**
+     * Converts a SQL default value to Paimon's default value literal. Paimon reads only an unquoted
+     * lowercase {@code null} inside an array, map or row literal as a null element, key, value or
+     * field, so the case-insensitive SQL keyword is lowercased there. Elsewhere the text is kept.
+     */
+    @Nullable
+    public static String toPaimonDefaultValue(@Nullable String sql) {
+        if (sql == null) {
+            return null;
+        }
+        StringBuilder result = new StringBuilder(sql.length());
+        int depth = 0;
+        char quote = 0;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (quote != 0) {
+                result.append(c);
+                if (c == '\\' && quote != '`' && i + 1 < sql.length()) {
+                    result.append(sql.charAt(++i));
+                } else if (c == quote) {
+                    quote = 0;
+                }
+            } else if (c == '\'' || c == '"' || c == '`') {
+                quote = c;
+                result.append(c);
+            } else if (Character.isLetterOrDigit(c) || c == '_') {
+                int end = i + 1;
+                while (end < sql.length()
+                        && (Character.isLetterOrDigit(sql.charAt(end)) || sql.charAt(end) == '_')) {
+                    end++;
+                }
+                String word = sql.substring(i, end);
+                result.append(depth > 0 && "null".equalsIgnoreCase(word) ? "null" : word);
+                i = end - 1;
+            } else {
+                if (c == '(' || c == '[' || c == '{') {
+                    depth++;
+                } else if (c == ')' || c == ']' || c == '}') {
+                    depth--;
+                }
+                result.append(c);
+            }
+        }
+        return result.toString();
     }
 }

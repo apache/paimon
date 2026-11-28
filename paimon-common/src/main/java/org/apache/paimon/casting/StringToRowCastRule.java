@@ -83,6 +83,9 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             int fieldCount) {
         try {
             String str = value.toString().trim();
+            if ("NULL".equalsIgnoreCase(str)) {
+                return null;
+            }
             if ("{}".equals(str) || "STRUCT()".equalsIgnoreCase(str)) {
                 return createNullRow(fieldCount);
             }

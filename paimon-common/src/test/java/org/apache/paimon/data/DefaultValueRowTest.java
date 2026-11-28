@@ -147,6 +147,26 @@ public class DefaultValueRowTest {
     }
 
     @Test
+    public void testNullRowDefaultProjectsToWriteType() {
+        RowType fullType =
+                RowType.of(
+                        new DataField(
+                                0,
+                                "nest",
+                                RowType.of(
+                                        new DataField(1, "a", DataTypes.INT()),
+                                        new DataField(2, "b", DataTypes.STRING())),
+                                null,
+                                "NULL"));
+        RowType writeType = fullType.projectByPaths(Collections.singletonList("nest.b"));
+
+        DefaultValueRow defaultValueRow = DefaultValueRow.create(writeType, fullType);
+        InternalRow row = defaultValueRow.replaceRow(GenericRow.of((Object) null));
+        assertThat(row.isNullAt(0)).isTrue();
+        assertThat(row.getRow(0, 1)).isNull();
+    }
+
+    @Test
     public void testDefaultValueRowWithRowType() {
         // Test with Row default value
         RowType innerRowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
