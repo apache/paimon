@@ -58,6 +58,8 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -87,15 +89,19 @@ public class NativeFullTextRowFilterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @Test
-    public void testFilterThenRankMatchesFilteredUnfilteredRanking() throws Exception {
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{\"match\":{\"query\":\"paimon lake\"}}",
+                "{\"match\":{\"column\":\"content\",\"terms\":\"paimon lake\"}}"
+            })
+    public void testFilterThenRankMatchesFilteredUnfilteredRanking(String query) throws Exception {
         int rowCount = 2_000;
         int categories = 8;
         Dataset dataset = writeDataset("filter_rank", rowCount, categories, 42);
         FileStoreTable table = dataset.table;
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
 
-        String query = matchQuery("paimon lake");
         int limit = 20;
 
         // Reference: rank every row without a filter, then keep the wanted category. BM25 scores

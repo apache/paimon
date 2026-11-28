@@ -92,7 +92,10 @@ All integers are **big-endian**.
 1. `NativeFullTextGlobalIndexReader` opens the archive file as a `SeekableInputStream`.
 2. The stream is passed to `paimon-full-text-index`'s `FullTextIndexReader` through a positional read adapter.
 3. The native reader reads file data on demand through `pread` callbacks backed by Paimon's file IO. No temp files are created in Paimon.
-4. Search queries are converted to the native single-column query JSON and executed with BM25 scoring, returning `(rowId, score)` pairs.
+4. Query JSON references to the selected table column (`column` or `columns`) are mapped to the
+   native field name (`text` by default, or the field configured when the index was built).
+   Queries that omit the field name use the native default field. Searches execute with BM25
+   scoring, returning `(rowId, score)` pairs.
 
 ## Usage
 
