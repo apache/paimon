@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -34,6 +35,8 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -75,6 +78,73 @@ public class SplitSerializerTest {
                 assertThat(actual).isEqualTo(readGoldenFile(goldenCase.fileName));
             }
             assertSplitEquals(goldenCase.split, SplitSerializer.deserialize(actual));
+        }
+    }
+
+    @Test
+    public void testGuardedDataSplitPinsReferencesAcrossSerialization() throws Exception {
+        IndexFileMeta guard = guard("guard-data");
+        List<IndexFileMeta> guards = new ArrayList<>(Collections.singletonList(guard));
+        DataSplit split = dataSplit(guards);
+        guards.clear();
+
+        assertThat(split.deleteOrderingGuards()).containsExactly(guard);
+        assertThat(split.rawConvertible()).isFalse();
+        assertThat(split.mergedRowCount()).isEmpty();
+        for (DataSplit restored :
+                Arrays.asList(
+                        (DataSplit) SplitSerializer.deserialize(SplitSerializer.serialize(split)),
+                        InstantiationUtil.clone(split))) {
+            assertThat(restored).isEqualTo(split);
+            assertThat(restored.deleteOrderingGuards()).containsExactly(guard);
+            assertThat(restored.rawConvertible()).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true,false,false",
+        "true,false,true",
+        "false,true,false",
+        "false,true,true",
+        "true,true,false",
+        "true,true,true"
+    })
+    public void testGuardedIncrementalSplitPinsBothEndpoints(
+            boolean guardedBefore, boolean guardedAfter, boolean streaming) throws Exception {
+        IndexFileMeta beforeGuard = guard("guard-before");
+        IndexFileMeta afterGuard = guard("guard-after");
+        List<IndexFileMeta> expectedBefore =
+                guardedBefore ? Collections.singletonList(beforeGuard) : Collections.emptyList();
+        List<IndexFileMeta> expectedAfter =
+                guardedAfter ? Collections.singletonList(afterGuard) : Collections.emptyList();
+        List<IndexFileMeta> beforeGuards = new ArrayList<>(expectedBefore);
+        List<IndexFileMeta> afterGuards = new ArrayList<>(expectedAfter);
+        IncrementalSplit ordinary = incrementalSplit();
+        IncrementalSplit split =
+                new IncrementalSplit(
+                        ordinary.snapshotId(),
+                        ordinary.partition(),
+                        ordinary.bucket(),
+                        ordinary.totalBuckets(),
+                        ordinary.beforeFiles(),
+                        ordinary.beforeDeletionFiles(),
+                        ordinary.afterFiles(),
+                        ordinary.afterDeletionFiles(),
+                        streaming,
+                        beforeGuards,
+                        afterGuards);
+        beforeGuards.clear();
+        afterGuards.clear();
+
+        for (IncrementalSplit restored :
+                Arrays.asList(
+                        (IncrementalSplit)
+                                SplitSerializer.deserialize(SplitSerializer.serialize(split)),
+                        InstantiationUtil.clone(split))) {
+            assertThat(restored).isEqualTo(split);
+            assertThat(restored.beforeDeleteOrderingGuards()).isEqualTo(expectedBefore);
+            assertThat(restored.afterDeleteOrderingGuards()).isEqualTo(expectedAfter);
         }
     }
 
@@ -134,6 +204,10 @@ public class SplitSerializerTest {
     }
 
     private static DataSplit dataSplit() {
+        return dataSplit(Collections.emptyList());
+    }
+
+    private static DataSplit dataSplit(List<IndexFileMeta> guards) {
         List<DataFileMeta> files =
                 Arrays.asList(
                         dataFile("file-a", 0, 1, 10, 100L), dataFile("file-b", 1, 11, 20, 200L));
@@ -147,8 +221,13 @@ public class SplitSerializerTest {
                 .withBucketPath("dt=20260706/bucket-3")
                 .withDataFiles(files)
                 .withDataDeletionFiles(deletionFiles)
+                .withDeleteOrderingGuards(guards)
                 .rawConvertible(true)
                 .build();
+    }
+
+    private static IndexFileMeta guard(String fileName) {
+        return new IndexFileMeta("DELETE_ORDERING_GUARD", fileName, 128L, 2L, null, null, null);
     }
 
     private static IncrementalSplit incrementalSplit() {

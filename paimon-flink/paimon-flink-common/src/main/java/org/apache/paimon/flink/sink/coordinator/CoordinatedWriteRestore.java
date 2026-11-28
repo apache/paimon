@@ -127,7 +127,8 @@ public class CoordinatedWriteRestore implements WriteRestore {
                     response.extractDataFiles(),
                     response.extractDynamicBucketIndex(),
                     response.extractDeletionVectorsIndex(),
-                    response.extractVectorIndexPayloads());
+                    response.extractVectorIndexPayloads(),
+                    response.extractDeleteOrderingGuards());
         } catch (IOException
                 | ExecutionException
                 | InterruptedException
