@@ -172,7 +172,6 @@ public class JavaPyE2ETest {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         embeddingField.id(),
@@ -282,7 +281,6 @@ public class JavaPyE2ETest {
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         embeddingField.id(),

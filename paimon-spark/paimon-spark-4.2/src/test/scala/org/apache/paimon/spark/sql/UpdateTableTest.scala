@@ -30,8 +30,4 @@ class V2UpdateTableTest extends UpdateTableTestBase {
   override protected def sparkConf: SparkConf = {
     super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
-
-  // TODO(#11382): a V2 UPDATE of an append table with a VARCHAR column fails with "Max iterations".
-  override protected def excluded: Seq[String] = Seq(
-    "Paimon update: overlong VARCHAR value throws (same as INSERT)")
 }

@@ -234,7 +234,7 @@ Updates to already indexed rows also require the [update policy](#update-indexed
 
 | Mode | How coverage is checked | Use when |
 | --- | --- | --- |
-| `fast` | Search indexed coverage only. | The index is current, or partial coverage is acceptable. |
+| `fast` | Search indexed coverage, with a [range-limit fallback](#shared-options) for ordinary scalar batch scans. | The index is current, or partial coverage is acceptable. |
 | `full` | Check row-ID coverage against snapshot `nextRowId`; scan raw data for detected gaps where supported. | Newly appended ranges need to be included. |
 | `detail` | Compare active data-file row-ID ranges with index coverage, then scan detected gaps where supported. | Coverage should be checked against current files, including partition filtering. |
 
@@ -483,10 +483,11 @@ These table options affect global index build and read behavior:
 | `global-index.query-in-reader.enabled` | `false` | Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `full` | Search mode for ordinary Data Evolution scalar batch scans. An explicit setting also serves as a fallback for scalar prefilters. |
+| `data-evolution.scalar-index.max-selection-ranges` | Not set | Maximum number of disjoint candidate row-ID ranges when scalar global index results are evaluated during Java Data Evolution batch planning. |
 | `scalar-index.prefilter.search-mode` | `fast` | Search mode for scalar prefilters in vector and full-text search. Falls back to explicit `scalar-index.search-mode` and `global-index.search-mode` in that order. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
-| `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `global-index.external-paths` | Not set | Comma-separated root directories for index files, for example `s3://bucket-a/index,s3://bucket-b/index`. New index files use round-robin selection independently of data-file external path settings. An empty value uses the table index directory. Existing files remain at the paths recorded in their metadata. |
 | `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
 | `sorted-index.records-per-file` | `25000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. Falls back to `sorted-index.records-per-range`, then `btree-index.records-per-range`. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
@@ -501,3 +502,23 @@ These table options affect global index build and read behavior:
 
 The reader-side query option applies to supported scalar indexes on data evolution tables. It is
 evaluated by the core scan, including scans used by Flink and Spark.
+
+When scalar global index results are evaluated during planning, a positive
+`data-evolution.scalar-index.max-selection-ranges` enables bounded range probing for Java Data
+Evolution batch scans. An unset value or `0` leaves range conversion unbounded. The planner probes
+disjoint contiguous ranges in the combined candidate bitmap after index evaluation, including rows
+outside index coverage in `full` and `detail` modes. A contiguous run counts as one range regardless
+of its row count. The probe stops at the start of the first range over the limit.
+
+If fragmented candidate ranges slow planning, start with
+`data-evolution.scalar-index.max-selection-ranges=100000`.
+
+When the ranges fit, the planner pushes them down to prune manifests and builds indexed splits by
+intersecting the candidates with each split's merged file ranges.
+
+If the selection exceeds the limit, the planner emits ordinary data splits and keeps the original
+predicate as a residual filter on the same snapshot. In `full` and `detail`, it can drop whole file
+groups without candidate rows after building the ordinary scan plan.
+
+In `fast`, the planner uses the original scan plan, which can include matching rows outside a
+predicate branch's index coverage.

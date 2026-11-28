@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -47,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createGlobalIndexFileReadWrite;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -65,6 +67,7 @@ public class SortedGlobalIndexWriter implements Serializable {
 
     private List<DataField> indexFields;
     private GlobalIndexKeyExtractor keyExtractor;
+    private transient GlobalIndexFileReadWrite fileReadWrite;
 
     public SortedGlobalIndexWriter(Table table, String indexType) {
         this(table, indexType, ((FileStoreTable) table).coreOptions().toConfiguration());
@@ -141,8 +144,11 @@ public class SortedGlobalIndexWriter implements Serializable {
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {
+        if (fileReadWrite == null) {
+            fileReadWrite = createGlobalIndexFileReadWrite(table);
+        }
         GlobalIndexWriter indexWriter =
-                createIndexWriter(table, indexType, indexFields, indexOptions);
+                createIndexWriter(fileReadWrite, indexType, indexFields, indexOptions);
         if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
                     "Unexpected implementation, the index writer of "
@@ -164,7 +170,6 @@ public class SortedGlobalIndexWriter implements Serializable {
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexFields,

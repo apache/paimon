@@ -40,7 +40,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,12 +52,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -81,90 +84,62 @@ public class LazyFilteredBitmapIndexReaderTest {
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    void centroidBitmapSectionsPreserveSparseRowIdsAndNulls() throws IOException {
+    void centroidBitmapFilesShareALookupAndPreserveSparseRowIds() throws IOException {
         DataField state = new DataField(5, "state", DataTypes.INT());
         RowType fields = RowType.of(dataField, state);
-        CentroidBitmapIndex.ColumnRows tags =
-                column -> {
-                    column.write(BinaryString.fromString("blue"), 90);
-                    column.write(BinaryString.fromString("red"), 90_000);
-                };
-        ResultEntry result;
-        try (CentroidBitmapIndex.Writer writer = new CentroidBitmapIndex.Writer(fileWriter, 2, 2)) {
-            writer.writeColumn(
-                    state,
-                    new Options(),
-                    column -> {
-                        column.write(1, 90);
-                        column.write(null, 90_000);
-                    });
-            writer.writeColumn(dataField, new Options(), tags);
-            result = writer.finish();
+        long rangeSize = 1L << 32;
+        long first = CentroidBitmapIndex.encodeRowId(0, rangeSize, 90);
+        long firstEnd = CentroidBitmapIndex.encodeRowId(0, rangeSize, rangeSize - 1);
+        long lastStart = CentroidBitmapIndex.encodeRowId(2, rangeSize, 0);
+        long last = CentroidBitmapIndex.encodeRowId(2, rangeSize, 90_000);
+        Map<Integer, GlobalIndexIOMeta> bitmaps = new HashMap<>();
+        bitmaps.put(
+                dataField.id(),
+                writeData(
+                        Arrays.asList(
+                                Pair.of(str("red"), first),
+                                Pair.of(str("red"), firstEnd),
+                                Pair.of(str("red"), lastStart),
+                                Pair.of(str("red"), last))));
+        try (BitmapGlobalIndexWriter writer =
+                new BitmapGlobalIndexer(state, new Options()).createWriter(fileWriter)) {
+            writer.write(1, first);
+            writer.write(1, firstEnd);
+            writer.write(null, lastStart);
+            writer.write(null, last);
+            ResultEntry result = writer.finish().get(0);
+            Path path = new Path(result.filePath());
+            bitmaps.put(
+                    state.id(),
+                    new GlobalIndexIOMeta(
+                            path, fileIO.getFileSize(path), result.rowCount(), result.meta()));
         }
-        Path path = new Path(basePath, result.fileName());
-        GlobalIndexIOMeta meta =
-                new GlobalIndexIOMeta(path, fileIO.getFileSize(path), 2, result.meta());
-        assertThat(result.meta()).hasSize(Long.BYTES);
-        long secondSectionOffset = ByteBuffer.wrap(result.meta()).getLong();
-        assertThat(secondSectionOffset).isPositive().isLessThan(meta.fileSize());
-
-        int[] extraFieldIds = {state.id(), dataField.id()};
         PredicateBuilder builder = new PredicateBuilder(fields);
-        Predicate red = builder.equal(0, BinaryString.fromString("red"));
-        Predicate conjunction = PredicateBuilder.and(red, builder.isNull(1));
-        assertThat(
-                        CentroidBitmapIndex.match(
-                                fileReader, meta, extraFieldIds, fields, fields, conjunction))
-                .containsExactly(90_000L);
-        Predicate disjunction = PredicateBuilder.or(red, builder.isNotNull(1), builder.isNull(1));
-        assertThat(
-                        CentroidBitmapIndex.match(
-                                fileReader, meta, extraFieldIds, fields, fields, disjunction))
-                .containsExactly(90L, 90_000L);
-        GlobalIndexIOMeta incomplete =
-                new GlobalIndexIOMeta(path, secondSectionOffset, 2, result.meta());
-        assertThatThrownBy(
-                        () ->
-                                CentroidBitmapIndex.match(
-                                        file -> {
-                                            throw new AssertionError(
-                                                    "Invalid manifest opened a file.");
-                                        },
-                                        incomplete,
-                                        extraFieldIds,
-                                        fields,
-                                        fields,
-                                        conjunction))
-                .hasMessageContaining("Invalid centroid bitmap section");
-    }
-
-    @Test
-    void singleCentroidBitmapSectionNeedsNoDirectory() throws IOException {
-        ResultEntry result;
-        try (CentroidBitmapIndex.Writer writer = new CentroidBitmapIndex.Writer(fileWriter, 1, 2)) {
-            writer.writeColumn(
-                    dataField,
-                    new Options(),
-                    column -> {
-                        column.write(null, 10);
-                        column.write(BinaryString.fromString("red"), 30);
-                    });
-            result = writer.finish();
-        }
-        assertThat(result.meta()).isNull();
-        Path path = new Path(basePath, result.fileName());
-        GlobalIndexIOMeta meta =
-                new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.rowCount(), null);
-        RowType rowType = RowType.of(dataField);
-        assertThat(
-                        CentroidBitmapIndex.match(
-                                fileReader,
-                                meta,
-                                new int[] {dataField.id()},
-                                rowType,
-                                rowType,
-                                new PredicateBuilder(rowType).isNull(0)))
-                .containsExactly(10L);
+        Predicate predicate =
+                PredicateBuilder.or(
+                        PredicateBuilder.and(builder.equal(0, str("red")), builder.isNull(1)),
+                        builder.isNotNull(1));
+        AtomicInteger opens = new AtomicInteger();
+        IOFunction<Integer, RoaringNavigableMap64> filter =
+                CentroidBitmapIndex.filter(
+                        file -> {
+                            opens.incrementAndGet();
+                            return fileReader.getInputStream(file);
+                        },
+                        bitmaps,
+                        fields,
+                        fields,
+                        predicate,
+                        rangeSize,
+                        3);
+        assertThat(opens).hasValue(0);
+        RoaringNavigableMap64 matched = filter.apply(2);
+        assertThat(matched).containsExactly(0L, 90_000L);
+        assertThat(filter.apply(0)).containsExactly(90L, rangeSize - 1);
+        assertThat(filter.apply(1)).isEmpty();
+        matched.clear();
+        assertThat(filter.apply(2)).containsExactly(0L, 90_000L);
+        assertThat(opens).hasValue(2);
     }
 
     @BeforeEach
@@ -174,14 +149,15 @@ public class LazyFilteredBitmapIndexReaderTest {
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + "-" + UUID.randomUUID() + ".index";
+                    public String newFilePath(String prefix) {
+                        return new Path(basePath, prefix + "-" + UUID.randomUUID() + ".index")
+                                .toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws IOException {
-                        return fileIO.newOutputStream(new Path(basePath, fileName), true);
+                        return fileIO.newOutputStream(new Path(filePath), true);
                     }
                 };
         fileReader = meta -> fileIO.newInputStream(meta.filePath());
@@ -278,12 +254,12 @@ public class LazyFilteredBitmapIndexReaderTest {
         GlobalIndexFileWriter streamingFileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + ".index";
+                    public String newFilePath(String prefix) {
+                        return "memory://test/" + prefix + ".index";
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName) {
+                    public PositionOutputStream newOutputStream(String filePath) {
                         ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
                         output.set(stream);
                         return stream;
@@ -305,12 +281,12 @@ public class LazyFilteredBitmapIndexReaderTest {
         GlobalIndexFileWriter streamingFileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + ".index";
+                    public String newFilePath(String prefix) {
+                        return "memory://test/" + prefix + ".index";
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String fileName) {
+                    public PositionOutputStream newOutputStream(String filePath) {
                         ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
                         output.set(stream);
                         return stream;
@@ -354,7 +330,7 @@ public class LazyFilteredBitmapIndexReaderTest {
         }
         writer.write(null, keys.length);
         ResultEntry result = writer.finish().get(0);
-        Path filePath = new Path(basePath, result.fileName());
+        Path filePath = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta());
 
@@ -752,7 +728,7 @@ public class LazyFilteredBitmapIndexReaderTest {
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
         ResultEntry resultEntry = results.get(0);
-        Path filePath = new Path(basePath, resultEntry.fileName());
+        Path filePath = new Path(resultEntry.filePath());
         return new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), resultEntry.meta());
     }
 

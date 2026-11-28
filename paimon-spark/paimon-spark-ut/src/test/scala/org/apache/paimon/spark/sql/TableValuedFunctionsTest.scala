@@ -794,6 +794,31 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
     }
   }
 
+  test("Table Valued Functions: incremental audit log preserves changes for the same key") {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, v INT) USING paimon
+              |TBLPROPERTIES (
+              |  'primary-key' = 'id', 'bucket' = '1', 'write-only' = 'true',
+              |  'changelog-producer' = 'full-compaction',
+              |  'changelog-producer.ignore-update-before' = 'true')
+              |""".stripMargin)
+
+        Seq(10, 20, 30).foreach {
+          v =>
+            sql(s"INSERT INTO t VALUES (1, $v)")
+            sql("CALL sys.compact(table => 't')")
+        }
+
+        checkAnswer(
+          sql(
+            "SELECT rowkind, id, v FROM paimon_incremental_query('`t$audit_log`', 1, 6) ORDER BY v"),
+          Seq(Row("+I", 1, 10), Row("+U", 1, 20), Row("+U", 1, 30)))
+      }
+    }
+  }
+
   test("Table Valued Functions: incremental query with delete after minor compact") {
     withTable("t") {
       sql("""

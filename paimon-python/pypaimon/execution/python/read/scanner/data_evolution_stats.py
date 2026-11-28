@@ -79,11 +79,18 @@ class DataEvolutionGroupStatsFilter:
 
         normal_files = []
         special_field_ids = set()
+        vector_versions = {}
         for file in files:
             layout = self._layout(file)
-            if DataFileMeta.is_blob_file(file.file_name) \
-                    or DataFileMeta.is_vector_file(file.file_name):
+            is_vector = DataFileMeta.is_vector_file(file.file_name)
+            if is_vector or DataFileMeta.is_blob_file(file.file_name):
                 special_field_ids.update(layout.data_fields)
+                if is_vector and file.write_cols:
+                    for field_id in layout.data_fields:
+                        vector_versions[field_id] = max(
+                            vector_versions.get(field_id, file.max_sequence_number),
+                            file.max_sequence_number,
+                        )
             else:
                 normal_files.append((file, layout))
         providers = {}
@@ -115,7 +122,10 @@ class DataEvolutionGroupStatsFilter:
                     states.append(_MISSING)
                 continue
 
-            if provider.tied:
+            vector_version = vector_versions.get(field.id)
+            # A dedicated file can supersede the inline values for part of the group.
+            if (provider.tied
+                    or (vector_version is not None and vector_version >= provider.file.max_sequence_number)):
                 self._append_unknown(
                     min_values, max_values, null_counts, states)
                 continue

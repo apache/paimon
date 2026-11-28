@@ -48,7 +48,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
 
     private CharBuilder text = new CharBuilder();
     private boolean[] nullRows = new boolean[128];
-    @Nullable private String fileName;
+    @Nullable private String filePath;
     @Nullable private PositionOutputStream stream;
     @Nullable private DataOutputStream output;
     private long firstRowId;
@@ -131,7 +131,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                 return Collections.emptyList();
             }
             Preconditions.checkState(
-                    stream != null && output != null && fileName != null,
+                    stream != null && output != null && filePath != null,
                     "FM index container output is missing.");
             byte[] indexMeta = FMIndexFile.writeIndexMeta(firstRowId, totalRowCount, partitions);
             FMIndexFile.BlockInfo directory =
@@ -140,7 +140,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             FMIndexFile.writeContainerFooter(
                     output, directory, firstRowId, totalRowCount, partitions.size());
             closeOutput();
-            return Collections.singletonList(new ResultEntry(fileName, totalRowCount, indexMeta));
+            return Collections.singletonList(new ResultEntry(filePath, totalRowCount, indexMeta));
         } catch (IOException e) {
             closeOutputQuietly();
             throw new RuntimeException("Failed to finish FM global index container.", e);
@@ -290,8 +290,8 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
         if (output != null) {
             return;
         }
-        fileName = fileWriter.newFileName("fm");
-        stream = fileWriter.newOutputStream(fileName);
+        filePath = fileWriter.newFilePath("fm");
+        stream = fileWriter.newOutputStream(filePath);
         output = new DataOutputStream(stream);
     }
 

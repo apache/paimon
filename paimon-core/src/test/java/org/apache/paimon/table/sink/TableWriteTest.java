@@ -395,21 +395,22 @@ public class TableWriteTest {
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
         options.set(CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD, 1);
         FileStoreTable table = createNotNullFileStoreTable(options);
-        TableWriteImpl<?> write =
-                table.newWrite(commitUser)
-                        .withIOManager(
-                                new IOManagerImpl(
-                                        tempDir.resolve(UUID.randomUUID().toString()).toString()));
+        IOManagerImpl ioManager =
+                new IOManagerImpl(tempDir.resolve(UUID.randomUUID().toString()).toString());
+        TableWriteImpl<?> write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(GenericRow.of(1, 1, 10L));
         commit.commit(0, write.prepareCommit(false, 0));
         write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null));
-        commit.commit(1, write.prepareCommit(false, 1));
+        // Wait for the lookup compaction: close() only cancels it, and a compaction still writing
+        // its lookup files into the IO manager directory fails the deletion of tempDir.
+        commit.commit(1, write.prepareCommit(true, 1));
 
         assertThat(readRows(table)).isEmpty();
         write.close();
         commit.close();
+        ioManager.close();
     }
 
     @Test

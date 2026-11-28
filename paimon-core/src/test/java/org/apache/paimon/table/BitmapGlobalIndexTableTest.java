@@ -258,7 +258,6 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
         List<IndexFileMeta> indexFileMetas =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         indexField.id(),

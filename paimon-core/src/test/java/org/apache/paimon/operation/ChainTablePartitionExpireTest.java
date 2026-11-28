@@ -36,9 +36,13 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.PartitionModification;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -715,6 +719,106 @@ public class ChainTablePartitionExpireTest {
                 .containsExactly("CN|20250201", "US|20250101");
     }
 
+    @Test
+    public void testDropDeltaPartitionKeepsSnapshotBranch() throws Exception {
+        Path tablePath = tablePath("drop_delta_keeps_snapshot");
+        createChainTable(tablePath, false);
+        FileStoreTable snapshotTable = physicalBranch(tablePath, "snapshot");
+        FileStoreTable deltaTable = physicalBranch(tablePath, "delta");
+
+        write(snapshotTable, "20250101", "snap-1");
+        write(snapshotTable, "20250103", "snap-3");
+        write(deltaTable, "20250101", "delta-1");
+        write(deltaTable, "20250102", "delta-2");
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        try (BatchTableCommit commit = deltaTable.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(
+                    Arrays.asList(
+                            Collections.singletonMap("dt", "20250101"),
+                            Collections.singletonMap("dt", "20250102")));
+        }
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        snapshotTable = physicalBranch(tablePath, "snapshot");
+        assertThat(deltaTable.snapshotManager().latestSnapshot().operation())
+                .isEqualTo(Snapshot.Operation.TRUNCATE);
+        assertThat(listPartitions(deltaTable)).isEmpty();
+        assertThat(listPartitions(snapshotTable)).containsExactly("20250101", "20250103");
+    }
+
+    @Test
+    public void testOverwriteDeltaPartitionDropsSnapshotBaseline() throws Exception {
+        Path tablePath = tablePath("overwrite_delta_drops_snapshot");
+        createChainTable(tablePath, false);
+        FileStoreTable snapshotTable = physicalBranch(tablePath, "snapshot");
+        FileStoreTable deltaTable = physicalBranch(tablePath, "delta");
+
+        write(snapshotTable, "20250101", "snap-1");
+        write(snapshotTable, "20250103", "snap-3");
+        write(deltaTable, "20250102", "delta-2");
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        BatchWriteBuilder builder =
+                deltaTable
+                        .newBatchWriteBuilder()
+                        .withOverwrite(Collections.singletonMap("dt", "20250103"));
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("20250103"),
+                            BinaryString.fromString("new"),
+                            BinaryString.fromString("new")));
+            commit.commit(write.prepareCommit());
+        }
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        snapshotTable = physicalBranch(tablePath, "snapshot");
+        assertThat(deltaTable.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(deltaTable.snapshotManager().latestSnapshot().operation())
+                .isNotEqualTo(Snapshot.Operation.TRUNCATE);
+        assertThat(listPartitions(deltaTable)).containsExactly("20250102", "20250103");
+        assertThat(listPartitions(snapshotTable)).containsExactly("20250101");
+    }
+
+    @Test
+    public void testTruncateThenOverwriteOnSameCommitDropsSnapshotBaseline() throws Exception {
+        Path tablePath = tablePath("truncate_then_overwrite_same_commit");
+        createChainTable(tablePath, false);
+        FileStoreTable snapshotTable = physicalBranch(tablePath, "snapshot");
+        FileStoreTable deltaTable = physicalBranch(tablePath, "delta");
+
+        write(snapshotTable, "20250102", "snap-2");
+        write(snapshotTable, "20250103", "snap-3");
+        write(deltaTable, "20250102", "delta-2");
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        BatchWriteBuilder builder =
+                deltaTable
+                        .newBatchWriteBuilder()
+                        .withOverwrite(Collections.singletonMap("dt", "20250103"));
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            commit.truncatePartitions(
+                    Collections.singletonList(Collections.singletonMap("dt", "20250102")));
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("20250103"),
+                            BinaryString.fromString("new"),
+                            BinaryString.fromString("new")));
+            commit.commit(write.prepareCommit());
+        }
+
+        deltaTable = physicalBranch(tablePath, "delta");
+        snapshotTable = physicalBranch(tablePath, "snapshot");
+        assertThat(deltaTable.snapshotManager().latestSnapshot().operation())
+                .isNotEqualTo(Snapshot.Operation.TRUNCATE);
+        assertThat(listPartitions(deltaTable)).containsExactly("20250103");
+        assertThat(listPartitions(snapshotTable)).containsExactly("20250102");
+    }
+
     private Path tablePath(String tableName) {
         return new Path(tempDir.toUri().toString(), tableName);
     }
@@ -781,6 +885,16 @@ public class ChainTablePartitionExpireTest {
         schemaManager.commitChanges(chainTableOptions);
         new FileSystemSchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
         new FileSystemSchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
+    }
+
+    /** Branch table without chain fallback, matching {@code table$branch_name}. */
+    private FileStoreTable physicalBranch(Path tablePath, String branch) {
+        FileStoreTable branchTable = loadTable(tablePath).switchToBranch(branch);
+        if (branchTable instanceof FallbackReadFileStoreTable) {
+            branchTable = ((FallbackReadFileStoreTable) branchTable).wrapped();
+        }
+        assertThat(branchTable.coreOptions().branch()).isEqualTo(branch);
+        return branchTable;
     }
 
     private FileStoreTable loadTable(Path tablePath) {

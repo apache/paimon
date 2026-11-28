@@ -128,8 +128,8 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
     spark.sql("""INSERT INTO paimon.sales.extract_orders VALUES
                 |  (DATE '2025-05-10', 5),
                 |  (DATE '2026-05-10', 10),
-                |  (DATE '2026-05-31', 20),
-                |  (DATE '2026-06-01', 7),
+                |  (DATE '2026-03-31', 20),
+                |  (DATE '2026-04-01', 7),
                 |  (NULL, 3)""".stripMargin)
     register("""version: 0.3.0.dev0
                |name: order_metrics
@@ -140,6 +140,9 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
                |      - name: order_year
                |        expression:
                |          sql: ExTrAcT(YeAr FROM "ORDER_DATE")
+               |      - name: order_quarter
+               |        expression:
+               |          sql: EXTRACT(QuArTeR FROM order_date)
                |      - name: order_month
                |        expression:
                |          sql: EXTRACT(MONTH FROM COALESCE(order_date, NULL))
@@ -157,7 +160,8 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
 
     val expected = Seq(
       "order_year" -> Seq(Row(2025, 5L), Row(2026, 37L), Row(null, 3L)),
-      "order_month" -> Seq(Row(5, 35L), Row(6, 7L), Row(null, 3L)),
+      "order_quarter" -> Seq(Row(1, 20L), Row(2, 22L), Row(null, 3L)),
+      "order_month" -> Seq(Row(3, 20L), Row(4, 7L), Row(5, 15L), Row(null, 3L)),
       "order_day" -> Seq(Row(1, 7L), Row(10, 15L), Row(31, 20L), Row(null, 3L))
     )
     expected.foreach {
@@ -177,11 +181,11 @@ class OssieSemanticViewTest extends QueryTest with SharedSparkSession {
     val date = "DATE '2026-06-01'"
     val query = "SELECT region FROM paimon.sales.order_metrics"
     Seq(
-      s"EXTRACT(QUARTER FROM $date)" -> "Unsupported Ossie EXTRACT unit: QUARTER",
       s"EXTRACT(Y FROM $date)" -> "Unsupported Ossie EXTRACT unit: Y",
       s"extract('year', $date)" -> "Ossie EXTRACT expects EXTRACT(unit FROM input)",
       s"DATE_PART('year', $date)" -> "Unsupported OSSIE_SQL_2026 function: DATE_PART",
-      s"YEAR($date)" -> "Unsupported OSSIE_SQL_2026 function: YEAR"
+      s"YEAR($date)" -> "Unsupported OSSIE_SQL_2026 function: YEAR",
+      s"QUARTER($date)" -> "Unsupported OSSIE_SQL_2026 function: QUARTER"
     ).foreach {
       case (expression, message) =>
         register(model.replace("sql: region_code", s"sql: $expression"))

@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.IndexQuerySplit;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
@@ -213,6 +214,56 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                         .containsExactlyInAnyOrderElementsOf(read(withoutIndex, query));
             }
         }
+    }
+
+    @Test
+    void testAdaptiveScanKeepsSelectiveCompositeRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f1", "f0");
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        b.equal(1, BinaryString.fromString("category-a")), b.greaterThan(0, 7));
+
+        FileStoreTable adaptive =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "100000"));
+        assertThat(adaptive.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(IndexedSplit.class);
+        assertThat(read(adaptive, predicate)).containsExactlyInAnyOrder("p8", "p9");
+    }
+
+    @Test
+    void testFastRangeOverflowScansUncoveredCompositeMatches() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 40);
+        build(table, "f1", "f0");
+        append(table, 40, 80);
+        build(table, "f2");
+
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.or(
+                        query(builder, "category-a", 7),
+                        builder.equal(2, BinaryString.fromString("p41")));
+        FileStoreTable fast = configured(table, "fast", false);
+        FileStoreTable capped =
+                fast.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES.key(),
+                                "1"));
+        assertThat(read(fast, predicate)).containsExactlyInAnyOrder("p7", "p27", "p41");
+        assertThat(capped.newReadBuilder().withFilter(predicate).newScan().plan().splits())
+                .isNotEmpty()
+                .hasOnlyElementsOfType(DataSplit.class);
+        assertThat(read(capped, predicate))
+                .containsExactlyInAnyOrder("p7", "p27", "p41", "p47", "p67");
     }
 
     @Test

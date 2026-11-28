@@ -79,7 +79,7 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
     }
 
     @Override
-    public ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String name, byte[] payload)
+    public ResultEntry writeRoutingModel(GlobalIndexFileWriter io, String filePath, byte[] payload)
             throws IOException {
         checkArgument(
                 "l2".equals(buildMetric)
@@ -87,10 +87,10 @@ final class NativeCentroidVectorGlobalIndexer extends NativeVectorGlobalIndexer
                         || "inner_product".equals(buildMetric),
                 "Unsupported distance metric: %s",
                 buildMetric);
-        try (OutputStream out = io.newOutputStream(name)) {
+        try (OutputStream out = io.newOutputStream(filePath)) {
             out.write(payload);
         }
-        return new ResultEntry(name, 0, metric().getBytes(StandardCharsets.UTF_8));
+        return new ResultEntry(filePath, 0, metric().getBytes(StandardCharsets.UTF_8));
     }
 
     static String storedMetric(List<GlobalIndexIOMeta> files) {

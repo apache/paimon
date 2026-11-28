@@ -90,10 +90,6 @@ class V2MergeIntoAppendBucketedTableTest
   override protected def sparkConf: SparkConf = {
     super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
-
-  // TODO(#11382): a V2 MERGE INTO an append table with VARCHAR columns fails with
-  // "Max iterations (100)".
-  override protected def excluded: Seq[String] = Seq("Paimon MergeInto: merge into with varchar")
 }
 
 class V2MergeIntoAppendNonBucketedTableTest
@@ -104,8 +100,4 @@ class V2MergeIntoAppendNonBucketedTableTest
   override protected def sparkConf: SparkConf = {
     super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
-
-  // TODO(#11382): a V2 MERGE INTO an append table with VARCHAR columns fails with
-  // "Max iterations (100)".
-  override protected def excluded: Seq[String] = Seq("Paimon MergeInto: merge into with varchar")
 }

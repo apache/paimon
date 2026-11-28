@@ -59,6 +59,7 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
         if (currHead != null) {
             if (currHead.noMoreHead()) {
                 this.heap.poll();
+                currHead = null;
             } else {
                 this.heap.adjustTop();
             }

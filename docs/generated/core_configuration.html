@@ -633,6 +633,12 @@ under the License.
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.scalar-index.max-selection-ranges</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Maximum number of disjoint candidate row-ID ranges when scalar global index results are evaluated during planning for Data Evolution batch scans. If the selection exceeds the limit, use ordinary data splits. Full and detail can prune file groups after building the ordinary scan plan. Fast uses the original scan, which can include matching rows outside index coverage. Start with 100000 when fragmented candidate ranges slow planning. An unset value or 0 disables the limit.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -654,7 +660,7 @@ under the License.
             <td><h5>data-file.external-paths.strategy</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li><li>"weight-robin": When writing a new file, a path is chosen based on configured weights.</li></ul></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li><li>"entropy-inject-template": Uses a single path template in data-file.external-paths containing a '{hash}' placeholder. The placeholder is replaced in place by hash directories computed from the file name. Place '{hash}' before the database and table directories to share object storage prefixes across tables. This strategy cannot be enabled or disabled on an existing table.</li><li>"weight-robin": When writing a new file, a path is chosen based on configured weights.</li></ul></td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths.weights</h5></td>
@@ -945,10 +951,10 @@ under the License.
             <td>Whether to enable global index for scan.</td>
         </tr>
         <tr>
-            <td><h5>global-index.external-path</h5></td>
+            <td><h5>global-index.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+            <td>Comma-separated global index root directories. New index files are distributed in round-robin order. An empty value uses &lt;table-root-directory&gt;/index.</td>
         </tr>
         <tr>
             <td><h5>global-index.filter.refine-from-data</h5></td>

@@ -175,7 +175,8 @@ public class FileStoreTableFactory {
                                 tablePath,
                                 snapshotSchema.get(),
                                 snapshotBranchOptions,
-                                catalogEnvironment);
+                                branchCatalogEnvironment(
+                                        catalogEnvironment, scanFallbackSnapshotBranch));
         Options deltaBranchOptions = new Options(dynamicOptions.toMap());
         deltaBranchOptions.set(CoreOptions.BRANCH, scanFallbackDeltaBranch);
         Optional<TableSchema> deltaSchema =
@@ -187,7 +188,8 @@ public class FileStoreTableFactory {
                                 tablePath,
                                 deltaSchema.get(),
                                 deltaBranchOptions,
-                                catalogEnvironment);
+                                branchCatalogEnvironment(
+                                        catalogEnvironment, scanFallbackDeltaBranch));
         FileStoreTable chainGroupFileStoreTable =
                 new ChainGroupReadTable(snapshotTable, deltaTable);
         return new ChainTableFileStoreTable(table, chainGroupFileStoreTable);
@@ -218,6 +220,18 @@ public class FileStoreTableFactory {
                     fileIO, tablePath, schema.get(), branchOptions, branchCatalogEnvironment);
         }
         return null;
+    }
+
+    private static CatalogEnvironment branchCatalogEnvironment(
+            CatalogEnvironment catalogEnvironment, String branchName) {
+        Identifier identifier = catalogEnvironment.identifier();
+        if (identifier == null) {
+            return catalogEnvironment;
+        }
+        // Catalog snapshot reads must use the same branch as the table options.
+        return catalogEnvironment.copy(
+                new Identifier(
+                        identifier.getDatabaseName(), identifier.getTableName(), branchName));
     }
 
     public static FileStoreTable createWithoutFallbackBranch(

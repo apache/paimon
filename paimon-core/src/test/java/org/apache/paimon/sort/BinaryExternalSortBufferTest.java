@@ -147,6 +147,10 @@ public class BinaryExternalSortBufferTest {
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
 
+        // Repeated polls after EOF must return null instead of throwing.
+        assertThat(iterator.next(next)).isNull();
+        assertThat(iterator.next(next)).isNull();
+
         sorter.clear();
     }
 
@@ -260,6 +264,10 @@ public class BinaryExternalSortBufferTest {
             assertThat(next.getInt(0)).isEqualTo(i);
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
+
+        // The spilled merge iterator used to keep a dangling head and NPE on the second poll.
+        assertThat(iterator.next(next)).isNull();
+        assertThat(iterator.next(next)).isNull();
         sorter.clear();
     }
 

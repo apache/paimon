@@ -18,12 +18,16 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.fs.Path
+import org.apache.paimon.index.HashIndexFile.HASH_INDEX
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.Row
 
 import java.util.concurrent.ThreadLocalRandom
+
+import scala.collection.JavaConverters._
 
 class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
@@ -134,6 +138,97 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
         sql(s"SELECT * FROM tbl$random")
       )
 
+    }
+  }
+
+  test("Paimon copy files procedure: data files and external paths") {
+    // (source uses external paths, target uses external paths)
+    Seq((false, true), (true, false), (true, true)).foreach {
+      case (sourceExternal, targetExternal) =>
+        withTempDir {
+          dir =>
+            withTable("src", "dst") {
+              def externalOptions(name: String, external: Boolean): String =
+                if (external) {
+                  s""",
+                     |  'data-file.external-paths' = '${new Path(dir.toURI.toString, name)}',
+                     |  'data-file.external-paths.strategy' = 'round-robin'""".stripMargin
+                } else {
+                  ""
+                }
+              Seq("src" -> sourceExternal, "dst" -> targetExternal).foreach {
+                case (name, external) =>
+                  sql(
+                    s"""
+                       |CREATE TABLE $name (k INT, v STRING)
+                       |TBLPROPERTIES ('bucket' = '1', 'bucket-key' = 'k'${externalOptions(name, external)})
+                       |""".stripMargin)
+              }
+              sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
+
+              checkAnswer(
+                sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+                Row(true) :: Nil)
+
+              val target = loadTable("dst")
+              val files = target.store().newScan().plan().files().asScala.map(_.file())
+              assert(files.nonEmpty)
+              files.foreach {
+                file =>
+                  assert(file.externalPath().isPresent == targetExternal, file)
+                  if (targetExternal) {
+                    val path = new Path(file.externalPath().get())
+                    assert(path.getParent.getParent == new Path(dir.toURI.toString, "dst"), file)
+                    assert(target.fileIO().exists(path), file)
+                  }
+              }
+              checkAnswer(sql("SELECT * FROM dst"), Seq(Row(1, "a"), Row(2, "b")))
+            }
+        }
+    }
+  }
+
+  test("Paimon copy files procedure: write after copying hash indexes with two external roots") {
+    withTempDir {
+      dir =>
+        withTable("src", "dst") {
+          // Disjoint roots force every copy to change directories, regardless of round-robin order.
+          val roots = Seq("src", "dst").map {
+            name =>
+              name -> Seq("a", "b").map(suffix => new Path(dir.toURI.toString, s"$name-$suffix"))
+          }.toMap
+          Seq("src", "dst").foreach {
+            name =>
+              sql(s"""
+                     |CREATE TABLE $name (k INT, v STRING)
+                     |TBLPROPERTIES (
+                     |  'primary-key' = 'k',
+                     |  'bucket' = '-1',
+                     |  'index-file-in-data-file-dir' = 'false',
+                     |  'global-index.external-paths' = '${roots(name).mkString(",")}')
+                     |""".stripMargin)
+          }
+          sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
+
+          checkAnswer(
+            sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+            Row(true) :: Nil)
+
+          val target = loadTable("dst")
+          val indexes = target.store().newIndexFileHandler().scan(HASH_INDEX).asScala
+          assert(indexes.nonEmpty)
+          indexes.foreach {
+            entry =>
+              val path = new Path(entry.indexFile().externalPath())
+              assert(roots("dst").contains(path.getParent))
+              assert(target.fileIO().exists(path))
+          }
+
+          // Dynamic bucket assignment must reload the copied hash indexes before writing.
+          sql("INSERT INTO dst VALUES (1, 'updated'), (3, 'c')")
+          checkAnswer(sql("SELECT * FROM dst"), Seq(Row(1, "updated"), Row(2, "b"), Row(3, "c")))
+          checkAnswer(sql("SELECT * FROM src"), Seq(Row(1, "a"), Row(2, "b")))
+        }
     }
   }
 

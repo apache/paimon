@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.globalindex.sorted;
 
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder.BuildTaskLookup;
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder.SortedBuildTask;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.Range;
@@ -27,7 +28,6 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.plans.logical.RepartitionByExpression;
 import org.apache.spark.sql.catalyst.plans.logical.Sort;
-import org.apache.spark.sql.catalyst.plans.logical.Union;
 import org.apache.spark.sql.catalyst.plans.physical.RangePartitioning;
 import org.apache.spark.sql.functions;
 import org.junit.jupiter.api.Test;
@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link SortedIndexTopoBuilder}. */
 public class SortedIndexTopoBuilderTest {
@@ -53,12 +54,10 @@ public class SortedIndexTopoBuilderTest {
                         .config("spark.ui.enabled", "false")
                         .getOrCreate();
         try {
-            List<Dataset<Row>> partitionInputs =
-                    Arrays.asList(taskInput(spark, 0), taskInput(spark, 1), taskInput(spark, 2));
+            Dataset<Row> input = taskInput(spark, 0);
 
             Dataset<Row> topology =
-                    SortedIndexTopoBuilder.combineAndSortBuildTaskInputs(
-                            partitionInputs, 3, TASK_ID, INDEX_KEY);
+                    SortedIndexTopoBuilder.sortBuildTaskInput(input, 3, TASK_ID, INDEX_KEY, false);
 
             assertThat(topology.queryExecution().logical()).isInstanceOf(Sort.class);
             Sort sort = (Sort) topology.queryExecution().logical();
@@ -71,24 +70,36 @@ public class SortedIndexTopoBuilderTest {
             assertThat(repartition.shuffle()).isTrue();
             assertThat(repartition.partitioning()).isInstanceOf(RangePartitioning.class);
             assertThat(repartition.partitionExpressions().size()).isEqualTo(3);
-            assertThat(repartition.child()).isInstanceOf(Union.class);
-            assertThat(((Union) repartition.child()).children().size()).isEqualTo(3);
-
-            Dataset<Row> disabled =
-                    SortedIndexTopoBuilder.combineAndSortBuildTaskInputs(
-                            partitionInputs, 3, TASK_ID, INDEX_KEY, false);
-            assertThat(
-                            disabled.queryExecution()
-                                    .optimizedPlan()
-                                    .sameResult(topology.queryExecution().optimizedPlan()))
-                    .isTrue();
-            assertThat(disabled.queryExecution().executedPlan().toString())
+            assertThat(topology.queryExecution().executedPlan().toString())
                     .contains("rangepartitioning");
         } finally {
             spark.stop();
             SparkSession.clearActiveSession();
             SparkSession.clearDefaultSession();
         }
+    }
+
+    @Test
+    void testBuildTaskLookupForDisjointRanges() {
+        List<SortedBuildTask> tasks =
+                Arrays.asList(
+                        new SortedBuildTask(0, new Range(9, 10), new byte[0]),
+                        new SortedBuildTask(1, new Range(0, 6), new byte[0]),
+                        new SortedBuildTask(2, new Range(11, 11), new byte[0]));
+        BuildTaskLookup lookup = BuildTaskLookup.create(tasks);
+        assertThat(lookup).isNotNull();
+        assertThat(lookup.call(0L)).isEqualTo(1L);
+        assertThat(lookup.call(6L)).isEqualTo(1L);
+        assertThat(lookup.call(9L)).isEqualTo(0L);
+        assertThat(lookup.call(10L)).isEqualTo(0L);
+        assertThat(lookup.call(11L)).isEqualTo(2L);
+        assertThatThrownBy(() -> lookup.call(8L)).isInstanceOf(IllegalStateException.class);
+        assertThat(
+                        BuildTaskLookup.create(
+                                Arrays.asList(
+                                        tasks.get(1),
+                                        new SortedBuildTask(3, new Range(6, 7), new byte[0]))))
+                .isNull();
     }
 
     @Test

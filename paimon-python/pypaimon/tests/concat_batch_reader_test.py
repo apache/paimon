@@ -239,6 +239,27 @@ class ConcatBatchReaderTest(unittest.TestCase):
         self.assertEqual(batch_sizes, [1024] * 9 + [784])
         self.assertEqual(values, list(range(row_count)))
 
+    def test_merge_reader_skips_empty_batches_before_later_rows(self):
+        empty = pa.record_batch([pa.array([], type=pa.int64())], names=['left'])
+        left = _BatchReader([
+            empty,
+            pa.record_batch([pa.array([1])], names=['left']),
+            empty,
+            pa.record_batch([pa.array([2])], names=['left']),
+        ])
+        right = _BatchReader([
+            pa.record_batch([pa.array([10, 20])], names=['right']),
+        ])
+        reader = DataEvolutionMergeReader(
+            row_offsets=[0, 1],
+            field_offsets=[0, 0],
+            readers=[left, right],
+            schema=pa.schema([('left', pa.int64()), ('right', pa.int64())]),
+        )
+        self.assertEqual({'left': [1], 'right': [10]}, reader.read_arrow_batch().to_pydict())
+        self.assertEqual({'left': [2], 'right': [20]}, reader.read_arrow_batch().to_pydict())
+        self.assertIsNone(reader.read_arrow_batch())
+
     def test_merge_reader_does_not_join_buffered_remainders(self):
         left = _BatchReader([
             pa.record_batch([pa.array([0])], names=["left"]),

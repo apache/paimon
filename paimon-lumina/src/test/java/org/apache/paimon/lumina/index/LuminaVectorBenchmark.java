@@ -359,21 +359,20 @@ public class LuminaVectorBenchmark {
             buildDir = indexDir;
         }
 
-        String indexFileName;
         try {
             final Path finalBuildDir = buildDir;
             GlobalIndexFileWriter gFileWriter =
                     new GlobalIndexFileWriter() {
                         @Override
-                        public String newFileName(String prefix) {
-                            return prefix + "-" + UUID.randomUUID();
+                        public String newFilePath(String prefix) {
+                            return new Path(finalBuildDir, prefix + "-" + UUID.randomUUID())
+                                    .toString();
                         }
 
                         @Override
-                        public PositionOutputStream newOutputStream(String fileName)
+                        public PositionOutputStream newOutputStream(String filePath)
                                 throws IOException {
-                            return buildFileIO.newOutputStream(
-                                    new Path(finalBuildDir, fileName), false);
+                            return buildFileIO.newOutputStream(new Path(filePath), false);
                         }
                     };
 
@@ -404,18 +403,19 @@ public class LuminaVectorBenchmark {
                         "Index build done in %.2f s%n", (finishEnd - finishStart) / 1000.0);
             }
 
-            indexFileName = results.get(0).fileName();
+            Path indexFilePath = new Path(results.get(0).filePath());
 
             // Upload to OSS if needed
             if (isRemote) {
-                Path localFile = new Path(buildDir, indexFileName);
-                Path remoteFile = new Path(indexDir, indexFileName);
+                Path localFile = indexFilePath;
+                Path remoteFile = new Path(indexDir, localFile.getName());
                 long localSize = localFileIO.getFileSize(localFile);
                 System.out.printf(
                         "Uploading to OSS: %s (%,d bytes, %.2f GB)...%n",
                         remoteFile, localSize, localSize / (1024.0 * 1024 * 1024));
                 long uploadStart = System.currentTimeMillis();
                 uploadFile(localFileIO, localFile, fileIO, remoteFile);
+                indexFilePath = remoteFile;
                 long uploadEnd = System.currentTimeMillis();
                 double uploadSec = (uploadEnd - uploadStart) / 1000.0;
                 System.out.printf(
@@ -423,7 +423,6 @@ public class LuminaVectorBenchmark {
                         uploadSec, localSize / (1024.0 * 1024) / uploadSec);
             }
 
-            Path indexFilePath = new Path(indexDir, indexFileName);
             long buildFileSize = fileIO.getFileSize(indexFilePath);
             long buildEndTime = System.currentTimeMillis();
 
@@ -517,7 +516,6 @@ public class LuminaVectorBenchmark {
         List<GlobalIndexIOMeta> ioMetas = Collections.singletonList(ioMeta);
 
         final FileIO benchFileIO = fileIO;
-        final Path benchIndexDir = indexDir;
 
         System.out.printf(
                 "Running %,d queries (top-%d), each with fresh index load...%n", numQueries, topK);
@@ -540,9 +538,7 @@ public class LuminaVectorBenchmark {
             long queryStart = System.nanoTime();
 
             GlobalIndexFileReader gFileReader =
-                    ioMetaArg ->
-                            benchFileIO.newInputStream(
-                                    new Path(benchIndexDir, ioMetaArg.filePath().getName()));
+                    ioMetaArg -> benchFileIO.newInputStream(ioMetaArg.filePath());
             ExecutorService executor = Executors.newCachedThreadPool();
             try (LuminaVectorGlobalIndexReader reader =
                     new LuminaVectorGlobalIndexReader(

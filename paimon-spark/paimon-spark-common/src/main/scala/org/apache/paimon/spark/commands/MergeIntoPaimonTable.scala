@@ -113,14 +113,21 @@ case class MergeIntoPaimonTable(
 
     // Step1: get the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits =
-      findCandidateDataSplits(targetOnlyCondition.getOrElse(TrueLiteral), relation.output)
+      findCandidateDataSplits(targetOnlyCondition.getOrElse(TrueLiteral), relation)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (deletionVectorsEnabled) {
       // Step2: generate dataset that should contains ROW_KIND, FILE_PATH, ROW_INDEX columns
       val filteredDf = createDataset(
         sparkSession,
-        createNewScanPlan(candidateDataSplits, relation, targetOnlyCondition))
+        createNewScanPlan(
+          candidateReadSplits(
+            candidateDataSplits,
+            targetOnlyCondition.getOrElse(TrueLiteral),
+            relation),
+          relation,
+          targetOnlyCondition)
+      )
       val ds = constructChangedRows(
         sparkSession,
         selectWithDvMeta(filteredDf),

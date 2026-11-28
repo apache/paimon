@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
@@ -38,6 +39,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -59,7 +61,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -70,8 +71,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -414,16 +414,19 @@ public abstract class AbstractCatalog implements Catalog {
         return schemas.stream()
                 .flatMap(
                         schema -> {
-                            Map<String, String> options = schema.toSchema().options();
-                            return Arrays.stream(
-                                    new String[] {
-                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
-                                        options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
-                                    });
+                            CoreOptions options = new CoreOptions(schema.options());
+                            List<Path> paths = new ArrayList<>(options.globalIndexExternalPaths());
+                            String strategy =
+                                    schema.options().get(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key());
+                            boolean template =
+                                    ExternalPathStrategy.ENTROPY_INJECT_TEMPLATE
+                                            .toString()
+                                            .equalsIgnoreCase(strategy);
+                            if (!template) {
+                                paths.addAll(options.dataFileExternalPathList());
+                            }
+                            return paths.stream();
                         })
-                .filter(Objects::nonNull)
-                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
-                .map(Path::new)
                 .distinct()
                 .collect(Collectors.toList());
     }
@@ -560,6 +563,9 @@ public abstract class AbstractCatalog implements Catalog {
                             + "). Drop and re-create the table instead.");
         }
 
+        String strategy = DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        SchemaValidation.validateExternalPathStrategyChange(
+                existing.options().get(strategy), newSchema.options().get(strategy));
         replaceTableImpl(identifier, (FileStoreTable) existing, newSchema);
     }
 

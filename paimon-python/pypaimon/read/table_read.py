@@ -133,7 +133,8 @@ class TableRead:
         splits and CPUs. Native workers buffer at most one batch each; batches
         from different split groups are emitted as they become ready because
         table reads do not guarantee row order. Python fallback reads remain
-        serial.
+        serial. ``blob_parallelism`` follows the backend-specific defaults
+        and total worker budget described in :meth:`to_arrow`.
         """
         from pypaimon.read.read_support import to_arrow_batch_reader
         return to_arrow_batch_reader(self, splits, blob_parallelism, parallelism)
@@ -206,12 +207,14 @@ class TableRead:
                 serially when a limit may discard rows, so discarded payloads
                 are not fetched by speculative split workers.
             blob_parallelism: maximum concurrent blob range reads within each
-                split reader. ``None`` or ``1`` (default) reads blobs serially;
-                ``>= 2`` enables concurrent ranged reads. On the
-                parallel path, peak blob threads (``parallelism`` *
-                ``blob_parallelism``) are capped at
-                ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
-                shrunk to stay within it.
+                split reader. ``None`` uses the native reader default (8) when the
+                extension supports HTTP BLOB retries, otherwise 1. Python reads
+                and native preparation fallback also default to 1. Explicit ``1``
+                keeps BLOB reads serial within each split; values must be >= 1.
+                Native execution that materializes BLOB payloads caps combined
+                range reads at 64 per read. Python reduces per-split concurrency
+                toward a total budget of 64, but retains at least one read per
+                split worker; more than 64 split workers can exceed that budget.
         """
         from pypaimon.read.read_dispatch import to_arrow
         return to_arrow(self, splits, parallelism, blob_parallelism)
@@ -334,7 +337,7 @@ class TableRead:
 
     @classmethod
     def _cap_blob_parallelism(cls, workers: int, blob_parallelism: int) -> int:
-        """Shrink per-split blob_parallelism so workers*B <= cap (peak reads)."""
+        """Reduce per-split concurrency toward the budget, keeping at least one."""
         from pypaimon.read.read_support import _cap_blob_parallelism
         return _cap_blob_parallelism(cls, workers, blob_parallelism)
 

@@ -67,11 +67,8 @@ class NullBitmapShuffleSerializerTest {
                                                     "id AS `" + SpecialFields.ROW_ID.name() + "`");
                             Partitioner ranges = NullBitmapShuffle.createPartitioner(input, 4);
                             check(
-                                    SortedIndexTopoBuilder.combineAndSortBuildTaskInputs(
-                                            Collections.singletonList(input),
-                                            4,
-                                            "task_id",
-                                            "index_key"),
+                                    SortedIndexTopoBuilder.sortBuildTaskInput(
+                                            input, 4, "task_id", "index_key", false),
                                     nullPercent,
                                     strings);
                             check(

@@ -459,7 +459,6 @@ public class NativeFullTextRowFilterTest {
                 new ArrayList<>(
                         GlobalIndexBuilderUtils.toIndexFileMetas(
                                 table.fileIO(),
-                                table.store().pathFactory().globalIndexFileFactory(),
                                 table.coreOptions(),
                                 new Range(0, fullTextIndexedRows - 1),
                                 contentField.id(),
@@ -491,7 +490,6 @@ public class NativeFullTextRowFilterTest {
         indexFiles.addAll(
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
                         categoryField.id(),

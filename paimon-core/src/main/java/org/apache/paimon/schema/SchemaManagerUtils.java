@@ -74,6 +74,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
@@ -468,6 +469,9 @@ final class SchemaManagerUtils {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        String strategy = DATA_FILE_EXTERNAL_PATHS_STRATEGY.key();
+        SchemaValidation.validateExternalPathStrategyChange(
+                oldOptions.get(strategy), newTableSchema.options().get(strategy));
         SchemaValidation.validateGeneratedColumnEvolution(oldTableSchema, newTableSchema);
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
@@ -608,7 +612,9 @@ final class SchemaManagerUtils {
     static Map<String, String> applyRenameColumnsToOptions(
             Map<String, String> options, Iterable<SchemaChange> changes) {
         Iterable<RenameColumn> renameColumns =
-                FluentIterable.from(changes).filter(RenameColumn.class);
+                FluentIterable.from(changes)
+                        .filter(RenameColumn.class)
+                        .filter(rename -> rename.fieldNames().length == 1);
 
         if (Iterables.isEmpty(renameColumns)) {
             return options;
@@ -620,9 +626,7 @@ final class SchemaManagerUtils {
                 Streams.stream(renameColumns)
                         .collect(
                                 Collectors.toMap(
-                                        // currently only non-nested columns are supported
-                                        rename -> rename.fieldNames()[0],
-                                        RenameColumn::newName));
+                                        rename -> rename.fieldNames()[0], RenameColumn::newName));
 
         // case 1: the option key is fixed and only value may contain field names
 
@@ -648,8 +652,6 @@ final class SchemaManagerUtils {
         // name, while the option value doesn't contain field names.
         List<Function<String, String>> fieldNameToOptionKeys =
                 ImmutableList.of(
-                        // NESTED_KEY is not added since renaming nested columns is not supported
-                        // currently
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + DISTINCT,
@@ -1063,6 +1065,10 @@ final class SchemaManagerUtils {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (DATA_FILE_EXTERNAL_PATHS_STRATEGY.key().equals(key)) {
+            SchemaValidation.validateExternalPathStrategyChange(oldValue, newValue);
         }
 
         if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(key)) {

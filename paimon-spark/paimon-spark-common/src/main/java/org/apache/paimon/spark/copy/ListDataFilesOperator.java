@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.TableSchema;
@@ -108,15 +109,19 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                         .createDataFilePathFactory(
                                 manifestEntry.partition(), manifestEntry.bucket())
                         .toPath(manifestEntry);
+        DataFilePathFactory targetDataFilePathFactory =
+                targetFileStorePathFactory.createDataFilePathFactory(
+                        manifestEntry.partition(), manifestEntry.bucket());
         Path targetDataFilePath =
-                CopyFilesUtil.newDataFilePath(
-                        targetFileStorePathFactory.createDataFilePathFactory(
-                                manifestEntry.partition(), manifestEntry.bucket()),
-                        manifestEntry.fileName());
+                CopyFilesUtil.newDataFilePath(targetDataFilePathFactory, manifestEntry.fileName());
         DataFileMeta fileMeta = manifestEntry.file();
         DataFileMeta targetFileMeta =
                 CopyFilesUtil.toNewDataFileMeta(
-                        fileMeta, targetDataFilePath.getName(), newSchemaId, sourceFileSchema);
+                        fileMeta,
+                        targetDataFilePath,
+                        targetDataFilePathFactory.isExternalPath(),
+                        newSchemaId,
+                        sourceFileSchema);
         return new CopyFileInfo(
                 dataFilePath.toString(),
                 targetDataFilePath.toString(),

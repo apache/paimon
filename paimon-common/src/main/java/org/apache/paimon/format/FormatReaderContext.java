@@ -26,6 +26,10 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
 /** the context for creating RecordReader {@link RecordReader}. */
 public class FormatReaderContext implements FormatReaderFactory.Context {
 
@@ -35,6 +39,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Nullable private final RoaringBitmap32 selection;
     @Nullable private final ReadBatchSizer readBatchSizer;
     @Nullable private final FileMetadataCache metadataCache;
+    private Set<String> fallbackFields = Collections.emptySet();
 
     public FormatReaderContext(
             FileIO fileIO,
@@ -63,6 +68,16 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public FileIO fileIO() {
         return fileIO;
+    }
+
+    public FormatReaderContext withFallbackFields(Set<String> fields) {
+        this.fallbackFields = Collections.unmodifiableSet(new HashSet<>(fields));
+        return this;
+    }
+
+    @Override
+    public Set<String> fallbackFields() {
+        return fallbackFields;
     }
 
     @Override

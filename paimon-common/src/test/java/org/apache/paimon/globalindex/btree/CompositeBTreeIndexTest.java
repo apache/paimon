@@ -93,14 +93,14 @@ class CompositeBTreeIndexTest {
         GlobalIndexFileWriter files =
                 new GlobalIndexFileWriter() {
                     @Override
-                    public String newFileName(String prefix) {
-                        return prefix + UUID.randomUUID();
+                    public String newFilePath(String prefix) {
+                        return new Path(directory, prefix + UUID.randomUUID()).toString();
                     }
 
                     @Override
-                    public PositionOutputStream newOutputStream(String name)
+                    public PositionOutputStream newOutputStream(String filePath)
                             throws java.io.IOException {
-                        return io.newOutputStream(new Path(directory, name), false);
+                        return io.newOutputStream(new Path(filePath), false);
                     }
                 };
         GenericRow reused = row("category-a", -1, "");
@@ -126,7 +126,7 @@ class CompositeBTreeIndexTest {
                 .isEqualTo(row("category-a", -1, ""));
         assertThat(serializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey())))
                 .isEqualTo(row("category-b", 7, "tag"));
-        Path path = new Path(directory, result.fileName());
+        Path path = new Path(result.filePath());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, io.getFileSize(path), result.rowCount(), result.meta());
         AtomicInteger deserializations = new AtomicInteger();

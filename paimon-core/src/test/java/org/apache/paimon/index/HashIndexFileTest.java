@@ -25,6 +25,8 @@ import org.apache.paimon.utils.IntIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,13 +51,20 @@ public class HashIndexFileTest {
                     }
 
                     @Override
-                    public Path toPath(String fileName) {
+                    public Path newPathFromName(String fileName) {
                         return new Path(dir, fileName);
                     }
 
                     @Override
                     public boolean isExternalPath() {
                         return false;
+                    }
+
+                    @Override
+                    public Path toPath(String fileName, @Nullable String externalPath) {
+                        return externalPath == null
+                                ? newPathFromName(fileName)
+                                : new Path(externalPath);
                     }
                 };
 

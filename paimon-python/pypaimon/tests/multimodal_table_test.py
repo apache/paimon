@@ -2040,6 +2040,27 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual([1], result["id"].to_pylist())
 
     @pytest.mark.python_read
+    def test_scan_to_arrow_forwards_blob_parallelism(self):
+        users = self.conn.create_table(
+            "serial_blob_users", data=[{"id": 1}],
+            schema=_schema({"id": pa.int32()}), options=_PARQUET_OPTIONS)
+        from pypaimon.read.table_read import TableRead
+
+        read = TableRead.to_arrow
+        observed = []
+
+        def observe(reader, splits, parallelism=None, blob_parallelism=None):
+            observed.append(blob_parallelism)
+            return read(reader, splits, parallelism=parallelism, blob_parallelism=blob_parallelism)
+
+        with patch.object(TableRead, "to_arrow", new=observe):
+            result = users.scan().select("id").to_arrow(blob_parallelism=1)
+        self.assertEqual([{"id": 1}], result.to_pylist())
+        self.assertEqual([1], observed)
+        with self.assertRaisesRegex(ValueError, "blob_parallelism must be >= 1"):
+            users.scan().to_arrow(blob_parallelism=0)
+
+    @pytest.mark.python_read
     def test_scan_to_arrow_batch_reader(self):
         users = self.conn.create_table(
             "batch_users",

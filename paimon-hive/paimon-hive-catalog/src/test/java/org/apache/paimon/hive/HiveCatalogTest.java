@@ -93,6 +93,7 @@ import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -390,6 +391,16 @@ public class HiveCatalogTest extends CatalogTestBase {
 
         hiveCatalog.dropTable(identifier, false);
         assertThat(hiveCatalog.listTables(databaseName)).doesNotContain(tableName);
+    }
+
+    @Test
+    public void testDropTableWhenDatabaseMissing() {
+        Identifier identifier = Identifier.create("missing_db", "missing_table");
+
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.dropTable(identifier, false))
+                .withMessage("Table missing_db.missing_table does not exist.");
+        assertThatCode(() -> catalog.dropTable(identifier, true)).doesNotThrowAnyException();
     }
 
     @Test

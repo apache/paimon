@@ -19,7 +19,12 @@
 package org.apache.paimon.spark.copy;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.HashIndexFile;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.schema.Schema;
@@ -28,14 +33,75 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
 
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CopyFilesUtil}. */
 public class CopyFilesUtilTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testCopiedHashIndexUsesAllocatedPath(
+            boolean externalTarget, @TempDir java.nio.file.Path tempDir) throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path root = new Path(tempDir.toUri());
+        IndexPathFactory sourcePaths =
+                createNonPartFactory(root, Arrays.asList(new Path(root, "a"), new Path(root, "b")))
+                        .globalIndexFileFactory();
+        IndexFileMeta source = new HashIndexFile(fileIO, sourcePaths).write(new int[] {1, 2, 3});
+        IndexPathFactory targetPaths =
+                externalTarget
+                        ? sourcePaths
+                        : createNonPartFactory(new Path(root, "target")).globalIndexFileFactory();
+        Path sourcePath = sourcePaths.toPath(source);
+        Path targetPath = targetPaths.newPath();
+        assertThat(targetPath.getParent()).isNotEqualTo(sourcePath.getParent());
+        CopyFilesUtil.copyFiles(fileIO, fileIO, sourcePath, targetPath, false);
+
+        IndexFileMeta copied =
+                CopyFilesUtil.toNewIndexFileMeta(source, targetPath, targetPaths.isExternalPath());
+        assertThat(copied.fileName()).isEqualTo(targetPath.getName());
+        assertThat(copied.externalPath()).isEqualTo(externalTarget ? targetPath.toString() : null);
+        assertThat(new HashIndexFile(fileIO, targetPaths).readList(copied))
+                .containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void testCopiedDataFileTakesTheExternalPathOfTheTarget() {
+        DataFileMeta source =
+                DataFileMeta.forAppend(
+                        "source.parquet",
+                        10L,
+                        2L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        1L,
+                        0L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        "file:/source-external/bucket-0/source.parquet",
+                        null,
+                        null);
+
+        Path target = new Path("file:/target-external/bucket-0/copied.parquet");
+        DataFileMeta toExternal = CopyFilesUtil.toNewDataFileMeta(source, target, true, 0L);
+        assertThat(toExternal.fileName()).isEqualTo("copied.parquet");
+        assertThat(toExternal.externalPath()).hasValue(target.toString());
+
+        DataFileMeta toBucket =
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("file:/warehouse/t/bucket-0/copied.parquet"), false, 0L);
+        assertThat(toBucket.externalPath()).isEmpty();
+    }
 
     @Test
     void testNewDataFilePathKeepsTheKindOfTheFile() {
@@ -83,7 +149,8 @@ public class CopyFilesUtilTest {
                                 Arrays.asList("a", "b"))
                         .withWriteColsSequences(new long[] {2L, 3L});
 
-        DataFileMeta copied = CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 6L);
+        DataFileMeta copied =
+                CopyFilesUtil.toNewDataFileMeta(source, new Path("copied.parquet"), false, 6L);
 
         assertThat(copied.fileName()).isEqualTo("copied.parquet");
         assertThat(copied.schemaId()).isEqualTo(6L);
@@ -124,7 +191,8 @@ public class CopyFilesUtilTest {
                                 .build());
 
         DataFileMeta copied =
-                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("copied.parquet"), false, 9L, sourceSchema);
 
         assertThat(copied.schemaId()).isEqualTo(9L);
         assertThat(copied.writeCols()).containsExactly("id", "name");
@@ -159,7 +227,8 @@ public class CopyFilesUtilTest {
                                 .build());
 
         DataFileMeta copied =
-                CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 9L, sourceSchema);
+                CopyFilesUtil.toNewDataFileMeta(
+                        source, new Path("copied.parquet"), false, 9L, sourceSchema);
 
         assertThat(copied.schemaId()).isEqualTo(9L);
         assertThat(copied.writeCols()).containsExactly("id", "blob", "name");

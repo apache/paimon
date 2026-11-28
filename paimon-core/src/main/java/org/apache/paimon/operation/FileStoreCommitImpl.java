@@ -322,6 +322,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return this;
     }
 
+    @Nullable
+    @Override
+    public Snapshot.Operation operation() {
+        return operation;
+    }
+
     @Override
     public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
         // nothing to filter, fast exit

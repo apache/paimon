@@ -22,6 +22,7 @@ import heapq
 import itertools
 import logging
 from functools import partial
+from operator import itemgetter
 from typing import Iterable, List, Optional
 
 import pyarrow
@@ -29,9 +30,10 @@ from packaging.version import parse
 import ray
 from ray.data.datasource import Datasource
 
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.read_support import close_read_source
 from pypaimon.read.datasource.split_provider import SplitProvider
-from pypaimon.read.split import Split
+from pypaimon.read.split import DataSplit, Split
 from pypaimon.schema.data_types import PyarrowFieldParser
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,20 @@ logger = logging.getLogger(__name__)
 # Ray version constants for compatibility
 RAY_VERSION_SCHEMA_IN_READ_TASK = "2.48.0"  # Schema moved from BlockMetadata to ReadTask
 RAY_VERSION_PER_TASK_ROW_LIMIT = "2.52.0"  # per_task_row_limit parameter introduced
+
+
+def estimate_split_size(split: Split) -> int:
+    """Estimate selected bytes using the average on-disk row size."""
+    file_size = max(0, getattr(split, "file_size", 0))
+    if not isinstance(split, IndexedSplit) or not file_size:
+        return file_size
+    selected = split.row_count
+    if not selected:
+        return 0
+    total = DataSplit.row_count_before_deletions(split.files)
+    if selected >= total:
+        return file_size
+    return (file_size * selected + total - 1) // total
 
 
 class RayDatasource(Datasource):
@@ -80,7 +96,7 @@ class RayDatasource(Datasource):
         if not splits:
             return 0
 
-        total_size = sum(split.file_size for split in splits)
+        total_size = sum(estimate_split_size(split) for split in splits)
         return total_size if total_size > 0 else None
 
     @staticmethod
@@ -96,12 +112,10 @@ class RayDatasource(Datasource):
         heapq.heapify(chunk_sizes)
 
         # From largest to smallest, add the splits to the smallest chunk one at a time
-        for split in sorted(
-                splits, key=lambda s: s.file_size if hasattr(s, 'file_size') and s.file_size > 0 else 0, reverse=True
-        ):
+        sized_splits = ((estimate_split_size(split), split) for split in splits)
+        for split_size, split in sorted(sized_splits, key=itemgetter(0), reverse=True):
             smallest_chunk = heapq.heappop(chunk_sizes)
             chunks[smallest_chunk[1]].append(split)
-            split_size = split.file_size if hasattr(split, 'file_size') and split.file_size > 0 else 0
             heapq.heappush(
                 chunk_sizes,
                 (smallest_chunk[0] + split_size, smallest_chunk[1]),
@@ -225,8 +239,7 @@ class RayDatasource(Datasource):
                         total_rows = None
                     else:
                         total_rows += row_count
-                if hasattr(split, 'file_size') and split.file_size > 0:
-                    total_size += split.file_size
+                total_size += estimate_split_size(split)
 
             input_files = list(itertools.chain.from_iterable(
                 split.file_paths

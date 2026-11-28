@@ -19,6 +19,8 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.internal.filter2.columnindex.RowRanges.Range;
+import org.apache.parquet.internal.filter2.columnindex.RowRanges.RowIndexIterator;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -107,6 +109,15 @@ public final class ParquetReadState {
         }
 
         List<RowRange> rowRanges = new ArrayList<>();
+        if (rowIndexes instanceof RowIndexIterator) {
+            RowIndexIterator iterator = (RowIndexIterator) rowIndexes;
+            while (iterator.hasNext()) {
+                Range range = iterator.nextRange();
+                rowRanges.add(new RowRange(range.from, range.to));
+            }
+            return rowRanges.iterator();
+        }
+
         long currentStart = Long.MIN_VALUE;
         long previous = Long.MIN_VALUE;
 
