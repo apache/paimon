@@ -335,6 +335,10 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testTableReadWriteWithChangedExternalPath() throws Exception {
+        // Since Flink 2.3 only the minimum pause delays the first checkpoint. The writer switches
+        // to the new path at that checkpoint, so the first row has to arrive before it.
+        sEnv.getConfig().set("execution.checkpointing.min-pause", "500 ms");
+
         String externalPaths1 = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
         String externalPaths2 = TraceableFileIO.SCHEME + "://" + tempExternalPath2.toString();
 

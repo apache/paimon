@@ -521,9 +521,9 @@ under the License.
             <id>flink2</id>
             <properties>
                 <paimon-flinkx-common>paimon-flink2-common</paimon-flinkx-common>
-                <paimon-flink-common.flink.version>2.2.0</paimon-flink-common.flink.version>
-                <test.flink.main.version>2.2</test.flink.main.version>
-                <test.flink.version>2.2.0</test.flink.version>
+                <paimon-flink-common.flink.version>2.3.0</paimon-flink-common.flink.version>
+                <test.flink.main.version>2.3</test.flink.main.version>
+                <test.flink.version>2.3.0</test.flink.version>
                 <target.java.version>11</target.java.version>
             </properties>
             <modules>
@@ -531,6 +531,7 @@ under the License.
                 <module>paimon-flink/paimon-flink-2.0</module>
                 <module>paimon-flink/paimon-flink-2.1</module>
                 <module>paimon-flink/paimon-flink-2.2</module>
+                <module>paimon-flink/paimon-flink-2.3</module>
             </modules>
             <activation>
                 <property>

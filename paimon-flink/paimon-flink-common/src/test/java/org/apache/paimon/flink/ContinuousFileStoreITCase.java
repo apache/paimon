@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -26,7 +27,10 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.table.api.StatementSet;
+import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -86,6 +90,74 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         statementSet.addInsertSql("INSERT INTO new_print1 SELECT * FROM T1 LIMIT 5");
         statementSet.addInsertSql("INSERT INTO new_print2 SELECT * FROM T1");
         assertThat(statementSet.compilePlan().explain()).doesNotContain("Reused");
+    }
+
+    @Test
+    public void testSourceOperatorUid() {
+        String withSuffix =
+                "SELECT * FROM T1 /*+ OPTIONS('source.operator-uid.suffix' = 'test') */";
+
+        // by default the planner generates no uid
+        assertThat(sourceTransformation("SELECT * FROM T1").getUid()).isNull();
+        assertThat(sourceTransformation(withSuffix).getUid()).isEqualTo("Source_T1_test");
+
+        // with generated uids the source has the uid of the planner, which also replaces the one
+        // from 'source.operator-uid.suffix'
+        sEnv.getConfig()
+                .set(
+                        ExecutionConfigOptions.TABLE_EXEC_UID_GENERATION,
+                        ExecutionConfigOptions.UidGeneration.ALWAYS);
+        assertThat(sourceTransformation("SELECT * FROM T1").getUid()).matches("\\d+_source");
+        assertThat(sourceTransformation(withSuffix).getUid()).matches("\\d+_source");
+
+        // with a consumer id the provider returns the reader that follows the monitor source
+        String withConsumer =
+                "SELECT * FROM T1 /*+ OPTIONS('consumer-id'='me','consumer.expiration-time'='3h') */";
+        Transformation<?> reader =
+                AbstractTestBase.translate(sEnv, withConsumer).getInputs().get(0);
+        assertThat(reader.getInputs()).isNotEmpty();
+        assertThat(reader.getUid()).matches("\\d+_source");
+
+        // a bounded source in a streaming job, here a system table, has the uid as well
+        assertThat(sourceTransformation("SELECT * FROM T1$snapshots").getUid())
+                .matches("\\d+_source");
+    }
+
+    @Test
+    public void testSourceOperatorNameAndDescription() {
+        // the planner names a table source scan after the table and describes it with the plan node
+        String name = "T1\\[\\d+]";
+        String scan =
+                "\\[\\d+]:TableSourceScan\\(table=\\[\\[PAIMON, default, T1]], fields=\\[a, b, c]";
+
+        Transformation<?> source = sourceTransformation(sEnv, "SELECT * FROM T1");
+        assertThat(source.getName()).matches(name);
+        assertThat(source.getDescription()).matches(scan + "\\)");
+
+        Transformation<?> batchSource = sourceTransformation(tEnv, "SELECT * FROM T1");
+        assertThat(batchSource.getName()).matches(name);
+        assertThat(batchSource.getDescription()).matches(scan + "\\)");
+
+        // with a consumer id they are on the reader that follows the monitor source
+        String withConsumer =
+                "SELECT * FROM T1 /*+ OPTIONS('consumer-id'='me','consumer.expiration-time'='3h') */";
+        Transformation<?> reader =
+                AbstractTestBase.translate(sEnv, withConsumer).getInputs().get(0);
+        assertThat(reader.getInputs()).isNotEmpty();
+        assertThat(reader.getName()).matches(name);
+        assertThat(reader.getDescription()).matches(scan + ", hints=.*\\)");
+    }
+
+    private Transformation<?> sourceTransformation(String sql) {
+        return sourceTransformation(sEnv, sql);
+    }
+
+    private Transformation<?> sourceTransformation(TableEnvironment env, String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(env, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        return transformation;
     }
 
     @Test

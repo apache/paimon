@@ -49,7 +49,7 @@ case "$suite" in
         ;;
     flink2)
         profiles=flink2,spark3
-        for version in 2.0 2.1 2.2 common; do
+        for version in 2.0 2.1 2.2 2.3 common; do
             modules+=("org.apache.paimon:paimon-flink-${version}")
         done
         ;;
@@ -80,7 +80,7 @@ case "$suite" in
         goal=test
         ;;
     e2e-flink2)
-        profiles=flink2,spark3,flink-2.2,java11
+        profiles=flink2,spark3,flink-2.3,java11
         modules=(paimon-e2e-tests)
         threads=1C
         goal=test

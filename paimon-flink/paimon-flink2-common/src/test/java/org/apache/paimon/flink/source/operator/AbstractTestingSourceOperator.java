@@ -65,6 +65,7 @@ public abstract class AbstractTestingSourceOperator<T, S extends SourceSplit>
                 emitProgressiveWatermarks,
                 canEmitBatchOfRecords,
                 new HashMap<>(),
+                false,
                 false);
         this.subtaskIndex = subtaskIndex;
         this.parallelism = parallelism;

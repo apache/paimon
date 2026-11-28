@@ -23,6 +23,7 @@ import org.apache.flink.table.catalog.CatalogMaterializedTable;
 import org.apache.flink.table.catalog.IntervalFreshness;
 import org.apache.flink.table.catalog.ResolvedCatalogMaterializedTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.StartMode;
 
 import java.util.Collections;
 import java.util.Map;
@@ -42,7 +43,8 @@ public class FlinkCatalogTestBase {
                         .comment("test materialized table comment")
                         .partitionKeys(Collections.emptyList())
                         .options(options)
-                        .definitionQuery(DEFINITION_QUERY)
+                        .originalQuery(DEFINITION_QUERY)
+                        .expandedQuery(DEFINITION_QUERY)
                         .freshness(FRESHNESS)
                         .logicalRefreshMode(CatalogMaterializedTable.LogicalRefreshMode.AUTOMATIC)
                         .refreshMode(CatalogMaterializedTable.RefreshMode.CONTINUOUS)
@@ -50,6 +52,7 @@ public class FlinkCatalogTestBase {
                         .build(),
                 resolvedSchema,
                 CatalogMaterializedTable.RefreshMode.CONTINUOUS,
-                FRESHNESS);
+                FRESHNESS,
+                StartMode.of(StartMode.StartModeKind.FROM_BEGINNING));
     }
 }

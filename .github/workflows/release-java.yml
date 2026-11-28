@@ -114,7 +114,7 @@ jobs:
               mvn -ntp -B "${enforcer_goal}" \
                 -Denforcer.rules="${enforcer_rules}" \
                 -Papache-release,docs-and-source,flink2 \
-                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink-2.3,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
                 -am
               ;;
             jdk17)
@@ -165,14 +165,14 @@ jobs:
             jdk11)
               capture_expected_projects \
                 -Papache-release,docs-and-source,flink2 \
-                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink-2.3,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg
               # This install only supplies reactor dependencies for the deploy
               # below. Their Javadocs are built by the owning release lane.
               mvn clean install -ntp -B \
                 -Pdocs-and-source,flink2 \
                 -DskipTests -Dmaven.javadoc.skip=true \
                 -Dstyle.color=never \
-                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink-2.3,org.apache.paimon:paimon-iceberg \
                 -am \
                 2>&1 | tee "${log}"
               mvn deploy -ntp -B \
@@ -180,7 +180,7 @@ jobs:
                 -DskipTests -Dgpg.skip=true -Dstyle.color=never \
                 -DdeployAtEnd=true \
                 -DaltDeploymentRepository="${alt_repository}" \
-                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink-2.3,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
                 2>&1 | tee -a "${log}"
               ;;
             jdk17)

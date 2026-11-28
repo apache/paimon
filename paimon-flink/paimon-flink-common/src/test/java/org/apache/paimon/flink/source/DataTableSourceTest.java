@@ -128,6 +128,8 @@ class DataTableSourceTest {
         DataStream<RowData> sourceStream =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), env);
         assertThat(sourceStream.getParallelism()).isEqualTo(3);
+        // a context without a name leaves the name of the source as it is
+        assertThat(sourceStream.getTransformation().getName()).isEqualTo("cat.db.table");
     }
 
     @Test

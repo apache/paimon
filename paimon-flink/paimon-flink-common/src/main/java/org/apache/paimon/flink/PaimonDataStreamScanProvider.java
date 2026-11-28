@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.Table;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
@@ -39,6 +40,9 @@ import java.util.function.Function;
  */
 public class PaimonDataStreamScanProvider
         implements DataStreamScanProvider, ParallelismProvider, LineageVertexProvider {
+
+    /** The transformation name the planner uses for the uid of a table source scan. */
+    private static final String SOURCE_TRANSFORMATION = "source";
 
     private final boolean isBounded;
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
@@ -70,7 +74,29 @@ public class PaimonDataStreamScanProvider
     @Override
     public DataStream<RowData> produceDataStream(
             ProviderContext context, StreamExecutionEnvironment env) {
-        return producer.apply(env);
+        DataStream<RowData> dataStream = producer.apply(env);
+        // Since Flink 2.3 the planner no longer sets the name, the description and the uid of the
+        // returned transformation, it hands them to the provider through the context instead.
+        Transformation<?> transformation = dataStream.getTransformation();
+        contextValue(context, "getName").ifPresent(transformation::setName);
+        contextValue(context, "getDescription").ifPresent(transformation::setDescription);
+        // The planner generates a uid only for compiled plans and with
+        // 'table.exec.uid.generation' = 'ALWAYS'. Up to Flink 2.2 it then replaced whatever uid the
+        // transformation had with this one, so do the same to keep the state of those jobs mapped.
+        context.generateUid(SOURCE_TRANSFORMATION).ifPresent(transformation::setUid);
+        return dataStream;
+    }
+
+    private static Optional<String> contextValue(ProviderContext context, String getter) {
+        try {
+            String value = (String) ProviderContext.class.getMethod(getter).invoke(context);
+            return value == null || value.isEmpty() ? Optional.empty() : Optional.of(value);
+        } catch (NoSuchMethodException e) {
+            // before Flink 2.3 the context has no such getter and the planner sets the value
+            return Optional.empty();
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

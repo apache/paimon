@@ -250,7 +250,7 @@ voters may run the packaging-equivalent build without reproducing the full JDK
 (
   cd "paimon-${PAIMON_VERSION}"
   mvn -ntp clean install -DskipTests -Pdocs-and-source,flink2 \
-    -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+    -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink-2.3,org.apache.paimon:paimon-iceberg \
     -am
 )
 ```
