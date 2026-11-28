@@ -406,6 +406,40 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         self.assertFalse(_full_text_should_read_source(
             SimpleNamespace(file_source=0, level=2)))
 
+    def test_vector_coverage_uses_promoted_files_before_filtering(self):
+        partition = GenericRow([], [])
+        append = SimpleNamespace(
+            file_name="append.parquet", file_source=0, level=5, row_count=2, delete_row_count=0)
+        compact = SimpleNamespace(
+            file_name="compact.parquet", file_source=1, level=5, row_count=2, delete_row_count=0)
+        complete = DataSplit([append, compact], partition, 0)
+        filtered = DataSplit([compact], partition, 0)
+        options = CoreOptions(Options({"deletion-vectors.enabled": "true"}))
+
+        def plan(source_files):
+            sources = [PrimaryKeyIndexSourceFile(file.file_name, file.row_count)
+                       for file in source_files]
+            row_count = sum(file.row_count for file in source_files)
+            payload = SimpleNamespace(
+                row_count=row_count, global_index_meta=SimpleNamespace(
+                    row_range_start=0, row_range_end=row_count - 1))
+            entry = SimpleNamespace(partition=partition, bucket=0, index_file=payload)
+            with mock.patch.object(PrimaryKeyIndexSourceMeta, "from_index_file",
+                                   return_value=PrimaryKeyIndexSourceMeta(5, sources)):
+                return _bucket_splits([(filtered, {})], [entry], 7, options, [(complete, {})])[0]
+
+        old = plan([compact])
+        self.assertEqual(1, len(old.payloads))
+        self.assertEqual(("append.parquet",), old.uncovered_data_files)
+        self.assertEqual((), old.row_ranges_by_file["append.parquet"])
+
+        current = plan([append, compact])
+        self.assertEqual(1, len(current.payloads))
+        self.assertEqual((), current.uncovered_data_files)
+
+        append.delete_row_count = None
+        self.assertEqual((), plan([append, compact]).payloads)
+
     def test_pk_vector_scan_pins_source_and_index_to_same_snapshot(self):
         schema = TableSchema(
             fields=[DataField(1, "embedding", AtomicType("VECTOR(1)"))],
@@ -419,6 +453,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         class _ScanTable:
             table_schema = schema
             fields = schema.fields
+            options = CoreOptions(Options(schema.options))
 
             def copy_without_time_travel(self, options):
                 copied_options.append(options)

@@ -199,6 +199,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
+    @Nullable private Long writeSchemaId;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -275,6 +276,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (Exception e) {
             throw new RuntimeException("Failed to run commit with table lock.", e);
         }
+    }
+
+    public FileStoreCommitImpl withWriteSchemaId(long schemaId) {
+        this.writeSchemaId = schemaId;
+        return this;
     }
 
     @Override
@@ -926,6 +932,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return snapshotConflictChecker.prepareCompactionBaselines(commitMessages);
     }
 
+    private void checkVectorBackfillSchema() {
+        if (writeSchemaId != null
+                && writeSchemaId
+                        != schemaManager
+                                .latest()
+                                .orElseThrow(
+                                        () -> new IllegalStateException("Table schema is missing."))
+                                .id()) {
+            throw new IllegalStateException(
+                    "Table schema changed during primary-key vector index backfill. "
+                            + "Reload the table and retry the backfill.");
+        }
+    }
+
     private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
         Long checkFromSnapshot = null;
         for (CommitMessage message : commitMessages) {
@@ -1405,7 +1425,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         commitKind,
                         changes,
                         rebasedReassignments,
-                        compactionBaselines);
+                        compactionBaselines,
+                        this::checkVectorBackfillSchema);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit table files to snapshot {}", newSnapshotId);

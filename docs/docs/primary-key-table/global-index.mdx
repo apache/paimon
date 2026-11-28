@@ -340,13 +340,14 @@ that preparation, cancels outstanding builds, and cleans up uncommitted outputs.
 committed snapshots remain valid. More concurrent builds can increase memory and I/O usage;
 each index implementation may also use its own internal threads.
 
-Paimon builds primary-key indexes from complete `COMPACT` data files above Level 0. An index group
-stores the source file names and row counts required to map index results back to physical rows.
-Data-file and index-file changes are committed in the same snapshot.
+Paimon builds primary-key indexes from complete `COMPACT` data files above Level 0. Vector indexes
+can also use positive-level files when the current bucket can be read without primary-key merging
+and the visible files have a known zero delete-row count. This allows a batch compaction to
+backfill a vector index using the original Parquet files after a metadata-only level upgrade.
+The build uses the snapshot's deletion vectors to skip deleted physical rows.
 
-New Level-0 `APPEND` files are not index sources. They remain uncovered until physical data
-compaction produces an eligible output. A metadata-only level upgrade keeps its `APPEND` source
-and therefore remains uncovered as well.
+An index group stores the source file names and row counts required to map index results back
+to physical rows. Level-0 data must pass through compaction before it can enter an index group.
 
 For a postpone-bucket table, foreground writes can land in bucket `-2` or in pending Level-0 files
 inside real buckets. These rows become visible after batch compaction publishes them to real
@@ -653,7 +654,7 @@ create a table with the desired definition and migrate the data.
 - Exactly one vector index column is currently supported per table.
 - Exactly one full-text index column is currently supported per table.
 - Only `FLOAT` vectors are supported.
-- Indexes are built from eligible compact output, not directly from Level-0 appends.
+- Index sources must be eligible data files above Level 0.
 - Index acceleration and vector search are snapshot-scoped batch operations; continuous streaming
   and lateral Vector or Full Text search are not supported.
 - Flink vector search returns rows but does not expose the ANN score as a separate column.
