@@ -591,12 +591,17 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
   }
 
   protected def getScanStatistic(sql: String): Statistics = {
-    val relation = spark
-      .sql(sql)
-      .queryExecution
-      .optimizedPlan
-      .collectFirst { case relation: DataSourceV2ScanRelation => relation }
-      .get
-    relation.computeStats()
+    // Since Spark 4.3 (SPARK-58315), a V2 scan reports only its size without plan stats
+    var stats: Statistics = null
+    withSparkSQLConf("spark.sql.cbo.planStats.enabled" -> "true") {
+      stats = spark
+        .sql(sql)
+        .queryExecution
+        .optimizedPlan
+        .collectFirst { case relation: DataSourceV2ScanRelation => relation }
+        .get
+        .computeStats()
+    }
+    stats
   }
 }
