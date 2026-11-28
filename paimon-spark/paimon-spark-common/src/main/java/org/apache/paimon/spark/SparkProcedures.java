@@ -65,6 +65,7 @@ import org.apache.paimon.spark.procedure.RenameBranchProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairEarliestSnapshotProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
+import org.apache.paimon.spark.procedure.ReplaceByKeysProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.RescaleProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
@@ -157,6 +158,7 @@ public class SparkProcedures {
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
+        procedureBuilders.put("replace_by_keys", ReplaceByKeysProcedure::builder);
         procedureBuilders.put("reassign_row_id", ReassignRowIdProcedure::builder);
         procedureBuilders.put("grant_permission", GrantPermissionProcedure::builder);
         procedureBuilders.put("revoke_permission", RevokePermissionProcedure::builder);

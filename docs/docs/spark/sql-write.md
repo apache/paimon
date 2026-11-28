@@ -67,6 +67,72 @@ Use `INSERT INTO` to apply records and changes to tables.
 INSERT INTO my_table SELECT ...
 ```
 
+### Atomic Replacement by Business Keys
+
+For a Data Evolution table with deletion vectors, `replace_by_keys` combines a
+key-based delete and an append into one atomic data commit:
+
+```sql
+CALL paimon.sys.replace_by_keys(
+    table => 'db.target',
+    source_query => 'SELECT tenant, entity, value FROM paimon.db.batch WHERE ready = true',
+    key_columns => ARRAY('tenant', 'entity'),
+    target_filter => 'tenant = 7'
+);
+```
+
+The operation deletes target rows whose complete key matches a row from the
+source query, then inserts every source row. The optional `target_filter`
+restricts **deletions only**; put any desired insertion filter in the source
+query. Source duplicates are retained. Keys use ordinary SQL `=` semantics:
+NULL keys do not match existing NULL keys, just as a positive `IN` predicate
+does not select UNKNOWN results. Replaced rows receive new row IDs; unaffected
+rows retain theirs. Readers see the old or new data snapshot, never a committed
+delete-only intermediate result.
+
+The source query must supply all target columns by name; column order may differ.
+The append uses the existing INSERT assignment policy and type, nullability and
+CHAR/VARCHAR checks, without schema evolution. Deletion compares the source's
+original keys, before any INSERT casts, to preserve `DELETE ... IN` semantics.
+Deterministic queries over Paimon
+snapshot tables and immutable SQL values are supported. Each Paimon source is
+bound to a snapshot for both preparation jobs, without materializing another
+copy of the whole source. Fallback sources bind each branch separately, and
+tagged sources retain the selected snapshot even after its ordinary snapshot
+file expires. Query-time expressions share one value across both jobs,
+including inside subqueries. Streaming, commands, nondeterministic expressions and
+sources without a stable snapshot binding are rejected. `target_filter` must
+be a deterministic predicate over target columns without subqueries.
+Incremental, latest-delta, monitoring, compacted-only and file-creation-time
+source scans are rejected instead of silently changing their selected rows.
+Filters, projections, joins, unions, CTEs and DISTINCT over these inputs can be
+used directly. Aggregate, window, limit/offset, sampling and deduplication plans
+must first be materialized as a Paimon batch table. A fixed snapshot alone does
+not guarantee that separate key-only and full-row executions choose identical
+rows or aggregate values for these plans. The procedure rejects them rather
+than introducing a hidden full-source materialization step.
+
+Deletion vectors and new files are prepared before publication, using the
+existing distributed delete and append paths. This does not invoke the
+`MERGE INTO` execution path or reconstruct old target payload columns. It still
+needs to locate matching target rows, and holding both sets of commit messages
+can increase peak metadata memory. Inline write compaction is disabled for this
+operation; table maintenance can publish separate snapshots after the atomic
+data commit.
+
+Existing conflict checks apply, including concurrent partial-column updates
+overlapping the old file row ranges referenced by deletion vectors.
+Changing the RowID mapping of a referenced anchor after preparation (for example,
+with `reassign_row_id`) also rejects the stale replacement.
+A conflict requires replanning the operation;
+the procedure does not automatically retry the logical replacement. Atomic
+visibility does not enforce business-key uniqueness against concurrent appends
+or provide a general multi-statement, cross-table transaction. After a publication
+exception the result can be uncertain: do not assume rollback or blindly retry.
+Known staged files are aborted on preparation failure; files from tasks that
+failed before returning a commit message remain subject to normal orphan-file
+cleanup.
+
 ### Insert Overwrite
 
 In static mode, `INSERT OVERWRITE` without a partition filter replaces the whole table.
