@@ -18,6 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -26,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -40,12 +48,29 @@ import java.util.List;
  */
 public class PartitionPredicateHelper {
 
+    private static final String PARTITION_SEPARATOR = ", ";
+
     public static boolean applyPartitionFilter(
             SnapshotReader snapshotReader,
             @Nullable LeafPredicate partitionPredicate,
             List<String> partitionKeys,
             RowType partitionType) {
         if (partitionPredicate == null) {
+            return true;
+        }
+
+        if (partitionKeys.size() > 1
+                && (partitionPredicate.function() instanceof LeafBinaryFunction
+                        || partitionPredicate.function() instanceof In)
+                && partitionPredicate.literals().stream()
+                        .anyMatch(
+                                literal ->
+                                        literal != null
+                                                && hasExtraSeparators(
+                                                        literal.toString(),
+                                                        partitionKeys.size()))) {
+            snapshotReader.withPartitionFilter(
+                    new RenderedPartitionPredicate(partitionType, partitionPredicate));
             return true;
         }
 
@@ -113,7 +138,7 @@ public class PartitionPredicateHelper {
         if (partitionStr.endsWith("}")) {
             partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
         }
-        String[] partFields = partitionStr.split(", ");
+        String[] partFields = partitionStr.split(PARTITION_SEPARATOR, partitionKeys.size());
         if (partitionKeys.size() != partFields.length) {
             return null;
         }
@@ -122,5 +147,55 @@ public class PartitionPredicateHelper {
             partSpec.put(partitionKeys.get(i), partFields[i]);
         }
         return partSpec;
+    }
+
+    private static boolean hasExtraSeparators(String partition, int keyCount) {
+        int start = 0;
+        for (int i = 0; i < keyCount; i++) {
+            int separator = partition.indexOf(PARTITION_SEPARATOR, start);
+            if (separator < 0) {
+                return false;
+            }
+            start = separator + PARTITION_SEPARATOR.length();
+        }
+        return true;
+    }
+
+    private static class RenderedPartitionPredicate implements PartitionPredicate {
+
+        private static final long serialVersionUID = 1L;
+
+        private final RowType partitionType;
+        private final LeafPredicate predicate;
+        private transient volatile CastExecutor<InternalRow, BinaryString> renderer;
+
+        private RenderedPartitionPredicate(RowType partitionType, LeafPredicate predicate) {
+            this.partitionType = partitionType;
+            this.predicate = predicate;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public boolean test(BinaryRow partition) {
+            CastExecutor<InternalRow, BinaryString> cast = renderer;
+            if (cast == null) {
+                cast =
+                        (CastExecutor<InternalRow, BinaryString>)
+                                CastExecutors.resolveToString(partitionType);
+                renderer = cast;
+            }
+            return predicate
+                    .function()
+                    .test(VarCharType.STRING_TYPE, cast.cast(partition), predicate.literals());
+        }
+
+        @Override
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            return true;
+        }
     }
 }
