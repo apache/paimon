@@ -789,7 +789,18 @@ def _validate_columns_and_keys(schema: Schema):
                 f"Table column {names} should include all {included} {keys}")
 
 
-def _validate_options(options: dict):
+def _validate_options(options: dict, previous_options: Optional[dict] = None):
+    from pypaimon.common.options.core_options import MergeEngine
+
+    key = CoreOptions.MERGE_ENGINE.key()
+    # Older schemas may contain an enum member name. Allow unrelated schema changes on those tables.
+    previous_engine = (previous_options or {}).get(key, CoreOptions.MERGE_ENGINE.default_value())
+    if key in options and options[key] != previous_engine:
+        value = options[key]
+        valid_values = [engine.value for engine in MergeEngine]
+        if not isinstance(value, str) or value.lower() not in valid_values:
+            raise ValueError(f"Invalid value {value!r} for '{key}'. Expected one of {', '.join(valid_values)}.")
+
     core_options = CoreOptions(Options(options))
     target_file_row_num = core_options.target_file_row_num()
     max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
@@ -1092,8 +1103,8 @@ class SchemaManager:
             if success:
                 return table_schema
 
-    def commit(self, new_schema: TableSchema) -> bool:
-        _validate_options(new_schema.options)
+    def commit(self, new_schema: TableSchema, previous_options: Optional[dict] = None) -> bool:
+        _validate_options(new_schema.options, previous_options)
         _validate_sequence_group_sort_order(new_schema)
         _validate_blob_fields(
             new_schema.fields,
@@ -1153,7 +1164,7 @@ class SchemaManager:
 
             new_table_schema = self._generate_table_schema(old_table_schema, changes)
             try:
-                success = self.commit(new_table_schema)
+                success = self.commit(new_table_schema, old_table_schema.options)
                 if success:
                     return new_table_schema
             except Exception as e:
