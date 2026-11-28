@@ -19,14 +19,21 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.{CommitKind, Operation}
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.data.{BinaryVector, GenericRow}
 import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.globalindex.IndexedSplit
+import org.apache.paimon.io.DataIncrement
+import org.apache.paimon.schema.SchemaChange
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, DataEvolutionRowIdConflictCommitter, PaimonSparkWriter}
 import org.apache.paimon.spark.read.PaimonSplitScan
+import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort, SubqueryAlias}
@@ -948,47 +955,123 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   }
 
   test("Data Evolution: merge into keeps vector files that start inside a touched range") {
-    Seq("x", "embedding").foreach {
-      column =>
-        withTable("s", "t") {
-          // The vector file rolls every 1000 rows, so one normal file covers four vector files.
-          sql("""
-                |CREATE TABLE t (id INT, x INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
-                |  'row-tracking.enabled' = 'true',
-                |  'data-evolution.enabled' = 'true',
-                |  'file.format' = 'parquet',
-                |  'vector.file.format' = 'parquet',
-                |  'vector-field' = 'embedding',
-                |  'field.embedding.vector-dim' = '8',
-                |  'vector.target-file-size' = '1 kb')
-                |""".stripMargin)
-          sql("""
-                |INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), 0,
-                |  array_repeat(CAST(id AS FLOAT), 8) FROM range(0, 4000)
-                |""".stripMargin)
-          val vectorFiles = loadTable("t")
-            .store()
-            .newScan()
-            .plan()
-            .files()
-            .asScala
-            .map(_.file())
-            .filter(_.fileName().contains(".vector."))
-          assert(vectorFiles.exists(_.firstRowId() == 1000L), vectorFiles)
+    for (column <- Seq("x", "embedding"); on <- Seq("t._ROW_ID = s.id", "t.id = s.id")) {
+      withTable("s", "t") {
+        // The vector file rolls every 1000 rows, so one normal file covers four vector files.
+        sql("""
+              |CREATE TABLE t (id INT, x INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'file.format' = 'parquet',
+              |  'vector.file.format' = 'parquet',
+              |  'vector-field' = 'embedding',
+              |  'field.embedding.vector-dim' = '8',
+              |  'vector.target-file-size' = '1 kb')
+              |""".stripMargin)
+        sql("""
+              |INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), 0,
+              |  array_repeat(CAST(id AS FLOAT), 8) FROM range(0, 4000)
+              |""".stripMargin)
+        val vectorFiles = loadTable("t")
+          .store()
+          .newScan()
+          .plan()
+          .files()
+          .asScala
+          .map(_.file())
+          .filter(_.fileName().contains(".vector."))
+        assert(vectorFiles.exists(_.firstRowId() == 1000L), vectorFiles)
 
-          sql("CREATE TABLE s (id INT, x INT, embedding ARRAY<FLOAT>)")
-          sql("INSERT INTO s VALUES (1000, 7, array_repeat(CAST(-1 AS FLOAT), 8))")
-          sql(s"""
-                 |MERGE INTO t USING s ON t._ROW_ID = s.id
-                 |WHEN MATCHED THEN UPDATE SET t.$column = s.$column
-                 |""".stripMargin)
+        // BIGINT keeps `t._ROW_ID = s.id` free of a cast, so MERGE takes the row-id shortcut.
+        sql("CREATE TABLE s (id BIGINT, x INT, embedding ARRAY<FLOAT>)")
+        sql("INSERT INTO s VALUES (1000, 7, array_repeat(CAST(-1 AS FLOAT), 8))")
+        sql(s"""
+               |MERGE INTO t USING s ON $on
+               |WHEN MATCHED THEN UPDATE SET t.$column = s.$column
+               |""".stripMargin)
 
-          checkAnswer(
-            sql("SELECT count(*) FROM t WHERE id <> 1000 AND embedding[0] = CAST(id AS FLOAT)"),
-            Seq(Row(3999)))
-          val expected = if (column == "x") Row(1000, 7, 1000.0f) else Row(1000, 0, -1.0f)
-          checkAnswer(sql("SELECT id, x, embedding[0] FROM t WHERE id = 1000"), Seq(expected))
-        }
+        checkAnswer(
+          sql("SELECT count(*) FROM t WHERE id <> 1000 AND embedding[0] = CAST(id AS FLOAT)"),
+          Seq(Row(3999)))
+        val expected = if (column == "x") Row(1000, 7, 1000.0f) else Row(1000, 0, -1.0f)
+        checkAnswer(sql("SELECT id, x, embedding[0] FROM t WHERE id = 1000"), Seq(expected))
+      }
+    }
+  }
+
+  test("Data Evolution: merge into a range whose vector column is backfilled from a later row") {
+    for (column <- Seq("x", "embedding"); on <- Seq("t._ROW_ID = s.id", "t.id = s.id")) {
+      withTable("s", "t") {
+        sql("""
+              |CREATE TABLE t (id INT, x INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'vector.file.format' = 'parquet')
+              |""".stripMargin)
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ CAST(id AS INT), 0 FROM range(0, 4)")
+        paimonCatalog.alterTable(
+          Identifier.create(dbName0, "t"),
+          SchemaChange.addColumn("embedding", DataTypes.VECTOR(2, DataTypes.FLOAT())),
+          false)
+        backfillVectors(loadTable("t"), "embedding", 2L, Seq(2f, 3f))
+        val files = loadTable("t").store().newScan().plan().files().asScala.map(_.file())
+        assert(
+          files
+            .map(f => (f.fileName().contains(".vector."), f.firstRowId().longValue(), f.rowCount()))
+            .toSet == Set((false, 0L, 4L), (true, 2L, 2L)),
+          files)
+
+        // BIGINT keeps `t._ROW_ID = s.id` free of a cast, so MERGE takes the row-id shortcut.
+        sql("CREATE TABLE s (id BIGINT, x INT, embedding ARRAY<FLOAT>)")
+        sql("INSERT INTO s VALUES (0, 7, array(CAST(-1 AS FLOAT), CAST(-1 AS FLOAT)))")
+        sql(s"""
+               |MERGE INTO t USING s ON $on
+               |WHEN MATCHED THEN UPDATE SET t.$column = s.$column
+               |""".stripMargin)
+
+        val first = if (column == "x") Row(0, 7, null) else Row(0, 0, -1.0f)
+        checkAnswer(
+          sql("SELECT id, x, embedding[0] FROM t"),
+          Seq(first, Row(1, 0, null), Row(2, 0, 2.0f), Row(3, 0, 3.0f)))
+      }
+    }
+  }
+
+  /** Writes `values` to the vector column for consecutive row ids starting at `firstRowId`. */
+  private def backfillVectors(
+      table: FileStoreTable,
+      column: String,
+      firstRowId: Long,
+      values: Seq[Float]): Unit = {
+    val readSnapshot = table.latestSnapshot().get().id()
+    val builder = table.newBatchWriteBuilder()
+    val write = builder.newWrite().withWriteType(table.rowType().project(column))
+    val commit = builder.newCommit()
+    try {
+      values.foreach(v => write.write(GenericRow.of(BinaryVector.fromPrimitiveArray(Array(v, v)))))
+      val messages = write.prepareCommit().asScala.map {
+        message =>
+          val m = message.asInstanceOf[CommitMessageImpl]
+          val increment = m.newFilesIncrement()
+          val files = increment.newFiles().asScala.map(_.assignFirstRowId(firstRowId))
+          new CommitMessageImpl(
+            m.partition(),
+            m.bucket(),
+            m.totalBuckets(),
+            new DataIncrement(
+              files.asJava,
+              increment.deletedFiles(),
+              increment.changelogFiles(),
+              increment.newIndexFiles(),
+              increment.deletedIndexFiles()),
+            m.compactIncrement(),
+            Long.box(readSnapshot)
+          ): CommitMessage
+      }
+      commit.commit(messages.asJava)
+    } finally {
+      commit.close()
+      write.close()
     }
   }
 

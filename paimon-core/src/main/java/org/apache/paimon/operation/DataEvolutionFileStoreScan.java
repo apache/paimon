@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -225,12 +226,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      *
      * <p>When every file in the group lacks a requested column (e.g. an ADD COLUMN projection over
      * a row-disjoint pre-ALTER group), one file is kept as a row-count representative so the reader
-     * can emit the right number of NULL-filled rows.
+     * can emit the right number of NULL-filled rows. A group without a normal file, which a delta
+     * scan or a scan by file creation time can see, is then kept whole.
      *
      * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
-     * anchor file to lookup corresponding Deletion Files. Without deletion vectors, the anchor is
-     * still kept when the kept files are all blob/vector-store files, which may cover only part of
-     * the group's row-id range.
+     * anchor file to lookup corresponding Deletion Files. A delta scan attaches no deletion files,
+     * so there a group without a normal file needs no anchor; for other scans, finding the anchor
+     * throws on such a group. Without deletion vectors, the anchor is still kept when the kept
+     * files are all blob/vector-store files, which may cover only part of the group's row-id range.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
@@ -253,6 +256,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 readType,
                 filterFieldIds,
                 deletionVectorsEnabled,
+                scanMode != ScanMode.ALL,
                 this::fileFieldIdsForEntry);
     }
 
@@ -262,9 +266,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             RowType readType,
             Set<Integer> filterFieldIds,
             boolean deletionVectorsEnabled,
+            boolean deltaScan,
             Function<ManifestEntry, Set<Integer>> fileFieldIds) {
+        // Delta scans and scans by file creation time can see a group with no normal file. Delta
+        // splits carry no deletion files, so they need no anchor. With deletion vectors, other
+        // scans do, and retrieveAnchorFile throws on such a group.
+        boolean hasNormalFile = !group.stream().allMatch(e -> isDedicatedFile(e.file()));
         ManifestEntry anchor =
-                deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
+                deletionVectorsEnabled && (hasNormalFile || !deltaScan)
+                        ? retrieveAnchorFile(group, ManifestEntry::file)
+                        : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
@@ -288,21 +299,24 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
         // Blob and vector-store files may each cover only a sub-range of their group, and the
         // reader would derive the group's range from them and drop the other rows, so keep the
-        // anchor. An incremental scan can see a group with no normal file at all, which has no
-        // anchor to keep.
+        // anchor.
         if (anchor == null
+                && hasNormalFile
                 && !kept.isEmpty()
-                && kept.stream().allMatch(e -> isDedicatedFile(e.file()))
-                && !group.stream().allMatch(e -> isDedicatedFile(e.file()))) {
+                && kept.stream().allMatch(e -> isDedicatedFile(e.file()))) {
             kept.add(retrieveAnchorFile(group, ManifestEntry::file));
+        }
+        if (!kept.isEmpty()) {
+            return kept;
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows. The representative must be a full-range
         // normal file: a blob or vector-store file covers only a sub-range of the group's row
-        // ids, so the split would silently emit fewer rows than the group contains.
-        return kept.isEmpty()
+        // ids, so the split would silently emit fewer rows than the group contains. Without a
+        // normal file, keep the whole group, as a read type without user fields does.
+        return hasNormalFile
                 ? Collections.singletonList(retrieveAnchorFile(group, ManifestEntry::file))
-                : kept;
+                : group;
     }
 
     private static boolean isDedicatedFile(DataFileMeta file) {

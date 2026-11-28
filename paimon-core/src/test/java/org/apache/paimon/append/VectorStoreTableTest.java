@@ -40,6 +40,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.DataEvolutionTestBase;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -52,6 +53,8 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -75,6 +78,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for table with vector-store and data evolution. */
 public class VectorStoreTableTest extends DataEvolutionTestBase {
@@ -550,6 +554,283 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
         assertThat(readIdAndVector(builder)).containsExactly("1=200.0", "4=null", "7=300.0");
     }
 
+    @Test
+    public void testReadWithoutAVectorColumnBackfilledFromALaterRow() throws Exception {
+        // embedding_v2 is backfilled only for rows [2, 3]; reads that skip it must emit all rows.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        updateVectors(2, Collections.singletonList("embedding_v2"), vectorRows(2, 200));
+
+        // Splits planned for every column keep the embedding_v2 file.
+        List<Split> splits = getTableDefault().newReadBuilder().newScan().plan().splits();
+        ReadBuilder idOnly = getTableDefault().newReadBuilder().withProjection(new int[] {0});
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = idOnly.newRead().createReader(splits)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactly(0, 1, 2, 3);
+
+        // Read with embedding, the same splits keep embedding's vector file and drop
+        // embedding_v2's.
+        ReadBuilder idAndEmbedding =
+                getTableDefault().newReadBuilder().withProjection(new int[] {0, 1});
+        List<String> idsAndVectors = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = idAndEmbedding.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row ->
+                            idsAndVectors.add(
+                                    row.getInt(0) + "=" + row.getVector(1).toFloatArray()[0]));
+        }
+        assertThat(idsAndVectors).containsExactly("0=1.0", "1=1.0", "2=1.0", "3=1.0");
+
+        // A row-id-only read type prunes no file in the scan.
+        ReadBuilder rowIdOnly =
+                getTableDefault().newReadBuilder().withReadType(RowType.of(SpecialFields.ROW_ID));
+        assertThat(readRowIds(rowIdOnly)).containsExactly(0L, 1L, 2L, 3L);
+    }
+
+    @Test
+    public void testReadOfARenamedVectorColumnNextToABackfilledOne() throws Exception {
+        // Vector-store files are matched to the read type by field id, not by name.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        updateVectors(2, Collections.singletonList("embedding_v2"), vectorRows(2, 200));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.renameColumn("embedding", "e")),
+                false);
+
+        List<Split> splits = getTableDefault().newReadBuilder().newScan().plan().splits();
+        ReadBuilder idAndE = getTableDefault().newReadBuilder().withProjection(new int[] {0, 1});
+        List<String> idsAndVectors = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = idAndE.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row ->
+                            idsAndVectors.add(
+                                    row.getInt(0)
+                                            + "="
+                                            + (row.isNullAt(1)
+                                                    ? null
+                                                    : row.getVector(1).toFloatArray()[0])));
+        }
+        assertThat(idsAndVectors).containsExactly("0=1.0", "1=1.0", "2=1.0", "3=1.0");
+    }
+
+    @Test
+    public void testIncrementalRowIdReadOfVectorOnlyChanges() throws Exception {
+        // Snapshots that only backfill vector columns give groups without a normal file.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        long base = getTableDefault().latestSnapshot().get().id();
+        updateVectors(2, Collections.singletonList("embedding_v2"), vectorRows(2, 200));
+        updateVectors(2, Collections.singletonList("embedding"), vectorRows(2, 300));
+
+        // Both vector columns cover rows [2, 3]; neither is read.
+        assertThat(readRowIds(rowIdsBetween(base, base + 2))).containsExactly(2L, 3L);
+
+        // embedding now covers rows [0, 3], embedding_v2 still only [2, 3].
+        updateVectors(0, Collections.singletonList("embedding"), vectorRows(4, 400));
+        assertThat(readRowIds(rowIdsBetween(base, base + 3))).containsExactly(0L, 1L, 2L, 3L);
+    }
+
+    @Test
+    public void testIncrementalReadOfVectorOnlyChangesWithAPartialUnreadColumn() throws Exception {
+        // embedding covers only rows [2, 3] and is never read; embedding_v2 covers [0, 3].
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        long base = getTableDefault().latestSnapshot().get().id();
+        updateVectors(2, Collections.singletonList("embedding"), vectorRows(2, 300));
+        updateVectors(0, Collections.singletonList("embedding_v2"), vectorRows(4, 400));
+        List<Split> splits = rowIdsBetween(base, base + 2).newScan().plan().splits();
+
+        // Pushed-down row ranges.
+        ReadBuilder rowIdOnly =
+                getTableDefault().newReadBuilder().withReadType(RowType.of(SpecialFields.ROW_ID));
+        List<Long> rowIds = new ArrayList<>();
+        for (Split split : splits) {
+            IndexedSplit indexed =
+                    new IndexedSplit(
+                            (DataSplit) split, Collections.singletonList(new Range(0, 3)), null);
+            try (RecordReader<InternalRow> reader = rowIdOnly.newRead().createReader(indexed)) {
+                reader.forEachRemaining(row -> rowIds.add(row.getLong(0)));
+            }
+        }
+        assertThat(rowIds).containsExactly(0L, 1L, 2L, 3L);
+
+        // A read of embedding_v2.
+        ReadBuilder v2Only = getTableDefault().newReadBuilder().withProjection(new int[] {2});
+        assertThat(readVectorValues(v2Only.newRead().createReader(splits)))
+                .containsExactly(400F, 400F, 400F, 400F);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testStreamingReadOfANormalColumnOverVectorOnlyChanges(boolean deletionVectors)
+            throws Exception {
+        // A snapshot that only backfills vector columns gives the delta scan a group without a
+        // normal file.
+        catalog.createTable(
+                identifier(),
+                vectorSchema("json")
+                        .option(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(),
+                                String.valueOf(deletionVectors))
+                        .build(),
+                false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        ReadBuilder builder =
+                getTableDefault()
+                        .newReadBuilder()
+                        .withReadType(
+                                RowType.of(
+                                        getTableDefault().rowType().getField("id"),
+                                        SpecialFields.ROW_ID));
+        StreamTableScan scan = builder.newStreamScan();
+        assertThat(readIdAndRowId(builder, scan.plan()))
+                .containsExactly("0@0", "1@1", "2@2", "3@3");
+        RowType v2ReadType =
+                RowType.of(
+                        getTableDefault().rowType().getField("id"),
+                        getTableDefault().rowType().getField("embedding_v2"),
+                        SpecialFields.ROW_ID);
+        ReadBuilder v2Builder = getTableDefault().newReadBuilder().withReadType(v2ReadType);
+        StreamTableScan v2Scan = v2Builder.newStreamScan();
+        v2Scan.plan();
+
+        // One commit backfills embedding_v2 for rows [2, 3] and rewrites embedding for [0, 3].
+        List<CommitMessage> messages =
+                new ArrayList<>(
+                        writeVectors(
+                                2, Collections.singletonList("embedding_v2"), vectorRows(2, 200)));
+        messages.addAll(
+                writeVectors(0, Collections.singletonList("embedding"), vectorRows(4, 300)));
+        commitVectors(messages);
+
+        // No changed file holds id, so id reads as NULL.
+        assertThat(readIdAndRowId(builder, scan.plan()))
+                .containsExactly("null@0", "null@1", "null@2", "null@3");
+
+        // A read of embedding_v2 keeps only the file that holds it, as without deletion vectors.
+        List<String> v2Rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = v2Builder.newRead().createReader(v2Scan.plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            v2Rows.add(
+                                    (row.isNullAt(0) ? null : row.getInt(0))
+                                            + "@"
+                                            + (row.isNullAt(1)
+                                                    ? null
+                                                    : row.getVector(1).toFloatArray()[0])
+                                            + "@"
+                                            + row.getLong(2)));
+        }
+        assertThat(v2Rows).containsExactly("null@200.0@2", "null@200.0@3");
+    }
+
+    @Test
+    public void testFileCreationTimeScanOfVectorOnlyChangesWithDeletionVectors() throws Exception {
+        // A scan by file creation time can skip the normal file of a group, which deletion vectors
+        // are looked up through. Reading a user column over the two vector files left fails at
+        // planning.
+        catalog.createTable(
+                identifier(),
+                vectorSchema("json")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        InternalRow[] rows = new InternalRow[4];
+        for (int i = 0; i < 4; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        // Start right after the first write, so the scan skips its files, the normal one too.
+        long startMillis =
+                getTableDefault().store().newScan().plan().files().stream()
+                                .mapToLong(entry -> entry.file().creationTimeEpochMillis())
+                                .max()
+                                .getAsLong()
+                        + 1;
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        List<CommitMessage> messages =
+                new ArrayList<>(
+                        writeVectors(
+                                2, Collections.singletonList("embedding_v2"), vectorRows(2, 200)));
+        messages.addAll(
+                writeVectors(0, Collections.singletonList("embedding"), vectorRows(4, 300)));
+        commitVectors(messages);
+        assertThat(getTableDefault().store().newScan().plan().files())
+                .filteredOn(entry -> entry.file().creationTimeEpochMillis() >= startMillis)
+                .extracting(entry -> entry.file().fileName())
+                .hasSize(2)
+                .allMatch(name -> name.contains(".vector."));
+
+        ReadBuilder builder =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+                                        String.valueOf(startMillis)))
+                        .newReadBuilder()
+                        .withProjection(new int[] {0});
+        assertThatThrownBy(() -> builder.newScan().plan())
+                .hasMessageContaining("must contain a normal");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"json", "parquet"})
     public void testCompactVectorFilesKeepsLatestColumnValues(String format) throws Exception {
@@ -800,6 +1081,39 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
         return actual;
     }
 
+    private ReadBuilder rowIdsBetween(long fromSnapshot, long toSnapshot) throws Exception {
+        return getTableDefault()
+                .copy(
+                        Collections.singletonMap(
+                                CoreOptions.INCREMENTAL_BETWEEN.key(),
+                                fromSnapshot + "," + toSnapshot))
+                .newReadBuilder()
+                .withReadType(RowType.of(SpecialFields.ROW_ID));
+    }
+
+    private static List<String> readIdAndRowId(ReadBuilder builder, TableScan.Plan plan)
+            throws IOException {
+        List<String> actual = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = builder.newRead().createReader(plan)) {
+            reader.forEachRemaining(
+                    row ->
+                            actual.add(
+                                    (row.isNullAt(0) ? null : row.getInt(0))
+                                            + "@"
+                                            + row.getLong(1)));
+        }
+        return actual;
+    }
+
+    private static List<Long> readRowIds(ReadBuilder builder) throws IOException {
+        List<Long> rowIds = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                builder.newRead().createReader(builder.newScan().plan())) {
+            reader.forEachRemaining(row -> rowIds.add(row.getLong(0)));
+        }
+        return rowIds;
+    }
+
     private static InternalRow[] vectorRows(int count, float value) {
         InternalRow[] rows = new InternalRow[count];
         for (int i = 0; i < count; i++) {
@@ -843,17 +1157,29 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
 
     private void updateVectors(long firstRowId, List<String> columns, InternalRow... rows)
             throws Exception {
+        commitVectors(writeVectors(firstRowId, columns, rows));
+    }
+
+    private List<CommitMessage> writeVectors(
+            long firstRowId, List<String> columns, InternalRow... rows) throws Exception {
         FileStoreTable table = getTableDefault();
-        BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        long readSnapshotId = table.latestSnapshot().get().id();
         try (BatchTableWrite writer =
-                        builder.newWrite().withWriteType(table.rowType().project(columns));
-                BatchTableCommit commit = builder.newCommit()) {
+                table.newBatchWriteBuilder()
+                        .newWrite()
+                        .withWriteType(table.rowType().project(columns))) {
             for (InternalRow row : rows) {
                 writer.write(row);
             }
             List<CommitMessage> messages = writer.prepareCommit();
             setFirstRowId(messages, firstRowId);
+            return messages;
+        }
+    }
+
+    private void commitVectors(List<CommitMessage> messages) throws Exception {
+        FileStoreTable table = getTableDefault();
+        long readSnapshotId = table.latestSnapshot().get().id();
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(
                     messages.stream()
                             .map(

@@ -1384,14 +1384,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       .filter(col(FIRST_ROW_ID_NAME).isNotNull)
       .distinct()
       .as[Long]
-      .flatMap(
-        f => {
-          if (firstRowIdToBlobFirstRowIds.contains(f)) {
-            firstRowIdToBlobFirstRowIds(f)
-          } else {
-            Seq(f)
-          }
-        })
+      // Keep the range start too: the writer looks the range up by it, and the range's blob or
+      // vector-store files may all start at later row ids.
+      .flatMap(f => f :: firstRowIdToBlobFirstRowIds.getOrElse(f, Nil))
       .collect()
   }
 

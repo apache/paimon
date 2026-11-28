@@ -460,7 +460,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         List<FieldBunch> fieldsFiles =
                 splitFieldBunches(
-                        needMergeFiles,
+                        dropUnreadVectorStoreFiles(needMergeFiles, readRowType),
                         file -> {
                             checkArgument(
                                     isBlobFile(file.fileName())
@@ -480,6 +480,43 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 deletionVector,
                 groupSelection,
                 metadataCache);
+    }
+
+    /**
+     * Vector-store bunches follow the normal file's bunch, which then provides the row-tracking
+     * fields, so a vector-store file without any read field gets no reader. Drop such files when
+     * the group has a normal file: a vector column backfilled for only part of the range would
+     * otherwise fail the row-count check.
+     */
+    private List<DataFileMeta> dropUnreadVectorStoreFiles(
+            List<DataFileMeta> files, RowType readRowType) {
+        boolean hasNormalFile =
+                files.stream()
+                        .anyMatch(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()));
+        if (!hasNormalFile) {
+            return files;
+        }
+        Set<Integer> readFieldIds =
+                readRowType.getFields().stream().map(DataField::id).collect(Collectors.toSet());
+        List<DataFileMeta> kept = new ArrayList<>(files.size());
+        for (DataFileMeta file : files) {
+            if (!isVectorStoreFile(file.fileName())) {
+                kept.add(file);
+                continue;
+            }
+            RowType fileType =
+                    schemaFetcher
+                            .apply(file.schemaId())
+                            .dataFileSchema(file.writeCols())
+                            .logicalRowType();
+            if (fileType.getFields().stream().anyMatch(f -> readFieldIds.contains(f.id()))) {
+                kept.add(file);
+            }
+        }
+        return kept;
     }
 
     private RecordReader<InternalRow> createUnionReader(
