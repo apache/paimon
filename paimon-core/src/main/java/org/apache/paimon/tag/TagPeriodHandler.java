@@ -21,9 +21,12 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Timestamp;
 
+import java.time.DateTimeException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.ResolverStyle;
@@ -264,6 +267,44 @@ public interface TagPeriodHandler {
         @Override
         protected DateTimeFormatter formatter() {
             return MINUTE_FORMATTER;
+        }
+    }
+
+    static void validateWatermark(CoreOptions options, long watermark) {
+        if (watermark == Long.MIN_VALUE
+                || options.tagCreationMode() != CoreOptions.TagCreationMode.WATERMARK) {
+            return;
+        }
+
+        Duration customPeriod = options.tagPeriodDuration().orElse(null);
+        checkArgument(
+                customPeriod == null || customPeriod.compareTo(Duration.ofMillis(1)) >= 0,
+                "Option '%s' must be at least 1 ms.",
+                CoreOptions.TAG_PERIOD_DURATION.key());
+        ZoneId zone = ZoneId.of(options.sinkWatermarkTimeZone());
+        LocalDateTime time = LocalDateTime.ofInstant(Instant.ofEpochMilli(watermark), zone);
+        TagPeriodHandler period = create(options);
+        try {
+            // Timestamp.toLocalDateTime uses an int epoch day. Do not let a bad unit wrap the year.
+            Math.toIntExact(time.toLocalDate().toEpochDay());
+            // After tags expire, a maintainer can see this snapshot as its first and ignore delay.
+            LocalDateTime firstTag = period.normalizeToPreviousTag(time);
+            period.timeToTag(firstTag);
+            if (options.tagAutomaticCompletion()) {
+                // A completion is due when its start + period <= watermark - delay.
+                LocalDateTime lastDue =
+                        period.previousTagTime(time.minus(options.tagCreationDelay()));
+                if (lastDue.getYear() > firstTag.getYear()) {
+                    period.timeToTag(lastDue);
+                }
+            }
+        } catch (DateTimeException | ArithmeticException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Watermark %s cannot name an automatic tag in time zone %s. "
+                                    + "Supply epoch milliseconds that yield a four-digit tag year.",
+                            watermark, zone),
+                    e);
         }
     }
 

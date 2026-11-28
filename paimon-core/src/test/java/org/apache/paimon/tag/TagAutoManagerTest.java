@@ -25,6 +25,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.TagManager;
@@ -47,8 +48,11 @@ import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
 import static org.apache.paimon.CoreOptions.TAG_DEFAULT_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.TAG_PERIOD_DURATION;
 import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for tag automatic creation. */
@@ -153,6 +157,54 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         assertThat(tagManager.allTagNames())
                 .containsOnly("2023-07-18 11", "2023-07-18 12", "2023-07-18 13");
         commit.close();
+    }
+
+    @Test
+    public void testInvalidWatermarkDoesNotPublishSnapshot() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        FileStoreTable table = this.table.copy(options.toMap());
+        try (TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            long micros = 1726000000000000L;
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(1, micros)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(String.valueOf(micros))
+                    .hasMessageContaining("epoch milliseconds");
+            assertThat(table.snapshotManager().latestSnapshotId()).isNull();
+
+            long millis = 1726003600000L;
+            commit.commit(new ManifestCommittable(1, millis));
+            assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(millis);
+            assertThat(table.tagManager().getOrThrow("2024-09-10 20").id()).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    public void testWriteOnlyWatermarkAtCompletionBoundary() throws Exception {
+        table.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(TAG_AUTOMATIC_CREATION.key(), "watermark"),
+                        SchemaChange.setOption(TAG_AUTOMATIC_COMPLETION.key(), "true"),
+                        SchemaChange.setOption(TAG_PERIOD_DURATION.key(), "70 s"));
+        FileStoreTable maintainer = table.copyWithLatestSchema();
+        Options options = new Options();
+        options.set(WRITE_ONLY, true);
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.NONE);
+        FileStoreTable writer = maintainer.copy(options.toMap());
+        try (TableCommitImpl commit = writer.newCommit(commitUser).ignoreEmptyCommit(false)) {
+            // The watermark is already in year 10000, but its first tag still starts in 9999.
+            long watermark = utcMills("+10000-01-01T00:00:30");
+            commit.commit(new ManifestCommittable(1, watermark));
+            maintainer.newTagAutoManager().run();
+            assertThat(maintainer.tagManager().getOrThrow("999912312359").id()).isEqualTo(1L);
+
+            // At 00:01:10 a completion starting at midnight can be due.
+            long invalid = utcMills("+10000-01-01T00:01:10");
+            assertThatThrownBy(() -> commit.commit(new ManifestCommittable(2, invalid)))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(maintainer.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        }
     }
 
     @Test
