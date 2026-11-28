@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
 import shutil
 import tempfile
@@ -28,6 +29,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
+from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
@@ -242,6 +244,65 @@ class FileSystemCatalogTest(unittest.TestCase):
         )
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
+
+    def test_create_table_validates_merge_engine(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        pa_schema = pa.schema([("id", pa.int64()), ("v", pa.int64())])
+
+        for value in ("PARTIAL_UPDATE", " partial-update "):
+            with self.subTest(value=value):
+                schema = Schema.from_pyarrow_schema(
+                    pa_schema, primary_keys=["id"], options={"bucket": "1", "merge-engine": value})
+                with self.assertRaisesRegex(ValueError, "merge-engine"):
+                    catalog.create_table("db.t", schema, False)
+                with self.assertRaises(TableNotExistException):
+                    catalog.get_table("db.t")
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=["id"], options={"bucket": "1", "merge-engine": "PARTIAL-UPDATE"})
+        catalog.create_table("db.t", schema, False)
+        self.assertEqual(catalog.get_table("db.t").table_schema.options["merge-engine"], "PARTIAL-UPDATE")
+
+    def test_alter_table_validates_merge_engine(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        schema = Schema.from_pyarrow_schema(pa.schema([("id", pa.int64()), ("v", pa.int64())]),
+                                            primary_keys=["id"], options={"bucket": "1"})
+        catalog.create_table("db.t", schema, False)
+
+        for value in ("PARTIAL_UPDATE", " partial-update "):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(RuntimeError, "merge-engine"):
+                    catalog.alter_table("db.t", [SchemaChange.set_option("merge-engine", value)])
+                stored = catalog.get_table("db.t").table_schema
+                self.assertEqual(stored.id, 0)
+                self.assertNotIn("merge-engine", stored.options)
+
+        catalog.alter_table("db.t", [SchemaChange.set_option("merge-engine", MergeEngine.PARTIAL_UPDATE)])
+        self.assertEqual(catalog.get_table("db.t").table_schema.options["merge-engine"], "partial-update")
+
+    def test_alter_table_with_legacy_merge_engine_value(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        schema = Schema.from_pyarrow_schema(pa.schema([("id", pa.int64()), ("v", pa.int64())]),
+                                            primary_keys=["id"], options={"bucket": "1"})
+        catalog.create_table("db.t", schema, False)
+        table = catalog.get_table("db.t")
+
+        # Install the spelling that an older catalog could persist.
+        path = f"{table.table_path}/schema/schema-0"
+        metadata = json.loads(table.file_io.read_file_utf8(path))
+        metadata["options"]["merge-engine"] = "PARTIAL_UPDATE"
+        table.file_io.overwrite_file_utf8(path, json.dumps(metadata))
+
+        catalog.alter_table("db.t", [SchemaChange.update_comment("events")])
+        stored = catalog.get_table("db.t").table_schema
+        self.assertEqual(stored.comment, "events")
+        self.assertEqual(stored.options["merge-engine"], "PARTIAL_UPDATE")
+
+        catalog.alter_table("db.t", [SchemaChange.set_option("merge-engine", "partial-update")])
+        self.assertEqual(catalog.get_table("db.t").table_schema.options["merge-engine"], "partial-update")
 
     def test_alter_immutable_options(self):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
