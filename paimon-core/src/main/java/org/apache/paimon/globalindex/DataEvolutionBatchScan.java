@@ -299,6 +299,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public Optional<Set<String>> queryAuthMaskedColumns() {
+        return batchScan.queryAuthMaskedColumns();
+    }
+
+    @Override
     public List<PartitionEntry> listPartitionEntries() {
         return batchScan.listPartitionEntries();
     }
