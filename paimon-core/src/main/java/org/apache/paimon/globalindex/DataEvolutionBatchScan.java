@@ -22,13 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BBoxIntersects;
 import org.apache.paimon.predicate.CompoundPredicate;
@@ -44,6 +44,7 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -51,6 +52,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
@@ -60,11 +63,15 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -317,15 +324,31 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         if (rowRangeIndex == null) {
             Optional<GlobalIndexResult> indexResult;
+            int maxRanges = 0;
             if (canPushDownGlobalIndexTopN()) {
                 indexResult = evalGlobalIndexTopN();
                 globalIndexTopNCandidatesFound = indexResult.isPresent();
             } else {
+                maxRanges = scalarSelectionRangeLimit();
                 indexResult = evalGlobalIndex();
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
+                RoaringNavigableMap64 candidates = result.results();
+                rowRangeIndex =
+                        maxRanges == 0
+                                ? RowRangeIndex.fromBitmap(candidates)
+                                : RowRangeIndex.tryFromBitmap(candidates, maxRanges).orElse(null);
+                if (rowRangeIndex == null) {
+                    GlobalIndexSearchMode searchMode = table.coreOptions().scalarScanSearchMode();
+                    LOG.info(
+                            "Scan table '{}' with ordinary data splits because the row-ID range limit was exceeded.",
+                            table.name());
+                    if (searchMode == GlobalIndexSearchMode.FAST
+                            || batchScan.snapshotReader().hasNonPartitionFilter()) {
+                        return planWithFileGroupPruning(candidates, searchMode);
+                    }
+                }
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -352,6 +375,84 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    private Plan planWithFileGroupPruning(
+            RoaringNavigableMap64 candidates, GlobalIndexSearchMode searchMode) {
+        if (searchMode == GlobalIndexSearchMode.FAST) {
+            return batchScan.plan();
+        }
+
+        // Index evaluation pinned the snapshot. Keep the original predicate on the scan and
+        // plan before applying a row-level LIMIT or TopN.
+        Plan plan = batchScan.plan();
+        return plan instanceof SnapshotReader.Plan
+                ? pruneFileGroups((SnapshotReader.Plan) plan, candidates)
+                : plan;
+    }
+
+    static SnapshotReader.Plan pruneFileGroups(
+            SnapshotReader.Plan dataPlan, RoaringNavigableMap64 candidates) {
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<Split> splits = dataPlan.splits();
+        List<FileGroup> groups = new ArrayList<>();
+        for (int i = 0; i < splits.size(); i++) {
+            DataSplit split = (DataSplit) splits.get(i);
+            for (List<DataFileMeta> files : rangeHelper.mergeOverlappingRanges(split.dataFiles())) {
+                groups.add(new FileGroup(i, files));
+            }
+        }
+        groups.sort(Comparator.comparingLong(group -> group.range.from));
+        BitSet matches =
+                candidates.intersectingRanges(
+                        groups.stream().map(group -> group.range).collect(Collectors.toList()));
+        if (matches.cardinality() == groups.size()) {
+            return dataPlan;
+        }
+
+        Map<Integer, Set<String>> removedBySplit = new HashMap<>();
+        for (int i = matches.nextClearBit(0); i < groups.size(); i = matches.nextClearBit(i + 1)) {
+            FileGroup group = groups.get(i);
+            Set<String> removed =
+                    removedBySplit.computeIfAbsent(group.splitIndex, ignored -> new HashSet<>());
+            group.files.forEach(file -> removed.add(file.fileName()));
+        }
+
+        List<Split> keptSplits = new ArrayList<>(splits.size());
+        for (int i = 0; i < splits.size(); i++) {
+            DataSplit split = (DataSplit) splits.get(i);
+            Set<String> removed = removedBySplit.get(i);
+            if (removed == null) {
+                keptSplits.add(split);
+            } else {
+                split.filterDataFile(file -> !removed.contains(file.fileName()))
+                        .ifPresent(keptSplits::add);
+            }
+        }
+        return new PlanImpl(
+                dataPlan.watermark(), dataPlan.snapshotId(), dataPlan.snapshot(), keptSplits);
+    }
+
+    private static final class FileGroup {
+
+        private final int splitIndex;
+        private final List<DataFileMeta> files;
+        private final Range range;
+
+        private FileGroup(int splitIndex, List<DataFileMeta> files) {
+            this.splitIndex = splitIndex;
+            this.files = files;
+            long first = Long.MAX_VALUE;
+            long last = Long.MIN_VALUE;
+            for (DataFileMeta file : files) {
+                Range rowIds = file.nonNullRowIdRange();
+                first = Math.min(first, rowIds.from);
+                last = Math.max(last, rowIds.to);
+            }
+            // Overlapping files form a contiguous group. Keep all versions and dedicated files
+            // together when any row in that group is a candidate.
+            this.range = new Range(first, last);
+        }
     }
 
     // An OR across a spatial and another column can require fallback for the entire predicate.
@@ -510,6 +611,25 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return options != null && options.queryAuthEnabled();
     }
 
+    private int scalarSelectionRangeLimit() {
+        if (filter == null || globalIndexResult != null || queryAuthEnabled()) {
+            return 0;
+        }
+        CoreOptions options = table.coreOptions();
+        Options configuration = options.toConfiguration();
+        if (!configuration.contains(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
+                || !options.globalIndexEnabled()) {
+            return 0;
+        }
+        int maxSelectionRanges =
+                configuration
+                        .getOptional(CoreOptions.DATA_EVOLUTION_SCALAR_INDEX_MAX_SELECTION_RANGES)
+                        .orElse(0);
+        Preconditions.checkArgument(
+                maxSelectionRanges >= 0, "Maximum selection range count must be non-negative.");
+        return maxSelectionRanges;
+    }
+
     private Optional<GlobalIndexResult> evalGlobalIndex() {
         // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
         // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
@@ -637,7 +757,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
     }
 
-    @VisibleForTesting
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
@@ -659,17 +778,18 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
 
         DataSplit dataSplit = (DataSplit) split;
-        List<DataFileMeta> files = dataSplit.dataFiles();
+        List<Range> fileRanges =
+                GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
 
         List<Range> expected = new ArrayList<>();
-        for (DataFileMeta file : files) {
-            Range fileRange = file.nonNullRowIdRange();
+        for (Range fileRange : fileRanges) {
             expected.addAll(rowRangeIndex.intersectedRanges(fileRange.from, fileRange.to));
         }
-        expected = Range.sortAndMergeOverlap(expected, true);
+        // The file ranges and the range index both visit their intervals in row-ID order.
+        expected = Range.mergeSortedAsPossible(expected);
         if (expected.isEmpty()) {
-            long min = files.stream().mapToLong(f -> f.nonNullRowIdRange().from).min().orElse(-1L);
-            long max = files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(-1L);
+            long min = fileRanges.isEmpty() ? -1L : fileRanges.get(0).from;
+            long max = fileRanges.isEmpty() ? -1L : fileRanges.get(fileRanges.size() - 1).to;
             throw new IllegalStateException(
                     String.format(
                             "This is a bug, there should be intersected ranges for split with min row id %d and max row id %d.",

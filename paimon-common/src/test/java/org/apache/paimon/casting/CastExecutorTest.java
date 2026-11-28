@@ -946,6 +946,22 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testTimeToTimestampWithLocalZone() {
+        TimeZone timeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            String time = "12:00:00.123";
+            compareCastResult(
+                    CastExecutors.resolve(new TimeType(), new LocalZonedTimestampType(3)),
+                    DateTimeUtils.parseTime(time),
+                    DateTimeUtils.parseTimestampData(
+                            "1970-01-01 " + time, 3, TimeZone.getDefault()));
+        } finally {
+            TimeZone.setDefault(timeZone);
+        }
+    }
+
+    @Test
     public void testArrayToString() {
         ArrayType arrayType = new ArrayType(DataTypes.INT());
         GenericArray genericArray = new GenericArray(new Integer[] {1, null, 2});

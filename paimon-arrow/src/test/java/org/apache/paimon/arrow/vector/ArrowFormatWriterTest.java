@@ -23,6 +23,8 @@ import org.apache.paimon.arrow.ArrowFieldTypeConversion;
 import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
@@ -36,8 +38,12 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
+import org.apache.paimon.data.serializer.InternalArraySerializer;
+import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
@@ -49,6 +55,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.VectorMappingUtils;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
@@ -79,6 +86,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -246,6 +254,170 @@ public class ArrowFormatWriterTest {
             assertThat(array.isNullAt(1)).isTrue();
             assertThat(array.isNullAt(2)).isFalse();
             assertThat(array.getInt(2)).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testWriteNestedArrayWithDescendingChildOffsets() {
+        // nested collections can carry descending physical child offsets, e.g. the outer array
+        // points row 0 to child 1 and row 1 to child 0
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.INT())));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            HeapArrayVector inner = new HeapArrayVector(2, new HeapIntVector(0));
+            inner.putOffsetLength(0, 0, 0);
+            inner.putOffsetLength(1, 0, 0);
+            HeapArrayVector outer = new HeapArrayVector(2, inner);
+            outer.putOffsetLength(0, 1, 1);
+            outer.putOffsetLength(1, 0, 1);
+
+            writer.write(new ColumnVector[] {outer}, null, 0, 2);
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            assertThat(vectorSchemaRoot.getRowCount()).isEqualTo(2);
+            ListVector listVector = (ListVector) vectorSchemaRoot.getFieldVectors().get(0);
+            for (int i = 0; i < 2; i++) {
+                assertThat(listVector.isNull(i)).isFalse();
+                List<?> row = (List<?>) listVector.getObject(i);
+                assertThat(row).hasSize(1);
+                assertThat((List<?>) row.get(0)).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    public void testWriteNestedArrayWithDuplicatedChildOffsets() {
+        // two outer rows can reference the same inner array slot, so the child picks are repeated
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.INT())));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            HeapIntVector data = new HeapIntVector(1);
+            data.setInt(0, 42);
+            HeapArrayVector inner = new HeapArrayVector(1, data);
+            inner.putOffsetLength(0, 0, 1);
+            HeapArrayVector outer = new HeapArrayVector(2, inner);
+            outer.putOffsetLength(0, 0, 1);
+            outer.putOffsetLength(1, 0, 1);
+
+            writer.write(new ColumnVector[] {outer}, null, 0, 2);
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            assertThat(vectorSchemaRoot.getRowCount()).isEqualTo(2);
+            ListVector listVector = (ListVector) vectorSchemaRoot.getFieldVectors().get(0);
+            for (int i = 0; i < 2; i++) {
+                List<?> row = (List<?>) listVector.getObject(i);
+                assertThat(row).hasSize(1);
+                List<?> innerArray = (List<?>) row.get(0);
+                assertThat(innerArray).hasSize(1);
+                assertThat(innerArray.get(0)).isEqualTo(42);
+            }
+        }
+    }
+
+    @Test
+    public void testWriteNullArrayWithoutChildVector() {
+        // the fixed partition vectors don't expose their child vector, so an all-null batch must
+        // not look it up
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT()));
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter partitionWriter = new BinaryRowWriter(partition);
+        partitionWriter.setNullAt(0);
+        partitionWriter.complete();
+        ColumnVector fixed =
+                VectorMappingUtils.createFixedVector(rowType.getTypeAt(0), partition, 0);
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {fixed}, null, 0, 2);
+            writer.flush();
+
+            ListVector listVector =
+                    (ListVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(listVector.isNull(0)).isTrue();
+            assertThat(listVector.isNull(1)).isTrue();
+        }
+
+        // an all-empty array batch must not look it up either
+        BinaryRow emptyPartition = new BinaryRow(1);
+        BinaryRowWriter emptyPartitionWriter = new BinaryRowWriter(emptyPartition);
+        emptyPartitionWriter.writeArray(
+                0, new GenericArray(new Object[0]), new InternalArraySerializer(DataTypes.INT()));
+        emptyPartitionWriter.complete();
+        ColumnVector emptyFixed =
+                VectorMappingUtils.createFixedVector(rowType.getTypeAt(0), emptyPartition, 0);
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {emptyFixed}, null, 0, 2);
+            writer.flush();
+
+            ListVector listVector =
+                    (ListVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(listVector.isNull(0)).isFalse();
+            assertThat((List<?>) listVector.getObject(0)).isEmpty();
+            assertThat(listVector.isNull(1)).isFalse();
+            assertThat((List<?>) listVector.getObject(1)).isEmpty();
+        }
+
+        // the same when a selection is supplied but none of the picked arrays has children
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {fixed}, new int[] {0, 0}, 0, 2);
+            writer.flush();
+
+            ListVector listVector =
+                    (ListVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(listVector.isNull(0)).isTrue();
+            assertThat(listVector.isNull(1)).isTrue();
+        }
+    }
+
+    @Test
+    public void testWriteNullMapWithoutChildVector() {
+        // the fixed partition vectors don't expose their children, so an all-null batch must not
+        // look them up
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter partitionWriter = new BinaryRowWriter(partition);
+        partitionWriter.setNullAt(0);
+        partitionWriter.complete();
+        ColumnVector fixed =
+                VectorMappingUtils.createFixedVector(rowType.getTypeAt(0), partition, 0);
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {fixed}, null, 0, 2);
+            writer.flush();
+
+            MapVector mapVector = (MapVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+        }
+
+        // an all-empty map batch must not look it up either
+        BinaryRow emptyPartition = new BinaryRow(1);
+        BinaryRowWriter emptyPartitionWriter = new BinaryRowWriter(emptyPartition);
+        emptyPartitionWriter.writeMap(
+                0,
+                new GenericMap(Collections.emptyMap()),
+                new InternalMapSerializer(DataTypes.INT(), DataTypes.INT()));
+        emptyPartitionWriter.complete();
+        ColumnVector emptyFixed =
+                VectorMappingUtils.createFixedVector(rowType.getTypeAt(0), emptyPartition, 0);
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {emptyFixed}, null, 0, 2);
+            writer.flush();
+
+            MapVector mapVector = (MapVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(mapVector.isNull(0)).isFalse();
+            assertThat((List<?>) mapVector.getObject(0)).isEmpty();
+            assertThat(mapVector.isNull(1)).isFalse();
+            assertThat((List<?>) mapVector.getObject(1)).isEmpty();
+        }
+
+        // the same when a selection is supplied but none of the picked maps has entries
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {fixed}, new int[] {0, 0}, 0, 2);
+            writer.flush();
+
+            MapVector mapVector = (MapVector) writer.getVectorSchemaRoot().getFieldVectors().get(0);
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
         }
     }
 

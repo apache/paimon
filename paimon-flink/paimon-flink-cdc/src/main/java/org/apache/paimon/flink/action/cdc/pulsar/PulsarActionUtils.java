@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
@@ -52,6 +53,8 @@ import org.apache.pulsar.common.lookup.GetTopicsResult;
 import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.naming.TopicName;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
@@ -68,6 +71,7 @@ import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULS
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_CONSUMER_NAME;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME;
 import static org.apache.flink.connector.pulsar.source.config.PulsarSourceConfigUtils.createConsumerBuilder;
+import static org.apache.flink.connector.pulsar.source.enumerator.topic.TopicNameUtils.isInternal;
 import static org.apache.flink.connector.pulsar.source.enumerator.topic.range.TopicRangeUtils.isFullTopicRanges;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.pulsar.client.api.KeySharedPolicy.stickyHashRange;
@@ -391,18 +395,37 @@ public class PulsarActionUtils {
                                         queryPattern,
                                         null)
                                 .get();
-                List<String> topics = topicsResult.getTopics();
-
-                if (topics == null || topics.isEmpty()) {
+                String topic = firstMatchingTopic(topicsResult, shortenedPattern);
+                if (topic == null) {
                     throw new RuntimeException(
                             "Cannot find topics match the topic-pattern " + pattern);
                 }
-
-                return topics.get(0);
+                return topic;
             } catch (ExecutionException | InterruptedException e) {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    /**
+     * Returns the first non-internal topic that matches the pattern. The broker filters the topics
+     * only for some patterns, see {@link GetTopicsResult#isFiltered()}.
+     */
+    @VisibleForTesting
+    @Nullable
+    static String firstMatchingTopic(GetTopicsResult topicsResult, Pattern shortenedPattern) {
+        List<String> topics = topicsResult.getTopics();
+        if (topics == null) {
+            return null;
+        }
+        for (String topic : topics) {
+            if (!isInternal(topic)
+                    && (topicsResult.isFiltered()
+                            || shortenedPattern.matcher(topic.split("://")[1]).matches())) {
+                return topic;
+            }
+        }
+        return null;
     }
 
     private static class PulsarConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {

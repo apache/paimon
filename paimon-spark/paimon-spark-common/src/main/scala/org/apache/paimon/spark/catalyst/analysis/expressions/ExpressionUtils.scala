@@ -32,7 +32,7 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 import scala.collection.JavaConverters._
 
-/** This wrapper is only used in java code, e.g. Procedure. */
+/** Converts and normalizes Spark SQL predicates for Paimon. */
 object ExpressionUtils extends ExpressionHelper {
 
   def convertPolicyFilter(
@@ -72,7 +72,23 @@ object ExpressionUtils extends ExpressionHelper {
         throw new IllegalArgumentException("Cannot fully convert filter_sql to a predicate."))
   }
 
-  /** Adapt storage comparison semantics only for SQL-authored policies. */
+  /** Use Spark's signed-zero semantics for ranked filters and subsequent reads. */
+  private[spark] def normalizeVectorSearchFilters(
+      filters: Seq[Predicate],
+      normalizeSignedZeros: Boolean): Seq[Predicate] = {
+    if (normalizeSignedZeros) filters.map(normalizeVectorSearchPredicate) else filters
+  }
+
+  private def normalizeVectorSearchPredicate(predicate: Predicate): Predicate =
+    predicate match {
+      case compound: CompoundPredicate =>
+        new CompoundPredicate(
+          compound.function(),
+          compound.children().asScala.map(normalizeVectorSearchPredicate).asJava)
+      case _ => normalizeFloatingPointPredicate(predicate)
+    }
+
+  /** Adapt storage comparison semantics for SQL-authored policies. */
   private def normalizePolicyPredicate(predicate: Predicate): Predicate = predicate match {
     case compound: CompoundPredicate =>
       new CompoundPredicate(
@@ -107,6 +123,10 @@ object ExpressionUtils extends ExpressionHelper {
         // Keep the timestamp type unchanged apart from precision to avoid time-zone conversion.
         LeafPredicate.of(new CastTransform(field, timestampType), leaf.function(), leaf.literals())
       }
+    case _ => normalizeFloatingPointPredicate(predicate)
+  }
+
+  private def normalizeFloatingPointPredicate(predicate: Predicate): Predicate = predicate match {
     case leaf: LeafPredicate
         if Set(FLOAT, DOUBLE).contains(leaf.transform().outputType().getTypeRoot) =>
       def isZero(value: AnyRef): Boolean = value match {

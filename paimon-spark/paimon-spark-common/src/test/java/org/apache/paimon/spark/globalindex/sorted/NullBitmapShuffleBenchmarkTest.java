@@ -156,8 +156,8 @@ class NullBitmapShuffleBenchmarkTest {
         }
         long start = System.nanoTime();
         Dataset<Row> sorted =
-                SortedIndexTopoBuilder.combineAndSortBuildTaskInputs(
-                        Collections.singletonList(input), 4, "task_id", "index_key", adaptive);
+                SortedIndexTopoBuilder.sortBuildTaskInput(
+                        input, 4, "task_id", "index_key", adaptive);
         List<long[]> partitions =
                 sorted.javaRDD()
                         .mapPartitions(

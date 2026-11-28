@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -193,6 +194,48 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
                         "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testTopicPatternIgnoresOtherTopicsInNamespace() throws Exception {
+        // The broker filters the topic list only for patterns ending with ".*", so the schema must
+        // not be sampled from another topic of the namespace.
+        String otherTopic = "audit_log";
+        String topic = "orders_1";
+        topics = Arrays.asList(otherTopic, topic);
+        createTopic(otherTopic, 1);
+        createTopic(topic, 1);
+        sendMessages(otherTopic, getMessages("kafka/canal/table/nonpk/canal-data-1.txt"));
+        sendMessages(topic, getMessages("kafka/canal/table/schemaevolution/canal-data-1.txt"));
+
+        Map<String, String> pulsarConfig = getBasicPulsarConfig();
+        pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
+        pulsarConfig.put(TOPIC_PATTERN.key(), "orders_[0-9]+");
+        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+
+        PulsarSyncTableAction action =
+                syncTableActionBuilder(pulsarConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        JobClient client = runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        waitForResult(
+                client,
+                Arrays.asList("+I[1, 1, one]", "+I[1, 2, two]", "+I[2, 4, four]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("pt", "_id"));
     }
 
     @Test

@@ -67,6 +67,7 @@ class BatchPrimaryKeyVectorRead(PrimaryKeyVectorRead, BatchVectorSearchRead):
             return self._with_executor(executor).read_batch_plan(plan)
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
+        self._scoring_queries = {}
         self._index_metric = None
         index_type = VectorIndexOptions.resolve(
             self._table.options.options, None, self._vector_column.name, default_metric=False).index_type
@@ -120,9 +121,10 @@ class BatchPrimaryKeyVectorRead(PrimaryKeyVectorRead, BatchVectorSearchRead):
         metric = self._search_metric(
             VectorIndexOptions.resolve(
                 self._table.options.options, None, self._vector_column.name, default_metric=False).index_type)
+        queries = [self._scoring_query(q, metric) for q in self._query_vectors]
         for split, data_file, positions, vectors in self._raw_batches(plan):
             partition = _partition_bytes(split.data_split.partition)
-            for start, query_index, scores in _iter_arrow_batch_scores(vectors, self._query_vectors, metric):
+            for start, query_index, scores in _iter_arrow_batch_scores(vectors, queries):
                 rows = (PrimaryKeySearchPosition(
                     partition, split.data_split.bucket, data_file.file_name, position, score)
                     for position, score in zip(positions[start:start + len(scores)], scores) if score is not None)
@@ -144,15 +146,16 @@ class BatchPrimaryKeyVectorRead(PrimaryKeyVectorRead, BatchVectorSearchRead):
         candidate_plan = PrimaryKeyVectorScanPlan(plan.snapshot_id, splits, plan.snapshot())
         metric = self._search_metric(index_type)
         reranked = [[] for _ in self._query_vectors]
+        queries = [self._scoring_query(q, metric) for q in self._query_vectors]
         for split, data_file, positions, vectors in self._raw_batches(candidate_plan):
             keys = [(_partition_bytes(split.data_split.partition), split.data_split.bucket,
                      data_file.file_name, position) for position in positions]
-            for i, query in enumerate(self._query_vectors):
+            for i, query in enumerate(queries):
                 offsets = [offset for offset, key in enumerate(keys) if key in selected[i]]
                 if not offsets:
                     continue
                 rows = vectors.take(pa.array(offsets, type=pa.int64()))
-                for offset, score in zip(offsets, _iter_arrow_scores(rows, query, metric)):
+                for offset, score in zip(offsets, _iter_arrow_scores(rows, query)):
                     if score is None:
                         raise ValueError("Primary-key vector candidate contains a null vector.")
                     reranked[i].append(selected[i].pop(keys[offset]).with_score(score))

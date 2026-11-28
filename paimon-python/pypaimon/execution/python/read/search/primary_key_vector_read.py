@@ -52,6 +52,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
             return self._with_executor(executor).read_plan(plan)
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
+        self._scoring_queries = {}
         self._index_metric = None
         index_type = VectorIndexOptions.resolve(
             self._table.options.options, None, self._vector_column.name, default_metric=False).index_type
@@ -126,6 +127,8 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
             [self._vector_column.name]).new_read()
         metric = self._search_metric(index_type)
 
+        query = self._scoring_query(self._query_vector, metric)
+
         def reranked_iter():
             for split in candidate_result.splits:
                 data_split = split.data_split()
@@ -139,7 +142,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                     if key[:3] == (partition, data_split.bucket, data_file_name))
                 position_iter = iter(positions)
                 for batch in reader.to_arrow([split]).to_batches():
-                    for score in _iter_arrow_scores(batch.column(0), self._query_vector, metric):
+                    for score in _iter_arrow_scores(batch.column(0), query):
                         try:
                             row_position = next(position_iter)
                         except StopIteration:
@@ -176,8 +179,9 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         metric = self._search_metric(
             VectorIndexOptions.resolve(
                 self._table.options.options, None, self._vector_column.name, default_metric=False).index_type)
+        query = self._scoring_query(self._query_vector, metric)
         for split, data_file, positions, vectors in self._raw_batches(plan):
-            for position, score in zip(positions, _iter_arrow_scores(vectors, self._query_vector, metric)):
+            for position, score in zip(positions, _iter_arrow_scores(vectors, query)):
                 if score is not None:
                     yield PrimaryKeySearchPosition(
                         _partition_bytes(split.data_split.partition), split.data_split.bucket,

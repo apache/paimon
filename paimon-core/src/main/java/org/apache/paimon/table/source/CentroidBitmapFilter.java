@@ -34,6 +34,8 @@ import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NotEqual;
+import org.apache.paimon.predicate.NotIn;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -184,7 +186,9 @@ final class CentroidBitmapFilter {
         Optional<FieldRef> fieldRef = leaf.fieldRefOptional();
         if (!fieldRef.isPresent()
                 || (!Equal.INSTANCE.equals(leaf.function())
+                        && !NotEqual.INSTANCE.equals(leaf.function())
                         && !In.INSTANCE.equals(leaf.function())
+                        && !NotIn.INSTANCE.equals(leaf.function())
                         && !IsNotNull.INSTANCE.equals(leaf.function())
                         && !IsNull.INSTANCE.equals(leaf.function()))
                 || !rowType.containsField(fieldRef.get().name())) {

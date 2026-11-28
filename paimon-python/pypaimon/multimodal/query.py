@@ -65,14 +65,17 @@ class ScanQuery:
         self._limit = limit
         return self
 
-    def to_arrow(self):
+    def to_arrow(self, *, blob_parallelism=None):
+        """Collect a scan, optionally limiting per-split BLOB read concurrency."""
         if self._result_factory is not None:
+            if blob_parallelism is not None:
+                raise TypeError("blob_parallelism is only supported on scan(), not search queries.")
             return self._read_global_index_result(self._result_factory(self))
 
         read_builder = self._configured_read_builder()
         scan = read_builder.new_scan()
         plan = scan.plan()
-        return read_builder.new_read().to_arrow(plan.splits())
+        return read_builder.new_read().to_arrow(plan.splits(), blob_parallelism=blob_parallelism)
 
     def to_arrow_batch_reader(self, *, blob_parallelism=None):
         """Stream this scan as Arrow batches without collecting a table."""

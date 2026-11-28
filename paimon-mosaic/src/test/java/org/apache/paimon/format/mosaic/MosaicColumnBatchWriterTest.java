@@ -203,6 +203,34 @@ class MosaicColumnBatchWriterTest {
     }
 
     @Test
+    void testShortBundlesPreserveBatchSize() throws Exception {
+        RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
+        List<Integer> batchRowCounts = new ArrayList<>();
+        List<String> writtenValues = new ArrayList<>();
+        MosaicWriter nativeWriter =
+                capturingWriter(
+                        root -> {
+                            batchRowCounts.add(root.getRowCount());
+                            VarCharVector column = (VarCharVector) root.getVector(0);
+                            for (int i = 0; i < root.getRowCount(); i++) {
+                                writtenValues.add(column.getObject(i).toString());
+                            }
+                        });
+        HeapBytesVector values = new HeapBytesVector(150);
+        for (int i = 0; i < 150; i++) {
+            values.putByteArray(i, new byte[] {'a'}, 0, 1);
+        }
+        try (MosaicRecordsWriter writer = createWriter(rowType, nativeWriter)) {
+            for (int rows : new int[] {150, 150, 150, 1, 150}) {
+                writer.writeBundle(new VectorizedBundleRecords(batch(rows, values), null));
+            }
+        }
+
+        assertThat(batchRowCounts).containsExactly(32, 64, 54, 128, 22, 150, 1, 150);
+        assertThat(writtenValues).containsExactlyElementsOf(Collections.nCopies(601, "a"));
+    }
+
+    @Test
     void testVectorizedBundleRespectsWriteBatchMemory() throws Exception {
         RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
         MemorySize memoryLimit = MemorySize.parse("64 kb");

@@ -231,7 +231,7 @@ This experimental execution profile supports:
   `TIMESTAMP_LTZ` values and implicitly convert `DATE` values and timestamp strings to
   `TIMESTAMP_LTZ`. A `NULL` input returns `NULL`. `TIMESTAMP_NTZ` inputs are rejected during
   analysis.
-- `EXTRACT(unit FROM date_expr)` supports `YEAR`, `MONTH`, and `DAY` (day of month),
+- `EXTRACT(unit FROM date_expr)` supports `YEAR`, `QUARTER`, `MONTH`, and `DAY` (day of month),
   case-insensitively. It returns an integer and propagates `NULL`. Spark applies its
   built-in date input coercion.
 

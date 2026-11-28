@@ -32,6 +32,9 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.deletionvectors.ApplyDeletionFileRecordIterator;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
@@ -78,6 +81,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -272,6 +276,172 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+    }
+
+    /**
+     * Reads an ARRAY&lt;BIGINT&gt; parquet column and converts it with {@link
+     * org.apache.paimon.arrow.writer.ArrowFieldWriters.ArrayWriter} through the columnar path.
+     *
+     * <p>The parquet reader reserves one placeholder child slot per null / empty array (see {@code
+     * ParquetColumnVector#assembleCollection}), so the child elements of the rows after such a row
+     * live at an offset larger than the accumulated logical lengths. The writer must therefore
+     * address the child vector by its physical offsets.
+     */
+    @TestTemplate
+    public void testParquetArrayWriterPlaceholderOffset() throws Exception {
+        assumeThat(testMode).isEqualTo("vectorized_without_dv");
+
+        RowType rowType =
+                RowType.builder().field("arr", DataTypes.ARRAY(DataTypes.BIGINT())).build();
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of((Object) null)); // null array -> placeholder child slot
+        rows.add(GenericRow.of(new GenericArray(new long[0]))); // empty array -> placeholder slot
+        rows.add(GenericRow.of(new GenericArray(new long[] {10L})));
+        rows.add(GenericRow.of(new GenericArray(new long[] {20L, 30L})));
+        // a placeholder between non-empty arrays, so the child elements are not contiguous
+        rows.add(GenericRow.of((Object) null));
+        rows.add(GenericRow.of(new GenericArray(new long[0])));
+        rows.add(GenericRow.of(new GenericArray(new long[] {40L, 50L, 60L})));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        FileStoreTable table = createFileStoreTable(rowType, Collections.emptyList(), options);
+        StreamTableWrite write = table.newStreamWriteBuilder().newWrite();
+        write.withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+        for (InternalRow row : rows) {
+            write.write(row);
+        }
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        RecordReader.RecordIterator<InternalRow> iterator =
+                table.newRead()
+                        .withProjection(null)
+                        .createReader(table.newReadBuilder().newScan().plan())
+                        .readBatch();
+        // a parquet file with nested columns exposes a plain ColumnarRowIterator, so take the
+        // batch from the returned columnar row
+        ColumnarRowIterator columnar = (ColumnarRowIterator) iterator;
+        VectorizedColumnBatch batch = ((ColumnarRow) columnar.next()).batch();
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
+            ArrowFieldWriter arrayWriter = ArrowUtils.createArrowFieldWriters(vsr, rowType)[0];
+            arrayWriter.write(batch.columns[0], null, 0, batch.getNumRows());
+            vsr.setRowCount(batch.getNumRows());
+
+            assertThat(vsr.getRowCount()).isEqualTo(7);
+            ListVector listVector = (ListVector) vsr.getVector("arr");
+            assertThat(listVector.isNull(0)).isTrue();
+            assertThat((List<?>) listVector.getObject(1)).isEmpty();
+
+            List<?> row2 = (List<?>) listVector.getObject(2);
+            assertThat(row2).hasSize(1);
+            assertThat(row2.get(0)).isEqualTo(10L);
+
+            List<?> row3 = (List<?>) listVector.getObject(3);
+            assertThat(row3).hasSize(2);
+            assertThat(row3.get(0)).isEqualTo(20L);
+            assertThat(row3.get(1)).isEqualTo(30L);
+
+            assertThat(listVector.isNull(4)).isTrue();
+            assertThat((List<?>) listVector.getObject(5)).isEmpty();
+
+            List<?> row6 = (List<?>) listVector.getObject(6);
+            assertThat(row6).hasSize(3);
+            assertThat(row6.get(0)).isEqualTo(40L);
+            assertThat(row6.get(1)).isEqualTo(50L);
+            assertThat(row6.get(2)).isEqualTo(60L);
+
+            vsr.close();
+        }
+    }
+
+    /**
+     * Same as {@link #testParquetArrayWriterPlaceholderOffset()} but for MAP, which shares the
+     * child-offset handling of the array writer.
+     */
+    @TestTemplate
+    public void testParquetMapWriterPlaceholderOffset() throws Exception {
+        assumeThat(testMode).isEqualTo("vectorized_without_dv");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("m", DataTypes.MAP(DataTypes.INT(), DataTypes.BIGINT()))
+                        .build();
+        Map<Integer, Long> map1 = new LinkedHashMap<>();
+        map1.put(1, 10L);
+        Map<Integer, Long> map2 = new LinkedHashMap<>();
+        map2.put(2, 20L);
+        map2.put(3, 30L);
+        Map<Integer, Long> map3 = new LinkedHashMap<>();
+        map3.put(4, 40L);
+        map3.put(5, 50L);
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of((Object) null)); // null map -> placeholder child slot
+        rows.add(GenericRow.of(new GenericMap(Collections.emptyMap()))); // placeholder slot
+        rows.add(GenericRow.of(new GenericMap(map1)));
+        rows.add(GenericRow.of(new GenericMap(map2)));
+        // a placeholder between non-empty maps, so the child entries are not contiguous
+        rows.add(GenericRow.of((Object) null));
+        rows.add(GenericRow.of(new GenericMap(Collections.emptyMap())));
+        rows.add(GenericRow.of(new GenericMap(map3)));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        FileStoreTable table = createFileStoreTable(rowType, Collections.emptyList(), options);
+        StreamTableWrite write = table.newStreamWriteBuilder().newWrite();
+        write.withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+        for (InternalRow row : rows) {
+            write.write(row);
+        }
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        RecordReader.RecordIterator<InternalRow> iterator =
+                table.newRead()
+                        .withProjection(null)
+                        .createReader(table.newReadBuilder().newScan().plan())
+                        .readBatch();
+        VectorizedColumnBatch batch =
+                ((ColumnarRow) ((ColumnarRowIterator) iterator).next()).batch();
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
+            ArrowFieldWriter mapWriter = ArrowUtils.createArrowFieldWriters(vsr, rowType)[0];
+            mapWriter.write(batch.columns[0], null, 0, batch.getNumRows());
+            vsr.setRowCount(batch.getNumRows());
+
+            assertThat(vsr.getRowCount()).isEqualTo(7);
+            MapVector mapVector = (MapVector) vsr.getVector("m");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat((List<?>) mapVector.getObject(1)).isEmpty();
+
+            List<?> row2 = (List<?>) mapVector.getObject(2);
+            assertThat(row2).hasSize(1);
+            assertEntry(row2.get(0), 1, 10L);
+
+            List<?> row3 = (List<?>) mapVector.getObject(3);
+            assertThat(row3).hasSize(2);
+            assertEntry(row3.get(0), 2, 20L);
+            assertEntry(row3.get(1), 3, 30L);
+
+            assertThat(mapVector.isNull(4)).isTrue();
+            assertThat((List<?>) mapVector.getObject(5)).isEmpty();
+
+            List<?> row6 = (List<?>) mapVector.getObject(6);
+            assertThat(row6).hasSize(2);
+            assertEntry(row6.get(0), 4, 40L);
+            assertEntry(row6.get(1), 5, 50L);
+
+            vsr.close();
+        }
+    }
+
+    private static void assertEntry(Object entry, int expectedKey, long expectedValue) {
+        JsonStringHashMap<String, Object> map = (JsonStringHashMap<String, Object>) entry;
+        assertThat(map.get(MapVector.KEY_NAME)).isEqualTo(expectedKey);
+        assertThat(map.get(MapVector.VALUE_NAME)).isEqualTo(expectedValue);
     }
 
     @TestTemplate

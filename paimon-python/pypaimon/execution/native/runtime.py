@@ -29,10 +29,18 @@ def _raise_if_native_fork_safety_error(error):
 def native_runtime_available() -> bool:
     """Whether the optional companion Rust extension is installed.
 
-    Native paths require this release's APIs; they do not probe older builds.
+    Native paths require this release's APIs.
     """
     try:
         import_module('pypaimon_rust.datafusion')
     except ImportError:
         return False
     return True
+
+
+def native_http_blob_retry_supported() -> bool:
+    """Whether native default BLOB concurrency can tolerate HTTP throttling."""
+    try:
+        return getattr(import_module('pypaimon_rust'), 'HTTP_BLOB_RETRY_SUPPORTED', False) is True
+    except ImportError:
+        return False

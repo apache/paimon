@@ -804,6 +804,26 @@ def _validate_options(options: dict):
         )
 
 
+def _validate_sequence_group_sort_order(schema: TableSchema):
+    from pypaimon.common.options.core_options import MergeEngine, SortOrder
+
+    prefix = CoreOptions.FIELDS_PREFIX + "."
+    suffix = ".sequence-group.sort-order"
+    options = CoreOptions.from_dict(schema.options)
+    for key, value in schema.options.items():
+        if not (key.startswith(prefix) and key.endswith(suffix)):
+            continue
+        if not schema.primary_keys or options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
+            raise ValueError(f"Option '{key}' requires a primary-key table with the partial-update merge engine.")
+        if not key[len(prefix):-len(suffix)]:
+            raise ValueError(f"Missing ordering field in option '{key}'.")
+        group = key[:-len(".sort-order")]
+        if group not in schema.options:
+            raise ValueError(f"Cannot set '{key}' without defining corresponding sequence group '{group}'.")
+        if not isinstance(value, str) or value.lower() not in (SortOrder.ASCENDING, SortOrder.DESCENDING):
+            raise ValueError(f"Invalid value '{value}' for '{key}': expected ascending or descending.")
+
+
 def _validate_row_tracking(options: dict, primary_keys: List[str]):
     """Mirror the row tracking checks of Java SchemaValidation#validateRowTracking."""
     core_options = CoreOptions(Options(options or {}))
@@ -1074,6 +1094,7 @@ class SchemaManager:
 
     def commit(self, new_schema: TableSchema) -> bool:
         _validate_options(new_schema.options)
+        _validate_sequence_group_sort_order(new_schema)
         _validate_blob_fields(
             new_schema.fields,
             new_schema.options,

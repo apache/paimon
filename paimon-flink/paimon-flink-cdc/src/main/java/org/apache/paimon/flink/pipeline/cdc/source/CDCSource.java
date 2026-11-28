@@ -173,12 +173,30 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                 return null;
             }
 
+            return getTableSchema(identifier, schemaId, false);
+        }
+
+        /**
+         * Returns null if the table no longer exists or is not a file store table. The catalog is
+         * only consulted when the schema is not cached.
+         */
+        public @Nullable TableSchema getTableSchemaIfAvailable(
+                Identifier identifier, long schemaId) {
+            return getTableSchema(identifier, schemaId, true);
+        }
+
+        private @Nullable TableSchema getTableSchema(
+                Identifier identifier, long schemaId, boolean ignoreUnavailable) {
             Tuple2<Identifier, Long> cacheKey = Tuple2.of(identifier, schemaId);
             if (tableSchemaMap.containsKey(cacheKey)) {
                 return tableSchemaMap.get(cacheKey);
             }
 
-            TableSchema tableSchema = loadTableSchema(identifier, schemaId);
+            FileStoreTable table = getTable(identifier, ignoreUnavailable);
+            if (table == null) {
+                return null;
+            }
+            TableSchema tableSchema = table.schemaManager().schema(schemaId);
             tableSchemaMap.put(cacheKey, tableSchema);
             return tableSchema;
         }
@@ -207,6 +225,11 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
         }
 
         private FileStoreTable getTable(Identifier identifier) {
+            return getTable(identifier, false);
+        }
+
+        @Nullable
+        private FileStoreTable getTable(Identifier identifier, boolean ignoreUnavailable) {
             if (tableMap.containsKey(identifier)) {
                 return tableMap.get(identifier);
             }
@@ -215,17 +238,20 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             try {
                 table = catalog.getTable(identifier);
             } catch (Catalog.TableNotExistException e) {
+                if (ignoreUnavailable) {
+                    return null;
+                }
                 throw new RuntimeException(e);
             }
 
-            // As the table should have just been checked by the enumerator, it is supposed to exist
-            // and be a FileStoreTable.
+            if (ignoreUnavailable && !(table instanceof FileStoreTable)) {
+                return null;
+            }
+
+            // Cache only available tables so a newly discovered table can be loaded after an
+            // earlier lookup found it missing.
             tableMap.put(identifier, (FileStoreTable) table);
             return (FileStoreTable) table;
-        }
-
-        private TableSchema loadTableSchema(Identifier identifier, long schemaId) {
-            return getTable(identifier).schemaManager().schema(schemaId);
         }
 
         private TableRead loadTableRead(Identifier identifier, TableSchema schema) {

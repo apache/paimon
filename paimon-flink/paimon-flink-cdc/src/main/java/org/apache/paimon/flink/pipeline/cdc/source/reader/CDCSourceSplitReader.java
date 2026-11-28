@@ -101,7 +101,9 @@ public class CDCSourceSplitReader
             return new FileStoreSourceSplitReader.EmptyRecordsWithSplitIds<>();
         }
 
-        checkSplitOrStartNext();
+        if (!checkSplitOrStartNext()) {
+            return finishSplit();
+        }
 
         // poll from the pool first, pool size is 1, the underlying implementation does not allow
         // multiple batches to be read at the same time
@@ -202,9 +204,9 @@ public class CDCSourceSplitReader
         }
     }
 
-    private void checkSplitOrStartNext() throws IOException {
+    private boolean checkSplitOrStartNext() throws IOException {
         if (currentReader != null) {
-            return;
+            return true;
         }
 
         final TableAwareFileStoreSourceSplit nextSplit = splits.poll();
@@ -222,12 +224,21 @@ public class CDCSourceSplitReader
         }
 
         Identifier identifier = nextSplit.getIdentifier();
-        TableSchema tableSchema = tableManager.getTableSchema(identifier, nextSplit.getSchemaId());
+        currentSplitId = nextSplit.splitId();
+        // Reader state can contain splits for a table removed while the job was stopped.
+        TableSchema tableSchema =
+                tableManager.getTableSchemaIfAvailable(identifier, nextSplit.getSchemaId());
+        if (tableSchema == null) {
+            LOG.info(
+                    "Skipping split {} because table {} no longer exists or is not a file store table.",
+                    currentSplitId,
+                    identifier);
+            return false;
+        }
         List<SchemaChangeEvent> schemaChangeEvents =
                 tableManager.generateSchemaChangeEventList(
                         identifier, nextSplit.getLastSchemaId(), nextSplit.getSchemaId());
         currentTableReaderInfo = new TableReaderInfo(identifier, tableSchema);
-        currentSplitId = nextSplit.splitId();
         currentReader = createLazyRecordReader(nextSplit.split());
         currentDataRowsRead = nextSplit.recordsToSkip();
         currentSchemaChangeEvents.clear();
@@ -240,6 +251,7 @@ public class CDCSourceSplitReader
         if (currentDataRowsRead > 0) {
             seek(currentDataRowsRead);
         }
+        return true;
     }
 
     private long schemaChangeEventsToSkip(

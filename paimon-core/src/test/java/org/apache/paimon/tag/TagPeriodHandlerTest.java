@@ -18,6 +18,9 @@
 
 package org.apache.paimon.tag;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.options.Options;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -27,6 +30,7 @@ import static org.apache.paimon.CoreOptions.TagPeriodFormatter.WITHOUT_DASHES;
 import static org.apache.paimon.CoreOptions.TagPeriodFormatter.WITHOUT_DASHES_AND_SPACES;
 import static org.apache.paimon.CoreOptions.TagPeriodFormatter.WITH_DASHES;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for TagPeriodHandler. */
 public class TagPeriodHandlerTest {
@@ -90,5 +94,22 @@ public class TagPeriodHandlerTest {
                 .isEqualTo(LocalDateTime.of(2023, 1, 1, 1, 1));
         assertThat(periodDurationTagPeriodHandler.isAutoTag("202301010101")).isTrue();
         assertThat(periodDurationTagPeriodHandler.isAutoTag("20230101 0101")).isFalse();
+    }
+
+    @Test
+    public void testWatermarkWithSubMillisecondTagPeriod() {
+        Options options = new Options();
+        options.set(CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.WATERMARK);
+        options.set(CoreOptions.TAG_PERIOD_DURATION, Duration.ofNanos(500_000));
+        long watermark = 1726003600000L;
+        assertThatThrownBy(
+                        () ->
+                                TagPeriodHandler.validateWatermark(
+                                        new CoreOptions(options), watermark))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Option 'tag.creation-period-duration' must be at least 1 ms.");
+
+        options.set(CoreOptions.TAG_PERIOD_DURATION, Duration.ofMillis(1));
+        TagPeriodHandler.validateWatermark(new CoreOptions(options), watermark);
     }
 }

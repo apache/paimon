@@ -582,6 +582,49 @@ class TestOptionValidation(unittest.TestCase):
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn(key, manager.latest().options)
 
+    @staticmethod
+    def _group_schema(options, primary_keys=("id",)):
+        fields = [DataField(i, name, AtomicType("INT"))
+                  for i, name in enumerate(("id", "ts", "offset", "channel"))]
+        return Schema(fields=fields, primary_keys=list(primary_keys),
+                      options={"bucket": "1" if primary_keys else "-1",
+                               "merge-engine": "partial-update", **options})
+
+    def test_create_rejects_invalid_sequence_group_sort_order(self):
+        group = "fields.ts.sequence-group"
+        order = group + ".sort-order"
+        cases = [
+            ({group: "channel", order: "invalid"}, ["id"], "Invalid value 'invalid'"),
+            ({order: "ascending"}, ["id"], "corresponding sequence group"),
+            ({"fields..sequence-group": "channel", "fields..sequence-group.sort-order": "ascending"},
+             ["id"], "Missing ordering field"),
+            ({group: "channel", order: "ascending"}, [], "primary-key"),
+            ({group: "channel", order: "ascending", "merge-engine": "deduplicate"}, ["id"], "partial-update"),
+        ]
+        for i, (options, primary_keys, message) in enumerate(cases):
+            with self.subTest(options=options, primary_keys=primary_keys):
+                manager = SchemaManager(self.file_io, f"{self.table_path}_{i}")
+                with self.assertRaisesRegex(ValueError, message):
+                    manager.create_table(self._group_schema(options, primary_keys))
+                self.assertIsNone(manager.latest())
+
+    def test_alter_validates_final_sequence_group_sort_order(self):
+        group = "fields.ts,offset.sequence-group"
+        order = group + ".sort-order"
+        manager = SchemaManager(self.file_io, self.table_path)
+        manager.create_table(self._group_schema({}))
+        manager.commit_changes([SetOption(order, "DeScEnDiNg"), SetOption(group, "channel")])
+        for change, message in [(SetOption(order, "invalid"), "Invalid value 'invalid'"),
+                                (RemoveOption(group), "corresponding sequence group")]:
+            with self.subTest(change=change):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    manager.commit_changes([change])
+                self.assertEqual(manager.latest().id, 1)
+                self.assertEqual(manager.latest().options[order], "DeScEnDiNg")
+                self.assertEqual(manager.latest().options[group], "channel")
+        manager.commit_changes([RemoveOption(group), RemoveOption(order)])
+        self.assertNotIn(order, manager.latest().options)
+
 
 class TestAlterTableOptions(unittest.TestCase):
 

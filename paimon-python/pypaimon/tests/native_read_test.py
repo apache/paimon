@@ -220,7 +220,6 @@ def test_native_read_consumes_retained_rust_splits_and_transports_limit():
         predicate=None,
         limit=2,
         read_type=read.read_type,
-        blob_parallelism=1,
         parallelism=1,
         ordered=True,
     )
@@ -564,21 +563,124 @@ def test_native_read_forwards_one_global_limit(method_name, limit):
     assert native.call_args.kwargs['parallelism'] == 2
 
 
-@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
-def test_native_read_transports_blob_parallelism_for_one_core_read(method_name):
+@pytest.mark.parametrize('capability, requested, expected', [
+    (None, None, 1), (False, None, 1), (True, None, None),
+    (None, 1, 1), (None, 8, 8), (True, 8, 8),
+])
+def test_native_blob_default_requires_http_retry_support(capability, requested, expected):
+    from pypaimon.execution.native.read import table_read as native
+
+    extension = ModuleType('pypaimon_rust')
+    if capability is not None:
+        extension.HTTP_BLOB_RETRY_SUPPORTED = capability
     read = _table_read()
-    splits = [_Split() for _ in range(16)]
-    for index, split in enumerate(splits):
-        split._native_split = index
-    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch(range(16))]) as native:
-        result = getattr(read, method_name)(splits, parallelism=16, blob_parallelism=16)
+    builder = Mock()
+    builder.with_blob_parallelism.return_value = builder
+    with patch.dict('sys.modules', {'pypaimon_rust': extension}), \
+            patch.object(native.runtime, 'native_runtime_available', return_value=True), \
+            patch.object(native.native_table, '_native_query_auth_supported', return_value=True), \
+            patch.object(native.native_builder, '_native_read_builder', return_value=builder), \
+            patch.object(native.native_builder, '_configure_native_read_builder', return_value=builder):
+        native._prepare_native_read(read.table, read_type=read.read_type, blob_parallelism=requested)
+    if expected is None:
+        builder.with_blob_parallelism.assert_not_called()
+    else:
+        builder.with_blob_parallelism.assert_called_once_with(expected)
+
+
+def test_native_row_iterator_keeps_serial_blob_reads():
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               return_value=[]) as native:
+        assert list(NativeTableRead(read).read_rows([split])) == []
+    native.assert_called_once()
+    assert native.call_args.kwargs['blob_parallelism'] == 1
+    assert native.call_args.kwargs['parallelism'] == 1
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+def test_native_read_uses_core_blob_default(method_name):
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               return_value=[_id_batch([1])]) as native:
+        result = getattr(read, method_name)([split])
         if method_name != 'to_arrow':
             result = result.read_all()
-    assert result.num_rows == 16
+    assert result.to_pydict() == {'id': [1]}
     native.assert_called_once()
-    assert native.call_args.args[1] == list(range(16))
+    assert 'blob_parallelism' not in native.call_args.kwargs
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+@pytest.mark.parametrize('blob_parallelism', [1, 8, 16])
+@pytest.mark.parametrize('split_count', [1, 16, 128])
+def test_native_read_transports_blob_parallelism_for_one_core_read(
+        method_name, blob_parallelism, split_count):
+    read = _table_read()
+    splits = [_Split() for _ in range(split_count)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               return_value=[_id_batch(range(split_count))]) as native:
+        result = getattr(read, method_name)(splits, parallelism=16, blob_parallelism=blob_parallelism)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.num_rows == split_count
+    native.assert_called_once()
+    assert native.call_args.args[1] == list(range(split_count))
     assert native.call_args.kwargs['parallelism'] == 16
-    assert native.call_args.kwargs['blob_parallelism'] == 16
+    assert native.call_args.kwargs['blob_parallelism'] == blob_parallelism
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+@pytest.mark.parametrize('native_enabled', [False, True])
+def test_default_blob_parallelism_stays_serial_on_python_fallback(method_name, native_enabled):
+    read = _table_read()
+    read.table.options.native_read_enabled.return_value = native_enabled
+    split = _Split()
+    split._native_split = object()
+    schema = pa.schema([('id', pa.int32())])
+    python_path = 'pypaimon.execution.python.read.table_read.PythonTableRead.'
+    method = '_materialize' if method_name == 'to_arrow' else 'read_batches'
+    batch = _id_batch([1])
+    output = pa.Table.from_batches([batch]) if method_name == 'to_arrow' else iter([batch])
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               side_effect=RuntimeError('setup failed')) as native, \
+            patch(python_path + method, return_value=output) as python_read:
+        result = getattr(read, method_name)([split], parallelism=16)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.to_pydict() == {'id': [1]}
+    python_read.assert_called_once_with([split], schema, 16, 1)
+    assert native.call_count == int(native_enabled)
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+@pytest.mark.parametrize('split_count', [0, 1])
+@pytest.mark.parametrize('blob_parallelism', [0, -1])
+def test_native_read_rejects_invalid_blob_parallelism_before_core(
+        method_name, split_count, blob_parallelism):
+    read = _table_read()
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        with pytest.raises(ValueError, match='blob_parallelism must be >= 1'):
+            getattr(read, method_name)([_Split() for _ in range(split_count)],
+                                       blob_parallelism=blob_parallelism)
+    native.assert_not_called()
+
+
+@pytest.mark.parametrize('method_name', ['to_arrow', 'to_arrow_batch_reader'])
+def test_native_read_empty_splits_do_not_open_core(method_name):
+    read = _table_read()
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
+        result = getattr(read, method_name)([], parallelism=128)
+        if method_name != 'to_arrow':
+            result = result.read_all()
+    assert result.num_rows == 0
+    native.assert_not_called()
 
 
 def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():

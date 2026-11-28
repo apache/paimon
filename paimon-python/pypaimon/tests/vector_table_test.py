@@ -19,8 +19,10 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -291,6 +293,400 @@ class VectorTableWriteReadTest(unittest.TestCase):
         self.assertEqual(embed_by_id[1], [1.0, 2.0, 3.0])
         self.assertEqual(embed_by_id[2], [4.0, 5.0, 6.0])
         self.assertEqual(embed_by_id[3], [7.0, 8.0, 9.0])
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_vector_table_partial_update_shared_vector_file(self):
+        from pypaimon.utils.range import Range
+
+        pytest.importorskip('vortex')
+        vector_type = pa.list_(pa.float32(), 3)
+        initial = pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'embedding': pa.array([[1., 0., 0.], [0., 1., 0.]], type=vector_type),
+            'embedding_v2': pa.array([[0., 1., 0.], [0., 0., 1.]], type=vector_type),
+        })
+        table_name = 'test_db.partial_update_shared_vector_file'
+        schema = Schema.from_pyarrow_schema(initial.schema, options={
+            'bucket': '-1',
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'vortex',
+        })
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        def read(projection, row_ranges=None):
+            builder = table.new_read_builder().with_projection(projection)
+            scan = builder.new_scan()
+            if row_ranges is not None:
+                scan = scan.with_row_ranges(row_ranges)
+            return builder.new_read().to_arrow(scan.plan().splits())
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(initial)
+        messages = writer.prepare_commit()
+        self.assertEqual([['embedding', 'embedding_v2']], [
+            file.write_cols for message in messages for file in message.new_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        ])
+        commit = builder.new_commit()
+        commit.commit(messages)
+        writer.close()
+        commit.close()
+
+        before = read(initial.column_names + ['_ROW_ID']).sort_by('id')
+        self.assertEqual(initial.to_pydict(), before.select(initial.column_names).to_pydict())
+        row_id = before['_ROW_ID'][0].as_py()
+
+        updates = pa.table({
+            '_ROW_ID': pa.array([row_id], type=pa.int64()),
+            'embedding': pa.array([[0., 0., 1.]], type=vector_type),
+        })
+        builder = table.new_batch_write_builder()
+        updater = builder.new_update().with_update_type(['embedding'])
+        messages = updater.update_by_arrow_with_row_id(updates)
+        self.assertEqual([['embedding']], [
+            file.write_cols for message in messages for file in message.new_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        ])
+        commit = builder.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        table = self.catalog.get_table(table_name)
+        expected = {
+            'embedding': [[0., 0., 1.], [0., 1., 0.]],
+            'embedding_v2': initial['embedding_v2'].to_pylist(),
+        }
+        for projection in (['embedding'], ['embedding_v2'], ['embedding', 'embedding_v2']):
+            with self.subTest(projection=projection):
+                self.assertEqual({name: expected[name] for name in projection},
+                                 read(projection).to_pydict())
+        self.assertEqual({name: values[:1] for name, values in expected.items()},
+                         read(list(expected), [Range(row_id, row_id)]).to_pydict())
+
+        # The newer file starts at the same row ID but covers only the first row.
+        second_row_id = before['_ROW_ID'][1].as_py()
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write().with_write_type(['embedding'])
+        writer.write_arrow(pa.table({'embedding': pa.array([None], type=vector_type)}))
+        messages = writer.prepare_commit()
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertTrue(DataFileMeta.is_vector_file(files[0].file_name))
+        files[0].first_row_id = row_id
+        commit = builder.new_commit()
+        commit.commit(messages)
+        writer.close()
+        commit.close()
+
+        table = self.catalog.get_table(table_name)
+        expected['embedding'][0] = None
+        self.assertEqual(dict(expected, _ROW_ID=[row_id, second_row_id]),
+                         read(['embedding_v2', '_ROW_ID', 'embedding']).to_pydict())
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_vector_updates_across_inline_and_dedicated_files(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        pytest.importorskip('vortex')
+        vector_type = pa.list_(pa.float32(), 2)
+        initial = pa.table({
+            'id': pa.array([0], type=pa.int32()),
+            'embedding': pa.array([[1., 1.]], type=vector_type),
+            'embedding_v2': pa.array([[4., 4.]], type=vector_type),
+        })
+        table_name = 'test_db.vector_storage_change'
+        schema = Schema.from_pyarrow_schema(initial.schema, options={
+            'bucket': '-1',
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'vortex',
+        })
+        self.catalog.create_table(table_name, schema, False)
+        self._write_vector_batches(self.catalog.get_table(table_name), initial)
+
+        for change, value in (
+                (SchemaChange.remove_option('vector.file.format'), 2.),
+                (SchemaChange.set_option('vector.file.format', 'vortex'), 3.)):
+            self.catalog.alter_table(table_name, [change], False)
+            table = self.catalog.get_table(table_name)
+            builder = table.new_batch_write_builder()
+            messages = builder.new_update().with_update_type(['embedding']).update_by_arrow_with_row_id(pa.table({
+                '_ROW_ID': pa.array([0], type=pa.int64()),
+                'embedding': pa.array([[value, value]], type=vector_type),
+            }))
+            commit = builder.new_commit()
+            commit.commit(messages)
+            commit.close()
+
+        table = self.catalog.get_table(table_name)
+        for projection in (['embedding'], initial.column_names):
+            builder = table.new_read_builder().with_projection(projection)
+            result = builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pydict()
+            expected = initial.select(projection).to_pydict()
+            expected['embedding'] = [[3., 3.]]
+            self.assertEqual(expected, result)
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_null_predicates_after_switching_to_dedicated_vector_files(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        pytest.importorskip('vortex')
+        vector_type = pa.list_(pa.float32(), 2)
+        for initial_value, updated_value in ((None, [3., 4.]), ([1., 2.], None)):
+            with self.subTest(initial_value=initial_value, updated_value=updated_value):
+                table_name = 'test_db.vector_null_filter_' + ('was_null' if initial_value is None else 'was_set')
+                initial = pa.table({
+                    'id': pa.array([0], type=pa.int32()),
+                    'embedding': pa.array([initial_value], type=vector_type),
+                })
+                schema = Schema.from_pyarrow_schema(initial.schema, options={
+                    'bucket': '-1',
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                    'file.format': 'parquet',
+                })
+                self.catalog.create_table(table_name, schema, False)
+                self._write_vector_batches(self.catalog.get_table(table_name), initial)
+                self.catalog.alter_table(
+                    table_name, [SchemaChange.set_option('vector.file.format', 'vortex')], False)
+                table = self.catalog.get_table(table_name)
+                builder = table.new_batch_write_builder()
+                update = pa.table({
+                    '_ROW_ID': pa.array([0], type=pa.int64()),
+                    'embedding': pa.array([updated_value], type=vector_type),
+                })
+                messages = builder.new_update().with_update_type(['embedding']).update_by_arrow_with_row_id(update)
+                commit = builder.new_commit()
+                commit.commit(messages)
+                commit.close()
+
+                table = self.catalog.get_table(table_name)
+                reader = table.new_read_builder()
+                expected = {'id': [0], 'embedding': [updated_value]}
+                self.assertEqual(expected, reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pydict())
+                predicate_builder = reader.new_predicate_builder()
+                predicate = (predicate_builder.is_null('embedding') if updated_value is None
+                             else predicate_builder.is_not_null('embedding'))
+                reader = reader.with_filter(predicate)
+                splits = reader.new_scan().plan().splits()
+                self.assertTrue(splits)
+                self.assertEqual(expected, reader.new_read().to_arrow(splits).to_pydict())
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_rolled_vector_updates(self):
+        vortex = pytest.importorskip('vortex')
+        cases = [
+            ('1KB', '1KB', 80, False), ('1MB', '1KB', 80, False), ('1MB', '1KB', 72, False),
+            ('1MB', '1KB', 80, True), ('1MB', '1KB', 72, True), ('1KB', '2KB', 64, True),
+        ]
+        for case in cases:
+            with self.subTest(layout=case):
+                self._assert_rolled_vector_update(vortex, *case)
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_rolled_update_of_shared_vector_file(self):
+        vortex = pytest.importorskip('vortex')
+        for updated_row_count in (80, 72):
+            with self.subTest(updated_row_count=updated_row_count):
+                self._assert_rolled_vector_update(
+                    vortex, '1MB', '1KB', updated_row_count, False, shared_vector_file=True)
+
+    @pytest.mark.python_plan
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_rolled_vector_backfill_decodes_parquet_anchor_once(self):
+        from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.schema.data_types import AtomicType, VectorType
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.utils.range import Range
+
+        pytest.importorskip('vortex')
+        table_name = 'test_db.partial_rolled_vector_backfill'
+        initial = pa.table({'id': pa.array(range(80), type=pa.int32())})
+        schema = Schema.from_pyarrow_schema(initial.schema, options={
+            'bucket': '-1',
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+            'vector.file.format': 'vortex',
+            'vector.target-file-size': '1KB',
+            'parquet.filter.columnindex.enabled': 'false',
+        })
+        self.catalog.create_table(table_name, schema, False)
+        self._write_vector_batches(self.catalog.get_table(table_name), initial)
+        self.catalog.alter_table(table_name, [
+            SchemaChange.add_column('embedding', VectorType(True, AtomicType('FLOAT'), 32))
+        ], False)
+        vectors = [[float(i)] * 32 for i in range(72)]
+        self._write_vector_batches(self.catalog.get_table(table_name), pa.table({
+            'embedding': pa.array(vectors, type=pa.list_(pa.float32(), 32)),
+        }), first_row_id=0)
+
+        table = self.catalog.get_table(table_name)
+        builder = table.new_read_builder()
+        splits = builder.new_scan().with_row_ranges([Range(0, 79)]).plan().splits()
+        original = FormatPyArrowReader._read_parquet_row_group_batches
+        decoded_rows = []
+
+        def count_decoded(reader, row_group, columns):
+            for batch in original(reader, row_group, columns):
+                decoded_rows.append(batch.num_rows)
+                yield batch
+
+        with patch.object(FormatPyArrowReader, '_read_parquet_row_group_batches', count_decoded):
+            result = builder.new_read().to_arrow(splits).to_pydict()
+        self.assertEqual({'id': list(range(80)), 'embedding': vectors + [None] * 8}, result)
+        self.assertEqual(80, sum(decoded_rows))
+
+    def _assert_rolled_vector_update(
+            self, vortex, initial_file_size, updated_file_size, updated_row_count, alter_schema,
+            shared_vector_file=False):
+        from pypaimon.execution.python.read.reader.format_vortex_reader import FormatVortexReader
+        from pypaimon.execution.python.read.split_read import DataEvolutionSplitRead
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.utils.range import Range
+
+        row_count = 80
+        vector_type = pa.list_(pa.float32(), 32)
+        initial = pa.table({
+            'id': pa.array(range(row_count), type=pa.int32()),
+            'embedding': pa.array([[float(i)] * 32 for i in range(row_count)], type=vector_type),
+        })
+        updated_column = 'embedding'
+        if shared_vector_file:
+            updated_column = 'embedding_v2'
+            initial = initial.append_column(
+                updated_column, pa.array([[float(i + 200)] * 32 for i in range(row_count)], type=vector_type))
+        updated = pa.array([[float(i + 100)] * 32 for i in range(updated_row_count)], type=vector_type)
+        table_name = ('test_db.rolled_vector_updates_'
+                      f'{initial_file_size}_{updated_row_count}_{alter_schema}_{shared_vector_file}')
+        schema = Schema.from_pyarrow_schema(initial.schema, options={
+            'bucket': '-1',
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'deletion-vectors.enabled': 'true' if shared_vector_file else 'false',
+            'read.batch-size': '5' if shared_vector_file else '1024',
+            'file.format': 'vortex',
+            'vector.file.format': 'vortex',
+            'vector.target-file-size': initial_file_size if alter_schema else updated_file_size,
+        })
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        self._write_vector_batches(table.copy({'vector.target-file-size': initial_file_size}), initial)
+        initial_schema_id = table.table_schema.id
+        if alter_schema:
+            self.catalog.alter_table(
+                table_name, [SchemaChange.set_option('vector.target-file-size', updated_file_size)], False)
+            table = self.catalog.get_table(table_name)
+            self.assertGreater(table.table_schema.id, initial_schema_id)
+        updated_rows_per_file = 16 if updated_file_size == '2KB' else 8
+        self._write_vector_batches(table, pa.table({updated_column: updated}), first_row_id=0,
+                                   rows_per_batch=updated_rows_per_file)
+        table = self.catalog.get_table(table_name)
+        builder = table.new_read_builder()
+        splits = builder.new_scan().plan().splits()
+        files = [file for split in splits for file in split.files]
+        normal_files = [file for file in files if not DataFileMeta.is_vector_file(file.file_name)]
+        self.assertEqual([row_count], [file.row_count for file in normal_files])
+        updated_ranges = [(start, updated_rows_per_file)
+                          for start in range(0, updated_row_count, updated_rows_per_file)]
+        initial_rows_per_file = 8 if initial_file_size == '1KB' else row_count
+        initial_ranges = [(start, initial_rows_per_file) for start in range(0, row_count, initial_rows_per_file)]
+        expected_ranges = [(initial_schema_id, start, count) for start, count in initial_ranges]
+        expected_ranges.extend((table.table_schema.id, start, count) for start, count in updated_ranges)
+        self.assertEqual(sorted(expected_ranges), sorted(
+            (file.schema_id, file.first_row_id, file.row_count) for file in files
+            if DataFileMeta.is_vector_file(file.file_name)))
+
+        with patch.object(vortex, 'open', wraps=vortex.open) as open_file:
+            result = builder.new_read().to_arrow(splits).sort_by('id')
+        expected = initial.to_pydict()
+        expected[updated_column][:updated_row_count] = updated.to_pylist()
+        self.assertEqual(expected, result.to_pydict())
+        opened_files = [os.path.basename(call.args[0]) for call in open_file.call_args_list]
+        self.assertIn(normal_files[0].file_name, opened_files)
+        self.assertCountEqual(opened_files, set(opened_files))
+
+        if shared_vector_file:
+            original = FormatVortexReader.read_arrow_batch
+            decoded_rows = []
+
+            def count_decoded(reader):
+                batch = original(reader)
+                if batch is not None:
+                    decoded_rows.append(batch.num_rows)
+                return batch
+
+            with patch.object(FormatVortexReader, 'read_arrow_batch', count_decoded), patch.object(
+                    vortex, 'open', wraps=vortex.open) as limited_opens:
+                result = builder.with_limit(1).new_read().to_arrow(splits).to_pydict()
+            self.assertEqual({name: values[:1] for name, values in expected.items()}, result)
+            self.assertEqual([1, 1, 1], decoded_rows)
+            self.assertEqual(3, limited_opens.call_count)
+
+        if shared_vector_file:
+            deleted = [6, 7, 8, 23, 24, 73, 78]
+            write_builder = table.new_batch_write_builder()
+            messages = write_builder.new_update().delete_by_row_id(deleted)
+            commit = write_builder.new_commit()
+            commit.commit(messages)
+            commit.close()
+            builder = self.catalog.get_table(table_name).new_read_builder()
+
+            selected = [Range(6, 10), Range(23, 24), Range(70, 74), Range(79, 79)]
+            row_ids = [row_id for row_range in selected
+                       for row_id in range(row_range.from_, row_range.to + 1) if row_id not in deleted]
+            splits = builder.new_scan().with_row_ranges(selected).plan().splits()
+            with patch.object(DataEvolutionSplitRead, 'file_reader_supplier', autospec=True,
+                              side_effect=DataEvolutionSplitRead.file_reader_supplier) as create_file_reader:
+                result = builder.new_read().to_arrow(splits)
+            self.assertEqual({name: [values[row_id] for row_id in row_ids] for name, values in expected.items()},
+                             result.to_pydict())
+            if updated_row_count == row_count:
+                for call in create_file_reader.call_args_list:
+                    file = call.kwargs['file']
+                    if DataFileMeta.is_vector_file(file.file_name):
+                        self.assertEqual(Range.and_(selected, [file.non_null_row_id_range()]),
+                                         call.kwargs['row_ranges'])
+            result = builder.with_limit(1).new_read().to_arrow(splits).to_pydict()
+            self.assertEqual({name: [values[row_ids[0]]] for name, values in expected.items()}, result)
+            predicate = builder.new_predicate_builder().greater_or_equal('id', 70)
+            result = builder.with_filter(predicate).new_read().to_arrow(splits).to_pydict()
+            self.assertEqual({name: [values[70]] for name, values in expected.items()}, result)
+
+    @staticmethod
+    def _write_vector_batches(table, data, first_row_id=None, rows_per_batch=8):
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        if first_row_id is not None:
+            writer = writer.with_write_type(data.column_names)
+        for batch in data.to_batches(max_chunksize=rows_per_batch):
+            writer.write_arrow(pa.Table.from_batches([batch]))
+        messages = writer.prepare_commit()
+        if first_row_id is not None:
+            # Stage a replacement for each rolled vector range.
+            for message in messages:
+                for file in message.new_files:
+                    file.first_row_id = first_row_id
+                    first_row_id += file.row_count
+        commit = builder.new_commit()
+        commit.commit(messages)
+        writer.close()
+        commit.close()
 
     def test_vector_table_partial_update_non_vector_column(self):
         vector_schema = pa.schema([

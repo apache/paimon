@@ -46,6 +46,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CDCSource.TableManager}. */
 public class CDCSourceTableManagerTest {
@@ -81,6 +82,56 @@ public class CDCSourceTableManagerTest {
     public void afterEach() throws Exception {
         ioManager.close();
         catalog.close();
+    }
+
+    @Test
+    public void testMissingTableIsNotCached() throws Exception {
+        CDCSource.TableManager tableManager = createTableManager(1, 1, 1);
+        catalog.dropTable(IDENTIFIER, false);
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNull();
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNull();
+
+        catalog.createTable(
+                IDENTIFIER, Schema.newBuilder().column("v0", DataTypes.BIGINT()).build(), false);
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L).id()).isZero();
+    }
+
+    @Test
+    public void testCachedSchemaSkipsAvailabilityLookup() throws Exception {
+        Identifier anotherIdentifier = Identifier.create(DATABASE, "another_table");
+        catalog.createTable(
+                anotherIdentifier,
+                Schema.newBuilder().column("v0", DataTypes.BIGINT()).build(),
+                false);
+        CountingCatalog countingCatalog = new CountingCatalog(catalog);
+        // The table cache is smaller than the schema cache, as with the default sizes.
+        CDCSource.TableManager tableManager = createTableManager(countingCatalog, 1, 2, 1);
+
+        tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L);
+        tableManager.getTableSchemaIfAvailable(anotherIdentifier, 0L);
+        assertThat(tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L)).isNotNull();
+
+        assertThat(countingCatalog.getTableCount(IDENTIFIER)).isEqualTo(1);
+    }
+
+    @Test
+    public void testAvailabilityPropagatesCatalogErrors() {
+        Catalog failingCatalog =
+                new DelegateCatalog(catalog) {
+                    @Override
+                    public CatalogLoader catalogLoader() {
+                        return wrapped.catalogLoader();
+                    }
+
+                    @Override
+                    public Table getTable(Identifier identifier) {
+                        throw new IllegalStateException("catalog unavailable");
+                    }
+                };
+        CDCSource.TableManager tableManager = createTableManager(failingCatalog, 1, 1, 1);
+        assertThatThrownBy(() -> tableManager.getTableSchemaIfAvailable(IDENTIFIER, 0L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("catalog unavailable");
     }
 
     @Test

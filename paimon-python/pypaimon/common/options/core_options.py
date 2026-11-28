@@ -1227,6 +1227,13 @@ class CoreOptions:
             "LeRobot DataLoader worker.")
     )
 
+    READ_VIDEO_MAX_CACHED_FILES: ConfigOption[int] = (
+        ConfigOptions.key("read.video.max-cached-files")
+        .int_type()
+        .default_value(0)
+        .with_description("Maximum cached Arrow S3/OSS video file handles per collator. 0 disables pooling.")
+    )
+
     READ_VIDEO_PREFETCH_MAX_BYTES: ConfigOption[int] = (
         ConfigOptions.key("read.video.prefetch-max-bytes")
         .int_type()
@@ -2064,6 +2071,9 @@ class CoreOptions:
 
     def read_video_max_open_decoders(self) -> int:
         return self._positive_video_option(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)
+
+    def read_video_max_cached_files(self) -> int:
+        return self._non_negative_video_option(CoreOptions.READ_VIDEO_MAX_CACHED_FILES)
 
     def read_video_decode_parallelism(self) -> int:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODE_PARALLELISM)

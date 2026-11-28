@@ -153,7 +153,11 @@ public class CDCSourceEnumerator
                         tableProgress.schemaId());
             }
 
-            addSplits(checkpoint.getSplits());
+            for (TableAwareFileStoreSourceSplit split : checkpoint.getSplits()) {
+                if (tableStatusMap.containsKey(split.getIdentifier())) {
+                    addSplit(split);
+                }
+            }
         }
     }
 

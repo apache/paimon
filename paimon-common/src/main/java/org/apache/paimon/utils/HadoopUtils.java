@@ -107,10 +107,17 @@ public class HadoopUtils {
             possibleHadoopConfPaths[1] = hadoopHomeDir + "/etc/hadoop"; // hadoop 2.2
         }
 
+        // A HADOOP_HOME usually contains only one of conf/ and etc/hadoop, so accumulate
+        // the flag (|| foundHadoopConfiguration) to avoid an empty iteration resetting a
+        // previous success.
         for (String possibleHadoopConfPath : possibleHadoopConfPaths) {
             if (!StringUtils.isNullOrWhitespaceOnly(possibleHadoopConfPath)) {
+                LOG.debug(
+                        "Searching Hadoop configuration files in possible hadoop conf path: {}",
+                        possibleHadoopConfPath);
                 foundHadoopConfiguration =
-                        addHadoopConfIfFound(result, possibleHadoopConfPath, options);
+                        addHadoopConfIfFound(result, possibleHadoopConfPath, options)
+                                || foundHadoopConfiguration;
             }
         }
 

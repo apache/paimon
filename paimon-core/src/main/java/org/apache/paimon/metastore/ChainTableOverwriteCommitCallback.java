@@ -19,6 +19,7 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -44,6 +45,9 @@ import java.util.stream.Collectors;
  *
  * <ul>
  *   <li>The committed snapshot kind is {@link CommitKind#OVERWRITE};
+ *   <li>The logical operation is not {@link Snapshot.Operation#TRUNCATE}. Drop partition, truncate
+ *       and partition delete commit as overwrite with that operation and must remove data on the
+ *       delta branch only;
  *   <li>The table is a chain table and current branch is delta branch.
  * </ul>
  *
@@ -68,6 +72,13 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
         }
 
         if (context.snapshot.commitKind() != CommitKind.OVERWRITE) {
+            return;
+        }
+
+        // DROP PARTITION, TRUNCATE and a whole-partition DELETE are overwrite commits whose
+        // operation is TRUNCATE. They delete delta data only. INSERT OVERWRITE leaves the
+        // operation unset or sets OVERWRITE, and still clears the snapshot baseline.
+        if (context.snapshot.operation() == Snapshot.Operation.TRUNCATE) {
             return;
         }
 
