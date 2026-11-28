@@ -89,6 +89,9 @@ public enum FileType {
     /** Parse a comma-separated whitelist string into a set of {@link FileType}s. */
     public static Set<FileType> parseWhitelist(String whitelist) {
         Set<FileType> result = EnumSet.noneOf(FileType.class);
+        if (whitelist == null) {
+            return result;
+        }
         for (String name : whitelist.split(",")) {
             name = name.trim();
             switch (name) {
@@ -113,7 +116,7 @@ public enum FileType {
                 default:
                     if (!name.isEmpty()) {
                         LOG.warn(
-                                "Unknown local-cache.whitelist value '{}'. "
+                                "Unknown whitelist value '{}'. "
                                         + "Supported values: meta, global-index, bucket-index, data, file-index, "
                                         + "or * for all of them.",
                                 name);

@@ -35,6 +35,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO
 
 
 class RESTTokenFileIO(FileIO):
@@ -129,6 +130,9 @@ class RESTTokenFileIO(FileIO):
     def file_io(self) -> FileIO:
         return self._file_io_with_token()[0]
 
+    def for_path(self, path: str, operation: str):
+        return self.file_io().for_path(path, operation)
+
     def _file_io_with_token(self, minimum_validity_millis: int = 0):
         with self._token_lock:
             if minimum_validity_millis:
@@ -151,7 +155,8 @@ class RESTTokenFileIO(FileIO):
                 cache = self._FILE_IO_CACHE
                 file_io = cache.get(cache_key)
                 if file_io is None:
-                    file_io = FileIO.get(self.path, self._merged_options(token))
+                    file_io = CachePolicyFileIO.create(
+                        self.path, self._merged_options(token))
                     self._log_file_io_created(cache)
                 # Re-inserting on every access expires idle entries only, like expireAfterAccess.
                 cache[cache_key] = file_io
@@ -201,22 +206,27 @@ class RESTTokenFileIO(FileIO):
     def _merged_options(self, token: RESTToken) -> Options:
         merged_properties = RESTUtil.merge(
             self.catalog_options.to_map() if self.catalog_options else {},
-            token.token
+            self._merge_token_with_catalog_options(token.token)
         )
-        if self.catalog_options:
-            dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return Options(merged_properties)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
-        """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
+        """Apply client cache and DLF overrides, preserving the server OSS endpoint."""
         merged_token = dict(token)
         if self.catalog_options:
+            for key, value in self.catalog_options.to_map().items():
+                if key.startswith("io-cache.") and value is not None:
+                    merged_token[key] = value
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return merged_token
+
+    def _token_with_catalog_options(self, token: Optional[RESTToken]) -> Optional[RESTToken]:
+        if token is None:
+            return None
+        properties = self._merge_token_with_catalog_options(token.token)
+        return token if properties == token.token else RESTToken(properties, token.expire_at_millis)
 
     def new_input_stream(self, path: str):
         return self.file_io().new_input_stream(path)
@@ -413,8 +423,8 @@ class RESTTokenFileIO(FileIO):
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
 
-        merged_token_dict = self._merge_token_with_catalog_options(response.token)
-        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
+        # Shared tokens must not retain another client's endpoint or cache-policy overrides.
+        new_token = RESTToken(dict(response.token), response.expires_at_millis)
         self.token = new_token
         if self._is_token_expired(new_token):
             self._log_short_token(new_token)
@@ -436,12 +446,12 @@ class RESTTokenFileIO(FileIO):
 
     def valid_token(self):
         self.try_to_refresh_token()
-        return self.token
+        return self._token_with_catalog_options(self.token)
 
     def _existing_valid_token(self) -> Optional[RESTToken]:
         """Return this instance's valid token without locks or refresh requests."""
         token = self.token
-        return token if not self._is_token_expired(token) else None
+        return self._token_with_catalog_options(token) if not self._is_token_expired(token) else None
 
     def close(self):
         pass

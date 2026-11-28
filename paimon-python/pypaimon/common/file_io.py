@@ -600,6 +600,10 @@ class FileIO(ABC):
     def to_filesystem_path(self, path: str) -> str:
         return path
 
+    def for_path(self, path: str, operation: str):
+        """Select the concrete backend for native format readers and writers."""
+        return self
+
     def parse_location(self, location: str):
         import os
         from urllib.parse import urlparse

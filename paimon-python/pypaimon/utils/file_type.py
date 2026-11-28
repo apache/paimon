@@ -111,6 +111,8 @@ class FileType(Enum):
             "file-index": (FileType.FILE_INDEX,),
         }
         result = set()
+        if whitelist_str is None:
+            return result
         for name in whitelist_str.split(","):
             name = name.strip()
             if name == "*":
@@ -119,7 +121,7 @@ class FileType(Enum):
                 result.update(mapping[name])
             elif name:
                 logger.warning(
-                    "Unknown local-cache.whitelist value '%s'. "
+                    "Unknown whitelist value '%s'. "
                     "Supported values: meta, global-index, bucket-index, data, "
                     "structured-data, file-index, or * for all of them.",
                     name,

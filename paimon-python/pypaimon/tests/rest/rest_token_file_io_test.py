@@ -37,6 +37,7 @@ from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.cache_policy_file_io import CachePolicyFileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.table.row.blob import BlobDescriptor
 
@@ -666,11 +667,12 @@ class RESTTokenFileIOTest(unittest.TestCase):
             with open(expected_path, 'rb') as f:
                 self.assertEqual(f.read(), test_content)
 
-    def test_dlf_oss_endpoint_overrides_token_endpoint(self):
-        """Test that DLF OSS endpoint overrides the standard OSS endpoint in token."""
+    def test_dlf_endpoint_has_highest_priority(self):
+        """A client DLF endpoint overrides both client and server OSS endpoints."""
         dlf_oss_endpoint = "https://dlf-custom-endpoint.oss-cn-hangzhou.aliyuncs.com"
         catalog_options = {
-            CatalogOptions.DLF_OSS_ENDPOINT.key(): dlf_oss_endpoint
+            CatalogOptions.DLF_OSS_ENDPOINT.key(): dlf_oss_endpoint,
+            OssOptions.OSS_ENDPOINT.key(): "client-standard-endpoint",
         }
 
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
@@ -690,11 +692,13 @@ class RESTTokenFileIOTest(unittest.TestCase):
             # Merge token with catalog options
             merged_token = file_io._merge_token_with_catalog_options(token)
 
-            # Verify DLF OSS endpoint overrides the standard endpoint
             self.assertEqual(
                 merged_token[OssOptions.OSS_ENDPOINT.key()],
                 dlf_oss_endpoint,
-                "DLF OSS endpoint should override the standard OSS endpoint in token"
+            )
+            self.assertEqual(
+                dlf_oss_endpoint,
+                file_io._merged_options(RESTToken(token, 0)).get(OssOptions.OSS_ENDPOINT),
             )
             # Verify other token properties are preserved
             self.assertEqual(
@@ -702,11 +706,187 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 "test-access-key",
                 "Other token properties should be preserved"
             )
+
+            token.pop(OssOptions.OSS_ENDPOINT.key())
+            merged_token = file_io._merge_token_with_catalog_options(token)
+            self.assertEqual(dlf_oss_endpoint, merged_token[OssOptions.OSS_ENDPOINT.key()])
             self.assertEqual(
                 merged_token["fs.oss.accessKeySecret"],
                 "test-secret-key",
                 "Other token properties should be preserved"
             )
+
+    def test_client_cache_settings_take_precedence(self):
+        catalog_options = Options({
+            OssOptions.OSS_ENDPOINT.key(): "client-endpoint",
+            CatalogOptions.DLF_OSS_ENDPOINT.key(): "client-dlf-endpoint",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "client-origin",
+            CatalogOptions.IO_CACHE_POLICY.key(): "meta,read",
+            CatalogOptions.IO_CACHE_WHITELIST.key(): "meta",
+            CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "manifest",
+            "io-cache.enabled": "false",
+            "io-cache.custom-option": "client-value",
+        })
+        file_io = RESTTokenFileIO(
+            self.identifier, self.warehouse_path, catalog_options)
+        server_options = {
+            OssOptions.OSS_ENDPOINT.key(): "server-cache",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
+            CatalogOptions.IO_CACHE_POLICY.key(): "none",
+            CatalogOptions.IO_CACHE_WHITELIST.key(): "data",
+            CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "bucket-0",
+            "io-cache.enabled": "true",
+            "io-cache.custom-option": "server-value",
+            OssOptions.OSS_SECURITY_TOKEN.key(): "server-credentials",
+        }
+        merged_token = file_io._merge_token_with_catalog_options(server_options)
+        options = file_io._merged_options(RESTToken(server_options, 0))
+        for key, value in catalog_options.to_map().items():
+            if key.startswith("io-cache."):
+                self.assertEqual(value, merged_token[key])
+                self.assertEqual(value, options.to_map()[key])
+        self.assertEqual("client-dlf-endpoint", options.get(OssOptions.OSS_ENDPOINT))
+        self.assertEqual("server-credentials", options.get(OssOptions.OSS_SECURITY_TOKEN))
+        self.assertEqual("server-cache", server_options[OssOptions.OSS_ENDPOINT.key()])
+        self.assertEqual("client-endpoint", catalog_options.get(OssOptions.OSS_ENDPOINT))
+
+    def test_server_endpoint_precedes_standard_client_endpoint(self):
+        for endpoint in ("server-cache", None):
+            with self.subTest(server_endpoint=endpoint):
+                client = Options({OssOptions.OSS_ENDPOINT.key(): "client-endpoint"})
+                file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, client)
+                server = {OssOptions.OSS_SECURITY_TOKEN.key(): "server-credentials"}
+                if endpoint is not None:
+                    server[OssOptions.OSS_ENDPOINT.key()] = endpoint
+                file_io.token = RESTToken(server, int(time.time() * 1000) + 7_200_000)
+                with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                        patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+                    self.assertEqual(
+                        endpoint or "client-endpoint",
+                        file_io.file_io().options.get(OssOptions.OSS_ENDPOINT))
+                    self.assertEqual(endpoint, file_io.valid_token().token.get(OssOptions.OSS_ENDPOINT.key()))
+                    self.assertEqual(endpoint, file_io._existing_valid_token().token.get(OssOptions.OSS_ENDPOINT.key()))
+                self.assertEqual("server-credentials", file_io.token.token[OssOptions.OSS_SECURITY_TOKEN.key()])
+                self.assertEqual("client-endpoint", client.get(OssOptions.OSS_ENDPOINT))
+
+    def test_server_endpoint_and_empty_client_cache_overrides(self):
+        server = {
+            OssOptions.OSS_ENDPOINT.key(): "server-cache",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
+            CatalogOptions.IO_CACHE_POLICY.key(): "read",
+            CatalogOptions.IO_CACHE_WHITELIST.key(): "data",
+            CatalogOptions.IO_CACHE_WHITELIST_PATH.key(): "bucket-0",
+        }
+        for key in (CatalogOptions.IO_CACHE_POLICY.key(),
+                    CatalogOptions.IO_CACHE_WHITELIST.key(),
+                    CatalogOptions.IO_CACHE_WHITELIST_PATH.key()):
+            for value in ("", "none" if key == CatalogOptions.IO_CACHE_POLICY.key() else " "):
+                with self.subTest(key=key, value=value):
+                    client = Options({OssOptions.OSS_ENDPOINT.key(): "client-endpoint", key: value,
+                                      CatalogOptions.DLF_OSS_ENDPOINT.key(): " "})
+                    file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, client)
+                    options = file_io._merged_options(RESTToken(server, 0))
+                    self.assertEqual("server-cache", options.get(OssOptions.OSS_ENDPOINT))
+                    self.assertEqual(value, options.to_map()[key])
+                    io = CachePolicyFileIO.create(self.warehouse_path, options)
+                    self.addCleanup(io.close)
+                    if isinstance(io, CachePolicyFileIO):
+                        self.assertIs(io._origin_file_io, io.for_path(
+                            "oss://bucket/table/bucket-0/data.orc", "read"))
+
+    def test_shared_server_token_does_not_leak_client_routing_overrides(self):
+        server = {
+            OssOptions.OSS_ENDPOINT.key(): "server-cache",
+            CatalogOptions.IO_CACHE_ORIGIN_ENDPOINT.key(): "server-origin",
+            CatalogOptions.IO_CACHE_POLICY.key(): "read",
+        }
+        clients = (
+            Options({CatalogOptions.DLF_OSS_ENDPOINT.key(): "client-endpoint",
+                     CatalogOptions.IO_CACHE_POLICY.key(): "none"}),
+            Options({}),
+            Options({CatalogOptions.DLF_OSS_ENDPOINT.key(): "server-origin"}),
+        )
+        api = MagicMock()
+        api.load_table_token.return_value = types.SimpleNamespace(
+            token=server, expires_at_millis=int(time.time() * 1000) + 7_200_000)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(RESTTokenFileIO, '_build_cache_key', return_value='routing-overrides'):
+            instances = [RESTTokenFileIO(self.identifier, self.warehouse_path, options)
+                         for options in clients]
+            for instance in instances:
+                instance.api_instance = api
+            delegates = [instance.file_io() for instance in instances]
+            for delegate in delegates:
+                self.addCleanup(delegate.close)
+            self.assertNotIsInstance(delegates[0], CachePolicyFileIO)
+            self.assertIsInstance(delegates[1], CachePolicyFileIO)
+            self.assertNotIsInstance(delegates[2], CachePolicyFileIO)
+            self.assertEqual(server, RESTTokenFileIO._TOKEN_CACHE['routing-overrides'].token)
+            self.assertEqual("client-endpoint", instances[0].valid_token().token['fs.oss.endpoint'])
+            self.assertEqual("server-cache", instances[1].valid_token().token['fs.oss.endpoint'])
+            self.assertEqual("server-origin", instances[2].valid_token().token['fs.oss.endpoint'])
+            self.assertEqual("none", instances[0]._existing_valid_token().token['io-cache.policy'])
+            self.assertEqual("read", instances[1]._existing_valid_token().token['io-cache.policy'])
+            api.load_table_token.assert_called_once_with(self.identifier)
+            self.assertEqual("server-cache", server['fs.oss.endpoint'])
+
+    def test_client_overrides_survive_token_refresh(self):
+        client = Options({CatalogOptions.DLF_OSS_ENDPOINT.key(): "client-endpoint",
+                          CatalogOptions.IO_CACHE_POLICY.key(): "none"})
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, client)
+        now = [1700000000]
+        file_io.api_instance = MagicMock()
+        file_io.api_instance.load_table_token.side_effect = [types.SimpleNamespace(
+            token={"fs.oss.endpoint": endpoint, "io-cache.policy": policy,
+                   "fs.oss.securityToken": endpoint}, expires_at_millis=expiry * 1000)
+            for endpoint, policy, expiry in (
+                ("server-first", "read", now[0] + 7200),
+                ("server-second", "write", now[0] + 14400))]
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', side_effect=lambda: now[0]), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(file_io, '_build_cache_key', return_value='routing-refresh'):
+            for endpoint in ("server-first", "server-second"):
+                token = file_io.valid_token()
+                self.assertEqual("client-endpoint", token.token['fs.oss.endpoint'])
+                self.assertEqual("none", token.token['io-cache.policy'])
+                self.assertEqual(endpoint, token.token['fs.oss.securityToken'])
+                self.assertEqual(endpoint, file_io.token.token['fs.oss.endpoint'])
+                now[0] += 7200
+            self.assertEqual(2, file_io.api_instance.load_table_token.call_count)
+
+    def test_token_file_io_uses_cache_policy_factory(self):
+        file_io = RESTTokenFileIO(
+            self.identifier,
+            "oss://test-bucket/database/table",
+            Options({OssOptions.OSS_IMPL.key(): "legacy"}),
+        )
+        file_io.token = RESTToken(
+            {
+                CatalogOptions.IO_CACHE_POLICY.key(): "read",
+                OssOptions.OSS_ENDPOINT.key(): "cache-endpoint",
+            },
+            int(time.time() * 1000) + 7_200_000,
+        )
+
+        cache = TTLCache(
+            maxsize=RESTTokenFileIO._FILE_IO_CACHE_MAXSIZE,
+            ttl=RESTTokenFileIO._FILE_IO_CACHE_TTL,
+        )
+        with patch.object(RESTTokenFileIO, "_FILE_IO_CACHE", cache):
+            expected = MagicMock()
+            with patch.object(RESTTokenFileIO, "try_to_refresh_token"), \
+                    patch.object(
+                        CachePolicyFileIO, "create", return_value=expected) as create:
+                self.assertIs(expected, file_io.file_io())
+
+            create.assert_called_once()
+            path, options = create.call_args[0]
+            self.assertEqual("oss://test-bucket/database/table", path)
+            self.assertEqual("legacy", options.get(OssOptions.OSS_IMPL))
+            self.assertEqual("read", options.get(CatalogOptions.IO_CACHE_POLICY))
+            self.assertEqual("cache-endpoint", options.get(OssOptions.OSS_ENDPOINT))
 
     def test_catalog_options_not_modified(self):
         from pypaimon.api.rest_util import RESTUtil

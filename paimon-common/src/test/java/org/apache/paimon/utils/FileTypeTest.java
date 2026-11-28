@@ -22,6 +22,8 @@ import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -103,6 +105,15 @@ public class FileTypeTest {
         Path changelog = new Path(TABLE_ROOT + "/changelog/changelog-5");
         assertThat(FileType.classify(changelog)).isEqualTo(FileType.META);
         assertThat(FileType.isMutable(changelog)).isFalse();
+    }
+
+    @Test
+    public void testParseWhitelistWithNullAndUnknownValues() {
+        assertThat(FileType.parseWhitelist(" meta, global-index, bucket-index, data, file-index "))
+                .containsExactlyInAnyOrderElementsOf(EnumSet.allOf(FileType.class));
+        assertThat(FileType.parseWhitelist("")).isEqualTo(Collections.emptySet());
+        assertThat(FileType.parseWhitelist("manifest,unknown")).isEqualTo(Collections.emptySet());
+        assertThat(FileType.parseWhitelist(null)).isEqualTo(Collections.emptySet());
     }
 
     // ===== META files =====

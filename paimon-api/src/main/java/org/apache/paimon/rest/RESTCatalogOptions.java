@@ -121,6 +121,21 @@ public class RESTCatalogOptions {
                     .withDescription(
                             "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
 
+    public static final ConfigOption<String> IO_CACHE_ORIGIN_ENDPOINT =
+            ConfigOptions.key("io-cache.origin.endpoint")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The original OSS endpoint used when cache is bypassed.");
+
+    public static final ConfigOption<String> IO_CACHE_WHITELIST =
+            ConfigOptions.key("io-cache.whitelist")
+                    .stringType()
+                    .defaultValue("*")
+                    .withDescription(
+                            "Comma-separated list of file types allowed to use the cache endpoint. "
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index. "
+                                    + "Use * to allow all file types.");
+
     public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
             ConfigOptions.key("io-cache.whitelist-path")
                     .stringType()

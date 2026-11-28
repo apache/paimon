@@ -28,11 +28,13 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -53,7 +55,6 @@ import java.util.concurrent.TimeUnit;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -270,7 +271,7 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            fileIO = FileIO.get(path, context);
+            fileIO = CachePolicyFileIO.create(path, context);
             FILE_IO_CACHE.put(currentToken, fileIO);
             return new FileIOWithToken(fileIO, currentToken);
         }
@@ -344,14 +345,17 @@ public class RESTTokenFileIO implements FileIO {
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
         Options catalogOptions = catalogContext.options();
-        // DLF OSS endpoint should override the standard OSS endpoint.
-        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
-        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
-            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
+        // Include client cache settings in the token used by native callers and FileIO reuse.
+        // Keep the server's standard OSS endpoint; the explicit DLF override is applied below.
+        for (Map.Entry<String, String> entry : catalogOptions.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("io-cache.") && entry.getValue() != null) {
+                newToken.put(key, entry.getValue());
+            }
         }
-        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
-            newToken.put(
-                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(dlfOssEndpoint)) {
+            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
         return ImmutableMap.copyOf(newToken);
     }

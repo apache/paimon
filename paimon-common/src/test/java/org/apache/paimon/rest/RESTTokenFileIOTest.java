@@ -24,8 +24,10 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RemoteIterator;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
@@ -34,9 +36,17 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -48,6 +58,345 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link RESTTokenFileIO}. */
 class RESTTokenFileIOTest {
+
+    @Test
+    void testServerEndpointOverridesClientAndDlfEndpointHasHighestPriority() throws IOException {
+        for (String[] endpoints :
+                new String[][] {
+                    {null, null, "server-cache"},
+                    {"client-endpoint", null, "server-cache"},
+                    {"client-endpoint", "client-dlf-endpoint", "client-dlf-endpoint"},
+                    {null, "client-dlf-endpoint", "client-dlf-endpoint"},
+                    {"client-endpoint", "  ", "server-cache"}
+                }) {
+            Options options = new Options();
+            if (endpoints[0] != null) {
+                options.set("fs.oss.endpoint", endpoints[0]);
+            }
+            if (endpoints[1] != null) {
+                options.set(DLF_OSS_ENDPOINT, endpoints[1]);
+            }
+            options.set(IO_CACHE_ORIGIN_ENDPOINT, "client-origin");
+            Map<String, String> tokenOptions = tokenOptions();
+            RESTTokenFileIO rest = restFileIO(options, tokenOptions);
+            FileIO delegate = rest.fileIO();
+            assertThat(delegate).isInstanceOf(CachePolicyFileIO.class);
+            HadoopOptionsProvider provider = (HadoopOptionsProvider) delegate;
+            Path data = new Path("oss://bucket/table/bucket-0/data.orc");
+            assertThat(provider.hadoopOptions(data, "read").get("fs.oss.endpoint"))
+                    .isEqualTo(endpoints[2]);
+            assertThat(provider.hadoopOptions(data, "write").get("fs.oss.endpoint"))
+                    .isEqualTo("client-origin");
+            assertThat(rest.validToken().token().get("fs.oss.endpoint")).isEqualTo(endpoints[2]);
+            assertThat(tokenOptions.get("fs.oss.endpoint")).isEqualTo("server-cache");
+            assertThat(options.get("fs.oss.endpoint")).isEqualTo(endpoints[0]);
+        }
+    }
+
+    @Test
+    void testClientEndpointIsUsedWhenServerOmitsEndpoint() throws IOException {
+        Options options = new Options();
+        options.set("fs.oss.endpoint", "client-endpoint");
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "client-origin");
+        Map<String, String> tokenOptions = tokenOptions();
+        tokenOptions.remove("fs.oss.endpoint");
+        RESTTokenFileIO rest = restFileIO(options, tokenOptions);
+        HadoopOptionsProvider provider = (HadoopOptionsProvider) rest.fileIO();
+        Path data = new Path("oss://bucket/table/bucket-0/data.orc");
+        assertThat(provider.hadoopOptions(data, "read").get("fs.oss.endpoint"))
+                .isEqualTo("client-endpoint");
+        assertThat(provider.hadoopOptions(data, "write").get("fs.oss.endpoint"))
+                .isEqualTo("client-origin");
+        assertThat(rest.validToken().token()).doesNotContainKey("fs.oss.endpoint");
+        assertThat(tokenOptions).doesNotContainKey("fs.oss.endpoint");
+    }
+
+    @Test
+    void testClientCacheOptionsOverrideTokenIncludingNativeToken() throws IOException {
+        Options options = new Options();
+        options.set(IO_CACHE_POLICY, "meta,read");
+        options.set(IO_CACHE_WHITELIST, "meta");
+        options.set(IO_CACHE_WHITELIST_PATH, "manifest");
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "client-origin");
+        options.set(IO_CACHE_ENABLED, false);
+        options.set("io-cache.custom-option", "client-value");
+        Map<String, String> tokenOptions = tokenOptions();
+        tokenOptions.put(IO_CACHE_POLICY.key(), "none");
+        tokenOptions.put(IO_CACHE_WHITELIST.key(), "data");
+        tokenOptions.put(IO_CACHE_WHITELIST_PATH.key(), "bucket-0");
+        tokenOptions.put(IO_CACHE_ENABLED.key(), "true");
+        tokenOptions.put("io-cache.custom-option", "server-value");
+        RESTTokenFileIO rest = restFileIO(options, tokenOptions);
+        HadoopOptionsProvider provider = (HadoopOptionsProvider) rest.fileIO();
+        Path manifest = new Path("oss://bucket/table/manifest/manifest-1");
+        Path data = new Path("oss://bucket/table/bucket-0/data.orc");
+        Path schema = new Path("oss://bucket/table/schema/schema-0");
+        assertThat(provider.hadoopOptions(manifest, "read").get("fs.oss.endpoint"))
+                .isEqualTo("server-cache");
+        assertThat(provider.hadoopOptions(manifest, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("server-cache");
+        assertThat(provider.hadoopOptions(data, "read").get("fs.oss.endpoint"))
+                .isEqualTo("client-origin");
+        assertThat(provider.hadoopOptions(schema, "read").get("fs.oss.endpoint"))
+                .isEqualTo("client-origin");
+        assertThat(provider.hadoopOptions(manifest, "write").get("fs.oss.endpoint"))
+                .isEqualTo("client-origin");
+        assertThat(rest.validToken().token()).containsAllEntriesOf(options.toMap());
+    }
+
+    @Test
+    void testClientCanDisableServerCacheOrClearWhitelists() throws IOException {
+        for (String key :
+                new String[] {
+                    IO_CACHE_POLICY.key(), IO_CACHE_WHITELIST.key(), IO_CACHE_WHITELIST_PATH.key()
+                }) {
+            for (String value :
+                    new String[] {"", key.equals(IO_CACHE_POLICY.key()) ? "none" : " "}) {
+                Options options = new Options();
+                options.set(key, value);
+                RESTTokenFileIO rest = restFileIO(options, tokenOptions());
+                assertThat(rest.validToken().token()).containsEntry(key, value);
+                FileIO fileIO = rest.fileIO();
+                if (fileIO instanceof HadoopOptionsProvider) {
+                    assertThat(
+                                    ((HadoopOptionsProvider) fileIO)
+                                            .hadoopOptions(
+                                                    new Path(
+                                                            "oss://bucket/table/bucket-0/data.orc"),
+                                                    "read")
+                                            .get("fs.oss.endpoint"))
+                            .isEqualTo("server-origin");
+                } else {
+                    assertThat(fileIO).isNotInstanceOf(CachePolicyFileIO.class);
+                }
+            }
+        }
+    }
+
+    @Test
+    void testIdenticalServerTokensRespectDifferentClientOverrides() throws IOException {
+        Map<String, String> tokenOptions = tokenOptions();
+        Options disabled = new Options();
+        disabled.set(IO_CACHE_POLICY, "none");
+        Options direct = new Options();
+        direct.set(DLF_OSS_ENDPOINT, "server-origin");
+        RESTTokenFileIO cached = restFileIO(new Options(), tokenOptions);
+        RESTTokenFileIO noCache = restFileIO(disabled, tokenOptions);
+        RESTTokenFileIO sameEndpoint = restFileIO(direct, tokenOptions);
+        assertThat(cached.fileIO()).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(noCache.fileIO())
+                .isNotSameAs(cached.fileIO())
+                .isNotInstanceOf(CachePolicyFileIO.class);
+        assertThat(sameEndpoint.fileIO())
+                .isNotSameAs(cached.fileIO())
+                .isNotInstanceOf(CachePolicyFileIO.class);
+        assertThat(sameEndpoint.validToken().token())
+                .containsEntry("fs.oss.endpoint", "server-origin");
+    }
+
+    private static Map<String, String> tokenOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("test.token", UUID.randomUUID().toString());
+        options.put("fs.oss.endpoint", "server-cache");
+        options.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "server-origin");
+        options.put(IO_CACHE_POLICY.key(), "read");
+        return options;
+    }
+
+    private static RESTTokenFileIO restFileIO(Options options, Map<String, String> tokenOptions) {
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(new GetTableTokenResponse(tokenOptions, Long.MAX_VALUE));
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        return new RESTTokenFileIO(
+                CatalogContext.create(options, loader, null),
+                api,
+                identifier,
+                new Path("oss://bucket/table"));
+    }
+
+    @Test
+    void testClientRoutingOverridesSurviveTokenRefresh() throws IOException {
+        Map<String, String> firstToken = tokenOptions();
+        firstToken.put(IO_CACHE_POLICY.key(), "none");
+        firstToken.put("fs.oss.securityToken", "first-credentials");
+        Map<String, String> nextToken = new HashMap<>(firstToken);
+        nextToken.put("fs.oss.endpoint", "next-server-cache");
+        nextToken.put(IO_CACHE_POLICY.key(), "write");
+        nextToken.put("fs.oss.securityToken", "next-credentials");
+        Options options = new Options();
+        options.set(DLF_OSS_ENDPOINT, "client-cache");
+        options.set(IO_CACHE_POLICY, "read");
+        long now = System.currentTimeMillis();
+        AtomicLong clock = new AtomicLong(now);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(firstToken, now + 3_600_000),
+                        new GetTableTokenResponse(nextToken, Long.MAX_VALUE));
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        RESTTokenFileIO rest =
+                new RESTTokenFileIO(
+                        CatalogContext.create(options, loader, null),
+                        api,
+                        identifier,
+                        new Path("oss://bucket/table")) {
+                    @Override
+                    long currentTimeMillis() {
+                        return clock.get();
+                    }
+                };
+        FileIO first = rest.fileIO();
+        assertThat(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(rest.validToken().token())
+                .containsEntry("fs.oss.endpoint", "client-cache")
+                .containsEntry(IO_CACHE_POLICY.key(), "read")
+                .containsEntry("fs.oss.securityToken", "first-credentials");
+        clock.set(now + 3_600_000);
+        assertThat(rest.fileIO()).isNotSameAs(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(rest.validToken().token())
+                .containsEntry("fs.oss.endpoint", "client-cache")
+                .containsEntry(IO_CACHE_POLICY.key(), "read")
+                .containsEntry("fs.oss.securityToken", "next-credentials");
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testTokenRefreshRebuildsPolicyWrapper() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        Path data = new Path(root, "bucket-0/data.orc");
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        Map<String, String> tokenOptions = new HashMap<>();
+        tokenOptions.put(IO_CACHE_POLICY.key(), "read");
+        tokenOptions.put("fs.oss.endpoint", "cache");
+        tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
+        Map<String, String> disabledOptions = new HashMap<>(tokenOptions);
+        disabledOptions.put(IO_CACHE_POLICY.key(), "none");
+        long now = System.currentTimeMillis();
+        AtomicLong clock = new AtomicLong(now);
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(tokenOptions, now + 3_600_000),
+                        new GetTableTokenResponse(disabledOptions, Long.MAX_VALUE));
+        RESTTokenFileIO rest =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null), api, identifier, root) {
+                    @Override
+                    long currentTimeMillis() {
+                        return clock.get();
+                    }
+                };
+        FileIO first = rest.fileIO();
+        assertThat(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(
+                        ((HadoopOptionsProvider) first)
+                                .hadoopOptions(data, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("cache");
+        assertThat(rest.fileIO()).isSameAs(first);
+        clock.set(now + 3_600_000);
+        FileIO refreshed = rest.fileIO();
+        assertThat(refreshed).isNotSameAs(first).isNotInstanceOf(CachePolicyFileIO.class);
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testIdenticalTokensSharePolicyWrapperAcrossTablesAndContexts() throws IOException {
+        Path firstRoot = new Path("oss://bucket/table-one");
+        Path secondRoot = new Path("oss://bucket/table-two");
+        Path firstData = new Path(firstRoot, "bucket-0/data.orc");
+        Path secondData = new Path(secondRoot, "bucket-0/data.orc");
+        RESTApi api = mock(RESTApi.class);
+        Map<String, String> tokenOptions = new HashMap<>();
+        tokenOptions.put("test.token", UUID.randomUUID().toString());
+        tokenOptions.put(IO_CACHE_POLICY.key(), "read");
+        tokenOptions.put("fs.oss.endpoint", "cache");
+        tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
+        tokenOptions.put(IO_CACHE_WHITELIST_PATH.key(), "table-two");
+        when(api.loadTableToken(any()))
+                .thenReturn(new GetTableTokenResponse(tokenOptions, Long.MAX_VALUE));
+        FileIO origin = mock(FileIO.class);
+        FileIO cache = mock(FileIO.class);
+        FileIOLoader firstLoader = mock(FileIOLoader.class);
+        FileIOLoader secondLoader = mock(FileIOLoader.class);
+        // FileIO.get probes the loader before creating the actual delegate for each endpoint.
+        when(firstLoader.load(any())).thenReturn(origin, origin, cache, cache);
+        CatalogContext firstContext = CatalogContext.create(new Options(), firstLoader, null);
+        CatalogContext secondContext = CatalogContext.create(new Options(), secondLoader, null);
+        RESTTokenFileIO first =
+                new RESTTokenFileIO(
+                        firstContext, api, Identifier.create("db", "table-one"), firstRoot);
+        RESTTokenFileIO second =
+                new RESTTokenFileIO(
+                        secondContext, api, Identifier.create("db", "table-two"), secondRoot);
+        FileIO shared = first.fileIO();
+        assertThat(shared).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(second.fileIO()).isSameAs(shared);
+        first.newInputStream(firstData);
+        // Initialize cache only after another table has reused the wrapper. Route its actual path.
+        second.newInputStream(secondData);
+        verify(origin).newInputStream(firstData);
+        verify(cache).newInputStream(secondData);
+        assertThat(
+                        ((HadoopOptionsProvider) shared)
+                                .hadoopOptions(firstData, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("origin");
+        assertThat(
+                        ((HadoopOptionsProvider) shared)
+                                .hadoopOptions(secondData, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("cache");
+        verify(secondLoader, never()).load(any());
+    }
+
+    @Test
+    void testIdenticalCredentialsWithDifferentCacheOptionsDoNotShareFileIO() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        Path data = new Path(root, "bucket-0/data.orc");
+        Map<String, String> tokenOptions = new HashMap<>();
+        tokenOptions.put("fs.oss.securityToken", UUID.randomUUID().toString());
+        tokenOptions.put(IO_CACHE_POLICY.key(), "read");
+        tokenOptions.put("fs.oss.endpoint", "cache");
+        tokenOptions.put(IO_CACHE_ORIGIN_ENDPOINT.key(), "origin");
+        Map<String, String> disabledOptions = new HashMap<>(tokenOptions);
+        disabledOptions.put(IO_CACHE_POLICY.key(), "none");
+        Map<String, String> otherEndpointOptions = new HashMap<>(tokenOptions);
+        otherEndpointOptions.put("fs.oss.endpoint", "other-cache");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(tokenOptions, Long.MAX_VALUE),
+                        new GetTableTokenResponse(disabledOptions, Long.MAX_VALUE),
+                        new GetTableTokenResponse(otherEndpointOptions, Long.MAX_VALUE));
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(ignored -> mock(FileIO.class));
+        CatalogContext context = CatalogContext.create(new Options(), loader, null);
+        FileIO first = new RESTTokenFileIO(context, api, identifier, root).fileIO();
+        FileIO disabled = new RESTTokenFileIO(context, api, identifier, root).fileIO();
+        FileIO otherEndpoint = new RESTTokenFileIO(context, api, identifier, root).fileIO();
+        assertThat(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(disabled).isNotSameAs(first).isNotInstanceOf(CachePolicyFileIO.class);
+        assertThat(otherEndpoint).isNotSameAs(first).isInstanceOf(CachePolicyFileIO.class);
+        assertThat(
+                        ((HadoopOptionsProvider) first)
+                                .hadoopOptions(data, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("cache");
+        assertThat(
+                        ((HadoopOptionsProvider) otherEndpoint)
+                                .hadoopOptions(data, "read")
+                                .get("fs.oss.endpoint"))
+                .isEqualTo("other-cache");
+    }
 
     @Test
     void testSetFileIOCacheMaximumSize() {

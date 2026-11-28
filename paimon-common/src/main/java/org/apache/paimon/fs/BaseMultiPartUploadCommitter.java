@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.cache.CachePolicyFileIO;
 import org.apache.paimon.rest.RESTTokenFileIO;
 
 import org.slf4j.Logger;
@@ -111,14 +112,17 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     }
 
     private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
-        if (fileIO instanceof RESTTokenFileIO) {
-            RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
-            fileIO = restTokenFileIO.fileIO();
-        }
-        if (fileIO instanceof ResolvingFileIO) {
-            // The upload was started on the FileIO this resolver resolved to, and
-            // multiPartUploadStore casts to that concrete type, so resolve again here.
-            fileIO = ((ResolvingFileIO) fileIO).fileIO(targetPath());
+        while (true) {
+            if (fileIO instanceof RESTTokenFileIO) {
+                fileIO = ((RESTTokenFileIO) fileIO).fileIO();
+            } else if (fileIO instanceof CachePolicyFileIO) {
+                // Transactional uploads are always started on the origin endpoint.
+                fileIO = ((CachePolicyFileIO) fileIO).originFileIO();
+            } else if (fileIO instanceof ResolvingFileIO) {
+                fileIO = ((ResolvingFileIO) fileIO).fileIO(targetPath());
+            } else {
+                break;
+            }
         }
         return multiPartUploadStore(fileIO, targetPath());
     }

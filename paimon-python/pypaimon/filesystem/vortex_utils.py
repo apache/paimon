@@ -25,7 +25,8 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import OssOptions
 
 
-def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
+def to_vortex_specified(file_io: FileIO, file_path: str,
+                        operation: str = "read") -> Tuple[str, Optional[Dict[str, str]]]:
     """Convert path and extract storage options for Vortex store.from_url().
 
     Returns (url, store_kwargs) where store_kwargs can be passed as
@@ -34,6 +35,7 @@ def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[
     """
     if hasattr(file_io, 'file_io'):
         file_io = file_io.file_io()
+    file_io = file_io.for_path(file_path, operation)
 
     if hasattr(file_io, 'get_merged_properties'):
         properties = file_io.get_merged_properties()
@@ -187,7 +189,7 @@ def write_vortex_file(file_io: FileIO, path: str, data: Any, compact: bool = Fal
     if edition:
         options = options.with_edition(edition)
 
-    file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, path)
+    file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, path, "write")
     if store_kwargs:
         vortex_store, key = _store_for(file_path_for_vortex, store_kwargs)
         options.write(vortex.array(data), key, store=vortex_store)

@@ -171,7 +171,6 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -2171,25 +2170,47 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
     }
 
-    @Test
-    void testValidTokenWithIOCacheEnabled() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+        ",,server-cache",
+        "client-endpoint,,server-cache",
+        ",client-dlf-endpoint,client-dlf-endpoint",
+        "client-endpoint,client-dlf-endpoint,client-dlf-endpoint"
+    })
+    void testValidTokenWithCacheSettingsAndEndpointOverrides(
+            String clientEndpoint, String clientDlfEndpoint, String expectedEndpoint)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(IO_CACHE_ENABLED.key(), "true");
+        if (clientEndpoint != null) {
+            options.put("fs.oss.endpoint", clientEndpoint);
+        }
+        if (clientDlfEndpoint != null) {
+            options.put(DLF_OSS_ENDPOINT.key(), clientDlfEndpoint);
+        }
         this.catalog = newRestCatalogWithDataToken(options);
         Identifier identifier =
-                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
-        RESTToken expiredDataToken =
+                Identifier.create("test_data_token", "table_for_testing_server_cache_settings");
+        RESTToken serverDataToken =
                 new RESTToken(
-                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        ImmutableMap.of(
+                                "akId",
+                                "akId",
+                                "akSecret",
+                                UUID.randomUUID().toString(),
+                                "io-cache.origin.endpoint",
+                                "server-origin",
+                                "fs.oss.endpoint",
+                                "server-cache"),
                         System.currentTimeMillis() + 3600_000L);
-        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        setDataTokenToRestServerForMock(identifier, serverDataToken);
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
 
-        // Verify IO_CACHE_ENABLED is merged into token
-        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
+        assertEquals("server-origin", fileDataToken.token().get("io-cache.origin.endpoint"));
+        assertEquals(expectedEndpoint, fileDataToken.token().get("fs.oss.endpoint"));
+        assertEquals(serverDataToken, getDataTokenFromRestServer(identifier));
     }
 
     @Test

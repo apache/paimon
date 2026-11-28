@@ -115,6 +115,9 @@ class ResolvingFileIO(FileIO):
     def to_filesystem_path(self, path: str) -> str:
         return self._get_fileio(path).to_filesystem_path(path)
 
+    def for_path(self, path: str, operation: str):
+        return self._get_fileio(path).for_path(path, operation)
+
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
         return self._get_fileio(path).write_parquet(path, data, compression,
