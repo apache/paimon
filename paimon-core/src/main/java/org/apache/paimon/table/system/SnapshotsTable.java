@@ -51,9 +51,9 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
@@ -64,9 +64,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -96,7 +93,7 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(3, "commit_identifier", new BigIntType(false)),
                             new DataField(
                                     4, "commit_kind", SerializationUtils.newStringType(false)),
-                            new DataField(5, "commit_time", new TimestampType(false, 3)),
+                            new DataField(5, "commit_time", new LocalZonedTimestampType(false, 3)),
                             new DataField(
                                     6,
                                     "base_manifest_list",
@@ -359,10 +356,7 @@ public class SnapshotsTable implements ReadonlyTable {
                     BinaryString.fromString(snapshot.commitUser()),
                     snapshot.commitIdentifier(),
                     BinaryString.fromString(snapshot.commitKind().toString()),
-                    Timestamp.fromLocalDateTime(
-                            LocalDateTime.ofInstant(
-                                    Instant.ofEpochMilli(snapshot.timeMillis()),
-                                    ZoneId.systemDefault())),
+                    Timestamp.fromEpochMillis(snapshot.timeMillis()),
                     BinaryString.fromString(snapshot.baseManifestList()),
                     BinaryString.fromString(snapshot.deltaManifestList()),
                     BinaryString.fromString(snapshot.changelogManifestList()),

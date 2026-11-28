@@ -137,4 +137,27 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
     sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)")
     checkAnswer(sql("SELECT snapshot_id FROM `T$snapshots` WHERE snapshot_id < 2"), Nil)
   }
+
+  test("system table: snapshot and tag commit times use the snapshot instant") {
+    assume(gteqSpark3_4)
+    sql("CREATE TABLE T (a INT)")
+    sql("INSERT INTO T VALUES (1)")
+    sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'first', snapshot => 1)")
+    val millis = loadTable("T").snapshotManager().snapshot(1).timeMillis()
+
+    withTimeZone("Asia/Shanghai") {
+      withSparkSQLConf(
+        "spark.sql.session.timeZone" -> "UTC",
+        "spark.paimon.legacy-timestamp-mapping.enabled" -> "false") {
+        checkAnswer(
+          sql(s"""
+                 |SELECT unix_millis(s.commit_time), unix_millis(t.commit_time)
+                 |FROM `T$$snapshots` s JOIN `T$$tags` t ON s.snapshot_id = t.snapshot_id
+                 |WHERE t.tag_name = 'first' AND s.commit_time < timestamp_millis(${millis + 1})
+                 |""".stripMargin),
+          Seq(Row(millis, millis))
+        )
+      }
+    }
+  }
 }
