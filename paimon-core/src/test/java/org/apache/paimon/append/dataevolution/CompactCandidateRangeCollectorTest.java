@@ -49,6 +49,46 @@ class CompactCandidateRangeCollectorTest {
     }
 
     @Test
+    void testSelectsSizeTriggeredBinsBelowMinimumFileCount() {
+        CompactCandidateRangeCollector collector = collector(512L, 512L, 1L, 5L);
+        for (int i = 0; i < 12; i++) {
+            collector.add(0, NORMAL_FILE, i * 10L, 10L, 200L);
+        }
+
+        assertThat(finish(collector)).containsExactly("0-29:3", "30-59:3", "60-89:3", "90-119:3");
+    }
+
+    @Test
+    void testSelectsSizeTriggeredColumnUpdatesBelowMinimumFileCount() {
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 5L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 80L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 30L);
+
+        assertThat(finish(collector)).containsExactly("0-9:2");
+    }
+
+    @Test
+    void testSizeTriggerUsesOpenFileCost() {
+        CompactCandidateRangeCollector collector = collector(512L, 512L, 200L, 5L);
+        for (int i = 0; i < 3; i++) {
+            collector.add(0, NORMAL_FILE, i * 10L, 10L, 1L);
+        }
+
+        assertThat(finish(collector)).containsExactly("0-29:3");
+    }
+
+    @Test
+    void testSizeTriggerRequiresMultipleNormalFilesAndExceedsTarget() {
+        CompactCandidateRangeCollector collector = collector(512L, 512L, 1L, 5L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 513L);
+        collector.add(0, IGNORED_DEDICATED_FILE, 0L, 10L, 1000L);
+        collector.add(0, NORMAL_FILE, 10L, 10L, 256L);
+        collector.add(0, NORMAL_FILE, 20L, 10L, 256L);
+
+        assertThat(finish(collector)).isEmpty();
+    }
+
+    @Test
     void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
         for (boolean enabled : new boolean[] {false, true}) {
             CompactCandidateRangeCollector collector =
@@ -58,12 +98,13 @@ class CompactCandidateRangeCollectorTest {
             collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
             collector.add(0, NORMAL_FILE, 20L, 10L, 201L);
             collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
+            collector.add(0, NORMAL_FILE, 30L, 10L, 201L);
             // Dedicated files never trigger normal-file splitting.
             collector.add(0, 3, 0L, 10L, 1000L);
             if (enabled) {
-                assertThat(finish(collector)).containsExactly("20-29:2");
+                assertThat(finish(collector)).containsExactly("20-29:2", "30-39:1");
             } else {
-                assertThat(finish(collector)).isEmpty();
+                assertThat(finish(collector)).containsExactly("20-29:2");
             }
         }
     }
@@ -78,12 +119,13 @@ class CompactCandidateRangeCollectorTest {
         collector.add(0, NORMAL_FILE, 10L, 10L, threshold);
         collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
         collector.add(0, NORMAL_FILE, 20L, 10L, threshold + 1);
-        // Neither the sum of versions nor dedicated-file sizes bypass the minimum file count.
+        // Summed versions trigger merging, while physical file sizes control singleton splitting.
         collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
         collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
+        collector.add(0, NORMAL_FILE, 40L, 10L, threshold + 1);
         collector.add(0, IGNORED_DEDICATED_FILE, 0L, 10L, 1000L);
 
-        assertThat(finish(collector)).containsExactly("20-29:2");
+        assertThat(finish(collector)).containsExactly("20-29:2", "30-39:2", "40-49:1");
     }
 
     @Test

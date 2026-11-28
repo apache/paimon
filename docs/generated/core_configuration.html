@@ -432,7 +432,7 @@ under the License.
             <td><h5>compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table. Data Evolution normal files can also trigger compaction below this count when two or more files have a combined weighted size greater than target-file-size. Each file contributes at least source.split.open-file-cost to the weighted size.</td>
         </tr>
         <tr>
             <td><h5>compaction.offpeak-ratio</h5></td>
@@ -540,7 +540,7 @@ under the License.
             <td><h5>data-evolution.compaction.incremental.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Compact a newest-first prefix of column-file versions within one row-ID range, writing only their columns and retaining older files. Applies to normal, BLOB and VECTOR files when their compaction is enabled. Uses compaction.min.file-num for normal/VECTOR files and the existing two-file trigger for BLOB files, plus compaction.size-ratio and compaction.max-size-amplification-percent. Nested ROW columns are projected by written leaf field IDs. Partial normal rewrites keep their complete row-ID range. Eligible oversized normal files select all normal versions for splitting.</td>
+            <td>Compact a newest-first prefix of column-file versions within one row-ID range, writing only their columns and retaining older files. Applies to normal, BLOB and VECTOR files when their compaction is enabled. Uses compaction.min.file-num for normal/VECTOR files and the existing two-file trigger for BLOB files, plus compaction.size-ratio and compaction.max-size-amplification-percent. Size-triggered normal-file batches below the configured count use a two-file minimum while retaining these size checks. Nested ROW columns are projected by written leaf field IDs. Partial normal rewrites keep their complete row-ID range. Eligible oversized normal files select all normal versions for splitting.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.compaction.large-file-ratio</h5></td>

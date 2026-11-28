@@ -1161,7 +1161,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(5)
                     .withDescription(
                             "For file set [f_0,...,f_N], the minimum file number to trigger a compaction for "
-                                    + "append-only table.");
+                                    + "append-only table. Data Evolution normal files can also trigger "
+                                    + "compaction below this count when two or more files have a combined "
+                                    + "weighted size greater than target-file-size. Each file contributes "
+                                    + "at least source.split.open-file-cost to the weighted size.");
 
     public static final ConfigOption<Integer> COMPACTION_FILE_NUM_LIMIT =
             key("compaction.file-num-limit")
@@ -2851,6 +2854,8 @@ public class CoreOptions implements Serializable {
                                     + "compaction is enabled. Uses compaction.min.file-num for normal/VECTOR "
                                     + "files and the existing two-file trigger for BLOB files, plus "
                                     + "compaction.size-ratio and compaction.max-size-amplification-percent. "
+                                    + "Size-triggered normal-file batches below the configured count "
+                                    + "use a two-file minimum while retaining these size checks. "
                                     + "Nested ROW columns are projected by written leaf field IDs. "
                                     + "Partial normal rewrites keep their complete row-ID range. Eligible "
                                     + "oversized normal files select all normal versions for splitting.");

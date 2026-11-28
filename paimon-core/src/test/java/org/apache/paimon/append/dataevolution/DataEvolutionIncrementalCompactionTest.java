@@ -809,6 +809,36 @@ public class DataEvolutionIncrementalCompactionTest extends TableTestBase {
         return table;
     }
 
+    @Test
+    public void testSizeTriggerRetainsBaseAcrossCompactionRounds() throws Exception {
+        FileStoreTable table =
+                writeVersions(true)
+                        .copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "1 kb"));
+        DataFileMeta base =
+                files(table).stream()
+                        .min(java.util.Comparator.comparingLong(DataFileMeta::maxSequenceNumber))
+                        .get();
+        List<InternalRow> expected = read(table);
+        DataEvolutionCompactTask task = plan(table);
+        assertThat(task.compactBefore()).hasSize(3).doesNotContain(base);
+        compact(table, task);
+
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(files(table)).contains(base).hasSize(2);
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table,
+                                        false,
+                                        false,
+                                        table.snapshotManager().latestSnapshot())
+                                .withCompletedNormalFiles(
+                                        task.compactAfter().stream()
+                                                .map(DataFileMeta::fileName)
+                                                .collect(Collectors.toSet()))
+                                .plan())
+                .isEmpty();
+    }
+
     private FileStoreTable incrementalTable() throws Exception {
         return getTableDefault()
                 .copy(
