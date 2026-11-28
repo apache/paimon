@@ -20,7 +20,8 @@ package org.apache.spark.sql
 
 import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
-import org.apache.spark.sql.catalyst.analysis.Resolver
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.{ResolvePartitionSpec, Resolver}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
@@ -33,7 +34,7 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.transl
 import org.apache.spark.sql.internal.connector.PredicateUtils
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 import org.apache.spark.sql.util.PartitioningUtils
 import org.apache.spark.util.{Utils => SparkUtils}
 
@@ -157,6 +158,11 @@ object PaimonUtils {
       spec: TablePartitionSpec,
       partitionColumnNames: Seq[String]): Unit = {
     PartitioningUtils.requireExactMatchedPartitionSpec(tableName, spec, partitionColumnNames)
+  }
+
+  /** Spark's conversion of a normalized partition spec to the partition values of `schema`. */
+  def convertToPartIdent(spec: TablePartitionSpec, schema: Seq[StructField]): InternalRow = {
+    ResolvePartitionSpec.convertToPartIdent(spec, schema)
   }
 
   def sameType(left: DataType, right: DataType): Boolean = {

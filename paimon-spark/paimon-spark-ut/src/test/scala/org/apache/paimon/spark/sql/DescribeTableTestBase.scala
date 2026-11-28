@@ -22,6 +22,7 @@ import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
 import org.junit.jupiter.api.Assertions
 
 import java.util.Objects
@@ -239,5 +240,136 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(
       parameters.head.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME))
     Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_RECORD_COUNT))
+  }
+
+  test("Paimon describe: describe a partition by its values") {
+    withTable("dp_string") {
+      sql("CREATE TABLE dp_string (id INT, p STRING) PARTITIONED BY (p)")
+      // A blank value and NULL are both stored under the default partition name.
+      sql("INSERT INTO dp_string VALUES (1, 'a'), (2, ' '), (3, NULL), (4, NULL)")
+
+      val blank = partitionDetailsOf("DESCRIBE FORMATTED dp_string PARTITION (p = ' ')")
+      assert(blank("Partition Values") == "[p= ]", blank)
+      assert(recordCountOf(blank) == 1, blank)
+      val nullValue = partitionDetailsOf("DESCRIBE FORMATTED dp_string PARTITION (p = NULL)")
+      assert(nullValue("Partition Values") == "[p=null]", nullValue)
+      assert(recordCountOf(nullValue) == 2, nullValue)
+      // Partition column names resolve like column names.
+      val upperCase = partitionDetailsOf("DESCRIBE FORMATTED dp_string PARTITION (P = 'a')")
+      assert(recordCountOf(upperCase) == 1, upperCase)
+
+      // The default partition name is a value of its own, not a way to name NULL.
+      intercept[NoSuchPartitionException] {
+        sql("DESCRIBE FORMATTED dp_string PARTITION (p = '__DEFAULT_PARTITION__')")
+      }
+      intercept[NoSuchPartitionException](sql("DESCRIBE dp_string PARTITION (p = 'missing')"))
+      assert(sql("DESCRIBE dp_string PARTITION (p = 'a')").collect().nonEmpty)
+    }
+  }
+
+  test("Paimon describe: describe a partition of non-string columns by its values") {
+    withTable("dp_typed", "dp_binary") {
+      sql("CREATE TABLE dp_typed (id INT, m INT, d DATE, ts TIMESTAMP) PARTITIONED BY (m, d, ts)")
+      sql("INSERT INTO dp_typed VALUES (1, 9, DATE'2025-01-01', TIMESTAMP'2025-01-01 10:00:00')")
+      val details = partitionDetailsOf(
+        "DESCRIBE FORMATTED dp_typed " +
+          "PARTITION (m = '09', d = '2025-01-01', ts = '2025-01-01 10:00:00')")
+      assert(details("Partition Values") == "[m=9, d=2025-01-01, ts=2025-01-01 10:00:00]", details)
+      assert(recordCountOf(details) == 1, details)
+
+      sql("CREATE TABLE dp_binary (id INT, p BINARY) PARTITIONED BY (p)")
+      sql(
+        "INSERT INTO dp_binary VALUES (1, CAST('2021' AS BINARY)), (2, CAST(' ' AS BINARY)), " +
+          "(3, NULL), (4, NULL)")
+      val blank = partitionDetailsOf("DESCRIBE FORMATTED dp_binary PARTITION (p = ' ')")
+      assert(recordCountOf(blank) == 1, blank)
+      val nullValue = partitionDetailsOf("DESCRIBE FORMATTED dp_binary PARTITION (p = NULL)")
+      assert(recordCountOf(nullValue) == 2, nullValue)
+    }
+  }
+
+  test("Paimon describe: describe a partition held only by the fallback branch") {
+    withTable("dp_fallback") {
+      sql("CREATE TABLE dp_fallback (id INT, dt STRING) PARTITIONED BY (dt)")
+      sql(s"CALL sys.create_branch('$dbName0.dp_fallback', 'fb')")
+      sql("ALTER TABLE dp_fallback SET TBLPROPERTIES ('scan.fallback-branch' = 'fb')")
+      sql("INSERT INTO `dp_fallback$branch_fb` VALUES (1, 'only_fb'), (2, 'both'), (3, 'both')")
+      sql("INSERT INTO dp_fallback VALUES (4, 'both')")
+
+      val fallbackOnly =
+        partitionDetailsOf("DESCRIBE FORMATTED dp_fallback PARTITION (dt = 'only_fb')")
+      assert(recordCountOf(fallbackOnly) == 1, fallbackOnly)
+      // A partition the main branch holds is read from the main branch only.
+      val both = partitionDetailsOf("DESCRIBE FORMATTED dp_fallback PARTITION (dt = 'both')")
+      assert(recordCountOf(both) == 1, both)
+      val information =
+        sql(s"SHOW TABLE EXTENDED IN $dbName0 LIKE 'dp_fallback' PARTITION (dt = 'only_fb')")
+          .select("information")
+          .collect()
+          .head
+          .getString(0)
+      assert(information.contains(s"${PartitionStatistics.FIELD_RECORD_COUNT}=1"), information)
+    }
+  }
+
+  test("Paimon describe: describe a partition of the snapshot the session travels to") {
+    withTable("dp_travel") {
+      sql("CREATE TABLE dp_travel (id INT, p STRING) PARTITIONED BY (p)")
+      sql("INSERT INTO dp_travel VALUES (1, 'a'), (2, 'a')")
+      sql(s"CALL sys.create_tag(table => '$dbName0.dp_travel', tag => 'two_rows')")
+      sql("INSERT INTO dp_travel VALUES (3, 'a')")
+      sql("ALTER TABLE dp_travel DROP PARTITION (p = 'a')")
+
+      intercept[NoSuchPartitionException](sql("DESCRIBE dp_travel PARTITION (p = 'a')"))
+      withSparkSQLConf("spark.paimon.scan.tag-name" -> "two_rows") {
+        val details = partitionDetailsOf("DESCRIBE FORMATTED dp_travel PARTITION (p = 'a')")
+        assert(recordCountOf(details) == 2, details)
+      }
+    }
+  }
+
+  test("Paimon describe: describe a partition whose files are all at level 0") {
+    withTable("dp_level0") {
+      // Batch scans of this table skip level-0 files.
+      sql("""
+            |CREATE TABLE dp_level0 (id INT, p STRING) PARTITIONED BY (p) TBLPROPERTIES (
+            |  'primary-key' = 'id, p', 'bucket' = '1',
+            |  'deletion-vectors.enabled' = 'true', 'write-only' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO dp_level0 VALUES (1, 'a'), (2, 'a')")
+      val details = partitionDetailsOf("DESCRIBE FORMATTED dp_level0 PARTITION (p = 'a')")
+      assert(recordCountOf(details) == 2, details)
+    }
+  }
+
+  test("Paimon describe: describe a partition of a system table") {
+    withTable("dp_sys") {
+      sql("CREATE TABLE dp_sys (id INT, p STRING) PARTITIONED BY (p)")
+      sql("INSERT INTO dp_sys VALUES (1, 'a')")
+      // An audit log table has the partition keys of its table but reports no statistics.
+      val details = partitionDetailsOf("DESCRIBE FORMATTED `dp_sys$audit_log` PARTITION (p = 'a')")
+      // Only Paimon's exec writes a Database row; Spark 4.2's own exec does not.
+      assert(details.contains("Database"), details)
+      assert(details("Partition Values") == "[p=a]", details)
+      intercept[NoSuchPartitionException] {
+        sql("DESCRIBE `dp_sys$audit_log` PARTITION (p = 'missing')")
+      }
+    }
+  }
+
+  /** The "# Detailed Partition Information" rows of a DESCRIBE statement, by row name. */
+  private def partitionDetailsOf(statement: String): Map[String, String] = {
+    val rows = sql(statement).collect().map(row => (row.getString(0), row.getString(1))).toSeq
+    val header = rows.indexWhere(_._1 == "# Detailed Partition Information")
+    assert(header >= 0, rows.mkString("\n"))
+    rows.drop(header + 1).takeWhile(_._1.nonEmpty).toMap
+  }
+
+  private def recordCountOf(details: Map[String, String]): Long = {
+    val recordCount = s"${PartitionStatistics.FIELD_RECORD_COUNT}=(\\d+)".r
+    recordCount
+      .findFirstMatchIn(details.getOrElse("Partition Parameters", ""))
+      .map(_.group(1).toLong)
+      .getOrElse(fail(s"No record count in $details"))
   }
 }

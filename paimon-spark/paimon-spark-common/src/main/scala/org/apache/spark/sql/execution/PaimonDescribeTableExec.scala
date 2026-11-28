@@ -21,19 +21,24 @@ package org.apache.spark.sql.execution
 import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.spark.util.PartitionStatisticsDisplay
-import org.apache.paimon.spark.utils.CatalogUtils.{checkNamespace, toIdentifier}
+import org.apache.paimon.spark.utils.CatalogUtils.checkNamespace
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, ResolvedPartitionSpec}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageFormat, CatalogTablePartition}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.execution.datasources.v2.DescribeTableExec
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StringType, StructType}
 
 import scala.collection.JavaConverters._
+import scala.collection.immutable.ListMap
 import scala.collection.mutable.ArrayBuffer
 
 case class PaimonDescribeTableExec(
@@ -41,7 +46,7 @@ case class PaimonDescribeTableExec(
     catalog: SparkBaseCatalog,
     identifier: Identifier,
     table: SparkTable,
-    partitionSpec: TablePartitionSpec,
+    partitionSpec: Option[ResolvedPartitionSpec],
     isExtended: Boolean)
   extends PaimonLeafV2CommandExec {
 
@@ -55,8 +60,12 @@ case class PaimonDescribeTableExec(
     val description = constructor.newInstance(args: _*).asInstanceOf[DescribeTableExec]
     val rows = ArrayBuffer.empty ++= description.executeCollect()
 
-    if (partitionSpec.nonEmpty) {
-      describeDetailedPartitionInfo(rows)
+    partitionSpec.foreach {
+      spec =>
+        val metadata = loadPartitionMetadata(spec)
+        if (isExtended) {
+          describeFormattedDetailedPartitionInfo(spec, metadata, rows)
+        }
     }
 
     if (isExtended) {
@@ -66,77 +75,78 @@ case class PaimonDescribeTableExec(
     rows.toSeq
   }
 
-  private def describeDetailedPartitionInfo(rows: ArrayBuffer[InternalRow]): Unit = {
+  /**
+   * The partition's statistics, found by value. A FileStoreTable reports them for every partition
+   * it holds. Another table, e.g. `t$audit_log`, reports none, so its partition must be one the
+   * table lists.
+   */
+  private def loadPartitionMetadata(spec: ResolvedPartitionSpec): Map[String, String] = {
+    val metadata = table.loadPartitionMetadata(spec.ident).asScala.toMap
     if (
-      table.partitionSchema.fieldNames.length != partitionSpec.size
-      || partitionSpec.keys.exists(!table.partitionSchema.fieldNames.contains(_))
+      metadata.isEmpty && (table.table.isInstanceOf[FileStoreTable] ||
+        table.listPartitionIdentifiers(spec.names.toArray, spec.ident).isEmpty)
     ) {
-      throw new UnsupportedOperationException(
-        "DESCRIBE partition must specify all the correct partition columns")
+      throw new NoSuchPartitionException(identifier.toString, spec.ident, table.partitionSchema)
     }
-
-    if (isExtended) {
-      describeFormattedDetailedPartitionInfo(rows)
-    }
+    metadata
   }
 
-  private def describeFormattedDetailedPartitionInfo(rows: ArrayBuffer[InternalRow]): Unit = {
+  private def describeFormattedDetailedPartitionInfo(
+      spec: ResolvedPartitionSpec,
+      metadata: Map[String, String],
+      rows: ArrayBuffer[InternalRow]): Unit = {
     checkNamespace(identifier.namespace(), catalog.name())
     rows += emptyRow()
     rows += toCatalystRow("# Detailed Partition Information", "", "")
     rows += toCatalystRow("Database", identifier.namespace().head, "")
     rows += toCatalystRow("Table", identifier.name(), "")
-    val partition = catalog
-      .paimonCatalog()
-      .listPartitions(toIdentifier(identifier, catalog.name()))
-      .asScala
-      .filter(_.spec().asScala == partitionSpec)
-    if (partition.size != 1) {
-      throw new IllegalArgumentException(
-        s"Found ${partition.size} matching partitions. " +
-          s"Expected exactly one partition to match the partition spec.")
-    }
     val dummyStorageFormat =
       CatalogStorageFormat(None, None, None, None, compressed = false, Map.empty)
-    val statistics = partition.head
     // Include only reported values. Spark omits the "Partition Parameters" row for an empty map.
-    val partParameters: Map[String, String] = Seq(
-      PartitionStatistics.FIELD_FILE_COUNT -> statistics.fileCount(),
-      PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> statistics.fileSizeInBytes(),
-      PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> statistics.lastFileCreationTime(),
-      PartitionStatistics.FIELD_RECORD_COUNT -> statistics.recordCount()
-    ).collect {
-      case (field, value) if PartitionStatistics.isKnown(value) => field -> value.toString
-    }.toMap
+    val partParameters = ListMap(
+      metadata.toSeq
+        .filterNot { case (field, value) => PartitionStatisticsDisplay.isUnreported(field, value) }
+        .sortBy(_._1): _*)
     // CatalogTablePartition uses this temporary value only to render its "Partition Statistics"
     // row. It cannot represent an unknown size, so omit the row when size is unknown and omit an
     // unknown row count independently.
-    val partStats = if (PartitionStatistics.isKnown(statistics.fileSizeInBytes())) {
-      val rowCount =
-        if (PartitionStatistics.isKnown(statistics.recordCount())) {
-          Some(BigInt(statistics.recordCount()))
-        } else {
-          None
-        }
-      Some(CatalogStatistics(statistics.fileSizeInBytes(), rowCount))
-    } else {
-      None
+    val rowCount = known(metadata, PartitionStatistics.FIELD_RECORD_COUNT).map(BigInt(_))
+    val partStats = known(metadata, PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES).map {
+      size => CatalogStatistics(size, rowCount)
     }
+    val createTime = known(metadata, PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME)
     val partitionDetails = CatalogTablePartition(
-      partitionSpec,
+      partitionValues(spec),
       dummyStorageFormat,
       partParameters,
-      statistics.lastFileCreationTime(),
+      createTime.getOrElse(PartitionStatistics.UNKNOWN),
       -1,
       partStats).toLinkedHashMap
     // Spark formats every createTime as a date; replace an unknown timestamp to avoid a 1969 date.
-    if (!PartitionStatistics.isKnown(statistics.lastFileCreationTime())) {
+    if (createTime.isEmpty) {
       partitionDetails.put(
         PaimonDescribeTableExec.CREATED_TIME_KEY,
         PartitionStatisticsDisplay.UNKNOWN)
     }
     partitionDetails.foreach(s => rows += toCatalystRow(s._1, s._2, ""))
     rows += emptyRow()
+  }
+
+  private def known(metadata: Map[String, String], field: String): Option[Long] =
+    PartitionStatisticsDisplay.known(metadata, field)
+
+  /** The partition's values as strings, in partition column order; NULL renders as "null". */
+  private def partitionValues(spec: ResolvedPartitionSpec): TablePartitionSpec = {
+    val timeZoneId = Some(conf.sessionLocalTimeZone)
+    val values = table.partitionSchema.fields.toSeq.zipWithIndex.map {
+      case (field, i) =>
+        val dataType = CharVarcharUtils.replaceCharVarcharWithString(field.dataType)
+        val value = Compatibility
+          .cast(Literal(spec.ident.get(i, dataType), dataType), StringType, timeZoneId)
+          .eval()
+        field.name -> (if (value == null) "null" else value.toString)
+    }
+    ListMap(values: _*)
   }
 
   private def addNotNullMetadata(schema: StructType, rows: ArrayBuffer[InternalRow]): Unit = {

@@ -43,12 +43,11 @@ object PartitionStatisticsDisplay {
 
   /** Returns the numeric value, or [[UNKNOWN]] when it is absent, nonnumeric, or negative. */
   def render(parameters: collection.Map[String, String], field: String): String =
-    parameters
-      .get(field)
-      .flatMap(asLong)
-      .filter(count => PartitionStatistics.isKnown(count))
-      .map(_.toString)
-      .getOrElse(UNKNOWN)
+    known(parameters, field).map(_.toString).getOrElse(UNKNOWN)
+
+  /** Returns the numeric value, or None when it is absent, nonnumeric, or negative. */
+  def known(parameters: collection.Map[String, String], field: String): Option[Long] =
+    parameters.get(field).flatMap(asLong).filter(count => PartitionStatistics.isKnown(count))
 
   private def asLong(value: String): Option[Long] = Try(value.trim.toLong).toOption
 }

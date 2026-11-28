@@ -18,16 +18,15 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier => PaimonIdentifier}
-import org.apache.paimon.partition.{Partition, PartitionStatistics}
-import org.apache.paimon.spark.{BaseTable, PaimonSparkTestBase, SparkCatalog}
+import org.apache.paimon.partition.PartitionStatistics
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog, SparkTable}
 import org.apache.paimon.table.{Table => PaimonTable}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier, Table => SparkConnectorTable}
 
-import java.util.{List => JList, Map => JMap}
+import java.util.{Map => JMap}
 
 import scala.collection.JavaConverters._
 
@@ -59,7 +58,7 @@ class UnreportedPartitionStatisticsTest extends PaimonSparkTestBase {
       createPartitionedTable(tableName)
       insertTwoRows(tableName)
 
-      val details = UnreportedStatistics.withAllUnreportedListing {
+      val details = UnreportedStatistics.withAllUnreportedMetadata {
         partitionBlockOf(tableName)
       }
       val rendered = details.mkString("\n")
@@ -98,7 +97,7 @@ class UnreportedPartitionStatisticsTest extends PaimonSparkTestBase {
       createPartitionedTable(tableName)
       insertTwoRows(tableName)
 
-      val information = UnreportedStatistics.withUnreportedMetadata {
+      val information = UnreportedStatistics.withAllUnreportedMetadata {
         partitionInformationOf(tableName)
       }
 
@@ -150,7 +149,7 @@ class UnreportedPartitionStatisticsTest extends PaimonSparkTestBase {
       insertTwoRows(tableName)
 
       val rowCountUnknown =
-        UnreportedStatistics.withUnreportedListing(PartitionStatistics.FIELD_RECORD_COUNT) {
+        UnreportedStatistics.withUnreportedMetadata(PartitionStatistics.FIELD_RECORD_COUNT) {
           partitionBlockOf(tableName)
         }
       val rowCountUnknownMap = rowCountUnknown.toMap
@@ -167,7 +166,7 @@ class UnreportedPartitionStatisticsTest extends PaimonSparkTestBase {
         rowCountUnknownRendered)
 
       val sizeUnknown =
-        UnreportedStatistics.withUnreportedListing(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES) {
+        UnreportedStatistics.withUnreportedMetadata(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES) {
           partitionBlockOf(tableName)
         }
       val sizeUnknownMap = sizeUnknown.toMap
@@ -213,35 +212,26 @@ class UnreportedPartitionStatisticsTest extends PaimonSparkTestBase {
 private[sql] object UnreportedStatistics {
 
   sealed trait MetadataMode
-  case object AllUnknown extends MetadataMode
+  case class Unreported(fields: Set[String]) extends MetadataMode
   case class Missing(fields: Set[String]) extends MetadataMode
-
-  /** The statistic fields [[Catalog#listPartitions]] currently leaves unreported. */
-  @volatile var listingFields: Set[String] = Set.empty
 
   /** The partition metadata override applied by [[UnreportedStatisticsSparkCatalog]]. */
   @volatile var metadataMode: Option[MetadataMode] = None
 
   def reset(): Unit = {
-    listingFields = Set.empty
     metadataMode = None
   }
 
-  def withAllUnreportedListing[T](body: => T): T =
-    withUnreportedListing(
+  def withAllUnreportedMetadata[T](body: => T): T =
+    withUnreportedMetadata(
       PartitionStatistics.FIELD_RECORD_COUNT,
       PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES,
       PartitionStatistics.FIELD_FILE_COUNT,
       PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME
     )(body)
 
-  def withUnreportedListing[T](fields: String*)(body: => T): T = {
-    listingFields = fields.toSet
-    try body
-    finally listingFields = Set.empty
-  }
-
-  def withUnreportedMetadata[T](body: => T): T = withMetadataMode(AllUnknown)(body)
+  def withUnreportedMetadata[T](fields: String*)(body: => T): T =
+    withMetadataMode(Unreported(fields.toSet))(body)
 
   def withMissingMetadata[T](fields: String*)(body: => T): T =
     withMetadataMode(Missing(fields.toSet))(body)
@@ -256,13 +246,9 @@ private[sql] object UnreportedStatistics {
 /** Catalog fixture that masks selected partition statistics. */
 private[sql] class UnreportedStatisticsSparkCatalog extends SparkCatalog {
 
-  private lazy val unreporting: Catalog = new UnreportedStatisticsCatalog(super.paimonCatalog())
-
-  override def paimonCatalog(): Catalog = unreporting
-
   override def loadTable(ident: SparkIdentifier): SparkConnectorTable = {
     super.loadTable(ident) match {
-      case table: BaseTable =>
+      case table: SparkTable =>
         UnreportedStatistics.metadataMode match {
           case Some(mode) => new OverriddenMetadataTable(table.table, mode)
           case None => table
@@ -272,54 +258,20 @@ private[sql] class UnreportedStatisticsSparkCatalog extends SparkCatalog {
   }
 }
 
-private[sql] class UnreportedStatisticsCatalog(wrapped: Catalog) extends DelegateCatalog(wrapped) {
-
-  override def catalogLoader(): CatalogLoader = wrapped.catalogLoader()
-
-  override def listPartitions(identifier: PaimonIdentifier): JList[Partition] = {
-    val partitions = super.listPartitions(identifier)
-    if (UnreportedStatistics.listingFields.isEmpty) {
-      partitions
-    } else {
-      partitions.asScala
-        .map(
-          partition =>
-            new Partition(
-              partition.spec(),
-              listedStatistic(PartitionStatistics.FIELD_RECORD_COUNT, partition.recordCount()),
-              listedStatistic(
-                PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES,
-                partition.fileSizeInBytes()),
-              listedStatistic(PartitionStatistics.FIELD_FILE_COUNT, partition.fileCount()),
-              listedStatistic(
-                PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME,
-                partition.lastFileCreationTime()),
-              PartitionStatistics.UNKNOWN_TOTAL_BUCKETS,
-              partition.done()
-            ))
-        .asJava
-    }
-  }
-
-  private def listedStatistic(field: String, value: Long): Long =
-    if (UnreportedStatistics.listingFields.contains(field)) {
-      PartitionStatistics.UNKNOWN
-    } else {
-      value
-    }
-}
-
 /** Table wrapper that replaces or removes partition statistics for display tests. */
 private[sql] class OverriddenMetadataTable(
-    override val table: PaimonTable,
+    paimonTable: PaimonTable,
     mode: UnreportedStatistics.MetadataMode)
-  extends BaseTable {
+  extends SparkTable(paimonTable) {
 
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
     val reported = super.loadPartitionMetadata(ident).asScala
     mode match {
-      case UnreportedStatistics.AllUnknown =>
-        reported.map { case (field, _) => field -> PartitionStatistics.UNKNOWN.toString }.asJava
+      case UnreportedStatistics.Unreported(fields) =>
+        reported.map {
+          case (field, value) =>
+            field -> (if (fields.contains(field)) PartitionStatistics.UNKNOWN.toString else value)
+        }.asJava
       case UnreportedStatistics.Missing(fields) =>
         reported.filterNot { case (field, _) => fields.contains(field) }.asJava
     }

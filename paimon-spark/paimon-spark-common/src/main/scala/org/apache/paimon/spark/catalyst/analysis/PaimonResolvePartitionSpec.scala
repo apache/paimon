@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.catalyst.Compatibility
 
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.PaimonUtils.{normalizePartitionSpec, requireExactMatchedPartitionSpec}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{PartitionSpec, ResolvedPartitionSpec, UnresolvedPartitionSpec}
@@ -27,7 +28,7 @@ import org.apache.spark.sql.catalyst.analysis.ResolvePartitionSpec.conf
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{Identifier, SupportsPartitionManagement, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 
@@ -44,6 +45,21 @@ object PaimonResolvePartitionSpec {
         resolvePartitionSpec(table.name(), u, partitionSchema, allowPartitionSpec = false)
       case o => o.asInstanceOf[ResolvedPartitionSpec]
     }
+  }
+
+  /**
+   * Resolves a spec naming every partition column of `table` as Spark resolves the spec of a V2
+   * partition command, with Spark's conversion of each value to its column type.
+   */
+  def resolveFullSpec(
+      table: SupportsPartitionManagement,
+      spec: TablePartitionSpec): ResolvedPartitionSpec = {
+    val partSchema = table.partitionSchema()
+    val normalizedSpec = normalizePartitionSpec(spec, partSchema, table.name(), conf.resolver)
+    requireExactMatchedPartitionSpec(table.name(), normalizedSpec, partSchema.fieldNames)
+    ResolvedPartitionSpec(
+      partSchema.fieldNames.toSeq,
+      PaimonUtils.convertToPartIdent(normalizedSpec, partSchema.fields.toSeq))
   }
 
   private def resolvePartitionSpec(
