@@ -175,6 +175,10 @@ under the License.
                                 <exclude>**/Spark4ArrayData.scala</exclude>
                                 <exclude>**/Spark41*.scala</exclude>
                                 <exclude>**/PaimonSpark4SqlExtensionsParser.scala</exclude>
+                                <!-- Spark 4.3 merges scans of the Paimon tables that declare
+                                     SCAN_MERGING (see PaimonScanMerging), so the no-op rule from
+                                     common is used. -->
+                                <exclude>**/catalyst/optimizer/MergePaimonScalarSubqueries.scala</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
