@@ -33,6 +33,12 @@ from pypaimon.write.row_utils import (
     require_columns, row_to_named_values, row_values_to_arrow_table, validate_write_columns,
 )
 
+# Native Writer must not reduce keytime maps: STRING uses UTF-8 order, and
+# non-STRING timestamps are rejected with ``requires STRING`` on Rust 0.5.0.
+from pypaimon.common.keytime_capability import (
+    native_write_refuses_string_keytime as _native_write_refuses_merge_map_keytime,
+)
+
 
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
@@ -50,7 +56,8 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                 and table.options.changelog_producer() == ChangelogProducer.INPUT
                 and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
-            or table.options.video_frame_fields()):
+            or table.options.video_frame_fields()
+            or _native_write_refuses_merge_map_keytime(table)):
         return None
     # Rust 0.5.0 emits zero sequence bounds for ordinary bucketed append files.
     # Java compaction needs advancing ranges to preserve their append order.
