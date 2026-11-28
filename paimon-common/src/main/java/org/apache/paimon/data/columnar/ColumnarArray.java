@@ -54,6 +54,15 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         this.fileIO = fileIO;
     }
 
+    /**
+     * Returns the physical index of the first element in the child column vector. It is not always
+     * equal to the number of elements of the preceding arrays, because some readers (e.g. the
+     * parquet reader) reserve a placeholder slot for null or empty arrays.
+     */
+    public int getOffset() {
+        return offset;
+    }
+
     @Override
     public int size() {
         return numElements;
