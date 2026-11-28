@@ -63,6 +63,13 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.core.config.Property;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,6 +93,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -214,6 +222,69 @@ public class LocalOrphanFilesCleanTest {
         assertThat(fileIO.exists(managedBlob)).isTrue();
         assertThat(fileIO.exists(ordinaryOrphan)).isFalse();
         assertThat(deleted).doesNotContain(managedBlob);
+    }
+
+    @Test
+    void testProgressSpansLocalCleanup() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+        Path partition = listSubDirs(tablePath, p -> p.getName().contains("=")).get(0);
+        Path subPartition = listSubDirs(partition, p -> p.getName().contains("=")).get(0);
+        Path bucket =
+                listSubDirs(subPartition, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)).get(0);
+        Path orphan = new Path(bucket, "orphan.avro");
+        fileIO.newOutputStream(orphan, false).close();
+
+        List<String> messages = new CopyOnWriteArrayList<>();
+        Logger logger = (Logger) LogManager.getLogger(MaintenanceProgress.class);
+        Level previousLevel = logger.getLevel();
+        boolean previousAdditive = logger.isAdditive();
+        AbstractAppender appender =
+                new AbstractAppender(
+                        "local-orphan-progress-test", null, null, false, Property.EMPTY_ARRAY) {
+                    @Override
+                    public void append(LogEvent event) {
+                        String message = event.getMessage().getFormattedMessage();
+                        if (message.contains("mode=local")) {
+                            messages.add(message);
+                        }
+                    }
+                };
+
+        try {
+            Configurator.setLevel(logger.getName(), Level.INFO);
+            logger.setAdditive(false);
+            appender.start();
+            logger.addAppender(appender);
+
+            new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
+            Configurator.setLevel(logger.getName(), previousLevel);
+            logger.setAdditive(previousAdditive);
+        }
+
+        assertThat(messages).anyMatch(message -> message.contains("event=START"));
+        assertThat(messages)
+                .anyMatch(
+                        message ->
+                                message.contains("event=PHASE_START")
+                                        && message.contains("phase=[list-candidate-files]"));
+        assertThat(messages)
+                .anyMatch(
+                        message ->
+                                message.contains("event=PHASE_START")
+                                        && message.contains("phase=[read-referenced-files]"));
+        assertThat(messages.stream().filter(message -> message.contains("event=END")))
+                .singleElement()
+                .satisfies(
+                        message ->
+                                assertThat(message)
+                                        .contains(
+                                                "phase=[clean-empty-directories]",
+                                                "candidate_directories_scanned=",
+                                                "delete_calls_completed=",
+                                                "manifests_read="));
     }
 
     public void normallyRemoving(Path dataPath) throws Throwable {
