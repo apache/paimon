@@ -81,6 +81,7 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
@@ -177,6 +178,150 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testWithoutBaseRebuildRequiresIncrementalResync() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "false"));
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.ignoreEmptyCommit(false).commit(1, Collections.emptyList());
+            commit.ignoreEmptyCommit(true);
+            long checkpoint = getIcebergTable().currentSnapshot().snapshotId();
+            assertThat(getIcebergResult()).isEmpty();
+
+            write.write(GenericRow.of(1, 10));
+            commit.commit(2, write.prepareCommit(false, 2));
+            write.write(GenericRow.of(1, 11));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(3, write.prepareCommit(false, 3));
+            assertThat(getIcebergResult()).isEmpty();
+            long previousHead = getIcebergTable().currentSnapshot().snapshotId();
+
+            Path metadataPath = IcebergCommitCallback.catalogTableMetadataPath(table);
+            table.fileIO().deleteDirectoryQuietly(metadataPath);
+            assertThat(table.fileIO().exists(metadataPath)).isFalse();
+
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            commit.commit(4, write.prepareCommit(true, 4));
+
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.COMPACT);
+            assertThat(getIcebergResult())
+                    .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)");
+
+            org.apache.iceberg.Table rebuilt = getIcebergTable();
+            assertThat(rebuilt.currentSnapshot().snapshotId()).isEqualTo(previousHead + 1);
+            for (long oldCheckpoint : new long[] {previousHead, checkpoint}) {
+                assertThatThrownBy(
+                                () ->
+                                        rebuilt.newIncrementalAppendScan()
+                                                .fromSnapshotExclusive(oldCheckpoint)
+                                                .planFiles())
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("not a parent ancestor");
+            }
+            assertThat(rebuilt.currentSnapshot().parentId()).isNull();
+        }
+    }
+
+    @Test
+    public void testRebuiltHistoryAcceptsNumericallyReusedCheckpoint() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        // a consumer holds this checkpoint: rows 1 and 2 are its committed state
+        long staleCheckpoint = getIcebergTable().currentSnapshot().snapshotId();
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.write(GenericRow.of(4, 40));
+        commit.commit(4, write.prepareCommit(false, 4));
+        write.close();
+        commit.close();
+
+        table.rollbackTo(1);
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.write(GenericRow.of(10, 100));
+        commit2.commit(3, write2.prepareCommit(false, 3));
+        write2.close();
+        commit2.close();
+
+        // the rebuild is the root of a new history and re-exported rows 1 and 9
+        org.apache.iceberg.Table rebuilt = getIcebergTable();
+        assertThat(rebuilt.snapshot(staleCheckpoint).parentId()).isNull();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(9, 90)", "Record(10, 100)");
+
+        // documented limitation: the rebuilt history reuses Paimon snapshot IDs, so the stale
+        // checkpoint still resolves and Iceberg accepts it. The incremental plan covers only
+        // snapshot 3 (row 10) and silently misses row 9 re-exported by the rebuild. Consumers
+        // must invalidate pre-rebuild checkpoints externally.
+        try (CloseableIterable<FileScanTask> files =
+                rebuilt.newIncrementalAppendScan()
+                        .fromSnapshotExclusive(staleCheckpoint)
+                        .planFiles()) {
+            assertThat(files)
+                    .extracting(task -> task.file().recordCount())
+                    .containsExactly(1L);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInitialIcebergSnapshotCanBeReadAsAppend(boolean overwrite) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            if (overwrite) {
+                commit.withOverwriteStaticPartitions(
+                        Collections.singletonList(BinaryRow.EMPTY_ROW));
+            }
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(overwrite ? Snapshot.CommitKind.OVERWRITE : Snapshot.CommitKind.APPEND);
+        org.apache.iceberg.Table icebergTable = getIcebergTable();
+        assertThat(icebergTable.currentSnapshot().parentId()).isNull();
+        try (CloseableIterable<FileScanTask> files =
+                icebergTable.newIncrementalAppendScan().planFiles()) {
+            assertThat(files).extracting(task -> task.file().recordCount()).containsExactly(2L);
+        }
+        assertThat(icebergTable.currentSnapshot().operation()).isEqualTo("append");
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
     }
 
     @Test

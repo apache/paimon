@@ -571,7 +571,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
-                        snapshotId == Snapshot.FIRST_SNAPSHOT_ID ? null : (Long) (snapshotId - 1),
+                        // A full export starts a new lineage; readers with old checkpoints must
+                        // resync. IDs still mirror Paimon's, so a numerically reused checkpoint
+                        // can be accepted and needs external invalidation (see docs).
+                        null,
                         // the Paimon snapshot's own commit time, the as-of time readers see
                         paimonSnapshot.timeMillis(),
                         snapshotSummary,

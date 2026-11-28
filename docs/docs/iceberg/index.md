@@ -73,6 +73,14 @@ Initial publication and metadata rebuilds use snapshot splits that can be read d
 Paimon's merge logic. The table above describes subsequent incremental publication. Use compaction
 to establish a predictable visibility boundary for primary key tables.
 
+An Iceberg metadata rebuild starts a new snapshot history. An incremental reader with a checkpoint
+from before the rebuild must read a full snapshot and resume from a checkpoint in the new history.
+Iceberg snapshot IDs in this mirror are Paimon snapshot IDs, so a rebuild that follows a deep
+rollback can reuse the numerical ID of a checkpoint from the expired history. Iceberg then accepts
+that stale checkpoint in an incremental scan while silently skipping rows re-exported by the
+rebuild. Invalidating pre-rebuild incremental checkpoints is the consumer's responsibility: trigger
+a full resync whenever a rollback or a metadata rebuild may have occurred.
+
 The [primary key guide](./primary-key-table.mdx) explains both modes and their configuration.
 Disabling an Iceberg catalog's cache can help with interactive verification, but cannot make
 uncompacted or unpublished changes visible.
