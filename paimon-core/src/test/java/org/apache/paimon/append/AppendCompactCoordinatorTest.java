@@ -40,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -201,6 +202,27 @@ public class AppendCompactCoordinatorTest {
         // compacting a single file alone does not reduce the file count
         assertThat(batchCoordinator.compactPlan()).isEmpty();
         assertThat(batchCoordinator.listRestoredFiles()).hasSize(1);
+    }
+
+    @Test
+    public void testBatchKeepsCandidateAcrossPartitionGaps() {
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(appendOnlyFileStoreTable, false);
+        List<DataFileMeta> files = generateNewFiles(2, 0);
+        batchCoordinator.notifyNewFiles(partition, Collections.singletonList(files.get(0)));
+        assertThat(batchCoordinator.compactPlan()).isEmpty();
+
+        // Other partitions must not age out a candidate from this finite batch scan.
+        for (int i = 0; i < AppendCompactCoordinator.REMOVE_AGE + 2; i++) {
+            batchCoordinator.notifyNewFiles(row(i + 1), generateNewFiles(1, 0));
+            assertThat(batchCoordinator.compactPlan()).isEmpty();
+        }
+
+        batchCoordinator.notifyNewFiles(partition, Collections.singletonList(files.get(1)));
+        List<AppendCompactTask> tasks = batchCoordinator.compactPlan();
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).partition()).isEqualTo(partition);
+        assertThat(tasks.get(0).compactBefore()).containsExactlyInAnyOrderElementsOf(files);
     }
 
     @Test

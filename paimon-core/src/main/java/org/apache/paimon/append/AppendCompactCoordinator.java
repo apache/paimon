@@ -55,12 +55,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Compact coordinator for append only tables.
  *
- * <p>Note: {@link AppendCompactCoordinator} scan files in snapshot, read APPEND and COMPACT
- * snapshot then load those new files. It will try it best to generate compaction task for the
- * restored files scanned in snapshot, but to reduce memory usage, it won't remain single file for a
- * long time. After ten times scan, single file with one partition will be ignored and removed from
- * memory, which means, it will not participate in compaction again until restart the compaction
- * job.
+ * <p>In streaming mode, the coordinator scans APPEND and COMPACT snapshots and retains new files as
+ * compaction candidates. To reduce memory usage, a partition with only one candidate is removed
+ * after exceeding the age limit. The file will not participate in compaction again until the job
+ * restarts.
+ *
+ * <p>In batch mode, candidates are retained until the scan ends, allowing files from the same
+ * partition to be compacted together across scan batches.
  *
  * <p>When a third task delete file in latest snapshot(including batch delete/update and overwrite),
  * the file in coordinator will still remain and participate in compaction task. When this happens,
@@ -95,6 +96,24 @@ public class AppendCompactCoordinator {
             FileStoreTable table,
             boolean isStreaming,
             @Nullable PartitionPredicate partitionPredicate) {
+        this(table, isStreaming, partitionPredicate, null);
+    }
+
+    /**
+     * Creates a batch coordinator that scans the supplied snapshot without following new commits.
+     */
+    public AppendCompactCoordinator(
+            FileStoreTable table,
+            Snapshot snapshot,
+            @Nullable PartitionPredicate partitionPredicate) {
+        this(table, false, partitionPredicate, snapshot);
+    }
+
+    private AppendCompactCoordinator(
+            FileStoreTable table,
+            boolean isStreaming,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Snapshot snapshot) {
         checkArgument(table.primaryKeys().isEmpty());
         this.snapshotManager = table.snapshotManager();
         CoreOptions options = table.coreOptions();
@@ -106,9 +125,9 @@ public class AppendCompactCoordinator {
         this.fileNumLimit = options.compactionFileNumLimit();
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
-                        ? new DvMaintainerCache(table.store().newIndexFileHandler())
+                        ? new DvMaintainerCache(table.store().newIndexFileHandler(), snapshot)
                         : null;
-        this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate);
+        this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate, snapshot);
         this.isStreaming = isStreaming;
     }
 
@@ -245,7 +264,12 @@ public class AppendCompactCoordinator {
         }
 
         public boolean readyToRemove() {
-            return toCompact.isEmpty() || age > REMOVE_AGE;
+            // Ageing is a streaming-only memory bound: a stream coordinator never knows whether
+            // another file of the partition will arrive, so it eventually gives up on unmatched
+            // candidates. A batch coordinator scans a fixed snapshot instead, where a candidate
+            // may still be matched by a file scanned in a later batch, and the scan never
+            // revisits files, so evicting it would drop the candidate for good.
+            return toCompact.isEmpty() || (isStreaming && age > REMOVE_AGE);
         }
 
         private List<List<DataFileMeta>> agePack() {
@@ -381,12 +405,14 @@ public class AppendCompactCoordinator {
     private class DvMaintainerCache {
 
         private final IndexFileHandler indexFileHandler;
+        @Nullable private final Snapshot snapshot;
 
         /** Should be thread safe, ManifestEntryFilter will be invoked in many threads. */
         private final Map<BinaryRow, AppendDeleteFileMaintainer> cache = new ConcurrentHashMap<>();
 
-        private DvMaintainerCache(IndexFileHandler indexFileHandler) {
+        private DvMaintainerCache(IndexFileHandler indexFileHandler, @Nullable Snapshot snapshot) {
             this.indexFileHandler = indexFileHandler;
+            this.snapshot = snapshot;
         }
 
         private void refresh() {
@@ -398,7 +424,9 @@ public class AppendCompactCoordinator {
                     partition,
                     p ->
                             BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                    indexFileHandler, snapshotManager.latestSnapshot(), p));
+                                    indexFileHandler,
+                                    snapshot == null ? snapshotManager.latestSnapshot() : snapshot,
+                                    p));
         }
     }
 
@@ -407,6 +435,7 @@ public class AppendCompactCoordinator {
 
         private final SnapshotReader snapshotReader;
         private final boolean streamingMode;
+        @Nullable private final Snapshot snapshot;
 
         @Nullable private Long nextSnapshot = null;
         @Nullable private Iterator<ManifestEntry> currentIterator;
@@ -415,7 +444,8 @@ public class AppendCompactCoordinator {
         public FilesIterator(
                 FileStoreTable table,
                 boolean isStreaming,
-                @Nullable PartitionPredicate partitionPredicate) {
+                @Nullable PartitionPredicate partitionPredicate,
+                @Nullable Snapshot snapshot) {
             this.snapshotReader = table.newSnapshotReader();
             if (partitionPredicate != null) {
                 snapshotReader.withPartitionFilter(partitionPredicate);
@@ -425,12 +455,16 @@ public class AppendCompactCoordinator {
                 snapshotReader.dropStats();
             }
             this.streamingMode = isStreaming;
+            this.snapshot = snapshot;
         }
 
         private void assignNewIterator() {
             currentIterator = null;
             if (nextSnapshot == null) {
-                nextSnapshot = snapshotManager.latestSnapshotId();
+                nextSnapshot =
+                        snapshot == null
+                                ? snapshotManager.latestSnapshotId()
+                                : Long.valueOf(snapshot.id());
                 if (nextSnapshot == null) {
                     if (!streamingMode) {
                         throw new EndOfScanException();
@@ -445,11 +479,12 @@ public class AppendCompactCoordinator {
                 snapshotReader.withMode(ScanMode.DELTA);
             }
 
-            if (!snapshotManager.snapshotExists(nextSnapshot)) {
+            if (snapshot == null && !snapshotManager.snapshotExists(nextSnapshot)) {
                 return;
             }
 
-            Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
+            Snapshot inputSnapshot =
+                    snapshot == null ? snapshotManager.snapshot(nextSnapshot) : snapshot;
             nextSnapshot++;
 
             if (dvMaintainerCache != null) {
@@ -459,7 +494,7 @@ public class AppendCompactCoordinator {
                     snapshotReader
                             .withManifestEntryFilter(
                                     entry -> shouldCompact(entry.partition(), entry.file()))
-                            .withSnapshot(snapshot)
+                            .withSnapshot(inputSnapshot)
                             .readFileIterator();
         }
 

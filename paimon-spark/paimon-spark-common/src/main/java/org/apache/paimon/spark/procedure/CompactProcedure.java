@@ -61,6 +61,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -110,7 +111,9 @@ import scala.collection.Seq;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
+import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.ExceptionUtils.rethrow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -500,32 +503,28 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
+        if (table.coreOptions().compactionMultiBatchEnabled()) {
+            compactUnAwareBucketTableInBatches(
+                    table, partitionPredicate, partitionIdleTime, javaSparkContext);
+            return;
+        }
+
         List<AppendCompactTask> compactionTasks;
         try {
             compactionTasks = new AppendCompactCoordinator(table, false, partitionPredicate).run();
         } catch (EndOfScanException e) {
-            compactionTasks = new ArrayList<>();
+            compactionTasks = Collections.emptyList();
         }
         if (partitionIdleTime != null) {
             SnapshotReader snapshotReader = table.newSnapshotReader();
             if (partitionPredicate != null) {
                 snapshotReader.withPartitionFilter(partitionPredicate);
             }
-            Map<BinaryRow, Long> partitionInfo =
-                    snapshotReader.partitionEntries().stream()
-                            .collect(
-                                    Collectors.toMap(
-                                            PartitionEntry::partition,
-                                            PartitionEntry::lastFileCreationTime));
-            long historyMilli =
-                    LocalDateTime.now()
-                            .minus(partitionIdleTime)
-                            .atZone(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli();
+            Set<BinaryRow> partitionsToCompact =
+                    getPartitionsToCompact(snapshotReader, partitionIdleTime);
             compactionTasks =
                     compactionTasks.stream()
-                            .filter(task -> partitionInfo.get(task.partition()) <= historyMilli)
+                            .filter(task -> partitionsToCompact.contains(task.partition()))
                             .collect(Collectors.toList());
         }
         if (compactionTasks.isEmpty()) {
@@ -534,7 +533,81 @@ public class CompactProcedure extends BaseProcedure {
                     table.fullName());
             return;
         }
+        executeAppendCompactTasks(table, compactionTasks, javaSparkContext, null);
+    }
 
+    private void compactUnAwareBucketTableInBatches(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+
+        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshot);
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        Set<BinaryRow> partitionsToCompact =
+                getPartitionsToCompact(snapshotReader, partitionIdleTime);
+        AppendCompactCoordinator coordinator =
+                new AppendCompactCoordinator(table, snapshot, partitionPredicate);
+        AppendCompactCommitState commitState =
+                new AppendCompactCommitState(
+                        snapshot.id(), createCommitUser(table.coreOptions().toConfiguration()));
+        Throwable failure = null;
+        try {
+            do {
+                List<AppendCompactTask> compactionTasks;
+                try {
+                    compactionTasks = coordinator.run();
+                } catch (EndOfScanException e) {
+                    break;
+                }
+                if (partitionIdleTime != null) {
+                    compactionTasks =
+                            compactionTasks.stream()
+                                    .filter(task -> partitionsToCompact.contains(task.partition()))
+                                    .collect(Collectors.toList());
+                }
+                if (!compactionTasks.isEmpty()) {
+                    executeAppendCompactTasks(
+                            table, compactionTasks, javaSparkContext, commitState);
+                }
+            } while (coordinator.batchRemainFiles());
+
+            if (!commitState.snapshotPublished) {
+                LOG.info(
+                        "No append compaction snapshot was confirmed for table {}, skip deferred expiration.",
+                        table.fullName());
+            }
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            throw e;
+        } finally {
+            // Defer expiration until all scanning and rewriting in this invocation has ended.
+            if (commitState.snapshotPublished) {
+                try (TableCommitImpl commit =
+                        table.newCommit(createCommitUser(table.coreOptions().toConfiguration()))) {
+                    commit.expire(COMMIT_IDENTIFIER);
+                } catch (Throwable cleanupFailure) {
+                    if (failure == null) {
+                        rethrow(cleanupFailure);
+                    } else if (failure != cleanupFailure) {
+                        failure.addSuppressed(cleanupFailure);
+                    }
+                }
+            }
+        }
+    }
+
+    private void executeAppendCompactTasks(
+            FileStoreTable table,
+            List<AppendCompactTask> compactionTasks,
+            JavaSparkContext javaSparkContext,
+            @Nullable AppendCompactCommitState commitState) {
         AppendCompactTaskSerializer serializer = new AppendCompactTaskSerializer();
         List<byte[]> serializedTasks = new ArrayList<>();
         try {
@@ -551,7 +624,13 @@ public class CompactProcedure extends BaseProcedure {
                 serializedTasks.size(),
                 table.fullName(),
                 readParallelism);
-        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
+        String commitUser =
+                commitState == null
+                        ? createCommitUser(table.coreOptions().toConfiguration())
+                        : commitState.commitUser;
+        // Allocate once per batch; retries inside the committer must reuse this identifier.
+        long commitIdentifier =
+                commitState == null ? COMMIT_IDENTIFIER : commitState.nextCommitIdentifier++;
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks, readParallelism)
@@ -588,15 +667,80 @@ public class CompactProcedure extends BaseProcedure {
                                             }
                                         });
 
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+        try (TableCommitImpl commit =
+                table.newCommit(commitUser).expireOnCommit(commitState == null)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
             List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
             List<CommitMessage> messages =
                     deserializeCommitMessagesAndReleaseSerializedBytes(
                             messageSerializerser, serializedMessages);
-            commit.commit(messages);
+            Throwable commitFailure = null;
+            try {
+                if (commitState == null) {
+                    commit.commit(messages);
+                } else {
+                    commit.commitBatch(commitIdentifier, messages);
+                }
+            } catch (RuntimeException | Error e) {
+                commitFailure = e;
+                throw e;
+            } finally {
+                if (commitState != null) {
+                    commitState.confirmPublishedSnapshot(table, commitIdentifier, commitFailure);
+                }
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private static class AppendCompactCommitState {
+
+        private final long startingSnapshotId;
+        private final String commitUser;
+        private long nextCommitIdentifier;
+        private boolean snapshotPublished;
+
+        private AppendCompactCommitState(long startingSnapshotId, String commitUser) {
+            this.startingSnapshotId = startingSnapshotId;
+            this.commitUser = commitUser;
+        }
+
+        private void confirmPublishedSnapshot(
+                FileStoreTable table, long commitIdentifier, @Nullable Throwable commitFailure) {
+            if (snapshotPublished) {
+                return;
+            }
+            try {
+                // A callback can fail after publication, and another writer can advance latest.
+                SnapshotManager snapshots = table.snapshotManager();
+                snapshotPublished =
+                        snapshots
+                                .latestSnapshotOfUser(
+                                        commitUser,
+                                        snapshots.latestSnapshotIdFromFileSystem(),
+                                        startingSnapshotId + 1)
+                                .filter(
+                                        snapshot ->
+                                                snapshot.commitKind() == Snapshot.CommitKind.COMPACT
+                                                        && snapshot.commitIdentifier()
+                                                                == commitIdentifier)
+                                .isPresent();
+            } catch (RuntimeException confirmationFailure) {
+                // An unconfirmed outcome must not trigger expiration or hide the commit failure.
+                if (commitFailure != null) {
+                    if (commitFailure != confirmationFailure) {
+                        commitFailure.addSuppressed(confirmationFailure);
+                    }
+                } else {
+                    LOG.warn(
+                            "Unable to confirm compaction publication for table {} by user {}. "
+                                    + "Skipping deferred expiration unless a later batch is confirmed.",
+                            table.fullName(),
+                            commitUser,
+                            confirmationFailure);
+                }
+            }
         }
     }
 

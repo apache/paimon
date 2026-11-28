@@ -20,8 +20,10 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -57,6 +59,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
@@ -1321,6 +1324,49 @@ public class TableCommitTest {
         commit2.close();
     }
 
+    @ParameterizedTest
+    @EnumSource(CoreOptions.ExpireExecutionMode.class)
+    public void testBatchCommitWithIdentifierPropagatesMaintenanceFailure(
+            CoreOptions.ExpireExecutionMode expireExecutionMode) throws Exception {
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                new FileSystemSchemaManager(LocalFileIO.create(), path)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .option("bucket", "-1")
+                                        .build());
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        String commitUser = UUID.randomUUID().toString();
+        RuntimeException maintenanceFailure = new RuntimeException("Maintenance failed");
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit =
+                        new TableCommitImpl(
+                                table.store().newCommit(commitUser, table),
+                                () -> {
+                                    throw maintenanceFailure;
+                                },
+                                null,
+                                null,
+                                null,
+                                new ConsumerManager(LocalFileIO.create(), path),
+                                expireExecutionMode,
+                                table.name(),
+                                false,
+                                table.coreOptions().fileOperationThreadNum())) {
+            write.write(GenericRow.of(1));
+            List<CommitMessage> messages = write.prepareCommit(true, 7L);
+            assertThatThrownBy(() -> commit.commitBatch(7L, messages)).isSameAs(maintenanceFailure);
+            Snapshot snapshot = table.snapshotManager().latestSnapshot();
+            assertThat(snapshot.commitIdentifier()).isEqualTo(7L);
+            assertThatThrownBy(() -> commit.commitBatch(8L, Collections.emptyList()))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
+        }
+    }
+
     @Test
     public void testExpireForEmptyCommit() throws Exception {
         String path = tempDir.toString();
@@ -1372,6 +1418,109 @@ public class TableCommitTest {
         commit.commit(7, write.prepareCommit(true, 7));
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true, false, 3, 3", "false, false, 1, 3", "false, true, 1, 1"})
+    public void testExpireSnapshotsOnCommit(
+            boolean expireOnCommit,
+            boolean writeOnly,
+            long earliestBeforeExplicitExpiration,
+            long earliestAfterExplicitExpiration)
+            throws Exception {
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                new FileSystemSchemaManager(LocalFileIO.create(), path)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .option("bucket", "-1")
+                                        .option("write-only", Boolean.toString(writeOnly))
+                                        .option("snapshot.num-retained.min", "1")
+                                        .option("snapshot.num-retained.max", "1")
+                                        .option("snapshot.time-retained", "0 ms")
+                                        .build());
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        SnapshotManager snapshots = table.snapshotManager();
+        String writeUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(writeUser)) {
+            for (int i = 0; i < 3; i++) {
+                write.write(GenericRow.of(i));
+                try (TableCommitImpl commit = table.newCommit(UUID.randomUUID().toString())) {
+                    if (!expireOnCommit) {
+                        commit.expireOnCommit(false);
+                    }
+                    commit.commit(write.prepareCommit(true, i));
+                }
+            }
+        }
+
+        assertThat(snapshots.latestSnapshotId()).isEqualTo(3L);
+        assertThat(snapshots.earliestSnapshotId()).isEqualTo(earliestBeforeExplicitExpiration);
+        // Explicit expiration must work even when automatic expiration is disabled, while
+        // preserving write-only's existing behavior.
+        try (TableCommitImpl commit =
+                table.newCommit(UUID.randomUUID().toString()).expireOnCommit(false)) {
+            commit.expire(BatchWriteBuilder.COMMIT_IDENTIFIER);
+        }
+        assertThat(snapshots.earliestSnapshotId()).isEqualTo(earliestAfterExplicitExpiration);
+        assertThat(snapshots.latestSnapshotId()).isEqualTo(3L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true, false, 1", "false, false, 2", "false, true, 2"})
+    public void testExpirePartitionsOnCommit(
+            boolean expireOnCommit, boolean writeOnly, int partitionsBeforeExplicitExpiration)
+            throws Exception {
+        Path path = new Path(tempDir.toString());
+        TableSchema schema =
+                new FileSystemSchemaManager(LocalFileIO.create(), path)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .column("dt", DataTypes.STRING())
+                                        .partitionKeys("dt")
+                                        .option("bucket", "-1")
+                                        .option("write-only", Boolean.toString(writeOnly))
+                                        .build());
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        String writeUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(writeUser)) {
+            write.write(GenericRow.of(1, BinaryString.fromString("20000101")));
+            write.write(GenericRow.of(2, BinaryString.fromString("29990101")));
+            try (TableCommitImpl commit = table.newCommit(UUID.randomUUID().toString())) {
+                commit.commit(write.prepareCommit(true, 0));
+            }
+        }
+
+        Map<String, String> expirationOptions = new HashMap<>();
+        expirationOptions.put("partition.expiration-time", "7 d");
+        expirationOptions.put("partition.expiration-check-interval", "0 ms");
+        expirationOptions.put("partition.timestamp-pattern", "$dt");
+        expirationOptions.put("partition.timestamp-formatter", "yyyyMMdd");
+        table = table.copy(expirationOptions);
+        try (TableWriteImpl<?> write = table.newWrite(writeUser);
+                TableCommitImpl commit = table.newCommit(UUID.randomUUID().toString())) {
+            write.write(GenericRow.of(3, BinaryString.fromString("29990101")));
+            if (!expireOnCommit) {
+                commit.expireOnCommit(false);
+            }
+            commit.commit(write.prepareCommit(true, 1));
+        }
+
+        assertThat(table.newSnapshotReader().partitionEntries())
+                .hasSize(partitionsBeforeExplicitExpiration);
+        // Explicit expiration must still remove expired partitions after automatic expiration
+        // has been disabled, except on write-only tables.
+        try (TableCommitImpl commit =
+                table.newCommit(UUID.randomUUID().toString()).expireOnCommit(false)) {
+            commit.expire(BatchWriteBuilder.COMMIT_IDENTIFIER);
+        }
+        assertThat(table.newSnapshotReader().partitionEntries()).hasSize(writeOnly ? 2 : 1);
     }
 
     @Test

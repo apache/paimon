@@ -435,6 +435,12 @@ under the License.
             <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
         </tr>
         <tr>
+            <td><h5>compaction.multi-batch.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether Spark compact procedures scan all candidate files in multiple batches for ordinary bucket-unaware append tables. compaction.file-num-limit limits the number of candidate files scanned per batch, not the number of files committed at once; candidate files can accumulate across batches, and only batches that produce compaction tasks are committed. Does not apply to sort compaction or incremental clustering.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.offpeak-ratio</h5></td>
             <td style="word-wrap: break-word;">0</td>
             <td>Integer</td>

@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -277,6 +278,63 @@ public class AppendOnlyTableCompactionTest {
         assertThat(readRows()).containsExactlyInAnyOrderElementsOf(expectedRows);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLaterBatchRejectsConcurrentCompaction(boolean replaceBeforeRewrite)
+            throws Exception {
+        commit(writeCommit(6));
+        List<String> expectedRows = readRows();
+        FileStoreTable compactTable =
+                appendOnlyFileStoreTable.copy(singletonMap("compaction.file-num-limit", "2"));
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(compactTable, snapshotManager.latestSnapshot(), null);
+
+        List<AppendCompactTask> firstBatch = batchCoordinator.run();
+        assertThat(firstBatch).hasSize(1);
+        try (TableCommitImpl firstCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            firstCommit.commit(doCompact(firstBatch));
+        }
+        assertThat(batchCoordinator.batchRemainFiles()).isTrue();
+        String firstBatchOutput = firstBatch.get(0).compactAfter().get(0).fileName();
+
+        List<AppendCompactTask> laterBatch = batchCoordinator.run();
+        assertThat(laterBatch).hasSize(1);
+        assertThat(laterBatch.get(0).compactBefore()).hasSize(2);
+        AppendCompactTask concurrentTask =
+                new AppendCompactTask(
+                        laterBatch.get(0).partition(), laterBatch.get(0).compactBefore());
+        List<CommitMessage> staleMessages =
+                replaceBeforeRewrite ? Collections.emptyList() : doCompact(laterBatch);
+        try (TableCommitImpl concurrentCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            concurrentCommit.commit(doCompact(Collections.singletonList(concurrentTask)));
+        }
+        long concurrentSnapshotId = snapshotManager.latestSnapshotId();
+        List<String> committedFiles =
+                appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(committedFiles).hasSize(4).contains(firstBatchOutput);
+
+        // The same conflict must be detected whether the rewrite starts before or after the
+        // concurrent commit replaces its input files.
+        List<CommitMessage> laterMessages =
+                replaceBeforeRewrite ? doCompact(laterBatch) : staleMessages;
+        try (TableCommitImpl laterCommit =
+                appendOnlyFileStoreTable.newCommit(UUID.randomUUID().toString())) {
+            assertThatThrownBy(() -> laterCommit.commit(laterMessages))
+                    .hasMessageContaining("File deletion conflicts detected");
+        }
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(concurrentSnapshotId);
+        assertThat(
+                        appendOnlyFileStoreTable.store().newScan().plan().files().stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(committedFiles);
+        assertThat(readRows()).containsExactlyInAnyOrderElementsOf(expectedRows);
+    }
+
     private List<String> readRows() throws Exception {
         List<String> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -366,6 +424,82 @@ public class AppendOnlyTableCompactionTest {
                         .collect(Collectors.toList());
         assertThat(files).hasSize(1);
         assertThat(files.get(0).rowCount()).isEqualTo(2);
+    }
+
+    @Test
+    public void testBatchKeepsCandidateAcrossNonAdjacentBatches() throws Exception {
+        // A partitioned table lets the two files of one partition be separated by files of
+        // other partitions in the scan order.
+        org.apache.paimon.fs.Path partitionedPath =
+                new org.apache.paimon.fs.Path(tempDir.resolve("nonadjacent").toString());
+        FileIO fileIO = LocalFileIO.create();
+        TableSchema partitionedTableSchema =
+                new FileSystemSchemaManager(fileIO, partitionedPath)
+                        .createTable(
+                                Schema.newBuilder()
+                                        .column("pt", DataTypes.STRING())
+                                        .column("id", DataTypes.INT())
+                                        .partitionKeys("pt")
+                                        .option("bucket", "-1")
+                                        .option("compaction.min.file-num", "2")
+                                        .option("compaction.file-num-limit", "1")
+                                        .build());
+        FileStoreTable partitionedTable =
+                FileStoreTableFactory.create(fileIO, partitionedPath, partitionedTableSchema);
+
+        // One file in partition "a", twelve files in other partitions, then one more in "a".
+        // With file-num-limit=1 the two "a" files are scanned in nonadjacent batches, so the
+        // first candidate has to survive more than REMOVE_AGE intervening batches.
+        for (int i = 0; i < 14; i++) {
+            String partition = (i == 0 || i == 13) ? "a" : "p" + i;
+            writePartitionedCommit(partitionedTable, partition, i);
+        }
+
+        List<String> expectedPartitionAFiles =
+                partitionedTable.store().newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().getString(0).toString().equals("a"))
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(expectedPartitionAFiles).hasSize(2);
+
+        // Mirror CompactProcedure's multi-batch loop over a pinned snapshot.
+        AppendCompactCoordinator batchCoordinator =
+                new AppendCompactCoordinator(
+                        partitionedTable,
+                        partitionedTable.snapshotManager().latestSnapshot(),
+                        null);
+        List<AppendCompactTask> tasks = new ArrayList<>();
+        while (true) {
+            try {
+                tasks.addAll(batchCoordinator.run());
+            } catch (EndOfScanException e) {
+                break;
+            }
+            if (!batchCoordinator.batchRemainFiles()) {
+                break;
+            }
+        }
+
+        // The two files of partition "a" must be compacted together even though no batch ever
+        // scanned them adjacently.
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .extracting(DataFileMeta::fileName)
+                .containsExactlyInAnyOrderElementsOf(expectedPartitionAFiles);
+    }
+
+    private void writePartitionedCommit(FileStoreTable table, String partition, int id)
+            throws Exception {
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        try {
+            writer.write(GenericRow.of(BinaryString.fromString(partition), id));
+            List<CommitMessage> messages = writer.prepareCommit(true, 0);
+            try (TableCommitImpl commit = table.newCommit(UUID.randomUUID().toString())) {
+                commit.commit(messages);
+            }
+        } finally {
+            writer.close();
+        }
     }
 
     private AppendCompactCoordinator createBatchCoordinator(Map<String, String> extraOptions) {

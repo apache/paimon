@@ -1171,6 +1171,19 @@ public class CoreOptions implements Serializable {
                             "To avoid OOM caused by scanning compaction files, you can use this option to limit the "
                                     + "for unaware-bucket append table compaction.");
 
+    public static final ConfigOption<Boolean> COMPACTION_MULTI_BATCH_ENABLED =
+            key("compaction.multi-batch.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether Spark compact procedures scan all candidate files in multiple batches "
+                                    + "for ordinary bucket-unaware append tables. compaction.file-num-limit "
+                                    + "limits the number of candidate files scanned per batch, not the number "
+                                    + "of files committed at once; candidate files can accumulate across "
+                                    + "batches, and only batches that produce compaction tasks are "
+                                    + "committed. Does not apply to sort compaction or incremental "
+                                    + "clustering.");
+
     public static final ConfigOption<Double> COMPACTION_DELETE_RATIO_THRESHOLD =
             key("compaction.delete-ratio-threshold")
                     .doubleType()
@@ -4188,6 +4201,10 @@ public class CoreOptions implements Serializable {
 
     public int compactionFileNumLimit() {
         return options.get(COMPACTION_FILE_NUM_LIMIT);
+    }
+
+    public boolean compactionMultiBatchEnabled() {
+        return options.get(COMPACTION_MULTI_BATCH_ENABLED);
     }
 
     public double compactionDeleteRatioThreshold() {
