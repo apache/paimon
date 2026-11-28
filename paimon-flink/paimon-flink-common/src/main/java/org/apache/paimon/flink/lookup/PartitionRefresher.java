@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -60,6 +61,9 @@ public class PartitionRefresher implements Closeable {
 
     /** Current partitions being used for lookup. Updated when partition refresh completes. */
     private List<BinaryRow> currentPartitions;
+
+    /** Incremented when partitions are cleared, so async refreshes started earlier are dropped. */
+    private long generation;
 
     public PartitionRefresher(
             boolean partitionRefreshAsync,
@@ -86,6 +90,15 @@ public class PartitionRefresher implements Closeable {
     /** Get the current partitions being used for lookup. */
     public List<BinaryRow> currentPartitions() {
         return currentPartitions;
+    }
+
+    /**
+     * Stop serving the current partitions because the partition selection became empty. Async
+     * refreshes started before this call are dropped when they complete.
+     */
+    public void clearPartitions() {
+        this.currentPartitions = Collections.emptyList();
+        this.generation++;
     }
 
     /**
@@ -138,6 +151,7 @@ public class PartitionRefresher implements Closeable {
                 "Starting async partition refresh for table {}, new partitions detected.",
                 tableName);
 
+        long refreshGeneration = generation;
         partitionRefreshExecutor.submit(
                 () -> {
                     File newPath = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
@@ -164,7 +178,7 @@ public class PartitionRefresher implements Closeable {
                     }
 
                     try {
-                        publishRefreshResult(newTable, newPartitions, newPath);
+                        publishRefreshResult(newTable, newPartitions, newPath, refreshGeneration);
                         LOG.info("Async partition refresh completed for table {}.", tableName);
                     } catch (IOException e) {
                         LOG.error(
@@ -177,10 +191,12 @@ public class PartitionRefresher implements Closeable {
     }
 
     @VisibleForTesting
-    void publishRefreshResult(LookupTable lookupTable, List<BinaryRow> partitions, File refreshPath)
+    void publishRefreshResult(
+            LookupTable lookupTable, List<BinaryRow> partitions, File refreshPath, long generation)
             throws IOException {
         RefreshResult previous =
-                pendingRefresh.getAndSet(new RefreshResult(lookupTable, partitions, refreshPath));
+                pendingRefresh.getAndSet(
+                        new RefreshResult(lookupTable, partitions, refreshPath, generation));
         if (previous != null) {
             previous.lookupTable.close();
         }
@@ -208,6 +224,11 @@ public class PartitionRefresher implements Closeable {
 
         RefreshResult refreshResult = pendingRefresh.getAndSet(null);
         if (refreshResult == null) {
+            return null;
+        }
+        if (refreshResult.generation != generation) {
+            // Built for a selection that was cleared afterwards.
+            refreshResult.lookupTable.close();
             return null;
         }
 
@@ -244,11 +265,14 @@ public class PartitionRefresher implements Closeable {
         private final LookupTable lookupTable;
         private final List<BinaryRow> partitions;
         private final File path;
+        private final long generation;
 
-        private RefreshResult(LookupTable lookupTable, List<BinaryRow> partitions, File path) {
+        private RefreshResult(
+                LookupTable lookupTable, List<BinaryRow> partitions, File path, long generation) {
             this.lookupTable = lookupTable;
             this.partitions = partitions;
             this.path = path;
+            this.generation = generation;
         }
     }
 }

@@ -49,7 +49,7 @@ class PartitionRefresherTest {
         PartitionRefresher refresher = createRefresher(initialPartitions);
 
         try {
-            refresher.publishRefreshResult(refreshedTable, refreshedPartitions, refreshPath);
+            refresher.publishRefreshResult(refreshedTable, refreshedPartitions, refreshPath, 0);
 
             assertThat(refresher.getNewLookupTable()).isSameAs(refreshedTable);
             assertThat(refresher.currentPartitions()).isSameAs(refreshedPartitions);
@@ -72,8 +72,8 @@ class PartitionRefresherTest {
         PartitionRefresher refresher = createRefresher(partitions(1));
 
         try {
-            refresher.publishRefreshResult(tableB, partitionsB, pathB);
-            refresher.publishRefreshResult(tableC, partitionsC, pathC);
+            refresher.publishRefreshResult(tableB, partitionsB, pathB, 0);
+            refresher.publishRefreshResult(tableC, partitionsC, pathC, 0);
 
             assertThat(tableB.closed).isTrue();
             assertThat(tableC.closed).isFalse();
