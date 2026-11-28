@@ -19,12 +19,17 @@
 package org.apache.paimon.fs.local;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.OperatingSystem;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Tests for {@link LocalFileIO}. */
 public class LocalFileIOTest {
@@ -45,5 +50,21 @@ public class LocalFileIOTest {
 
         fileIO.copyFile(srcFile, dstFile, false);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
+    }
+
+    @Test
+    public void testListStatusWithColonInChildName() throws Exception {
+        assumeThat(OperatingSystem.isWindows())
+                .describedAs("Windows does not allow ':' in file names.")
+                .isFalse();
+        Files.createFile(tempDir.resolve("tag-demo:old"));
+        Files.createFile(tempDir.resolve("plain.txt"));
+
+        FileIO fileIO = new LocalFileIO();
+        FileStatus[] statuses = fileIO.listStatus(new Path(tempDir.toString()));
+
+        assertThat(statuses)
+                .extracting(status -> status.getPath().getName())
+                .containsExactlyInAnyOrder("tag-demo:old", "plain.txt");
     }
 }

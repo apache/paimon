@@ -129,7 +129,7 @@ public class LocalFileIO implements FileIO {
                 List<FileStatus> fileList = new ArrayList<>(names.length);
                 for (String name : names) {
                     try {
-                        fileList.add(getFileStatus(new Path(path, name)));
+                        fileList.add(getFileStatus(new Path(path, new Path(null, null, name))));
                     } catch (FileNotFoundException ignore) {
                         // ignore the files not found since the dir list may have changed since the
                         // names[] list was generated.
