@@ -24,7 +24,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.PathFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -38,6 +42,8 @@ public class IcebergPathFactory {
     private int manifestFileCount;
     private int manifestListCount;
 
+    @Nullable private List<Path> recorded;
+
     public IcebergPathFactory(Path metadataDirectory) {
         this.metadataDirectory = metadataDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -47,9 +53,31 @@ public class IcebergPathFactory {
         return metadataDirectory;
     }
 
+    /** Starts remembering every manifest and manifest list path handed out from now on. */
+    public void startRecording() {
+        recorded = new ArrayList<>();
+    }
+
+    /** The paths handed out since recording started. */
+    public List<Path> recordedPaths() {
+        return recorded == null ? new ArrayList<>() : new ArrayList<>(recorded);
+    }
+
+    /** Stops remembering new paths. */
+    public void stopRecording() {
+        recorded = null;
+    }
+
+    private Path record(Path path) {
+        if (recorded != null) {
+            recorded.add(path);
+        }
+        return path;
+    }
+
     public Path newManifestFile() {
         manifestFileCount++;
-        return toManifestFilePath(uuid + "-m" + manifestFileCount + ".avro");
+        return record(toManifestFilePath(uuid + "-m" + manifestFileCount + ".avro"));
     }
 
     public Path toManifestFilePath(String manifestFileName) {
@@ -58,7 +86,7 @@ public class IcebergPathFactory {
 
     public Path newManifestListFile() {
         manifestListCount++;
-        return toManifestListPath("snap-" + manifestListCount + "-" + uuid + ".avro");
+        return record(toManifestListPath("snap-" + manifestListCount + "-" + uuid + ".avro"));
     }
 
     public Path toManifestListPath(String manifestListName) {
