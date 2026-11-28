@@ -1031,6 +1031,38 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testFirstNonNullValue() {
+        Options options = new Options();
+        options.set("fields.f1.sequence-group", "f2,f3");
+        options.set("fields.f2.aggregate-function", "first_non_null_value");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+
+        func.reset();
+
+        add(func, 1, 2, 2, 2);
+        validate(func, 1, 2, 2, 2);
+        // an older null does not replace the first non-null value
+        add(func, 1, 1, null, 1);
+        validate(func, 1, 2, 2, 2);
+        // an older non-null value comes first
+        add(func, 1, 0, 3, 3);
+        validate(func, 1, 2, 3, 2);
+
+        func.reset();
+        add(func, 1, 2, null, 2);
+        validate(func, 1, 2, null, 2);
+        add(func, 1, 1, 3, 1);
+        validate(func, 1, 2, 3, 2);
+        // a newer value does not replace the first non-null value from an older record
+        add(func, 1, 3, 4, 3);
+        validate(func, 1, 3, 3, 3);
+    }
+
+    @Test
     public void testMultiSequenceFieldsFirstValue() {
         Options options = new Options();
         options.set("fields.f1,f2.sequence-group", "f3,f4");
