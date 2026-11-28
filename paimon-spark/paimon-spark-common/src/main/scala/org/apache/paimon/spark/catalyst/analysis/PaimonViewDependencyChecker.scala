@@ -41,13 +41,17 @@ private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends Pa
   private val completedDepths = mutable.Map[ViewReference, Int]()
   private val maxNestedViewDepth = spark.sessionState.conf.maxNestedViewDepth
 
-  def validate(catalog: SupportView, ident: Identifier, queryText: String): Unit = {
+  def validate(
+      catalog: SupportView,
+      ident: Identifier,
+      queryText: String,
+      options: Map[String, String]): Unit = {
     val active = mutable.ArrayBuffer[ViewReference]()
 
     def visit(
         currentCatalog: SupportView,
         currentIdent: Identifier,
-        currentQueryText: => String): Int = {
+        currentDefinition: => (String, Map[String, String])): Int = {
       val reference = viewReference(currentCatalog, currentIdent)
       val cycleStart = active.indexOf(reference)
       if (cycleStart >= 0) {
@@ -73,18 +77,22 @@ private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends Pa
           depth
         case None =>
           // Load first so that a table at the depth limit is not counted as another view.
-          val query = currentQueryText
+          val (query, queryOptions) = currentDefinition
           checkDepth(1)
           active += reference
           try {
-            val childDepth = viewDependencies(query).foldLeft(0) {
+            val dependencies = viewDependencies(currentCatalog, currentIdent, query, queryOptions)
+            val childDepth = dependencies.foldLeft(0) {
               case (depth, (dependencyCatalog, dependencyIdent)) =>
                 val dependencyDepth =
                   try {
                     visit(
                       dependencyCatalog,
-                      dependencyIdent,
-                      dependencyCatalog.loadView(dependencyIdent).query(SupportView.DIALECT))
+                      dependencyIdent, {
+                        val view = dependencyCatalog.loadView(dependencyIdent)
+                        (view.query(SupportView.DIALECT), PaimonViewRelations.viewOptions(view))
+                      }
+                    )
                   } catch {
                     case _: ViewNotExistException => 0
                   }
@@ -99,13 +107,23 @@ private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends Pa
       }
     }
 
-    visit(catalog, ident, queryText)
+    visit(catalog, ident, (queryText, options))
   }
 
-  private def viewDependencies(queryText: String): Seq[(SupportView, Identifier)] = {
+  private def viewDependencies(
+      viewCatalog: SupportView,
+      viewIdent: Identifier,
+      queryText: String,
+      options: Map[String, String]): Seq[(SupportView, Identifier)] = {
     val parsedPlan = PaimonUtils.parseQueryCompat(spark.sessionState.sqlParser, queryText)
     val earlyRules = SparkShimLoader.shim.earlyBatchRules()
-    val rewritten = earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan))
+    // Resolve the dependencies the way the view body is resolved when it is read.
+    val rewritten = PaimonViewRelations.qualify(
+      spark,
+      earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan)),
+      viewCatalog,
+      viewIdent,
+      options)
     val dependencies = mutable.ArrayBuffer[(SupportView, Identifier)]()
 
     def collectDependencies(plan: LogicalPlan): Unit = {

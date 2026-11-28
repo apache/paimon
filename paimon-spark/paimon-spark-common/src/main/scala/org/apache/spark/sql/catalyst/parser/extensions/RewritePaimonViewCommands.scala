@@ -19,6 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.catalyst.analysis.PaimonViewRelations
 import org.apache.paimon.spark.catalyst.plans.logical.{CreatePaimonView, DropPaimonView, ResolvedIdentifier, ShowPaimonViews}
 
 import org.apache.spark.sql.SparkSession
@@ -42,14 +43,20 @@ case class RewritePaimonViewCommands(spark: SparkSession)
         .unapply(c.child)
         .map {
           resolved =>
+            val (viewQuery, viewProperties) = PaimonViewRelations.qualifyNewView(
+              spark,
+              CTESubstitution.apply(c.query),
+              resolved.catalog.asInstanceOf[SupportView],
+              resolved.identifier,
+              c.properties)
             CreatePaimonView(
               child = resolved,
               queryText = c.originalText.get,
-              query = CTESubstitution.apply(c.query),
+              query = viewQuery,
               columnAliases = c.userSpecifiedColumns.map(_._1),
               columnComments = c.userSpecifiedColumns.map(_._2.orElse(None)),
               comment = c.comment,
-              properties = c.properties,
+              properties = viewProperties,
               allowExisting = c.allowExisting,
               replace = c.replace
             )

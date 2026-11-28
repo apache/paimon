@@ -68,7 +68,7 @@ case class CreatePaimonViewExec(
     // Note: for replace just drop then create, this operation is non-atomic.
     if (replace) {
       // The analyzed plan has already expanded referenced views, so validate the original SQL text.
-      new PaimonViewDependencyChecker(spark).validate(catalog, ident, queryText)
+      new PaimonViewDependencyChecker(spark).validate(catalog, ident, queryText, properties)
       catalog.dropView(ident, true)
     }
 
